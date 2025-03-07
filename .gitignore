@@ -1,0 +1,5 @@
+.idea/
+verifier
+tuf-repo-cdn.sigstore.dev.json
+TinfoilVerifier.xcframework
+TinfoilVerifier.xcframework.zip
