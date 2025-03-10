@@ -11,7 +11,7 @@ import (
 	"github.com/openai/openai-go/option"
 )
 
-// Client wraps the OpenAI client with verification for secure enclaves
+// Client wraps the OpenAI client to work with Tinfoil
 type Client struct {
 	*openai.Client
 	enclave     string
