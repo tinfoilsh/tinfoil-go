@@ -1,7 +1,5 @@
 # Tinfoil Go Client
 
-Tinfoil's secure HTTP client.
-
 [![Build Status](https://github.com/tinfoilsh/tinfoil-go/workflows/Run%20tests/badge.svg)](https://github.com/tinfoilsh/tinfoil-go/actions)
 
 ## Installation
@@ -10,47 +8,44 @@ Tinfoil's secure HTTP client.
 go get github.com/tinfoilsh/tinfoil-go
 ```
 
-## Quick Start: Use the Secure HTTP Client
+## Quick Start: Use the Tinfoil Go client (a wrapper around the OpenAI Go client)
 
 ```go
 import (
     "fmt"
-    "github.com/tinfoilsh/tinfoil-go"
+    "github.com/tinfoilsh/tinfoil-go" // imported as tinfoil
 )
 
 // Create a client for a specific enclave and code repository
 client := tinfoil.NewSecureClient("enclave.example.com", "org/repo")
 
-// Make HTTP requests - verification happens automatically
-resp, err := client.Get("/api/data", nil)
+// Make requests using the OpenAI client API
+// Note: enclave verification happens automatically
+chatCompletion, err := client.Chat.Completions.New(context.TODO(), openai.ChatCompletionNewParams{
+    Messages: openai.F([]openai.ChatCompletionMessageParamUnion{
+        openai.UserMessage("Say this is a test"),
+    }),
+    Model: openai.F("llama3.2:1b"), // see tinfoil.sh/inference for supported models
+})
+
 if err != nil {
-    return fmt.Errorf("request failed: %w", err)
+    panic(err.Error())
 }
 
-// POST with headers and body
-headers := map[string]string{"Content-Type": "application/json"}
-body := []byte(`{"key": "value"}`)
-resp, err := client.Post("/api/submit", headers, body)
+fmt.Println(chatCompletion.Choices[0].Message.Content)
 ```
 
-See [Secure HTTP Client](#secure-http-client) for examples of how to use the secure client.
+## Tinfoil Client
 
+The secure client ensures all requests are made to a verified enclave. This client:
 
-# Secure HTTP Client
-
-The secure HTTP client ensures all requests are made to a verified enclave. This client:
 - Verifies the enclave's attestation before making requests
+
 - Pins TLS connections to the attested certificate
 
-### Security Properties
+- Wraps the [Go OpenAI client](https://pkg.go.dev/github.com/openai/openai-go) 
 
-| Property | Description |
-|----------|-------------|
-| **Code Verification** | Ensures enclave runs the expected code version |
-| **Connection Security** | TLS with certificate pinning prevents MITM attacks |
-| **Request Isolation** | Each client connects to exactly one enclave |
-
-### Usage Examples
+### Usage
 
 ```go
 // 1. Create a client
@@ -59,33 +54,35 @@ client := tinfoil.NewSecureClient(
     "org/repo",            // GitHub repository
 )
 
-// 2. Manual verification (optional)
+// 2. Use client as you would openai.Client 
+// see https://pkg.go.dev/github.com/openai/openai-go for API documentation
+```
+
+### Advanced functionality
+
+```go
+// Manual verification
 state, err := client.Verify()
 if err != nil {
     return fmt.Errorf("verification failed: %w", err)
 }
 
-// 3. Make HTTP requests
-resp, err := client.Get("/api/status", map[string]string{
-    "Authorization": "Bearer token",
-})
-
-// 4. Use response
-if resp.StatusCode == http.StatusOK {
-    var data MyData
-    json.Unmarshal(resp.Body, &data)
-}
-
-// 5. Get raw HTTP client (advanced usage)
+// Get the raw HTTP client 
 httpClient, err := client.HTTPClient()
 if err != nil {
     return fmt.Errorf("failed to get HTTP client: %w", err)
 }
+
+// Make HTTP requests directly 
+resp, err := client.Get("/api/status", map[string]string{
+    "Authorization": "Bearer token",
+})
 ```
 
-## Foreign Function Interface (FFI) Support
+### Foreign Function Interface (FFI) Support
 
-For usage in other languages through FFI, additional functions are available:
+For usage in other languages through FFI, additional functions are available 
+which avoid using FFI incompatible data structures (e.g., Go maps): 
 
 ```go
 // Initialize a request and get an ID
@@ -99,10 +96,12 @@ client.AddHeader(requestID, "Authorization", "Bearer token")
 resp, err := client.ExecuteRequest(requestID)
 ```
 
-##  Reporting Vulnerabilities
+## Reporting Vulnerabilities
 
 Please report security vulnerabilities by either:
-- Emailing [contact@tinfoil.sh](mailto:contact@tinfoil.sh)
+
+- Emailing [security@tinfoil.sh](mailto:security@tinfoil.sh)
+
 - Opening an issue on GitHub on this repository
 
 We aim to respond to security reports within 24 hours and will keep you updated on our progress.
