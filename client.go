@@ -81,7 +81,7 @@ func (s *SecureClient) HTTPClient() (*http.Client, error) {
 	}
 
 	return &http.Client{
-		Transport: &TLSBoundRoundTripper{s.groundTruth.CertFingerprint},
+		Transport: &TLSBoundRoundTripper{ExpectedCertFP: s.groundTruth.CertFingerprint},
 	}, nil
 }
 

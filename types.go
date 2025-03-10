@@ -1,5 +1,3 @@
-// Package tinfoil provides secure client implementations for accessing
-// enclaves with verification
 package tinfoil
 
 import (

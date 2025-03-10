@@ -53,6 +53,7 @@ func NewClient(enclave, repo string, openaiOpts ...option.RequestOption) (*Clien
 func (c *Client) createOpenAIClient(opts ...option.RequestOption) (*openai.Client, error) {
 	// Verify the enclave and get the certificate fingerprint
 	secureClient := NewSecureClient(c.enclave, c.repo)
+	// Verify enclave and repo
 	groundTruth, err := secureClient.Verify()
 	if err != nil {
 		return nil, fmt.Errorf("failed to verify enclave: %w", err)
