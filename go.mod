@@ -1,4 +1,4 @@
-module tinfoil
+module github.com/tinfoilsh/tinfoil-go
 
 go 1.23.4
 

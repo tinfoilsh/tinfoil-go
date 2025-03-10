@@ -1,14 +1,21 @@
 package tinfoil
 
 import (
-	"bytes"
 	"fmt"
 	"net/http"
+	"os"
 
 	"github.com/tinfoilsh/verifier/attestation"
 	"github.com/tinfoilsh/verifier/github"
 	"github.com/tinfoilsh/verifier/sigstore"
 )
+
+// GroundTruth represents the "known good" verified state of the enclave
+type GroundTruth struct {
+	CertFingerprint []byte
+	Digest          string
+	Measurement     string
+}
 
 // SecureClient provides a way to securely communicate with a verified enclave
 type SecureClient struct {
@@ -104,26 +111,24 @@ func (s *SecureClient) makeRequest(req *http.Request) (*Response, error) {
 	return toResponse(resp)
 }
 
-// Post makes an HTTP POST request
-func (s *SecureClient) Post(url string, headers map[string]string, body []byte) (*Response, error) {
-	req, err := http.NewRequest("POST", url, bytes.NewBuffer(body))
-	if err != nil {
-		return nil, err
+// Helper function to compare byte slices
+func equalBytes(a, b []byte) bool {
+	if len(a) != len(b) {
+		return false
 	}
-	for k, v := range headers {
-		req.Header.Set(k, v)
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
 	}
-	return s.makeRequest(req)
+	return true
 }
 
-// Get makes an HTTP GET request
-func (s *SecureClient) Get(url string, headers map[string]string) (*Response, error) {
-	req, err := http.NewRequest("GET", url, nil)
-	if err != nil {
-		return nil, err
+// Helper function to get environment variable with default
+func getEnvDefault(key, defaultValue string) string {
+	value, exists := os.LookupEnv(key)
+	if !exists {
+		return defaultValue
 	}
-	for k, v := range headers {
-		req.Header.Set(k, v)
-	}
-	return s.makeRequest(req)
+	return value
 }

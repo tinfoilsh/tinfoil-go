@@ -19,16 +19,16 @@ type Client struct {
 	groundTruth *GroundTruth
 }
 
-// NewClient creates a new secure OpenAI client that verifies the enclave
-func NewClient(enclave, repo string, openaiOpts ...option.RequestOption) (*Client, error) {
-	// Use provided parameters or fall back to environment variables
-	if enclave == "" {
-		enclave = getEnvDefault("TINFOIL_ENCLAVE", "")
-	}
+// NewClient creates a new secure OpenAI client using environment variables for configuration
+func NewClient(openaiOpts ...option.RequestOption) (*Client, error) {
+	return NewClientWithParams("", "", openaiOpts...)
+}
 
-	if repo == "" {
-		repo = getEnvDefault("TINFOIL_REPO", "")
-	}
+// NewClientWithParams creates a new secure OpenAI client with explicit enclave and repo parameters
+func NewClientWithParams(enclave, repo string, openaiOpts ...option.RequestOption) (*Client, error) {
+	// Use provided parameters or fall back to environment variables
+	enclave = getEnvDefault("TINFOIL_ENCLAVE", enclave)
+	repo = getEnvDefault("TINFOIL_REPO", repo)
 
 	if enclave == "" || repo == "" {
 		return nil, fmt.Errorf("tinfoil: enclave and repo must be specified")
@@ -39,7 +39,7 @@ func NewClient(enclave, repo string, openaiOpts ...option.RequestOption) (*Clien
 		repo:    repo,
 	}
 
-	// Create the OpenAI client with secure connection
+	// Create the OpenAI client with a verified secure connection
 	openaiClient, err := client.createOpenAIClient(openaiOpts...)
 	if err != nil {
 		return nil, err
@@ -51,8 +51,10 @@ func NewClient(enclave, repo string, openaiOpts ...option.RequestOption) (*Clien
 
 // createOpenAIClient sets up the OpenAI client with a secure HTTP client
 func (c *Client) createOpenAIClient(opts ...option.RequestOption) (*openai.Client, error) {
+
 	// Verify the enclave and get the certificate fingerprint
 	secureClient := NewSecureClient(c.enclave, c.repo)
+
 	// Verify enclave and repo
 	groundTruth, err := secureClient.Verify()
 	if err != nil {

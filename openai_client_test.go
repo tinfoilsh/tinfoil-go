@@ -37,25 +37,26 @@ func getEnvOrDefault(key, defaultValue string) string {
 }
 
 func TestNewClient(t *testing.T) {
-
-	// Create a new client
-	client, err := NewClient(testCfg.enclave, testCfg.repo)
-
-	// Verify client creation was successful
+	// Test environment variable based client creation
+	client, err := NewClient()
 	require.NoError(t, err)
 	require.NotNil(t, client)
 
+	// Test explicit client creation
+	clientExplicit, err := NewClientWithParams(testCfg.enclave, testCfg.repo)
+	require.NoError(t, err)
+	require.NotNil(t, clientExplicit)
+
 	// Verify client properties
-	assert.Equal(t, testCfg.enclave, client.enclave)
-	assert.Equal(t, testCfg.repo, client.repo)
-	assert.NotNil(t, client.groundTruth)
-	assert.NotNil(t, client.Client)
+	assert.Equal(t, testCfg.enclave, clientExplicit.enclave)
+	assert.Equal(t, testCfg.repo, clientExplicit.repo)
+	assert.NotNil(t, clientExplicit.groundTruth)
+	assert.NotNil(t, clientExplicit.Client)
 }
 
 // TestClientIntegration_Chat tests the chat completion with specified parameters
 func TestClientIntegration_Chat(t *testing.T) {
-
-	client, err := NewClient(testCfg.enclave, testCfg.repo)
+	client, err := NewClientWithParams(testCfg.enclave, testCfg.repo)
 	require.NoError(t, err)
 
 	// Using the exact parameters provided
@@ -73,8 +74,7 @@ func TestClientIntegration_Chat(t *testing.T) {
 
 // TestClientNonStreamingChat tests the non-streaming version with the same parameters
 func TestClientNonStreamingChat(t *testing.T) {
-
-	client, err := NewClient(testCfg.enclave, testCfg.repo)
+	client, err := NewClientWithParams(testCfg.enclave, testCfg.repo)
 	require.NoError(t, err)
 
 	// Same parameters but without streaming
@@ -98,8 +98,7 @@ func TestClientNonStreamingChat(t *testing.T) {
 
 // TestClientStreamingChat tests the streaming version with the same parameters
 func TestClientStreamingChat(t *testing.T) {
-
-	client, err := NewClient(testCfg.enclave, testCfg.repo)
+	client, err := NewClientWithParams(testCfg.enclave, testCfg.repo)
 	require.NoError(t, err)
 
 	// Create a streaming chat completion request
