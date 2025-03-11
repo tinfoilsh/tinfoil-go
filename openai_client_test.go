@@ -37,6 +37,14 @@ func getEnvOrDefault(key, defaultValue string) string {
 }
 
 func TestNewClient(t *testing.T) {
+	// Set up environment variables for test
+	os.Setenv("TINFOIL_ENCLAVE", testCfg.enclave)
+	os.Setenv("TINFOIL_REPO", testCfg.repo)
+	defer func() {
+		os.Unsetenv("TINFOIL_ENCLAVE")
+		os.Unsetenv("TINFOIL_REPO")
+	}()
+
 	// Test environment variable based client creation
 	client, err := NewClient()
 	require.NoError(t, err)
