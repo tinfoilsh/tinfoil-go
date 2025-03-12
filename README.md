@@ -1,6 +1,7 @@
 # Tinfoil Go Client
 
 [![Build Status](https://github.com/tinfoilsh/tinfoil-go/actions/workflows/test.yml/badge.svg)](https://github.com/tinfoilsh/tinfoil-go/actions)
+[![Go Reference](https://pkg.go.dev/badge/github.com/openai/openai-go.svg)](https://pkg.go.dev/github.com/openai/openai-go)
 
 ## Installation
 
@@ -8,7 +9,7 @@
 go get github.com/tinfoilsh/tinfoil-go
 ```
 
-## Quick Start: Use the Tinfoil Go client 
+## Quick Start
 
 The Tinfoil Go client is a wrapper around the [OpenAI Go client](https://pkg.go.dev/github.com/openai/openai-go) and provides secure communication with Tinfoil enclaves. It has the same API as the OpenAI client, with additional security features:
 
