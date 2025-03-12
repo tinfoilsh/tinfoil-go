@@ -1,6 +1,6 @@
 # Tinfoil Go Client
 
-[![Build Status](https://github.com/tinfoilsh/tinfoil-go/workflows/Run%20tests/badge.svg)](https://github.com/tinfoilsh/tinfoil-go/actions)
+[![Build Status](https://github.com/tinfoilsh/tinfoil-go/actions/workflows/test.yml/badge.svg)](https://github.com/tinfoilsh/tinfoil-go/actions)
 
 ## Installation
 
@@ -8,7 +8,13 @@
 go get github.com/tinfoilsh/tinfoil-go
 ```
 
-## Quick Start: Use the Tinfoil Go client (a wrapper around the OpenAI Go client)
+## Quick Start: Use the Tinfoil Go client 
+
+The Tinfoil Go client is a wrapper around the [OpenAI Go client](https://pkg.go.dev/github.com/openai/openai-go) and provides secure communication with Tinfoil enclaves. It has the same API as the OpenAI client, with additional security features:
+
+- Automatic verification that the endpoint is running in a secure Tinfoil enclave
+- TLS certificate pinning to prevent man-in-the-middle attacks
+- Attestation validation to ensure enclave integrity
 
 ```go
 import (
@@ -16,8 +22,8 @@ import (
     "github.com/tinfoilsh/tinfoil-go" // imported as tinfoil
 )
 
-// Create a client for a specific enclave and code repository
-client := tinfoil.NewSecureClient("enclave.example.com", "org/repo")
+// Create a client for a specific enclave and model repository
+client := tinfoil.NewSecureClient("enclave.example.com", "org/model-repo")
 
 // Make requests using the OpenAI client API
 // Note: enclave verification happens automatically
@@ -25,7 +31,7 @@ chatCompletion, err := client.Chat.Completions.New(context.TODO(), openai.ChatCo
     Messages: openai.F([]openai.ChatCompletionMessageParamUnion{
         openai.UserMessage("Say this is a test"),
     }),
-    Model: openai.F("llama3.2:1b"), // see tinfoil.sh/inference for supported models
+    Model: openai.F("llama3.2:1b"), // see https://docs.tinfoil.sh for supported models
 })
 
 if err != nil {
@@ -34,16 +40,6 @@ if err != nil {
 
 fmt.Println(chatCompletion.Choices[0].Message.Content)
 ```
-
-## Tinfoil Client
-
-The secure client ensures all requests are made to a verified enclave. This client:
-
-- Verifies the enclave's attestation before making requests
-
-- Pins TLS connections to the attested certificate
-
-- Wraps the [Go OpenAI client](https://pkg.go.dev/github.com/openai/openai-go) 
 
 ### Usage
 
