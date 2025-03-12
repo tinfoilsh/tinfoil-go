@@ -19,6 +19,8 @@ The Tinfoil Go client is a wrapper around the [OpenAI Go client](https://pkg.go.
 ```go
 import (
     "fmt"
+    "github.com/openai/openai-go"
+	"github.com/openai/openai-go/option"
     "github.com/tinfoilsh/tinfoil-go" // imported as tinfoil
 )
 

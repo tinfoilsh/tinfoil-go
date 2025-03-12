@@ -8,7 +8,7 @@ import (
 
 	"github.com/openai/openai-go"
 	"github.com/openai/openai-go/option"
-	tinfoil "github.com/tinfoilsh/tinfoil-go"
+	"github.com/tinfoilsh/tinfoil-go"
 )
 
 func main() {
