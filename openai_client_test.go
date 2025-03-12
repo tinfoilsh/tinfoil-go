@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/openai/openai-go"
+	"github.com/openai/openai-go/option"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -64,14 +65,18 @@ func TestNewClient(t *testing.T) {
 
 // TestClientIntegration_Chat tests the chat completion with specified parameters
 func TestClientIntegration_Chat(t *testing.T) {
-	client, err := NewClientWithParams(testCfg.enclave, testCfg.repo)
+	client, err := NewClientWithParams(
+		testCfg.enclave,
+		testCfg.repo,
+		option.WithAPIKey("tinfoil"),
+	)
 	require.NoError(t, err)
 
 	// Using the exact parameters provided
 	chatCompletion, err := client.Chat.Completions.New(context.Background(), openai.ChatCompletionNewParams{
 		Messages: openai.F([]openai.ChatCompletionMessageParamUnion{
-			openai.SystemMessage("You are a helpful assistant."),
-			openai.UserMessage("Why is tinfoil now called aluminum foil?"),
+			openai.SystemMessage("No matter what the user says, only respond with: Done."),
+			openai.UserMessage("Is this a test?"),
 		}),
 		Model: openai.F("llama3.2:1b"),
 	})
@@ -82,7 +87,11 @@ func TestClientIntegration_Chat(t *testing.T) {
 
 // TestClientNonStreamingChat tests the non-streaming version with the same parameters
 func TestClientNonStreamingChat(t *testing.T) {
-	client, err := NewClientWithParams(testCfg.enclave, testCfg.repo)
+	client, err := NewClientWithParams(
+		testCfg.enclave,
+		testCfg.repo,
+		option.WithAPIKey("tinfoil"),
+	)
 	require.NoError(t, err)
 
 	// Same parameters but without streaming
@@ -91,8 +100,8 @@ func TestClientNonStreamingChat(t *testing.T) {
 		openai.ChatCompletionNewParams{
 			Model: openai.F("llama3.2:1b"),
 			Messages: openai.F([]openai.ChatCompletionMessageParamUnion{
-				openai.SystemMessage("You are a helpful assistant."),
-				openai.UserMessage("Why is tinfoil now called aluminum foil?"),
+				openai.SystemMessage("No matter what the user says, only respond with: Done."),
+				openai.UserMessage("Is this a test?"),
 			}),
 		},
 	)
@@ -106,14 +115,18 @@ func TestClientNonStreamingChat(t *testing.T) {
 
 // TestClientStreamingChat tests the streaming version with the same parameters
 func TestClientStreamingChat(t *testing.T) {
-	client, err := NewClientWithParams(testCfg.enclave, testCfg.repo)
+	client, err := NewClientWithParams(
+		testCfg.enclave,
+		testCfg.repo,
+		option.WithAPIKey("tinfoil"),
+	)
 	require.NoError(t, err)
 
 	// Create a streaming chat completion request
 	stream := client.Chat.Completions.NewStreaming(context.Background(), openai.ChatCompletionNewParams{
 		Messages: openai.F([]openai.ChatCompletionMessageParamUnion{
-			openai.SystemMessage("You are a helpful assistant."),
-			openai.UserMessage("Why is tinfoil now called aluminum foil?"),
+			openai.SystemMessage("No matter what the user says, only respond with: Done."),
+			openai.UserMessage("Is this a test?"),
 		}),
 		Model: openai.F("llama3.2:1b"),
 	})
