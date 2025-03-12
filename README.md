@@ -8,7 +8,7 @@
 go get github.com/tinfoilsh/tinfoil-go
 ```
 
-## Quick Start: Use the Tinfoil Go client 
+## Quick Start
 
 The Tinfoil Go client is a wrapper around the [OpenAI Go client](https://pkg.go.dev/github.com/openai/openai-go) and provides secure communication with Tinfoil enclaves. It has the same API as the OpenAI client, with additional security features:
 
@@ -91,6 +91,13 @@ client.AddHeader(requestID, "Authorization", "Bearer token")
 // Execute the request
 resp, err := client.ExecuteRequest(requestID)
 ```
+
+## API Documentation
+
+This library is a drop-in replacement for the [official OpenAI Go client](https://github.com/openai/openai-go) that can be used with Tinfoil. All methods and types are identical. See the [OpenAI Go client documentation](https://pkg.go.dev/github.com/openai/openai-go) for complete API usage and documentation.
+
+[![Go Reference](https://pkg.go.dev/badge/github.com/openai/openai-go.svg)](https://pkg.go.dev/github.com/openai/openai-go)
+
 
 ## Reporting Vulnerabilities
 
