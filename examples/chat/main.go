@@ -24,37 +24,27 @@ func main() {
 		log.Fatalf("Failed to create client: %v", err)
 	}
 
-	// Example 1: Non-streaming chat completion
-	fmt.Println("\n=== Non-streaming Chat Completion ===")
-	resp, err := client.Chat.Completions.New(
-		context.Background(),
-		openai.ChatCompletionNewParams{
-			Model: openai.F("llama3.2:1b"),
-			Messages: openai.F([]openai.ChatCompletionMessageParamUnion{
-				openai.SystemMessage("You are a helpful assistant."),
-				openai.UserMessage("What are three interesting facts about aluminum foil?"),
-			}),
-		},
-	)
-	if err != nil {
-		log.Printf("Chat request failed: %v", err)
-	} else {
-		fmt.Printf("Response: %s\n", resp.Choices[0].Message.Content)
-	}
-
-	// Example 2: Streaming chat completion
+	// Streaming chat completion
 	fmt.Println("\n=== Streaming Chat Completion ===")
+
+	systemPrompt := "You are a helpful assistant."
+	userPrompt := "Tell me a short story about aluminum foil."
+
+	fmt.Printf("System: %s\n", systemPrompt)
+	fmt.Printf("User: %s\n\n", userPrompt)
+
 	stream := client.Chat.Completions.NewStreaming(
 		context.Background(),
 		openai.ChatCompletionNewParams{
 			Model: openai.F("llama3.2:1b"),
 			Messages: openai.F([]openai.ChatCompletionMessageParamUnion{
-				openai.SystemMessage("You are a helpful assistant."),
-				openai.UserMessage("Tell me a short story about aluminum foil."),
+				openai.SystemMessage(systemPrompt),
+				openai.UserMessage(userPrompt),
 			}),
 		},
 	)
 
+	fmt.Println("Assistant:")
 	// Use the accumulator to collect the full response
 	acc := openai.ChatCompletionAccumulator{}
 

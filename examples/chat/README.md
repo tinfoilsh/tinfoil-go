@@ -23,9 +23,8 @@ go run main.go
 
 The example will:
 
-1. Create a Tinfoil client that wraps the OpenAI client
+1. Create an OpenAI client configured with Tinfoil settings
 
-2. Demonstrate a non-streaming chat completion
+2. Demonstrate a streaming chat completion with real-time output
 
-3. Demonstrate a streaming chat completion with real-time output
-
+The code shows both the basic usage pattern and error handling for each approach. 
