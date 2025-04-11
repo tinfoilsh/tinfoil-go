@@ -41,7 +41,7 @@ jobs:
       - name: Build XCFramework
         run: |
           export PATH=$PATH:$(go env GOPATH)/bin
-          gomobile bind -v -target=ios -o Tinfoil.xcframework $(go list ./... | grep -v "/examples/" | xargs)
+          gomobile bind -v -target=ios,macos -o Tinfoil.xcframework $(go list ./... | grep -v "/examples/" | xargs)
           zip -r Tinfoil.xcframework.zip Tinfoil.xcframework
 
       - name: Generate checksum
