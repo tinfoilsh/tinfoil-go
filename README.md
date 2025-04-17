@@ -19,13 +19,19 @@ The Tinfoil Go client is a wrapper around the [OpenAI Go client](https://pkg.go.
 ```go
 import (
     "fmt"
+    "context"
     "github.com/openai/openai-go"
-	"github.com/openai/openai-go/option"
+    "github.com/openai/openai-go/option"
     "github.com/tinfoilsh/tinfoil-go" // imported as tinfoil
 )
 
 // Create a client for a specific enclave and model repository
-client := tinfoil.NewSecureClient("enclave.example.com", "org/model-repo")
+client, err := tinfoil.NewClientWithParams("enclave.example.com", "org/model-repo",
+    option.WithAPIKey("your-api-key"),
+)
+if err != nil {
+    panic(err.Error())
+}
 
 // Make requests using the OpenAI client API
 // Note: enclave verification happens automatically
@@ -47,10 +53,14 @@ fmt.Println(chatCompletion.Choices[0].Message.Content)
 
 ```go
 // 1. Create a client
-client := tinfoil.NewSecureClient(
+client, err := tinfoil.NewClientWithParams(
     "enclave.example.com",  // Enclave hostname
-    "org/repo",            // GitHub repository
+    "org/repo",             // GitHub repository
+    option.WithAPIKey("your-api-key"),
 )
+if err != nil {
+    panic(err.Error())
+}
 
 // 2. Use client as you would openai.Client 
 // see https://pkg.go.dev/github.com/openai/openai-go for API documentation
