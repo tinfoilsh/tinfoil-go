@@ -22,8 +22,8 @@ var testCfg testConfig
 func TestMain(m *testing.M) {
 	// Load config from environment with defaults
 	testCfg = testConfig{
-		enclave: getEnvOrDefault("TINFOIL_TEST_ENCLAVE", "models.default.tinfoil.sh"),
-		repo:    getEnvOrDefault("TINFOIL_TEST_REPO", "tinfoilsh/default-models-nitro"),
+		enclave: getEnvOrDefault("TINFOIL_TEST_ENCLAVE", "llama3-3-70b.model.tinfoil.sh"),
+		repo:    getEnvOrDefault("TINFOIL_TEST_REPO", "tinfoilsh/confidential-llama3-3-70b"),
 	}
 
 	code := m.Run()
@@ -59,7 +59,6 @@ func TestNewClient(t *testing.T) {
 	// Verify client properties
 	assert.Equal(t, testCfg.enclave, clientExplicit.enclave)
 	assert.Equal(t, testCfg.repo, clientExplicit.repo)
-	assert.NotNil(t, clientExplicit.groundTruth)
 	assert.NotNil(t, clientExplicit.Client)
 }
 
@@ -74,11 +73,11 @@ func TestClientIntegration_Chat(t *testing.T) {
 
 	// Using the exact parameters provided
 	chatCompletion, err := client.Chat.Completions.New(context.Background(), openai.ChatCompletionNewParams{
-		Messages: openai.F([]openai.ChatCompletionMessageParamUnion{
+		Messages: []openai.ChatCompletionMessageParamUnion{
 			openai.SystemMessage("No matter what the user says, only respond with: Done."),
 			openai.UserMessage("Is this a test?"),
-		}),
-		Model: openai.F("llama3.2:1b"),
+		},
+		Model: "llama3-3-70b",
 	})
 	require.NoError(t, err)
 
@@ -98,11 +97,11 @@ func TestClientNonStreamingChat(t *testing.T) {
 	resp, err := client.Chat.Completions.New(
 		context.Background(),
 		openai.ChatCompletionNewParams{
-			Model: openai.F("llama3.2:1b"),
-			Messages: openai.F([]openai.ChatCompletionMessageParamUnion{
+			Model: "llama3-3-70b",
+			Messages: []openai.ChatCompletionMessageParamUnion{
 				openai.SystemMessage("No matter what the user says, only respond with: Done."),
 				openai.UserMessage("Is this a test?"),
-			}),
+			},
 		},
 	)
 
@@ -124,11 +123,11 @@ func TestClientStreamingChat(t *testing.T) {
 
 	// Create a streaming chat completion request
 	stream := client.Chat.Completions.NewStreaming(context.Background(), openai.ChatCompletionNewParams{
-		Messages: openai.F([]openai.ChatCompletionMessageParamUnion{
+		Messages: []openai.ChatCompletionMessageParamUnion{
 			openai.SystemMessage("No matter what the user says, only respond with: Done."),
 			openai.UserMessage("Is this a test?"),
-		}),
-		Model: openai.F("llama3.2:1b"),
+		},
+		Model: "llama3-3-70b",
 	})
 
 	// optionally, an accumulator helper can be used

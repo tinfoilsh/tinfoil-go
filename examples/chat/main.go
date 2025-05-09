@@ -4,20 +4,20 @@ import (
 	"context"
 	"fmt"
 	"log"
-	"os"
 
 	"github.com/openai/openai-go"
 	"github.com/openai/openai-go/option"
+	"github.com/sirupsen/logrus"
 	"github.com/tinfoilsh/tinfoil-go"
 )
 
 func main() {
-	// Set up environment variables (you can also set these in your shell)
-	os.Setenv("TINFOIL_ENCLAVE", "models.default.tinfoil.sh")
-	os.Setenv("TINFOIL_REPO", "tinfoilsh/default-models-nitro")
+	logrus.SetLevel(logrus.DebugLevel)
 
 	// Create a new tinfoil client
-	client, err := tinfoil.NewClient(
+	client, err := tinfoil.NewClientWithParams(
+		"llama3-3-70b.model.tinfoil.sh",
+		"tinfoilsh/confidential-llama3-3-70b",
 		option.WithAPIKey("tinfoil"), // Replace with your actual API key
 	)
 	if err != nil {
@@ -36,11 +36,11 @@ func main() {
 	stream := client.Chat.Completions.NewStreaming(
 		context.Background(),
 		openai.ChatCompletionNewParams{
-			Model: openai.F("llama3.2:1b"),
-			Messages: openai.F([]openai.ChatCompletionMessageParamUnion{
+			Model: "llama3-3-70b",
+			Messages: []openai.ChatCompletionMessageParamUnion{
 				openai.SystemMessage(systemPrompt),
 				openai.UserMessage(userPrompt),
-			}),
+			},
 		},
 	)
 
