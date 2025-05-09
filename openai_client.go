@@ -1,12 +1,7 @@
 package tinfoil
 
 import (
-	"crypto/sha256"
-	"crypto/tls"
-	"crypto/x509"
 	"fmt"
-	"net/http"
-
 	"github.com/openai/openai-go"
 	"github.com/openai/openai-go/option"
 )
@@ -62,30 +57,10 @@ func (c *Client) createOpenAIClient(opts ...option.RequestOption) (*openai.Clien
 	}
 	c.groundTruth = groundTruth
 
-	// Create a custom transport that verifies certificate fingerprints
-	transport := &http.Transport{
-		TLSClientConfig: &tls.Config{
-			VerifyPeerCertificate: func(rawCerts [][]byte, verifiedChains [][]*x509.Certificate) error {
-				if len(rawCerts) == 0 {
-					return fmt.Errorf("no certificate found")
-				}
-
-				// Calculate the SHA-256 fingerprint of the certificate
-				certFingerprint := sha256.Sum256(rawCerts[0])
-
-				// Compare with the expected fingerprint from attestation
-				if !equalBytes(certFingerprint[:], c.groundTruth.CertFingerprint) {
-					return fmt.Errorf("certificate fingerprint mismatch")
-				}
-
-				return nil
-			},
-		},
-	}
-
 	// Create an HTTP client with our custom transport
-	httpClient := &http.Client{
-		Transport: transport,
+	httpClient, err := secureClient.HTTPClient()
+	if err != nil {
+		return nil, fmt.Errorf("failed to create HTTP client: %w", err)
 	}
 
 	// Add our HTTP client and base URL to the options
