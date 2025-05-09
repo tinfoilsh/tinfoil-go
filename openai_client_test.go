@@ -22,8 +22,8 @@ var testCfg testConfig
 func TestMain(m *testing.M) {
 	// Load config from environment with defaults
 	testCfg = testConfig{
-		enclave: getEnvOrDefault("TINFOIL_TEST_ENCLAVE", "models.default.tinfoil.sh"),
-		repo:    getEnvOrDefault("TINFOIL_TEST_REPO", "tinfoilsh/default-models-nitro"),
+		enclave: getEnvOrDefault("TINFOIL_TEST_ENCLAVE", "llama3-3-70b.model.tinfoil.sh"),
+		repo:    getEnvOrDefault("TINFOIL_TEST_REPO", "tinfoilsh/confidential-llama3-3-70b"),
 	}
 
 	code := m.Run()
