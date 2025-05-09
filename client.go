@@ -12,9 +12,9 @@ import (
 
 // GroundTruth represents the "known good" verified state of the enclave
 type GroundTruth struct {
-	CertFingerprint []byte
-	Digest          string
-	Measurement     string
+	PublicKeyFP string
+	Digest      string
+	Measurement string
 }
 
 // SecureClient provides a way to securely communicate with a verified enclave
@@ -70,9 +70,9 @@ func (s *SecureClient) Verify() (*GroundTruth, error) {
 	err = codeMeasurements.Equals(verification.Measurement)
 	if err == nil {
 		s.groundTruth = &GroundTruth{
-			CertFingerprint: verification.CertFP,
-			Digest:          digest,
-			Measurement:     codeMeasurements.Fingerprint(),
+			PublicKeyFP: verification.PublicKeyFP,
+			Digest:      digest,
+			Measurement: codeMeasurements.Fingerprint(),
 		}
 	}
 	return s.groundTruth, err
@@ -88,7 +88,7 @@ func (s *SecureClient) HTTPClient() (*http.Client, error) {
 	}
 
 	return &http.Client{
-		Transport: &TLSBoundRoundTripper{ExpectedCertFP: s.groundTruth.CertFingerprint},
+		Transport: &TLSBoundRoundTripper{ExpectedPublicKey: s.groundTruth.PublicKeyFP},
 	}, nil
 }
 
@@ -109,19 +109,6 @@ func (s *SecureClient) makeRequest(req *http.Request) (*Response, error) {
 		return nil, err
 	}
 	return toResponse(resp)
-}
-
-// Helper function to compare byte slices
-func equalBytes(a, b []byte) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	for i := range a {
-		if a[i] != b[i] {
-			return false
-		}
-	}
-	return true
 }
 
 // Helper function to get environment variable with default
