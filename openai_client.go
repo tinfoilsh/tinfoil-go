@@ -2,6 +2,7 @@ package tinfoil
 
 import (
 	"fmt"
+
 	"github.com/openai/openai-go"
 	"github.com/openai/openai-go/option"
 )
@@ -9,9 +10,8 @@ import (
 // Client wraps the OpenAI client to work with Tinfoil
 type Client struct {
 	*openai.Client
-	enclave     string
-	repo        string
-	groundTruth *GroundTruth
+	enclave string
+	repo    string
 }
 
 // NewClient creates a new secure OpenAI client using environment variables for configuration
@@ -29,33 +29,7 @@ func NewClientWithParams(enclave, repo string, openaiOpts ...option.RequestOptio
 		return nil, fmt.Errorf("tinfoil: enclave and repo must be specified")
 	}
 
-	client := &Client{
-		enclave: enclave,
-		repo:    repo,
-	}
-
-	// Create the OpenAI client with a verified secure connection
-	openaiClient, err := client.createOpenAIClient(openaiOpts...)
-	if err != nil {
-		return nil, err
-	}
-
-	client.Client = openaiClient
-	return client, nil
-}
-
-// createOpenAIClient sets up the OpenAI client with a secure HTTP client
-func (c *Client) createOpenAIClient(opts ...option.RequestOption) (*openai.Client, error) {
-
-	// Verify the enclave and get the certificate fingerprint
-	secureClient := NewSecureClient(c.enclave, c.repo)
-
-	// Verify enclave and repo
-	groundTruth, err := secureClient.Verify()
-	if err != nil {
-		return nil, fmt.Errorf("failed to verify enclave: %w", err)
-	}
-	c.groundTruth = groundTruth
+	secureClient := NewSecureClient(enclave, repo)
 
 	// Create an HTTP client with our custom transport
 	httpClient, err := secureClient.HTTPClient()
@@ -64,13 +38,15 @@ func (c *Client) createOpenAIClient(opts ...option.RequestOption) (*openai.Clien
 	}
 
 	// Add our HTTP client and base URL to the options
-	allOpts := append(opts,
+	allOpts := append(openaiOpts,
 		option.WithHTTPClient(httpClient),
-		option.WithBaseURL(fmt.Sprintf("https://%s/v1/", c.enclave)),
+		option.WithBaseURL(fmt.Sprintf("https://%s/v1/", enclave)),
 	)
 
-	// Create the OpenAI client with our custom HTTP client
 	client := openai.NewClient(allOpts...)
-
-	return client, nil
+	return &Client{
+		Client:  &client,
+		enclave: enclave,
+		repo:    repo,
+	}, nil
 }
