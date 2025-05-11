@@ -6,7 +6,7 @@ require (
 	github.com/openai/openai-go v0.1.0-beta.10
 	github.com/sirupsen/logrus v1.9.3
 	github.com/stretchr/testify v1.10.0
-	github.com/tinfoilsh/verifier v0.1.4
+	github.com/tinfoilsh/verifier v0.1.5
 )
 
 require (
