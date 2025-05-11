@@ -25,36 +25,42 @@ The Tinfoil Go client is a wrapper around the [OpenAI Go client](https://pkg.go.
 - Attestation validation to ensure enclave integrity
 
 ```go
+package main
+
 import (
-    "fmt"
-    "context"
-    "github.com/openai/openai-go"
-    "github.com/openai/openai-go/option"
-    "github.com/tinfoilsh/tinfoil-go" // imported as tinfoil
+	"context"
+	"fmt"
+
+	"github.com/openai/openai-go"
+	"github.com/openai/openai-go/option"
+	"github.com/tinfoilsh/tinfoil-go" // imported as tinfoil
 )
 
-// Create a client for a specific enclave and model repository
-client, err := tinfoil.NewClientWithParams("enclave.example.com", "org/model-repo",
-    option.WithAPIKey("your-api-key"),
-)
-if err != nil {
-    panic(err.Error())
+func main() {
+	// Create a client for a specific enclave and model repository
+	client, err := tinfoil.NewClientWithParams(
+		"llama3-3-70b.model.tinfoil.sh",
+		"tinfoilsh/confidential-llama3-3-70b",
+		option.WithAPIKey("xxx"),
+	)
+	if err != nil {
+		panic(err.Error())
+	}
+
+	chatCompletion, err := client.Chat.Completions.New(context.TODO(), openai.ChatCompletionNewParams{
+		Messages: []openai.ChatCompletionMessageParamUnion{
+			openai.UserMessage("Say this is a test"),
+		},
+		Model: "llama3-3-70b", // see https://docs.tinfoil.sh for supported models
+	})
+
+	if err != nil {
+		panic(err.Error())
+	}
+
+	fmt.Println(chatCompletion.Choices[0].Message.Content)
+
 }
-
-// Make requests using the OpenAI client API
-// Note: enclave verification happens automatically
-chatCompletion, err := client.Chat.Completions.New(context.TODO(), openai.ChatCompletionNewParams{
-    Messages: openai.F([]openai.ChatCompletionMessageParamUnion{
-        openai.UserMessage("Say this is a test"),
-    }),
-    Model: openai.F("llama3.2:1b"), // see https://docs.tinfoil.sh for supported models
-})
-
-if err != nil {
-    panic(err.Error())
-}
-
-fmt.Println(chatCompletion.Choices[0].Message.Content)
 ```
 
 ### Usage
