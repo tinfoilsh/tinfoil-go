@@ -20,9 +20,8 @@ go get github.com/tinfoilsh/tinfoil-go
 
 The Tinfoil Go client is a wrapper around the [OpenAI Go client](https://pkg.go.dev/github.com/openai/openai-go) and provides secure communication with Tinfoil enclaves. It has the same API as the OpenAI client, with additional security features:
 
-- Automatic verification that the endpoint is running in a secure Tinfoil enclave
+- Automatic attestation validation to ensure enclave integrity verification
 - TLS certificate pinning to prevent man-in-the-middle attacks
-- Attestation validation to ensure enclave integrity
 
 ```go
 package main
@@ -39,14 +38,16 @@ import (
 func main() {
 	// Create a client for a specific enclave and model repository
 	client, err := tinfoil.NewClientWithParams(
-		"llama3-3-70b.model.tinfoil.sh",
-		"tinfoilsh/confidential-llama3-3-70b",
-		option.WithAPIKey("xxx"),
+		"enclave.example.com",
+		"org/model-repo",
+		option.WithAPIKey("your-api-key"),
 	)
 	if err != nil {
 		panic(err.Error())
 	}
 
+	// Make requests using the OpenAI client API
+	// Note: enclave verification happens automatically
 	chatCompletion, err := client.Chat.Completions.New(context.TODO(), openai.ChatCompletionNewParams{
 		Messages: []openai.ChatCompletionMessageParamUnion{
 			openai.UserMessage("Say this is a test"),
@@ -59,63 +60,67 @@ func main() {
 	}
 
 	fmt.Println(chatCompletion.Choices[0].Message.Content)
-
 }
 ```
 
-### Usage
+## Usage
 
 ```go
 // 1. Create a client
 client, err := tinfoil.NewClientWithParams(
-    "enclave.example.com",  // Enclave hostname
-    "org/repo",             // GitHub repository
-    option.WithAPIKey("your-api-key"),
+	"enclave.example.com",  // Enclave hostname
+	"org/repo",             // GitHub repository
+	option.WithAPIKey("your-api-key"),
 )
 if err != nil {
-    panic(err.Error())
+	panic(err.Error())
 }
 
 // 2. Use client as you would openai.Client 
 // see https://pkg.go.dev/github.com/openai/openai-go for API documentation
 ```
 
-### Advanced functionality
+## Advanced Functionality
 
 ```go
+// For manual verification and direct HTTP access, use SecureClient directly
+secureClient := tinfoil.NewSecureClient("enclave.example.com", "org/repo")
+
 // Manual verification
-state, err := client.Verify()
+groundTruth, err := secureClient.Verify()
 if err != nil {
-    return fmt.Errorf("verification failed: %w", err)
+	return fmt.Errorf("verification failed: %w", err)
 }
 
 // Get the raw HTTP client 
-httpClient, err := client.HTTPClient()
+httpClient, err := secureClient.HTTPClient()
 if err != nil {
-    return fmt.Errorf("failed to get HTTP client: %w", err)
+	return fmt.Errorf("failed to get HTTP client: %w", err)
 }
 
 // Make HTTP requests directly 
-resp, err := client.Get("/api/status", map[string]string{
-    "Authorization": "Bearer token",
+resp, err := secureClient.Get("/api/status", map[string]string{
+	"Authorization": "Bearer token",
 })
 ```
 
-### Foreign Function Interface (FFI) Support
+## Foreign Function Interface (FFI) Support
 
-For usage in other languages through FFI, additional functions are available 
-which avoid using FFI incompatible data structures (e.g., Go maps): 
+For usage in other languages through FFI, additional functions are available which avoid using FFI incompatible data structures (e.g., Go maps):
 
 ```go
+// Create a SecureClient for FFI usage
+secureClient := tinfoil.NewSecureClient("enclave.example.com", "org/repo")
+
 // Initialize a request and get an ID
-requestID, err := client.InitPostRequest("/api/submit", []byte(`{"key":"value"}`))
+requestID, err := secureClient.InitPostRequest("/api/submit", []byte(`{"key":"value"}`))
 
 // Add headers individually
-client.AddHeader(requestID, "Content-Type", "application/json")
-client.AddHeader(requestID, "Authorization", "Bearer token")
+secureClient.AddHeader(requestID, "Content-Type", "application/json")
+secureClient.AddHeader(requestID, "Authorization", "Bearer token")
 
 // Execute the request
-resp, err := client.ExecuteRequest(requestID)
+resp, err := secureClient.ExecuteRequest(requestID)
 ```
 
 ## API Documentation
@@ -123,7 +128,6 @@ resp, err := client.ExecuteRequest(requestID)
 This library is a drop-in replacement for the [official OpenAI Go client](https://github.com/openai/openai-go) that can be used with Tinfoil. All methods and types are identical. See the [OpenAI Go client documentation](https://pkg.go.dev/github.com/openai/openai-go) for complete API usage and documentation.
 
 [![Go Reference](https://pkg.go.dev/badge/github.com/openai/openai-go.svg)](https://pkg.go.dev/github.com/openai/openai-go)
-
 
 ## Reporting Vulnerabilities
 
