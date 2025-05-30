@@ -3,7 +3,7 @@ module github.com/tinfoilsh/tinfoil-go
 go 1.24.0
 
 require (
-	github.com/openai/openai-go v0.1.0-beta.10
+	github.com/openai/openai-go v1.2.0
 	github.com/sirupsen/logrus v1.9.3
 	github.com/stretchr/testify v1.10.0
 	github.com/tinfoilsh/verifier v0.1.5

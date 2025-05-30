@@ -24,7 +24,7 @@ func main() {
 		log.Fatalf("Failed to create client: %v", err)
 	}
 
-	// Streaming chat completion
+	// Example 1: Streaming chat completion
 	fmt.Println("\n=== Streaming Chat Completion ===")
 
 	systemPrompt := "You are a helpful assistant."
@@ -65,4 +65,24 @@ func main() {
 
 	fmt.Println("\n\nFull accumulated response:")
 	fmt.Println(acc.Choices[0].Message.Content)
+
+	// Example 2: Non-streaming chat completion
+	fmt.Println("\n\n=== Non-Streaming Chat Completion ===")
+
+	resp, err := client.Chat.Completions.New(
+		context.Background(),
+		openai.ChatCompletionNewParams{
+			Model: "llama3-3-70b",
+			Messages: []openai.ChatCompletionMessageParamUnion{
+				openai.SystemMessage("You are a helpful assistant."),
+				openai.UserMessage("What is the capital of France?"),
+			},
+		},
+	)
+	if err != nil {
+		log.Fatalf("Non-streaming chat error: %v", err)
+	}
+
+	fmt.Printf("Question: What is the capital of France?\n")
+	fmt.Printf("Answer: %s\n", resp.Choices[0].Message.Content)
 }
