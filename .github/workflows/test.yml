@@ -12,6 +12,8 @@ jobs:
   test:
     name: Test
     runs-on: ubuntu-latest
+    env:
+      TINFOIL_API_KEY: ${{ secrets.TINFOIL_API_KEY }}
     steps:
       - uses: actions/checkout@v4
 
