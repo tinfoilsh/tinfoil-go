@@ -1,5 +1,4 @@
 name: Release
-
 on:
   push:
     tags:
@@ -12,10 +11,21 @@ jobs:
   release:
     runs-on: macos-latest
     steps:
+      # Generate token for GitHub App
+      - name: Generate token
+        id: generate_token
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ secrets.APP_ID }}
+          private-key: ${{ secrets.APP_PRIVATE_KEY }}
+
+      # Checkout with the app token
       - name: Checkout
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          token: ${{ steps.generate_token.outputs.token }}
+          persist-credentials: true
 
       - name: Set up Go
         uses: actions/setup-go@v5
@@ -24,10 +34,10 @@ jobs:
 
       - name: Update verifier dependency
         run: |
-          git config --local user.email "github-actions[bot]@users.noreply.github.com"
-          git config --local user.name "github-actions[bot]"
+          # Use your app's bot user - replace APP_SLUG with your app's slug
+          git config --local user.email "YOUR_APP_ID+YOUR_APP_SLUG[bot]@users.noreply.github.com"
+          git config --local user.name "YOUR_APP_SLUG[bot]"
           go get -u github.com/tinfoilsh/verifier
-          go mod tidy
           git add .
           git commit -m "chore: bump verifier"
           git push origin main
