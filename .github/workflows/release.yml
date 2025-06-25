@@ -34,9 +34,9 @@ jobs:
 
       - name: Update verifier dependency
         run: |
-          # Use your app's bot user - replace APP_SLUG with your app's slug
-          git config --local user.email "YOUR_APP_ID+YOUR_APP_SLUG[bot]@users.noreply.github.com"
-          git config --local user.name "YOUR_APP_SLUG[bot]"
+          # Use Verifier Release Bot for commits
+          git config --local user.email "1461927+verifier-release-bot[bot]@users.noreply.github.com"
+          git config --local user.name "verifier-release-bot[bot]"
           go get -u github.com/tinfoilsh/verifier
           git add .
           git commit -m "chore: bump verifier"
