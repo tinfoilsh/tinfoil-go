@@ -1,4 +1,5 @@
 name: Release
+
 on:
   push:
     tags:
@@ -11,41 +12,15 @@ jobs:
   release:
     runs-on: macos-latest
     steps:
-      # Generate token for GitHub App
-      - name: Generate token
-        id: generate_token
-        uses: actions/create-github-app-token@v1
-        with:
-          app-id: ${{ secrets.APP_ID }}
-          private-key: ${{ secrets.APP_PRIVATE_KEY }}
-
-      # Checkout with the app token
       - name: Checkout
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          token: ${{ steps.generate_token.outputs.token }}
-          persist-credentials: true
 
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
-
-      - name: Update verifier dependency
-        run: |
-          # Use Verifier Release Bot for commits
-          git config --local user.email "1461927+verifier-release-bot[bot]@users.noreply.github.com"
-          git config --local user.name "verifier-release-bot[bot]"
-          go get -u github.com/tinfoilsh/verifier@latest
-          # Check if there are any changes to commit
-          if git diff --exit-code go.mod go.sum; then
-            echo "No changes to verifier dependency"
-          else
-            git add go.mod go.sum
-            git commit -m "chore: bump verifier to latest version"
-            git push origin main
-          fi
 
       - name: Set up xcode
         uses: maxim-lobanov/setup-xcode@v1
@@ -55,6 +30,8 @@ jobs:
       - name: Set up gomobile
         run: |
           export PATH=$PATH:$(go env GOPATH)/bin
+          go get -u golang.org/x/mobile/cmd/gomobile
+          go get -u golang.org/x/mobile/cmd/gobind
           go install golang.org/x/mobile/cmd/gomobile@latest
           go install golang.org/x/mobile/cmd/gobind@latest
           gomobile init -v
