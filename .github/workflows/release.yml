@@ -32,21 +32,6 @@ jobs:
         with:
           go-version-file: go.mod
 
-      - name: Update verifier dependency
-        run: |
-          # Use Verifier Release Bot for commits
-          git config --local user.email "1461927+verifier-release-bot[bot]@users.noreply.github.com"
-          git config --local user.name "verifier-release-bot[bot]"
-          go get -u github.com/tinfoilsh/verifier@latest
-          # Check if there are any changes to commit
-          if git diff --exit-code go.mod go.sum; then
-            echo "No changes to verifier dependency"
-          else
-            git add go.mod go.sum
-            git commit -m "chore: bump verifier to latest version"
-            git push origin main
-          fi
-
       - name: Set up xcode
         uses: maxim-lobanov/setup-xcode@v1
         with:
