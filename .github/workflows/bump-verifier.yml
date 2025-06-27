@@ -1,0 +1,51 @@
+name: Bump verifier on upstream release
+on:
+  repository_dispatch:
+    types: [ verifier_published ]
+
+permissions:
+  contents: write          # create‑pull‑request needs this
+  pull-requests: write
+
+jobs:
+  bump:
+    runs-on: ubuntu-latest
+
+    steps:
+      # 1. App token for *this* repo
+      - name: Mint App token
+        id: app_token
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ secrets.APP_ID }}
+          private-key: ${{ secrets.APP_PRIVATE_KEY }}
+
+      # 2. Check out using that token so pushes belong to the App bot
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ steps.app_token.outputs.token }}
+
+      # 3. Update go.mod
+      - name: go get verifier@tag
+        run: |
+          go get github.com/tinfoilsh/verifier@${{ github.event.client_payload.version }}
+          go mod tidy
+
+      # 4. Open (and auto‑merge) a PR
+      - name: Create PR
+        id: cpr
+        uses: peter-evans/create-pull-request@v6
+        with:
+          token: ${{ steps.app_token.outputs.token }}
+          branch: bump-verifier-${{ github.event.client_payload.version }}
+          commit-message: "chore: bump verifier to ${{ github.event.client_payload.version }}"
+          title: "chore: bump verifier to ${{ github.event.client_payload.version }}"
+          labels: automerge
+
+      - name: Enable automerge
+        if: steps.cpr.outputs.pull-request-number != ''
+        uses: peter-evans/enable-pull-request-automerge@v3
+        with:
+          pull-request-number: ${{ steps.cpr.outputs.pull-request-number }}
+          merge-method: squash
+          token: ${{ steps.app_token.outputs.token }}
