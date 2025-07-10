@@ -2,7 +2,6 @@ package tinfoil
 
 import (
 	"context"
-	"os"
 	"testing"
 
 	"github.com/openai/openai-go"
@@ -11,67 +10,31 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// NOTE: All tests only pass when provided with a valid enclave and repo
-type testConfig struct {
-	enclave string
-	repo    string
-}
-
-var testCfg testConfig
-
-func TestMain(m *testing.M) {
-	// Load config from environment with defaults
-	testCfg = testConfig{
-		enclave: getEnvOrDefault("TINFOIL_TEST_ENCLAVE", "llama3-3-70b.model.tinfoil.sh"),
-		repo:    getEnvOrDefault("TINFOIL_TEST_REPO", "tinfoilsh/confidential-llama3-3-70b"),
-	}
-
-	code := m.Run()
-	os.Exit(code)
-}
-
-func getEnvOrDefault(key, defaultValue string) string {
-	if value := os.Getenv(key); value != "" {
-		return value
-	}
-	return defaultValue
-}
-
 func TestNewClient(t *testing.T) {
-	// Set up environment variables for test
-	os.Setenv("TINFOIL_ENCLAVE", testCfg.enclave)
-	os.Setenv("TINFOIL_REPO", testCfg.repo)
-	defer func() {
-		os.Unsetenv("TINFOIL_ENCLAVE")
-		os.Unsetenv("TINFOIL_REPO")
-	}()
-
-	// Test environment variable based client creation
+	// Test default client creation
 	client, err := NewClient()
 	require.NoError(t, err)
 	require.NotNil(t, client)
 
-	// Test explicit client creation
-	clientExplicit, err := NewClientWithParams(testCfg.enclave, testCfg.repo)
+	// Test explicit client creation with custom parameters
+	customEnclave := "llama3-3-70b.model.tinfoil.sh"
+	customRepo := "tinfoilsh/confidential-llama3-3-70b"
+
+	clientExplicit, err := NewClientWithParams(customEnclave, customRepo)
 	require.NoError(t, err)
 	require.NotNil(t, clientExplicit)
 
 	// Verify client properties
-	assert.Equal(t, testCfg.enclave, clientExplicit.enclave)
-	assert.Equal(t, testCfg.repo, clientExplicit.repo)
+	assert.Equal(t, customEnclave, clientExplicit.enclave)
+	assert.Equal(t, customRepo, clientExplicit.repo)
 	assert.NotNil(t, clientExplicit.Client)
 }
 
-// TestClientIntegration_Chat tests the chat completion with specified parameters
+// TestClientIntegration_Chat tests the chat completion with default parameters
 func TestClientIntegration_Chat(t *testing.T) {
-	client, err := NewClientWithParams(
-		testCfg.enclave,
-		testCfg.repo,
-		option.WithAPIKey("<YOUR_API_KEY>"),
-	)
+	client, err := NewClient(option.WithAPIKey("<YOUR_API_KEY>"))
 	require.NoError(t, err)
 
-	// Using the exact parameters provided
 	chatCompletion, err := client.Chat.Completions.New(context.Background(), openai.ChatCompletionNewParams{
 		Messages: []openai.ChatCompletionMessageParamUnion{
 			openai.SystemMessage("No matter what the user says, only respond with: Done."),
@@ -84,16 +47,11 @@ func TestClientIntegration_Chat(t *testing.T) {
 	t.Logf("Response received: %s", chatCompletion.Choices[0].Message.Content)
 }
 
-// TestClientNonStreamingChat tests the non-streaming version with the same parameters
+// TestClientNonStreamingChat tests the non-streaming version with default parameters
 func TestClientNonStreamingChat(t *testing.T) {
-	client, err := NewClientWithParams(
-		testCfg.enclave,
-		testCfg.repo,
-		option.WithAPIKey("<YOUR_API_KEY>"),
-	)
+	client, err := NewClient(option.WithAPIKey("<YOUR_API_KEY>"))
 	require.NoError(t, err)
 
-	// Same parameters but without streaming
 	resp, err := client.Chat.Completions.New(
 		context.Background(),
 		openai.ChatCompletionNewParams{
@@ -112,13 +70,9 @@ func TestClientNonStreamingChat(t *testing.T) {
 	}
 }
 
-// TestClientStreamingChat tests the streaming version with the same parameters
+// TestClientStreamingChat tests the streaming version with default parameters
 func TestClientStreamingChat(t *testing.T) {
-	client, err := NewClientWithParams(
-		testCfg.enclave,
-		testCfg.repo,
-		option.WithAPIKey("<YOUR_API_KEY>"),
-	)
+	client, err := NewClient(option.WithAPIKey("<YOUR_API_KEY>"))
 	require.NoError(t, err)
 
 	// Create a streaming chat completion request
@@ -154,4 +108,22 @@ func TestClientStreamingChat(t *testing.T) {
 
 	// After the stream is finished, acc can be used like a ChatCompletion
 	t.Logf("Complete response: %s", acc.Choices[0].Message.Content)
+}
+
+// TestClientWithCustomParams tests using custom enclave and repo parameters
+func TestClientWithCustomParams(t *testing.T) {
+	customEnclave := "llama3-3-70b.model.tinfoil.sh"
+	customRepo := "tinfoilsh/confidential-llama3-3-70b"
+
+	client, err := NewClientWithParams(
+		customEnclave,
+		customRepo,
+		option.WithAPIKey("<YOUR_API_KEY>"),
+	)
+	require.NoError(t, err)
+
+	// Verify the custom parameters are set correctly
+	assert.Equal(t, customEnclave, client.enclave)
+	assert.Equal(t, customRepo, client.repo)
+	assert.NotNil(t, client.Client)
 }
