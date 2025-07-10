@@ -7,30 +7,27 @@ import (
 	"github.com/openai/openai-go/option"
 )
 
-// Client wraps the OpenAI client to work with Tinfoil
+// Client wraps the OpenAI client to provide secure inference through Tinfoil
 type Client struct {
 	*openai.Client
 	enclave string
 	repo    string
 }
 
-// NewClient creates a new secure OpenAI client using environment variables for configuration
+// NewClient creates a new secure OpenAI client using default parameters
 func NewClient(openaiOpts ...option.RequestOption) (*Client, error) {
-	return NewClientWithParams("", "", openaiOpts...)
+	secureClient := NewSecureClient()
+	return createClientFromSecureClient(secureClient, openaiOpts...)
 }
 
 // NewClientWithParams creates a new secure OpenAI client with explicit enclave and repo parameters
 func NewClientWithParams(enclave, repo string, openaiOpts ...option.RequestOption) (*Client, error) {
-	// Use provided parameters or fall back to environment variables
-	enclave = getEnvDefault("TINFOIL_ENCLAVE", enclave)
-	repo = getEnvDefault("TINFOIL_REPO", repo)
+	secureClient := NewSecureClientWithParams(enclave, repo)
+	return createClientFromSecureClient(secureClient, openaiOpts...)
+}
 
-	if enclave == "" || repo == "" {
-		return nil, fmt.Errorf("tinfoil: enclave and repo must be specified")
-	}
-
-	secureClient := NewSecureClient(enclave, repo)
-
+// createClientFromSecureClient is a helper function to create a Client from a SecureClient
+func createClientFromSecureClient(secureClient *SecureClient, openaiOpts ...option.RequestOption) (*Client, error) {
 	// Create an HTTP client with our custom transport
 	httpClient, err := secureClient.HTTPClient()
 	if err != nil {
@@ -40,13 +37,13 @@ func NewClientWithParams(enclave, repo string, openaiOpts ...option.RequestOptio
 	// Add our HTTP client and base URL to the options
 	allOpts := append(openaiOpts,
 		option.WithHTTPClient(httpClient),
-		option.WithBaseURL(fmt.Sprintf("https://%s/v1/", enclave)),
+		option.WithBaseURL(fmt.Sprintf("https://%s/v1/", secureClient.enclave)),
 	)
 
 	client := openai.NewClient(allOpts...)
 	return &Client{
 		Client:  &client,
-		enclave: enclave,
-		repo:    repo,
+		enclave: secureClient.enclave,
+		repo:    secureClient.repo,
 	}, nil
 }

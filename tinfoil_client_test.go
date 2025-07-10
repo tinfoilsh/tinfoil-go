@@ -67,7 +67,7 @@ func TestClientIntegration_Chat(t *testing.T) {
 	client, err := NewClientWithParams(
 		testCfg.enclave,
 		testCfg.repo,
-		option.WithAPIKey("tinfoil"),
+		option.WithAPIKey("<YOUR_API_KEY>"),
 	)
 	require.NoError(t, err)
 
@@ -89,7 +89,7 @@ func TestClientNonStreamingChat(t *testing.T) {
 	client, err := NewClientWithParams(
 		testCfg.enclave,
 		testCfg.repo,
-		option.WithAPIKey("tinfoil"),
+		option.WithAPIKey("<YOUR_API_KEY>"),
 	)
 	require.NoError(t, err)
 
@@ -117,7 +117,7 @@ func TestClientStreamingChat(t *testing.T) {
 	client, err := NewClientWithParams(
 		testCfg.enclave,
 		testCfg.repo,
-		option.WithAPIKey("tinfoil"),
+		option.WithAPIKey("<YOUR_API_KEY>"),
 	)
 	require.NoError(t, err)
 
