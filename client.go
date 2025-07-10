@@ -23,8 +23,13 @@ type SecureClient struct {
 	groundTruth   *GroundTruth
 }
 
-// NewSecureClient creates a new client for secure communications with the enclave
-func NewSecureClient(enclave, repo string) *SecureClient {
+// NewSecureClient creates a new client for secure communications with the enclave using default parameters
+func NewSecureClient() *SecureClient {
+	return NewSecureClientWithParams("inference.tinfoil.sh", "tinfoilsh/confidential-inference-proxy")
+}
+
+// NewSecureClientWithParams creates a new client for secure communications with the enclave using custom parameters
+func NewSecureClientWithParams(enclave, repo string) *SecureClient {
 	return &SecureClient{
 		enclave: enclave,
 		repo:    repo,

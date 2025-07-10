@@ -5,12 +5,13 @@ This example demonstrates how to use the Tinfoil client to interact with OpenAI'
 ## Setup
 
 1. Make sure you have Go installed and the Tinfoil repository cloned
-2. Set up your environment variables (or they will be set by the example):
+2. Replace the API key in the example with your actual Tinfoil API key
+
+The example uses default parameters for the Tinfoil enclave (`inference.tinfoil.sh`) and repository (`tinfoilsh/confidential-inference-proxy`). If you need to use custom parameters, you can set environment variables:
    ```bash
    export TINFOIL_ENCLAVE="your-enclave.tinfoil.sh"
    export TINFOIL_REPO="your-org/your-model-repo"
    ```
-3. Replace the API key in the example with your actual Tinfoil API key
 
 ## Running the Example
 

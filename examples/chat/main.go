@@ -14,11 +14,9 @@ import (
 func main() {
 	logrus.SetLevel(logrus.DebugLevel)
 
-	// Create a new tinfoil client
-	client, err := tinfoil.NewClientWithParams(
-		"llama3-3-70b.model.tinfoil.sh",
-		"tinfoilsh/confidential-llama3-3-70b",
-		option.WithAPIKey("tinfoil"), // Replace with your actual API key
+	// Create a new tinfoil client using default parameters
+	client, err := tinfoil.NewClient(
+		option.WithAPIKey("<YOUR_API_KEY>"), // Replace with your actual API key
 	)
 	if err != nil {
 		log.Fatalf("Failed to create client: %v", err)
