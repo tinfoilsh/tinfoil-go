@@ -40,8 +40,10 @@ jobs:
       - name: Set up gomobile
         run: |
           export PATH=$PATH:$(go env GOPATH)/bin
-          go install golang.org/x/mobile/cmd/gomobile@latest
-          go install golang.org/x/mobile/cmd/gobind@latest
+          go get -u golang.org/x/mobile/cmd/gomobile
+          go get -u golang.org/x/mobile/cmd/gobind
+          go install golang.org/x/mobile/cmd/gomobile
+          go install golang.org/x/mobile/cmd/gobind
           gomobile init -v
 
       - name: Build XCFramework
