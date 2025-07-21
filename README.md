@@ -4,10 +4,10 @@
 
 ## Installation
 
-`tinfoil-go` currently relies on a specific feature in `go-sev-guest` that hasn't been upstreamed yet. This requires adding the following line to your `go.mod`:
+`tinfoil-go` currently relies on a specific feature in `go-sev-guest` that hasn't been upstreamed yet:
 
 ```go
-replace github.com/google/go-sev-guest v0.0.0-00010101000000-000000000000 => github.com/jraman567/go-sev-guest v0.0.0-20250117204014-6339110611c9
+go mod edit -replace github.com/google/go-sev-guest=github.com/tinfoilsh/go-sev-guest@v0.0.0-20250704193550-c725e6216008
 ```
 
 Then run:
