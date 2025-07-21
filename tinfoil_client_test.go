@@ -25,8 +25,8 @@ func TestNewClient(t *testing.T) {
 	require.NotNil(t, clientExplicit)
 
 	// Verify client properties
-	assert.Equal(t, customEnclave, clientExplicit.enclave)
-	assert.Equal(t, customRepo, clientExplicit.repo)
+	assert.Equal(t, customEnclave, clientExplicit.Enclave())
+	assert.Equal(t, customRepo, clientExplicit.Repo())
 	assert.NotNil(t, clientExplicit.Client)
 }
 
@@ -123,7 +123,7 @@ func TestClientWithCustomParams(t *testing.T) {
 	require.NoError(t, err)
 
 	// Verify the custom parameters are set correctly
-	assert.Equal(t, customEnclave, client.enclave)
-	assert.Equal(t, customRepo, client.repo)
+	assert.Equal(t, customEnclave, client.Enclave())
+	assert.Equal(t, customRepo, client.Repo())
 	assert.NotNil(t, client.Client)
 }

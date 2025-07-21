@@ -17,7 +17,7 @@ func TestClientLoadBalance(t *testing.T) {
 			Repo: "tinfoilsh/confidential-qwen2-5-72b",
 		}, {
 			Host: "qwen2-5-72b-2.model.tinfoil.sh",
-			Repo: "tinfoilsh/confidential-qwen2-5-72b-2",
+			Repo: "tinfoilsh/confidential-qwen2-5-72b",
 		},
 	}
 
