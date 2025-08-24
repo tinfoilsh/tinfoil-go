@@ -1,19 +1,20 @@
 # Tinfoil Go Client
 
 [![Build Status](https://github.com/tinfoilsh/tinfoil-go/actions/workflows/test.yml/badge.svg)](https://github.com/tinfoilsh/tinfoil-go/actions)
+[![Documentation](https://img.shields.io/badge/docs-tinfoil.sh-blue)](https://docs.tinfoil.sh/sdk/go-sdk)
 
 ## Installation
 
-`tinfoil-go` currently relies on a specific feature in `go-sev-guest` that hasn't been upstreamed yet:
-
-```go
-go mod edit -replace github.com/google/go-sev-guest=github.com/tinfoilsh/go-sev-guest@v0.0.0-20250704193550-c725e6216008
-```
-
-Then run:
+Add the Tinfoil SDK to your project:
 
 ```bash
 go get github.com/tinfoilsh/tinfoil-go
+```
+
+`tinfoil-go` currently relies on a specific feature in `go-sev-guest` that hasn't been upstreamed yet. This requires adding the following line to your `go.mod`:
+
+```go
+replace github.com/google/go-sev-guest => github.com/tinfoilsh/go-sev-guest v0.0.0-20250704193550-c725e6216008
 ```
 
 ## Quick Start
@@ -29,21 +30,22 @@ package main
 import (
 	"context"
 	"fmt"
+	"log"
+	"os"
 
 	"github.com/openai/openai-go"
 	"github.com/openai/openai-go/option"
-	"github.com/tinfoilsh/tinfoil-go" // imported as tinfoil
+	"github.com/tinfoilsh/tinfoil-go"
 )
 
 func main() {
-	// Create a client for a specific enclave and model repository
-	client, err := tinfoil.NewClientWithParams(
-		"enclave.example.com",
-		"org/model-repo",
-		option.WithAPIKey("your-api-key"),
+	// Create a client
+	client, err := tinfoil.NewClient(
+		option.WithAPIKey(os.Getenv("TINFOIL_API_KEY")),
 	)
 	if err != nil {
-		panic(err.Error())
+		log.Printf("Failed to create client: %v", err)
+		return
 	}
 
 	// Make requests using the OpenAI client API
@@ -56,7 +58,8 @@ func main() {
 	})
 
 	if err != nil {
-		panic(err.Error())
+		log.Printf("Chat completion error: %v", err)
+		return
 	}
 
 	fmt.Println(chatCompletion.Choices[0].Message.Content)
@@ -67,13 +70,12 @@ func main() {
 
 ```go
 // 1. Create a client
-client, err := tinfoil.NewClientWithParams(
-	"enclave.example.com",  // Enclave hostname
-	"org/repo",             // GitHub repository
-	option.WithAPIKey("your-api-key"),
+client, err := tinfoil.NewClient(
+	option.WithAPIKey(os.Getenv("TINFOIL_API_KEY")),
 )
 if err != nil {
-	panic(err.Error())
+	log.Printf("Failed to create client: %v", err)
+	return
 }
 
 // 2. Use client as you would openai.Client 
