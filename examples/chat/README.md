@@ -1,31 +1,42 @@
-# Tinfoil Chat Example
+# Chat Example
 
-This example demonstrates how to use the Tinfoil client to interact with OpenAI's chat completion API in both streaming and non-streaming modes.
+This example demonstrates how to use the Tinfoil Go SDK with chat completion models in both streaming and non-streaming modes.
+
+## Installation
+
+Make sure you have Go installed, then add the Tinfoil SDK to your project:
+
+```bash
+go get github.com/tinfoilsh/tinfoil-go
+```
+
+Add the required replace directive to your `go.mod`:
+
+```go
+replace github.com/google/go-sev-guest => github.com/tinfoilsh/go-sev-guest v0.0.0-20250704193550-c725e6216008
+```
 
 ## Setup
 
-1. Make sure you have Go installed and the Tinfoil repository cloned
-2. Replace the API key in the example with your actual Tinfoil API key
+1. Set your Tinfoil API key as an environment variable:
 
-The example uses default parameters for the Tinfoil enclave (`inference.tinfoil.sh`) and repository (`tinfoilsh/confidential-inference-proxy`). If you need to use custom parameters, you can set environment variables:
    ```bash
-   export TINFOIL_ENCLAVE="your-enclave.tinfoil.sh"
-   export TINFOIL_REPO="your-org/your-model-repo"
+   export TINFOIL_API_KEY="your-tinfoil-api-key"
    ```
 
-## Running the Example
+2. Run the example:
 
-You can run the example by executing: 
-```bash
-go run main.go
-```
+   ```bash
+   go run main.go
+   ```
 
 ## What the Example Does
 
-The example will:
+The example demonstrates:
 
-1. Create an OpenAI client configured with Tinfoil settings
+1. **Migration from OpenAI**: Shows how to create a Tinfoil client that's compatible with OpenAI Go client
+2. **Streaming chat completion**: Real-time response streaming with content accumulation
+3. **Non-streaming chat completion**: Standard request-response pattern
+4. **Secure AI inference**: All requests are automatically routed through Tinfoil's secure enclaves
 
-2. Demonstrate a streaming chat completion with real-time output
-
-The code shows both the basic usage pattern and error handling for each approach. 
+Both examples use the `llama3-3-70b` model and show proper error handling patterns.
