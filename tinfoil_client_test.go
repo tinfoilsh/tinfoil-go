@@ -8,7 +8,15 @@ import (
     "github.com/openai/openai-go/v2"
     "github.com/openai/openai-go/v2/option"
     "github.com/stretchr/testify/require"
+    "github.com/subosito/gotenv"
 )
+
+// Load .env before running tests so TINFOIL_API_KEY is available locally
+func TestMain(m *testing.M) {
+    // Ignore error: if .env is missing, we just proceed
+    _ = gotenv.Load()
+    os.Exit(m.Run())
+}
 
 func TestNewClient(t *testing.T) {
 	// Test default client creation only
@@ -24,7 +32,7 @@ func TestClientIntegration_Chat(t *testing.T) {
 		t.Skip("TINFOIL_API_KEY not set; skipping integration test")
 	}
 
-	client, err := NewClient(option.WithAPIKey(apiKey))
+    client, err := NewClient(option.WithAPIKey(apiKey))
 	require.NoError(t, err)
 
 	chatCompletion, err := client.Chat.Completions.New(context.Background(), openai.ChatCompletionNewParams{
@@ -46,7 +54,7 @@ func TestClientNonStreamingChat(t *testing.T) {
 		t.Skip("TINFOIL_API_KEY not set; skipping integration test")
 	}
 
-	client, err := NewClient(option.WithAPIKey(apiKey))
+    client, err := NewClient(option.WithAPIKey(apiKey))
 	require.NoError(t, err)
 
 	resp, err := client.Chat.Completions.New(
@@ -74,11 +82,11 @@ func TestClientStreamingChat(t *testing.T) {
 		t.Skip("TINFOIL_API_KEY not set; skipping integration test")
 	}
 
-	client, err := NewClient(option.WithAPIKey(apiKey))
+    client, err := NewClient(option.WithAPIKey(apiKey))
 	require.NoError(t, err)
 
-	// Create a streaming chat completion request
-	stream := client.Chat.Completions.NewStreaming(context.Background(), openai.ChatCompletionNewParams{
+    // Create a streaming chat completion request
+    stream := client.Chat.Completions.NewStreaming(context.Background(), openai.ChatCompletionNewParams{
 		Messages: []openai.ChatCompletionMessageParamUnion{
 			openai.SystemMessage("No matter what the user says, only respond with: Done."),
 			openai.UserMessage("Is this a test?"),
@@ -111,4 +119,48 @@ func TestClientStreamingChat(t *testing.T) {
 
 	// After the stream is finished, acc can be used like a ChatCompletion
 	t.Logf("Complete response: %s", acc.Choices[0].Message.Content)
+}
+
+// TestDirectClientStreamingChat compares streaming using the raw OpenAI client
+// (no Tinfoil HTTP transport) against the wrapped client to isolate the source
+// of any streaming errors. If this test passes while TestClientStreamingChat
+// fails, the issue likely lies in the Secure HTTP client/transport.
+func TestDirectClientStreamingChat(t *testing.T) {
+    apiKey := os.Getenv("TINFOIL_API_KEY")
+    if apiKey == "" {
+        t.Skip("TINFOIL_API_KEY not set; skipping integration test")
+    }
+
+    // Build a plain OpenAI client pointing at the Tinfoil inference endpoint
+    // without using the SecureClient's HTTP transport. This helps determine
+    // whether streaming issues come from our wrapper or from the endpoint/API.
+    raw := openai.NewClient(
+        option.WithAPIKey(apiKey),
+        option.WithBaseURL("https://inference.tinfoil.sh/v1"),
+    )
+
+    stream := raw.Chat.Completions.NewStreaming(context.Background(), openai.ChatCompletionNewParams{
+        Messages: []openai.ChatCompletionMessageParamUnion{
+            openai.SystemMessage("No matter what the user says, only respond with: Done."),
+            openai.UserMessage("Is this a test?"),
+        },
+        Model: "llama3-3-70b",
+    })
+    defer stream.Close()
+
+    acc := openai.ChatCompletionAccumulator{}
+    t.Log("Direct client streaming response:")
+    for stream.Next() {
+        chunk := stream.Current()
+        acc.AddChunk(chunk)
+        if len(chunk.Choices) > 0 && chunk.Choices[0].Delta.Content != "" {
+            t.Logf("Received: %s", chunk.Choices[0].Delta.Content)
+        }
+    }
+
+    if err := stream.Err(); err != nil {
+        t.Fatalf("Direct stream error: %v", err)
+    }
+
+    t.Logf("Direct complete response: %s", acc.Choices[0].Message.Content)
 }
