@@ -3,7 +3,7 @@ module github.com/tinfoilsh/tinfoil-go
 go 1.24.0
 
 require (
-	github.com/openai/openai-go v1.2.0
+	github.com/openai/openai-go/v2 v2.4.2
 	github.com/sirupsen/logrus v1.9.3
 	github.com/stretchr/testify v1.10.0
 	github.com/tinfoilsh/verifier v0.1.16
@@ -73,7 +73,7 @@ require (
 	github.com/theupdateframework/go-tuf v0.7.0 // indirect
 	github.com/theupdateframework/go-tuf/v2 v2.0.2 // indirect
 	github.com/tidwall/gjson v1.18.0 // indirect
-	github.com/tidwall/match v1.1.1 // indirect
+	github.com/tidwall/match v1.2.0 // indirect
 	github.com/tidwall/pretty v1.2.1 // indirect
 	github.com/tidwall/sjson v1.2.5 // indirect
 	github.com/titanous/rocacheck v0.0.0-20171023193734-afe73141d399 // indirect

@@ -1,4 +1,5 @@
 .idea/
+.env 
 verifier
 tuf-repo-cdn.sigstore.dev.json
 Tinfoil.xcframework
