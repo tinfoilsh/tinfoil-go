@@ -19,7 +19,7 @@ replace github.com/google/go-sev-guest => github.com/tinfoilsh/go-sev-guest v0.0
 
 ## Quick Start
 
-The Tinfoil Go client is a wrapper around the [OpenAI Go client](https://pkg.go.dev/github.com/openai/openai-go) and provides secure communication with Tinfoil enclaves. It has the same API as the OpenAI client, with additional security features:
+The Tinfoil Go client is a wrapper around the [OpenAI Go client v2](https://pkg.go.dev/github.com/openai/openai-go/v2) and provides secure communication with Tinfoil enclaves. It has the same API as the OpenAI client, with additional security features:
 
 - Automatic attestation validation to ensure enclave integrity verification
 - TLS certificate pinning to prevent man-in-the-middle attacks
@@ -33,8 +33,8 @@ import (
 	"log"
 	"os"
 
-	"github.com/openai/openai-go"
-	"github.com/openai/openai-go/option"
+    "github.com/openai/openai-go/v2"
+    "github.com/openai/openai-go/v2/option"
 	"github.com/tinfoilsh/tinfoil-go"
 )
 
@@ -79,7 +79,7 @@ if err != nil {
 }
 
 // 2. Use client as you would openai.Client 
-// see https://pkg.go.dev/github.com/openai/openai-go for API documentation
+// see https://pkg.go.dev/github.com/openai/openai-go/v2 for API documentation
 ```
 
 ## Advanced Functionality
@@ -127,9 +127,9 @@ resp, err := secureClient.ExecuteRequest(requestID)
 
 ## API Documentation
 
-This library is a drop-in replacement for the [official OpenAI Go client](https://github.com/openai/openai-go) that can be used with Tinfoil. All methods and types are identical. See the [OpenAI Go client documentation](https://pkg.go.dev/github.com/openai/openai-go) for complete API usage and documentation.
+This library is a drop-in replacement for the [official OpenAI Go client](https://github.com/openai/openai-go) that can be used with Tinfoil. All methods and types are identical. See the [OpenAI Go client documentation](https://pkg.go.dev/github.com/openai/openai-go/v2) for complete API usage and documentation.
 
-[![Go Reference](https://pkg.go.dev/badge/github.com/openai/openai-go.svg)](https://pkg.go.dev/github.com/openai/openai-go)
+[![Go Reference](https://pkg.go.dev/badge/github.com/openai/openai-go/v2.svg)](https://pkg.go.dev/github.com/openai/openai-go/v2)
 
 ## Reporting Vulnerabilities
 

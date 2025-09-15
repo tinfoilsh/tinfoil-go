@@ -1,11 +1,11 @@
 package tinfoil
 
 import (
-	"fmt"
+    "fmt"
 
-	"github.com/openai/openai-go"
-	"github.com/openai/openai-go/option"
-	"github.com/tinfoilsh/verifier/client"
+    "github.com/openai/openai-go/v2"
+    "github.com/openai/openai-go/v2/option"
+    "github.com/tinfoilsh/verifier/client"
 )
 
 // Client wraps the OpenAI client to provide secure inference through Tinfoil
