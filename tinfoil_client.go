@@ -1,11 +1,11 @@
 package tinfoil
 
 import (
-    "fmt"
+	"fmt"
 
-    "github.com/openai/openai-go/v2"
-    "github.com/openai/openai-go/v2/option"
-    "github.com/tinfoilsh/verifier/client"
+	"github.com/openai/openai-go/v2"
+	"github.com/openai/openai-go/v2/option"
+	"github.com/tinfoilsh/verifier/client"
 )
 
 // Client wraps the OpenAI client to provide secure inference through Tinfoil
@@ -22,7 +22,11 @@ func NewClientWithParams(enclave, repo string, openaiOpts ...option.RequestOptio
 
 // NewClient creates a new secure OpenAI client using default parameters
 func NewClient(openaiOpts ...option.RequestOption) (*Client, error) {
-	return NewClientWithParams("inference.tinfoil.sh", "tinfoilsh/confidential-inference-proxy", openaiOpts...)
+	secureClient, err := client.NewDefaultClient()
+	if err != nil {
+		return nil, fmt.Errorf("failed to create secure client: %w", err)
+	}
+	return createClientFromSecureClient(secureClient, openaiOpts...)
 }
 
 // createClientFromSecureClient is a helper function to create a Client from a SecureClient
