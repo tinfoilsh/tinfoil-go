@@ -7,7 +7,7 @@ require (
 	github.com/sirupsen/logrus v1.9.3
 	github.com/stretchr/testify v1.11.1
 	github.com/subosito/gotenv v1.6.0
-	github.com/tinfoilsh/verifier v0.2.2
+	github.com/tinfoilsh/verifier v0.10.1
 )
 
 require (
