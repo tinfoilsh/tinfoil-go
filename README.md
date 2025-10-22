@@ -21,7 +21,7 @@ replace github.com/google/go-sev-guest => github.com/tinfoilsh/go-sev-guest v0.0
 
 ## Quick Start
 
-The Tinfoil Go client is a wrapper around the [OpenAI Go client v2](https://pkg.go.dev/github.com/openai/openai-go/v2) and provides secure communication with Tinfoil enclaves. It has the same API as the OpenAI client, with additional security features:
+The Tinfoil Go client is a wrapper around the [OpenAI Go client v3](https://pkg.go.dev/github.com/openai/openai-go/v3) and provides secure communication with Tinfoil enclaves. It has the same API as the OpenAI client, with additional security features:
 
 - Automatic attestation validation to ensure enclave integrity verification
 - Supports [Encrypted HTTP Body Protocol](https://docs.tinfoil.sh/resources/ehbp) to provide direct-to-enclave encrypted communication with attested public keys
@@ -35,8 +35,8 @@ import (
 	"fmt"
 	"log"
 
-    "github.com/openai/openai-go/v2"
-    "github.com/openai/openai-go/v2/option"
+    "github.com/openai/openai-go/v3"
+    "github.com/openai/openai-go/v3/option"
 	"github.com/tinfoilsh/tinfoil-go"
 )
 
@@ -78,8 +78,8 @@ if err != nil {
 	return
 }
 
-// 2. Use client as you would openai.Client 
-// see https://pkg.go.dev/github.com/openai/openai-go/v2 for API documentation
+// 2. Use client as you would openai.Client
+// see https://pkg.go.dev/github.com/openai/openai-go/v3 for API documentation
 ```
 
 ## Advanced Functionality
@@ -108,9 +108,9 @@ resp, err := secureClient.Get("/api/status", map[string]string{
 
 ## API Documentation
 
-This library is a drop-in replacement for the [official OpenAI Go client](https://github.com/openai/openai-go) that can be used with Tinfoil. All methods and types are identical. See the [OpenAI Go client documentation](https://pkg.go.dev/github.com/openai/openai-go/v2) for complete API usage and documentation.
+This library is a drop-in replacement for the [official OpenAI Go client](https://github.com/openai/openai-go) that can be used with Tinfoil. All methods and types are identical. See the [OpenAI Go client documentation](https://pkg.go.dev/github.com/openai/openai-go/v3) for complete API usage and documentation.
 
-[![Go Reference](https://pkg.go.dev/badge/github.com/openai/openai-go/v2.svg)](https://pkg.go.dev/github.com/openai/openai-go/v2)
+[![Go Reference](https://pkg.go.dev/badge/github.com/openai/openai-go/v3.svg)](https://pkg.go.dev/github.com/openai/openai-go/v3)
 
 ## Reporting Vulnerabilities
 

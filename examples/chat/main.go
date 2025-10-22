@@ -1,15 +1,15 @@
 package main
 
 import (
-    "context"
-    "fmt"
-    "log"
-    "os"
+	"context"
+	"fmt"
+	"log"
+	"os"
 
-    "github.com/openai/openai-go/v2"
-    "github.com/openai/openai-go/v2/option"
-    "github.com/sirupsen/logrus"
-    "github.com/tinfoilsh/tinfoil-go"
+	"github.com/openai/openai-go/v3"
+	"github.com/openai/openai-go/v3/option"
+	"github.com/sirupsen/logrus"
+	"github.com/tinfoilsh/tinfoil-go"
 )
 
 func main() {
