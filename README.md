@@ -3,6 +3,8 @@
 [![Build Status](https://github.com/tinfoilsh/tinfoil-go/actions/workflows/test.yml/badge.svg)](https://github.com/tinfoilsh/tinfoil-go/actions)
 [![Documentation](https://img.shields.io/badge/docs-tinfoil.sh-blue)](https://docs.tinfoil.sh/sdk/go-sdk)
 
+For complete documentation, see the [Go SDK documentation](https://docs.tinfoil.sh/sdk/go-sdk).
+
 ## Installation
 
 Add the Tinfoil SDK to your project:
@@ -31,7 +33,6 @@ import (
 	"context"
 	"fmt"
 	"log"
-	"os"
 
     "github.com/openai/openai-go/v2"
     "github.com/openai/openai-go/v2/option"
@@ -41,11 +42,10 @@ import (
 func main() {
 	// Create a client
 	client, err := tinfoil.NewClient(
-		option.WithAPIKey(os.Getenv("TINFOIL_API_KEY")),
+		option.WithAPIKey("<YOUR_API_KEY>"),
 	)
 	if err != nil {
-		log.Printf("Failed to create client: %v", err)
-		return
+		log.Fatalf("Failed to create client: %v", err)
 	}
 
 	// Make requests using the OpenAI client API
@@ -54,12 +54,11 @@ func main() {
 		Messages: []openai.ChatCompletionMessageParamUnion{
 			openai.UserMessage("Say this is a test"),
 		},
-		Model: "llama3-3-70b", // see https://docs.tinfoil.sh for supported models
+		Model: "llama3-3-70b", // see https://docs.tinfoil.sh/models/catalog for supported models
 	})
 
 	if err != nil {
-		log.Printf("Chat completion error: %v", err)
-		return
+		log.Fatalf("Chat completion error: %v", err)
 	}
 
 	fmt.Println(chatCompletion.Choices[0].Message.Content)
