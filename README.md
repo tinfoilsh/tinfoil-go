@@ -24,7 +24,8 @@ replace github.com/google/go-sev-guest => github.com/tinfoilsh/go-sev-guest v0.0
 The Tinfoil Go client is a wrapper around the [OpenAI Go client v2](https://pkg.go.dev/github.com/openai/openai-go/v2) and provides secure communication with Tinfoil enclaves. It has the same API as the OpenAI client, with additional security features:
 
 - Automatic attestation validation to ensure enclave integrity verification
-- TLS certificate pinning to prevent man-in-the-middle attacks
+- Supports [Encrypted HTTP Body Protocol](https://docs.tinfoil.sh/resources/ehbp) to provide direct-to-enclave encrypted communication with attested public keys
+- Supports a fallback mode with TLS certificate pinning using attested certificates to provide direct-to-enclave encrypted communication over TLS 
 
 ```go
 package main
@@ -49,7 +50,7 @@ func main() {
 	}
 
 	// Make requests using the OpenAI client API
-	// Note: enclave verification happens automatically
+	// Note: enclave verification and direct-to-enclave encryption happens automatically
 	chatCompletion, err := client.Chat.Completions.New(context.TODO(), openai.ChatCompletionNewParams{
 		Messages: []openai.ChatCompletionMessageParamUnion{
 			openai.UserMessage("Say this is a test"),
@@ -105,25 +106,6 @@ resp, err := secureClient.Get("/api/status", map[string]string{
 })
 ```
 
-## Foreign Function Interface (FFI) Support
-
-For usage in other languages through FFI, additional functions are available which avoid using FFI incompatible data structures (e.g., Go maps):
-
-```go
-// Create a SecureClient for FFI usage
-secureClient := tinfoil.NewSecureClient("enclave.example.com", "org/repo")
-
-// Initialize a request and get an ID
-requestID, err := secureClient.InitPostRequest("/api/submit", []byte(`{"key":"value"}`))
-
-// Add headers individually
-secureClient.AddHeader(requestID, "Content-Type", "application/json")
-secureClient.AddHeader(requestID, "Authorization", "Bearer token")
-
-// Execute the request
-resp, err := secureClient.ExecuteRequest(requestID)
-```
-
 ## API Documentation
 
 This library is a drop-in replacement for the [official OpenAI Go client](https://github.com/openai/openai-go) that can be used with Tinfoil. All methods and types are identical. See the [OpenAI Go client documentation](https://pkg.go.dev/github.com/openai/openai-go/v2) for complete API usage and documentation.
@@ -138,4 +120,4 @@ Please report security vulnerabilities by either:
 
 - Opening an issue on GitHub on this repository
 
-We aim to respond to security reports within 24 hours and will keep you updated on our progress.
+We aim to respond to (legitimate) security reports within 24 hours.
