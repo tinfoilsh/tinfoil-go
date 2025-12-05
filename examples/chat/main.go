@@ -4,6 +4,7 @@ import (
     "context"
     "fmt"
     "log"
+    "os"
 
     "github.com/openai/openai-go/v2"
     "github.com/openai/openai-go/v2/option"
@@ -14,9 +15,13 @@ import (
 func main() {
 	logrus.SetLevel(logrus.DebugLevel)
 
-	// Create a new tinfoil client using default parameters
+	apiKey := os.Getenv("TINFOIL_API_KEY")
+	if apiKey == "" {
+		log.Fatal("TINFOIL_API_KEY environment variable is not set")
+	}
+
 	client, err := tinfoil.NewClient(
-		option.WithAPIKey("<YOUR_API_KEY>"), // Replace with your actual API key
+		option.WithAPIKey(apiKey),
 	)
 	if err != nil {
 		log.Fatalf("Failed to create client: %v", err)
