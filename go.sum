@@ -1221,6 +1221,8 @@ github.com/tinfoilsh/go-sev-guest v0.0.0-20250704193550-c725e6216008 h1:utg5iGJK
 github.com/tinfoilsh/go-sev-guest v0.0.0-20250704193550-c725e6216008/go.mod h1:SK9vW+uyfuzYdVN0m8BShL3OQCtXZe/JPF7ZkpD3760=
 github.com/tinfoilsh/verifier v0.10.15 h1:jU4J/uyFPBua2nGoTwxT328hJXvvovvnnOcp5wHm0mQ=
 github.com/tinfoilsh/verifier v0.10.15/go.mod h1:33PiLuoEfrHHMWy/BCkZ8e/UBxUwTR1+nSOQmhTPPPs=
+github.com/tinfoilsh/verifier v0.10.17 h1:BWo058IHIIi+bbWMV4qLABjDAgddhpFliuAoHfCU4to=
+github.com/tinfoilsh/verifier v0.10.17/go.mod h1:33PiLuoEfrHHMWy/BCkZ8e/UBxUwTR1+nSOQmhTPPPs=
 github.com/tink-crypto/tink-go-awskms/v2 v2.1.0 h1:N9UxlsOzu5mttdjhxkDLbzwtEecuXmlxZVo/ds7JKJI=
 github.com/tink-crypto/tink-go-awskms/v2 v2.1.0/go.mod h1:PxSp9GlOkKL9rlybW804uspnHuO9nbD98V/fDX4uSis=
 github.com/tink-crypto/tink-go-gcpkms/v2 v2.2.0 h1:3B9i6XBXNTRspfkTC0asN5W0K6GhOSgcujNiECNRNb0=
