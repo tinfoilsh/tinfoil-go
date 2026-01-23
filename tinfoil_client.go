@@ -1,12 +1,69 @@
 package tinfoil
 
 import (
+	"crypto/tls"
+	"crypto/x509"
+	"errors"
 	"fmt"
+	"net/http"
+	"sync"
 
 	"github.com/openai/openai-go/v3"
 	"github.com/openai/openai-go/v3/option"
+	log "github.com/sirupsen/logrus"
 	"github.com/tinfoilsh/verifier/client"
 )
+
+// reVerifyingTransport wraps an http.RoundTripper and automatically re-verifies
+// attestation on certificate errors, handling server certificate rotation.
+type reVerifyingTransport struct {
+	secureClient *client.SecureClient
+	mu           sync.RWMutex
+	transport    http.RoundTripper
+}
+
+func (t *reVerifyingTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	t.mu.RLock()
+	transport := t.transport
+	t.mu.RUnlock()
+
+	resp, err := transport.RoundTrip(req)
+	if err == nil || !isCertificateError(err) {
+		return resp, err
+	}
+
+	// Certificate error detected, reinitialize secure client to re-verify attestation
+	newSecureClient := client.NewSecureClient(t.secureClient.Enclave(), t.secureClient.Repo())
+	newHTTPClient, clientErr := newSecureClient.HTTPClient()
+	if clientErr != nil {
+		// Re-verification failed, connection is genuinely malicious
+		return nil, err
+	}
+
+	// Re-verification succeeded, update transport and retry
+	log.Info("Certificate rotation detected, re-verified attestation successfully")
+
+	t.mu.Lock()
+	t.secureClient = newSecureClient
+	t.transport = newHTTPClient.Transport
+	t.mu.Unlock()
+
+	return newHTTPClient.Transport.RoundTrip(req)
+}
+
+func isCertificateError(err error) bool {
+	var certInvalidErr x509.CertificateInvalidError
+	var unknownAuthErr x509.UnknownAuthorityError
+	var hostnameErr x509.HostnameError
+	var certVerifyErr *tls.CertificateVerificationError
+
+	return errors.Is(err, client.ErrNoTLS) ||
+		errors.Is(err, client.ErrCertMismatch) ||
+		errors.As(err, &certInvalidErr) ||
+		errors.As(err, &unknownAuthErr) ||
+		errors.As(err, &hostnameErr) ||
+		errors.As(err, &certVerifyErr)
+}
 
 // Client wraps the OpenAI client to provide secure inference through Tinfoil
 type Client struct {
@@ -37,6 +94,13 @@ func createClientFromSecureClient(secureClient *client.SecureClient, openaiOpts 
 	if err != nil {
 		return nil, fmt.Errorf("failed to create HTTP client: %w", err)
 	}
+
+	// Wrap with re-verifying transport to handle certificate rotation
+	reVerifying := &reVerifyingTransport{
+		secureClient: secureClient,
+		transport:    httpClient.Transport,
+	}
+	httpClient.Transport = reVerifying
 
 	// Add our HTTP client and base URL to the options
 	allOpts := append(openaiOpts,
