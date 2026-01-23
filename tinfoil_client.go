@@ -11,6 +11,7 @@ import (
 // Client wraps the OpenAI client to provide secure inference through Tinfoil
 type Client struct {
 	*openai.Client
+	secureClient  *client.SecureClient
 	enclave, repo string
 }
 
@@ -43,11 +44,12 @@ func createClientFromSecureClient(secureClient *client.SecureClient, openaiOpts 
 		option.WithBaseURL(fmt.Sprintf("https://%s/v1/", secureClient.Enclave())),
 	)
 
-	client := openai.NewClient(allOpts...)
+	openaiClient := openai.NewClient(allOpts...)
 	return &Client{
-		Client:  &client,
-		enclave: secureClient.Enclave(),
-		repo:    secureClient.Repo(),
+		Client:       &openaiClient,
+		secureClient: secureClient,
+		enclave:      secureClient.Enclave(),
+		repo:         secureClient.Repo(),
 	}, nil
 }
 
@@ -57,4 +59,9 @@ func (c *Client) Enclave() string {
 
 func (c *Client) Repo() string {
 	return c.repo
+}
+
+// Verify re-verifies the enclave attestation and returns the ground truth
+func (c *Client) Verify() (*client.GroundTruth, error) {
+	return c.secureClient.Verify()
 }
