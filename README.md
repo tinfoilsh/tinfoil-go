@@ -13,12 +13,6 @@ Add the Tinfoil SDK to your project:
 go get github.com/tinfoilsh/tinfoil-go
 ```
 
-`tinfoil-go` currently relies on a specific feature in `go-sev-guest` that hasn't been upstreamed yet. This requires adding the following line to your `go.mod`:
-
-```go
-replace github.com/google/go-sev-guest => github.com/tinfoilsh/go-sev-guest v0.0.0-20250704193550-c725e6216008
-```
-
 ## Quick Start
 
 The Tinfoil Go client is a wrapper around the [OpenAI Go client v3](https://pkg.go.dev/github.com/openai/openai-go/v3) and provides secure communication with Tinfoil enclaves. It has the same API as the OpenAI client, with additional security features:
