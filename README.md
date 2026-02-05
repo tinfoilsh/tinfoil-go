@@ -79,25 +79,19 @@ if err != nil {
 ## Advanced Functionality
 
 ```go
-// For manual verification and direct HTTP access, use SecureClient directly
-secureClient := tinfoil.NewSecureClient("enclave.example.com", "org/repo")
-
-// Manual verification
-groundTruth, err := secureClient.Verify()
+// Create a secure client with explicit enclave and repo parameters
+client, err := tinfoil.NewClientWithParams(enclave, repo)
 if err != nil {
-	return fmt.Errorf("verification failed: %w", err)
+	return fmt.Errorf("Failed to create client: %v", err)
 }
 
-// Get the raw HTTP client 
-httpClient, err := secureClient.HTTPClient()
+// For direct HTTP access, use the underlying HTTPClient
+httpClient := client.HTTPClient()
+endpoint := fmt.Sprintf("https://%s/health", enclave)
+resp, err := httpClient.Get(endpoint)
 if err != nil {
-	return fmt.Errorf("failed to get HTTP client: %w", err)
+	return fmt.Errorf("Request failed: %v", err)
 }
-
-// Make HTTP requests directly 
-resp, err := secureClient.Get("/api/status", map[string]string{
-	"Authorization": "Bearer token",
-})
 ```
 
 ## API Documentation
