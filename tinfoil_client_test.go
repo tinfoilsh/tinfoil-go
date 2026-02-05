@@ -188,6 +188,22 @@ func TestDirectClientStreamingChat(t *testing.T) {
 	t.Logf("Direct complete response: %s", acc.Choices[0].Message.Content)
 }
 
+func TestHTTPClient(t *testing.T) {
+	client, err := NewClient()
+	require.NoError(t, err)
+
+	httpClient := client.HTTPClient()
+	require.NotNil(t, httpClient, "HTTPClient() should return a non-nil client")
+
+	// Verify the transport is the reVerifyingTransport
+	_, ok := httpClient.Transport.(*reVerifyingTransport)
+	require.True(t, ok, "HTTPClient transport should be reVerifyingTransport")
+
+	// Verify it returns the same instance (shared client)
+	httpClient2 := client.HTTPClient()
+	require.Same(t, httpClient, httpClient2, "HTTPClient() should return the same instance")
+}
+
 func TestIsCertificateError(t *testing.T) {
 	tests := []struct {
 		name     string

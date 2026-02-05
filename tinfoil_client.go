@@ -69,6 +69,7 @@ func isCertificateError(err error) bool {
 type Client struct {
 	*openai.Client
 	secureClient  *client.SecureClient
+	httpClient    *http.Client
 	enclave, repo string
 }
 
@@ -112,6 +113,7 @@ func createClientFromSecureClient(secureClient *client.SecureClient, openaiOpts 
 	return &Client{
 		Client:       &openaiClient,
 		secureClient: secureClient,
+		httpClient:   httpClient,
 		enclave:      secureClient.Enclave(),
 		repo:         secureClient.Repo(),
 	}, nil
@@ -128,4 +130,12 @@ func (c *Client) Repo() string {
 // Verify re-verifies the enclave attestation and returns the ground truth
 func (c *Client) Verify() (*client.GroundTruth, error) {
 	return c.secureClient.Verify()
+}
+
+// HTTPClient returns the underlying HTTP client that is configured with
+// automatic certificate re-verification and is restricted to TLS connections
+// to the verified enclave. This can be used for secure, direct HTTP requests
+// to the enclave.
+func (c *Client) HTTPClient() *http.Client {
+	return c.httpClient
 }
