@@ -24,6 +24,7 @@ type reVerifyingTransport struct {
 func (t *reVerifyingTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	t.mu.RLock()
 	transport := t.transport
+	secureClient := t.secureClient
 	t.mu.RUnlock()
 
 	resp, err := transport.RoundTrip(req)
@@ -32,7 +33,7 @@ func (t *reVerifyingTransport) RoundTrip(req *http.Request) (*http.Response, err
 	}
 
 	// Certificate error detected, reinitialize secure client to re-verify attestation
-	newSecureClient := client.NewSecureClient(t.secureClient.Enclave(), t.secureClient.Repo())
+	newSecureClient := client.NewSecureClient(secureClient.Enclave(), secureClient.Repo())
 	newHTTPClient, clientErr := newSecureClient.HTTPClient()
 	if clientErr != nil {
 		// Re-verification failed, connection is genuinely malicious
