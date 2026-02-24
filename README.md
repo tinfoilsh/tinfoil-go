@@ -78,17 +78,18 @@ if err != nil {
 
 ## Advanced Functionality
 
+For direct HTTP access without the OpenAI dependency, use `SecureClient`:
+
 ```go
 // Create a secure client with explicit enclave and repo parameters
-client, err := tinfoil.NewClientWithParams(enclave, repo)
+client, err := tinfoil.NewSecureClient(enclave, repo)
 if err != nil {
 	return fmt.Errorf("Failed to create client: %v", err)
 }
 
-// For direct HTTP access, use the underlying HTTPClient
-httpClient := client.HTTPClient()
+// Make requests directly — TLS is pinned to the verified enclave
 endpoint := fmt.Sprintf("https://%s/health", enclave)
-resp, err := httpClient.Get(endpoint)
+resp, err := client.Get(endpoint)
 if err != nil {
 	return fmt.Errorf("Request failed: %v", err)
 }

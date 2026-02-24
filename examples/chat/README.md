@@ -10,12 +10,6 @@ Make sure you have Go installed, then add the Tinfoil SDK to your project:
 go get github.com/tinfoilsh/tinfoil-go
 ```
 
-Add the required replace directive to your `go.mod`:
-
-```go
-replace github.com/google/go-sev-guest => github.com/tinfoilsh/go-sev-guest v0.0.0-20250704193550-c725e6216008
-```
-
 ## Setup
 
 1. Set your Tinfoil API key as an environment variable:

@@ -204,6 +204,19 @@ func TestHTTPClient(t *testing.T) {
 	require.Same(t, httpClient, httpClient2, "HTTPClient() should return the same instance")
 }
 
+func TestNewSecureClient(t *testing.T) {
+	sc, err := NewSecureClient("inference.tinfoil.sh", "tinfoilsh/confidential-model-router")
+	require.NoError(t, err)
+	require.NotNil(t, sc)
+
+	require.Equal(t, "inference.tinfoil.sh", sc.Enclave())
+	require.Equal(t, "tinfoilsh/confidential-model-router", sc.Repo())
+
+	// Verify the transport chain is correctly wired
+	_, ok := sc.HTTPClient().Transport.(*reVerifyingTransport)
+	require.True(t, ok, "SecureClient transport should be reVerifyingTransport")
+}
+
 func TestIsCertificateError(t *testing.T) {
 	tests := []struct {
 		name     string
