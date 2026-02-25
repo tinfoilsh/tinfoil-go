@@ -28,7 +28,7 @@ type getter struct{}
 func (*getter) Get(targetURL string) ([]byte, error) {
 	u, err := url.Parse(targetURL)
 	if err != nil {
-		return nil, fmt.Errorf("failed to parse URL: %v", err)
+		return nil, fmt.Errorf("failed to parse URL: %w", err)
 	}
 
 	if strings.HasSuffix(u.Path, "/cert_chain") {
@@ -73,7 +73,7 @@ func verifySevReport(attestationDoc string, isCompressed bool, vcekDER []byte) (
 
 	parsedReport, err := abi.ReportToProto(attDocBytes)
 	if err != nil {
-		return nil, fmt.Errorf("failed to parse report: %v", err)
+		return nil, fmt.Errorf("failed to parse report: %w", err)
 	}
 
 	var attestation *sevsnp.Attestation
