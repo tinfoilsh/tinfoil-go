@@ -10,6 +10,10 @@ verifier/TinfoilVerifier.xcframework.zip
 verifier/*.wasm
 verifier/wasm/
 
+# Go workspace (local dev only)
+go.work
+go.work.sum
+
 # Common
 cover.out
 tuf-repo-cdn.sigstore.dev.json
