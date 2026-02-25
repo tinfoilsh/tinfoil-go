@@ -12,7 +12,7 @@ import (
 	"github.com/openai/openai-go/v3/option"
 	"github.com/stretchr/testify/require"
 	"github.com/subosito/gotenv"
-	"github.com/tinfoilsh/verifier/client"
+	"github.com/tinfoilsh/tinfoil-go/verifier/client"
 )
 
 // Load .env before running tests so TINFOIL_API_KEY is available locally

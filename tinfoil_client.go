@@ -11,7 +11,7 @@ import (
 	"github.com/openai/openai-go/v3"
 	"github.com/openai/openai-go/v3/option"
 	log "github.com/sirupsen/logrus"
-	"github.com/tinfoilsh/verifier/client"
+	"github.com/tinfoilsh/tinfoil-go/verifier/client"
 )
 
 // reVerifyingTransport wraps an http.RoundTripper and automatically re-verifies
