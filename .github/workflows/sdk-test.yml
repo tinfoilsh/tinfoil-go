@@ -1,12 +1,14 @@
-name: Run tests
+name: SDK Tests
 
 on:
   push:
     branches:
       - main
+    paths-ignore:
+      - 'verifier/**'
   pull_request:
-    branches:
-      - main
+    paths-ignore:
+      - 'verifier/**'
 
 jobs:
   test:
