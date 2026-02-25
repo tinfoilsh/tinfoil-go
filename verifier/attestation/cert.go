@@ -31,7 +31,7 @@ func VerifyCertificate(certPEM string, expectedDomain string, attestationDoc *Do
 
 	cert, err := x509.ParseCertificate(block.Bytes)
 	if err != nil {
-		return nil, fmt.Errorf("failed to parse certificate: %v", err)
+		return nil, fmt.Errorf("failed to parse certificate: %w", err)
 	}
 
 	// 2. Extract SANs (DNS names)
@@ -53,7 +53,7 @@ func VerifyCertificate(certPEM string, expectedDomain string, attestationDoc *Do
 
 	hpkeKeyBytes, err := decodeDomains(hpkeSANs, "hpke")
 	if err != nil {
-		return nil, fmt.Errorf("failed to decode HPKE key from SANs: %v", err)
+		return nil, fmt.Errorf("failed to decode HPKE key from SANs: %w", err)
 	}
 
 	hpkePublicKey := fmt.Sprintf("%x", hpkeKeyBytes)
@@ -69,7 +69,7 @@ func VerifyCertificate(certPEM string, expectedDomain string, attestationDoc *Do
 
 	hashBytes, err := decodeDomains(hattSANs, "hatt")
 	if err != nil {
-		return nil, fmt.Errorf("failed to decode attestation hash from SANs: %v", err)
+		return nil, fmt.Errorf("failed to decode attestation hash from SANs: %w", err)
 	}
 
 	// The hash is stored as the hex string bytes
@@ -156,7 +156,7 @@ func decodeDomains(domains []string, prefix string) ([]byte, error) {
 	decoder := base32.StdEncoding.WithPadding(base32.NoPadding)
 	decoded, err := decoder.DecodeString(strings.ToUpper(combined.String()))
 	if err != nil {
-		return nil, fmt.Errorf("base32 decode error: %v", err)
+		return nil, fmt.Errorf("base32 decode error: %w", err)
 	}
 
 	return decoded, nil
