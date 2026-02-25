@@ -30,14 +30,17 @@ func (t *TLSBoundRoundTripper) RoundTrip(r *http.Request) (*http.Response, error
 	}
 
 	if resp.TLS == nil {
+		resp.Body.Close()
 		return nil, ErrNoTLS
 	}
 
 	certFP, err := attestation.ConnectionCertFP(*resp.TLS)
 	if err != nil {
+		resp.Body.Close()
 		return nil, err
 	}
 	if certFP != t.ExpectedPublicKey {
+		resp.Body.Close()
 		return nil, ErrCertMismatch
 	}
 

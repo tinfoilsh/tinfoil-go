@@ -12,6 +12,7 @@ type Response struct {
 }
 
 func toResponse(r *http.Response) (*Response, error) {
+	defer r.Body.Close()
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
 		return nil, err
