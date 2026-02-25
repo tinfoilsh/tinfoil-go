@@ -7,10 +7,8 @@ require (
 	github.com/sirupsen/logrus v1.9.3
 	github.com/stretchr/testify v1.11.1
 	github.com/subosito/gotenv v1.6.0
-	github.com/tinfoilsh/tinfoil-go/verifier v0.0.0
+	github.com/tinfoilsh/tinfoil-go/verifier v0.12.0
 )
-
-replace github.com/tinfoilsh/tinfoil-go/verifier => ./verifier
 
 require (
 	github.com/asaskevich/govalidator v0.0.0-20230301143203-a9d515a09cc2 // indirect
