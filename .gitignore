@@ -1,6 +1,18 @@
-.idea/
-.env 
-verifier
-tuf-repo-cdn.sigstore.dev.json
+# SDK build artifacts
 Tinfoil.xcframework
 Tinfoil.xcframework.zip
+coverage.out
+.env
+
+# Verifier build artifacts
+verifier/TinfoilVerifier.xcframework
+verifier/TinfoilVerifier.xcframework.zip
+verifier/*.wasm
+verifier/wasm/
+
+# Common
+cover.out
+tuf-repo-cdn.sigstore.dev.json
+
+# IDE
+.idea/

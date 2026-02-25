@@ -1,8 +1,9 @@
-name: Release
+name: SDK Release
 on:
   push:
     tags:
       - "v*"
+      - "!verifier/v*"
 
 permissions:
   contents: write
