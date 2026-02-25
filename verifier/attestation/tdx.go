@@ -316,13 +316,3 @@ func verifyTdxAttestationV2(attestationDoc string) (*Verification, error) {
 		Registers: registers,
 	}, reportData), nil
 }
-
-func printAllBits(array []byte) {
-	for i := 0; i < len(array); i++ {
-		for bit := 0; bit < 8; bit++ {
-			idx := i*8 + bit
-			val := (array[i] >> uint(bit)) & 1
-			fmt.Printf("bit %d = %d\n", idx, val)
-		}
-	}
-}

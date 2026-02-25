@@ -1,7 +1,6 @@
 package sigstore
 
 import (
-	_ "embed"
 	"encoding/hex"
 	"fmt"
 
