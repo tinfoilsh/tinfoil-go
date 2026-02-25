@@ -22,7 +22,7 @@ const (
 //go:embed trusted_root.json
 var embeddedTrustedRoot []byte
 
-// GroundTruth represents the "known good" verified of the enclave
+// GroundTruth represents the "known good" state of the enclave
 type GroundTruth struct {
 	EnclaveHost         string                           `json:"enclave_host,omitempty"`
 	TLSPublicKey        string                           `json:"tls_public_key,omitempty"`
@@ -84,7 +84,7 @@ func NewPinnedSecureClient(enclave string, codeMeasurement *attestation.Measurem
 	}
 }
 
-// NewDefaultSecureClient creates a new secure client with fallback mechanism.
+// NewDefaultClient creates a new secure client with fallback mechanism.
 // It tries to fetch routers from the router service, attempts to verify each one,
 // and falls back to inference.tinfoil.sh if all routers fail.
 func NewDefaultClient() (*SecureClient, error) {
