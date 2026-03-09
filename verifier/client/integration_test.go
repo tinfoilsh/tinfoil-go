@@ -25,12 +25,8 @@ func skipIfMissingEnvVars(t *testing.T) (enclave, repo, apiKey string) {
 	repo = os.Getenv(repoEnvVar)
 	apiKey = os.Getenv(apiKeyEnvVar)
 
-	if enclave == "" || repo == "" {
-		t.Skipf("Missing Tinfoil integration settings: %s or %s not set", enclaveEnvVar, repoEnvVar)
-	}
-
-	if apiKey == "" {
-		apiKey = "tinfoil" // Default API key
+	if enclave == "" || repo == "" || apiKey == "" {
+		t.Skipf("Missing Tinfoil integration settings: %s, %s, or %s not set", enclaveEnvVar, repoEnvVar, apiKeyEnvVar)
 	}
 
 	return enclave, repo, apiKey
@@ -66,7 +62,7 @@ func TestBasicChatCompletion(t *testing.T) {
 
 	// Prepare chat completion request
 	request := ChatCompletionRequest{
-		Model: "gpt-oss-120b-free",
+		Model: "gpt-oss-120b",
 		Messages: []Message{
 			{
 				Role:    "user",
