@@ -16,11 +16,11 @@ func main() {
 
 	log.Printf("Connected to enclave: %s", tinfoilClient.Enclave())
 
-	body := []byte(`{"model":"gpt-oss-120b-free","messages":[{"role":"user","content":"What is 2+2?"}]}`)
+	body := []byte(`{"model":"gpt-oss-120b","messages":[{"role":"user","content":"What is 2+2?"}]}`)
 
 	headers := map[string]string{
 		"Content-Type":  "application/json",
-		"Authorization": "Bearer tinfoil",
+		"Authorization": "Bearer <TINFOIL_API_KEY>",
 	}
 
 	resp, err := tinfoilClient.Post("/v1/chat/completions", headers, body)
