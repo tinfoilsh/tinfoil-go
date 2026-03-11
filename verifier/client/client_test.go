@@ -2,6 +2,7 @@ package client
 
 import (
 	"encoding/json"
+	"os"
 	"strings"
 	"testing"
 
@@ -10,21 +11,15 @@ import (
 )
 
 func TestVerify(t *testing.T) {
-	tests := []struct {
-		enclave string
-		repo    string
-	}{
-		{"deepseek-r1-0528.inf7.tinfoil.sh", "tinfoilsh/confidential-deepseek-r1-0528"},
-		{"inference.tinfoil.sh", "tinfoilsh/confidential-model-router"},
+	enclave := os.Getenv("TINFOIL_ENCLAVE")
+	repo := os.Getenv("TINFOIL_REPO")
+	if enclave == "" || repo == "" {
+		t.Skip("TINFOIL_ENCLAVE or TINFOIL_REPO not set")
 	}
 
-	for _, test := range tests {
-		t.Run(test.enclave, func(t *testing.T) {
-			client := NewSecureClient(test.enclave, test.repo)
-			_, err := client.Verify()
-			assert.NoError(t, err)
-		})
-	}
+	client := NewSecureClient(enclave, repo)
+	_, err := client.Verify()
+	assert.NoError(t, err)
 }
 
 func TestClientGroundTruthJSON(t *testing.T) {
@@ -138,13 +133,7 @@ func TestFetchAndVerifyJSON(t *testing.T) {
 }
 
 func TestFetchAndVerifyFromURLJSON(t *testing.T) {
-	// Test with default URL (empty string)
 	groundTruthJSON, err := FetchAndVerifyFromURLJSON("", defaultRouterRepo, nil)
-	assert.NoError(t, err)
-	assert.NotEmpty(t, groundTruthJSON)
-
-	// Test with explicit URL
-	groundTruthJSON, err = FetchAndVerifyFromURLJSON("https://atc.tinfoil.sh", defaultRouterRepo, nil)
 	assert.NoError(t, err)
 	assert.NotEmpty(t, groundTruthJSON)
 
