@@ -2,7 +2,7 @@
 
 Portable remote-attestation verifier & secure HTTP client for enclave-backed services.
 
-[![Build Status](https://github.com/tinfoilsh/verifier/workflows/Run%20tests/badge.svg)](https://github.com/tinfoilsh/verifier/actions)
+[![Build Status](https://github.com/tinfoilsh/tinfoil-go/actions/workflows/sdk-test.yml/badge.svg)](https://github.com/tinfoilsh/tinfoil-go/actions)
 
 ## Overview
 Tinfoil Verifier is a Go library that verifies the integrity of remote enclaves (AMD SEV-SNP & Intel TDX) and binds that verification to TLS connections. It also ships a drop-in secure `http.Client` that performs attestation transparently.
@@ -17,12 +17,12 @@ Tinfoil Verifier is a Go library that verifies the integrity of remote enclaves 
 
 ## Installation
 ```bash
-go get github.com/tinfoilsh/verifier@latest
+go get github.com/tinfoilsh/tinfoil-go@latest
 ```
 
 ## Quick Start
 ```go
-import "github.com/tinfoilsh/verifier/client"
+import "github.com/tinfoilsh/tinfoil-go/verifier/client"
 
 // 1. Create a client
 tinfoilClient := client.NewSecureClient("enclave.example.com", "org/repo")
@@ -97,13 +97,13 @@ You can fetch a pre-aggregated bundle from Tinfoil ATC (air-traffic-control) tha
 
 ```go
 // Single-request verification via ATC
-groundTruthJSON, err := client.VerifyFromATCJSON("org/repo", nil)
+groundTruthJSON, err := client.FetchAndVerifyJSON("org/repo", nil)
 if err != nil {
     log.Fatal(err)
 }
 
 // Or via your own bundle proxy URL
-groundTruthJSON, err := client.VerifyFromATCURLJSON("https://proxy.example.com", "org/repo", nil)
+groundTruthJSON, err := client.FetchAndVerifyFromURLJSON("https://proxy.example.com", "org/repo", nil)
 ```
 
 If you've already fetched the bundle yourself:
