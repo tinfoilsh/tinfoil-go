@@ -16,6 +16,8 @@ jobs:
     runs-on: ubuntu-latest
     env:
       TINFOIL_API_KEY: ${{ secrets.TINFOIL_API_KEY }}
+      TINFOIL_ENCLAVE: ${{ secrets.TINFOIL_ENCLAVE }}
+      TINFOIL_REPO: ${{ secrets.TINFOIL_REPO }}
     defaults:
       run:
         working-directory: verifier
