@@ -352,6 +352,35 @@ func (s *SecureClient) Get(url string, headers map[string]string) (*Response, er
 	return s.makeRequest(req)
 }
 
+// SecureGet makes an HTTP GET request (gomobile-compatible: headers as JSON string)
+func (s *SecureClient) SecureGet(url string, headersJSON string) (*Response, error) {
+	headers, err := parseHeadersJSON(headersJSON)
+	if err != nil {
+		return nil, err
+	}
+	return s.Get(url, headers)
+}
+
+// SecurePost makes an HTTP POST request (gomobile-compatible: headers as JSON string)
+func (s *SecureClient) SecurePost(url string, headersJSON string, body []byte) (*Response, error) {
+	headers, err := parseHeadersJSON(headersJSON)
+	if err != nil {
+		return nil, err
+	}
+	return s.Post(url, headers, body)
+}
+
+func parseHeadersJSON(headersJSON string) (map[string]string, error) {
+	if headersJSON == "" {
+		return nil, nil
+	}
+	var headers map[string]string
+	if err := json.Unmarshal([]byte(headersJSON), &headers); err != nil {
+		return nil, fmt.Errorf("failed to parse headers JSON: %v", err)
+	}
+	return headers, nil
+}
+
 // VerifyJSON verifies an enclave against a repo and returns the verification data as a JSON string
 func VerifyJSON(enclave, repo string, sigstoreTrustedRootJSON []byte) (string, error) {
 	sigstoreClient, err := getSigstoreClient(sigstoreTrustedRootJSON)
