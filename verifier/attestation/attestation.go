@@ -52,7 +52,10 @@ type Measurement struct {
 	Registers []string      `json:"registers"`
 }
 
-// Fingerprint computes a SHA-256 hash of the measurement type and registers. Not used for direct comparison.
+// Fingerprint computes a fingerprint for a measurement. For single-register
+// measurements, the register value is returned directly. For multi-register
+// measurements, SHA-256 is computed over the type URL concatenated with all
+// register values (no separator).
 func Fingerprint(m *Measurement, hw *HardwareMeasurement, targetType PredicateType) (string, error) {
 	var registers []string
 
@@ -77,7 +80,11 @@ func Fingerprint(m *Measurement, hw *HardwareMeasurement, targetType PredicateTy
 		return "", fmt.Errorf("unsupported measurement type %s", m.Type)
 	}
 
-	all := strings.Join(registers, "|")
+	if len(registers) == 1 {
+		return registers[0], nil
+	}
+
+	all := string(m.Type) + strings.Join(registers, "")
 	hash := sha256.Sum256([]byte(all))
 	return fmt.Sprintf("%x", hash), nil
 }
