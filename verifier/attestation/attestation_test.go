@@ -133,12 +133,15 @@ func TestAttestationFingerprint(t *testing.T) {
 	}
 
 	tcs := []struct {
-		sourceMeasurement   *Measurement
-		enclaveMeasurement  *Measurement
-		hwMeasurement       *HardwareMeasurement
-		expectedFingerprint string
+		name                       string
+		sourceMeasurement          *Measurement
+		enclaveMeasurement         *Measurement
+		hwMeasurement              *HardwareMeasurement
+		expectedSourceFingerprint  string
+		expectedEnclaveFingerprint string
 	}{
 		{
+			name:              "TDX multi-register: type URL included in hash, source != enclave",
 			sourceMeasurement: routerMpMeasurement,
 			enclaveMeasurement: &Measurement{
 				Type: TdxGuestV2,
@@ -154,28 +157,31 @@ func TestAttestationFingerprint(t *testing.T) {
 				MRTD:  "7357a10d2e2724dffe68813e3cc4cfcde6814d749f2fb62e3953e54f6e0b50a219786afe2cd478f684b52c61837e1114",
 				RTMR0: "304a1788d349864a75d7e76d54c8d0223207f990e84ad087d28787fff0a7b7cff14c5cb9a96f91ca02e8b32884d9fa81",
 			},
-			expectedFingerprint: "874cf5dbe488abcfc2a6dec361483c0e7145f59ada762d6ae6f8f8da3a264323",
+			expectedSourceFingerprint:  "02e628595f1bbd914799fdf0eab30ab954b0dda6ca96fcdbcbc3ff71cad44e40",
+			expectedEnclaveFingerprint: "d4c613f1c2919502eee6c8395527086d57e0cf3d7b1c4fda6ba70d421f6a5e08",
 		}, {
+			name:              "SEV single-register: raw value returned directly, source == enclave",
 			sourceMeasurement: routerMpMeasurement,
 			enclaveMeasurement: &Measurement{
 				Type:      SevGuestV2,
 				Registers: []string{"33162608e171154bae88886365341dad7eb5821ba87785041f7f2f6281511a65b01069894cfebad5370939e05a0a1ca1"},
 			},
-			hwMeasurement:       nil,
-			expectedFingerprint: "08ea4d8c2e8da077c682529d3cd1d1500d84e100df6b81781e38733f0589cfa1",
+			hwMeasurement:              nil,
+			expectedSourceFingerprint:  "33162608e171154bae88886365341dad7eb5821ba87785041f7f2f6281511a65b01069894cfebad5370939e05a0a1ca1",
+			expectedEnclaveFingerprint: "33162608e171154bae88886365341dad7eb5821ba87785041f7f2f6281511a65b01069894cfebad5370939e05a0a1ca1",
 		},
 	}
 
 	for _, tc := range tcs {
-		t.Run("", func(t *testing.T) {
+		t.Run(tc.name, func(t *testing.T) {
 			enclaveFP, err := Fingerprint(tc.enclaveMeasurement, tc.hwMeasurement, tc.enclaveMeasurement.Type)
 			require.NoError(t, err)
 
 			sourceFP, err := Fingerprint(tc.sourceMeasurement, tc.hwMeasurement, tc.enclaveMeasurement.Type)
 			require.NoError(t, err)
 
-			assert.Equal(t, tc.expectedFingerprint, sourceFP)
-			assert.Equal(t, tc.expectedFingerprint, enclaveFP)
+			assert.Equal(t, tc.expectedSourceFingerprint, sourceFP)
+			assert.Equal(t, tc.expectedEnclaveFingerprint, enclaveFP)
 		})
 	}
 }
