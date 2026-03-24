@@ -3,63 +3,31 @@ package attestation
 import (
 	"bytes"
 	"crypto/x509"
-	"embed"
+	_ "embed"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"encoding/pem"
 	"fmt"
-	"regexp"
 	"strings"
+	"sync"
 
 	"github.com/google/go-tdx-guest/abi"
 	pb "github.com/google/go-tdx-guest/proto/tdx"
 	"github.com/google/go-tdx-guest/validate"
 	"github.com/google/go-tdx-guest/verify"
+
+	"github.com/tinfoilsh/tinfoil-go/verifier/util"
 )
 
 //go:generate sh -xc "curl -o sgx_root_ca.pem https://certificates.trustedservices.intel.com/Intel_SGX_Provisioning_Certification_RootCA.pem"
+
 //go:embed sgx_root_ca.pem
 var sgxRootCACertPEM []byte
 
-//go:generate sh -xc "cd collateral && ./fetch.sh"
-
-//go:embed collateral/qe_identity.json
-var qeIdentityJSON []byte
-
-//go:embed collateral/qe_identity_chain.txt
-var qeIdentityChain []byte
-
-//go:embed collateral/root_ca.crl
-var rootCACRL []byte
-
-//go:embed collateral/pck_crl_processor.crl
-var pckCRLProcessor []byte
-
-//go:embed collateral/pck_crl_processor_chain.txt
-var pckCRLProcessorChain []byte
-
-//go:embed collateral/pck_crl_platform.crl
-var pckCRLPlatform []byte
-
-//go:embed collateral/pck_crl_platform_chain.txt
-var pckCRLPlatformChain []byte
-
-//go:embed collateral/tcb_info_*.json
-//go:embed collateral/tcb_info_*_chain.txt
-var tcbInfoFS embed.FS
-
-var tcbInfoCache map[string]struct {
-	body  []byte
-	chain []byte
-}
-
-var fmspcPattern = regexp.MustCompile(`^collateral/tcb_info_([a-f0-9]+)\.json$`)
-
 // MinimumTcbEvaluationDataNumber is the minimum TCB evaluation data number
-// required for embedded collateral. This ensures outdated collateral cannot
-// be accidentally embedded. The build will fail if collateral is older than
-// this value. See Intel's TCB Recovery best practices.
+// required for collateral. This prevents accepting collateral issued before
+// critical security updates. See Intel's TCB Recovery best practices.
 const MinimumTcbEvaluationDataNumber = 18
 
 // IntelQeVendorID is Intel's QE Vendor ID (939a7233-f79c-4ca9-940a-0db3957f0607)
@@ -70,8 +38,6 @@ var IntelQeVendorID = []byte{
 
 var intelRootCertPool *x509.CertPool
 
-type tdxGetter struct{}
-
 func init() {
 	root, _ := pem.Decode(sgxRootCACertPEM)
 	cert, err := x509.ParseCertificate(root.Bytes)
@@ -80,127 +46,80 @@ func init() {
 	}
 	intelRootCertPool = x509.NewCertPool()
 	intelRootCertPool.AddCert(cert)
-
-	loadTcbInfoCache()
-	validateEmbeddedCollateral()
 }
 
-func loadTcbInfoCache() {
-	tcbInfoCache = make(map[string]struct {
-		body  []byte
-		chain []byte
-	})
+// tdxGetter fetches TDX collateral from Intel PCS at runtime with in-memory caching.
+type tdxGetter struct{}
 
-	entries, err := tcbInfoFS.ReadDir("collateral")
-	if err != nil {
-		panic("failed to read embedded collateral directory: " + err.Error())
-	}
-
-	for _, entry := range entries {
-		path := "collateral/" + entry.Name()
-		matches := fmspcPattern.FindStringSubmatch(path)
-		if matches == nil {
-			continue
-		}
-		fmspc := matches[1]
-
-		body, err := tcbInfoFS.ReadFile(path)
-		if err != nil {
-			panic("failed to read embedded TCB Info for FMSPC " + fmspc + ": " + err.Error())
-		}
-
-		chainPath := fmt.Sprintf("collateral/tcb_info_%s_chain.txt", fmspc)
-		chain, err := tcbInfoFS.ReadFile(chainPath)
-		if err != nil {
-			panic("failed to read embedded TCB Info chain for FMSPC " + fmspc + ": " + err.Error())
-		}
-
-		tcbInfoCache[fmspc] = struct {
-			body  []byte
-			chain []byte
-		}{body, chain}
-	}
-
-	if len(tcbInfoCache) == 0 {
-		panic("no TCB Info collateral found in embedded filesystem")
-	}
+type collateralCacheEntry struct {
+	headers map[string][]string
+	body    []byte
 }
 
-func validateEmbeddedCollateral() {
-	var qeIdentity struct {
-		EnclaveIdentity struct {
-			TcbEvaluationDataNumber int `json:"tcbEvaluationDataNumber"`
-		} `json:"enclaveIdentity"`
-	}
-	if err := json.Unmarshal(qeIdentityJSON, &qeIdentity); err != nil {
-		panic("failed to parse embedded QE Identity: " + err.Error())
-	}
-	if qeIdentity.EnclaveIdentity.TcbEvaluationDataNumber < MinimumTcbEvaluationDataNumber {
-		panic(fmt.Sprintf("embedded QE Identity tcbEvaluationDataNumber %d is below minimum %d",
-			qeIdentity.EnclaveIdentity.TcbEvaluationDataNumber, MinimumTcbEvaluationDataNumber))
-	}
-
-	for fmspc, cached := range tcbInfoCache {
-		var tcbInfo struct {
-			TcbInfo struct {
-				TcbEvaluationDataNumber int `json:"tcbEvaluationDataNumber"`
-			} `json:"tcbInfo"`
-		}
-		if err := json.Unmarshal(cached.body, &tcbInfo); err != nil {
-			panic("failed to parse embedded TCB Info for FMSPC " + fmspc + ": " + err.Error())
-		}
-		if tcbInfo.TcbInfo.TcbEvaluationDataNumber < MinimumTcbEvaluationDataNumber {
-			panic(fmt.Sprintf("embedded TCB Info for FMSPC %s tcbEvaluationDataNumber %d is below minimum %d",
-				fmspc, tcbInfo.TcbInfo.TcbEvaluationDataNumber, MinimumTcbEvaluationDataNumber))
-		}
-	}
-}
+var (
+	collateralCache   = make(map[string]*collateralCacheEntry)
+	collateralCacheMu sync.RWMutex
+)
 
 func (t tdxGetter) Get(requestURL string) (map[string][]string, []byte, error) {
-	headers := make(map[string][]string)
+	collateralCacheMu.RLock()
+	if entry, ok := collateralCache[requestURL]; ok {
+		collateralCacheMu.RUnlock()
+		return entry.headers, entry.body, nil
+	}
+	collateralCacheMu.RUnlock()
 
+	body, headers, err := util.Get(requestURL)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to fetch collateral from %s: %w", requestURL, err)
+	}
+
+	if err := validateTcbEvaluationDataNumber(requestURL, body); err != nil {
+		return nil, nil, err
+	}
+
+	collateralCacheMu.Lock()
+	collateralCache[requestURL] = &collateralCacheEntry{headers: headers, body: body}
+	collateralCacheMu.Unlock()
+
+	return headers, body, nil
+}
+
+// validateTcbEvaluationDataNumber checks that fetched QE Identity and TCB Info
+// collateral meets the minimum tcbEvaluationDataNumber threshold, rejecting
+// collateral issued before critical security updates.
+func validateTcbEvaluationDataNumber(requestURL string, body []byte) error {
 	if strings.Contains(requestURL, "/qe/identity") {
-		headers["Sgx-Enclave-Identity-Issuer-Chain"] = []string{strings.TrimSpace(string(qeIdentityChain))}
-		return headers, qeIdentityJSON, nil
-	}
-
-	if strings.Contains(requestURL, "/rootcacrl") || strings.Contains(requestURL, "IntelSGXRootCA.der") {
-		return headers, rootCACRL, nil
-	}
-
-	if strings.Contains(requestURL, "/pckcrl") {
-		if strings.Contains(requestURL, "ca=processor") {
-			headers["Sgx-Pck-Crl-Issuer-Chain"] = []string{strings.TrimSpace(string(pckCRLProcessorChain))}
-			return headers, pckCRLProcessor, nil
+		var resp struct {
+			EnclaveIdentity struct {
+				TcbEvaluationDataNumber int `json:"tcbEvaluationDataNumber"`
+			} `json:"enclaveIdentity"`
 		}
-		if strings.Contains(requestURL, "ca=platform") {
-			headers["Sgx-Pck-Crl-Issuer-Chain"] = []string{strings.TrimSpace(string(pckCRLPlatformChain))}
-			return headers, pckCRLPlatform, nil
+		if err := json.Unmarshal(body, &resp); err != nil {
+			return fmt.Errorf("failed to parse QE Identity response: %w", err)
+		}
+		if resp.EnclaveIdentity.TcbEvaluationDataNumber < MinimumTcbEvaluationDataNumber {
+			return fmt.Errorf("QE Identity tcbEvaluationDataNumber %d is below minimum %d",
+				resp.EnclaveIdentity.TcbEvaluationDataNumber, MinimumTcbEvaluationDataNumber)
 		}
 	}
 
 	if strings.Contains(requestURL, "/tcb?fmspc=") {
-		fmspc := extractFMSPCFromURL(requestURL)
-		if cached, ok := tcbInfoCache[fmspc]; ok {
-			headers["Tcb-Info-Issuer-Chain"] = []string{strings.TrimSpace(string(cached.chain))}
-			return headers, cached.body, nil
+		var resp struct {
+			TcbInfo struct {
+				TcbEvaluationDataNumber int `json:"tcbEvaluationDataNumber"`
+			} `json:"tcbInfo"`
 		}
-		return nil, nil, fmt.Errorf("TCB info for FMSPC %s not found in embedded collateral", fmspc)
+		if err := json.Unmarshal(body, &resp); err != nil {
+			return fmt.Errorf("failed to parse TCB Info response: %w", err)
+		}
+		if resp.TcbInfo.TcbEvaluationDataNumber < MinimumTcbEvaluationDataNumber {
+			return fmt.Errorf("TCB Info tcbEvaluationDataNumber %d is below minimum %d",
+				resp.TcbInfo.TcbEvaluationDataNumber, MinimumTcbEvaluationDataNumber)
+		}
 	}
 
-	return nil, nil, fmt.Errorf("unsupported PCS URL: %s", requestURL)
-}
-
-func extractFMSPCFromURL(url string) string {
-	idx := strings.Index(url, "fmspc=")
-	if idx == -1 {
-		return ""
-	}
-	fmspc := url[idx+6:]
-	if ampIdx := strings.Index(fmspc, "&"); ampIdx != -1 {
-		fmspc = fmspc[:ampIdx]
-	}
-	return strings.ToLower(fmspc)
+	return nil
 }
 
 func verifyTdxReport(attestationDoc string, isCompressed bool) ([]string, []byte, error) {
