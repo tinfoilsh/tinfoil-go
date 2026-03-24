@@ -305,7 +305,7 @@ func (s *SecureClient) HTTPClient() (*http.Client, error) {
 	}
 
 	return &http.Client{
-		Transport: &TLSBoundRoundTripper{s.groundTruth.TLSPublicKey},
+		Transport: &TLSBoundRoundTripper{ExpectedPublicKey: s.groundTruth.TLSPublicKey},
 	}, nil
 }
 
