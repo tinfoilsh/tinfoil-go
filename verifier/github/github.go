@@ -8,9 +8,11 @@ import (
 	"github.com/tinfoilsh/tinfoil-go/verifier/util"
 )
 
+const githubProxy = "https://github-proxy.tinfoil.sh"
+
 // FetchLatestTag fetches the latest tag for a repo
 func FetchLatestTag(repo string) (string, error) {
-	url := "https://api-github-proxy.tinfoil.sh/repos/" + repo + "/releases/latest"
+	url := githubProxy + "/repos/" + repo + "/releases/latest"
 	releaseResponse, _, err := util.Get(url)
 	if err != nil {
 		return "", err
@@ -29,7 +31,7 @@ func FetchLatestTag(repo string) (string, error) {
 
 // FetchDigest fetches the attestation digest for a given repo and tag
 func FetchDigest(repo, tag string) (string, error) {
-	url := fmt.Sprintf(`https://api-github-proxy.tinfoil.sh/%s/releases/download/%s/tinfoil.hash`, repo, tag)
+	url := fmt.Sprintf("%s/%s/releases/download/%s/tinfoil.hash", githubProxy, repo, tag)
 	digest, _, err := util.Get(url)
 	if err != nil {
 		return "", err
@@ -53,7 +55,7 @@ func FetchLatestDigest(repo string) (string, error) {
 
 // FetchAttestationBundle fetches the sigstore bundle from a repo for a given repo and EIF hash
 func FetchAttestationBundle(repo, digest string) ([]byte, error) {
-	url := "https://gh-attestation-proxy.tinfoil.sh/repos/" + repo + "/attestations/sha256:" + digest
+	url := githubProxy + "/repos/" + repo + "/attestations/sha256:" + digest
 	bundleResponse, _, err := util.Get(url)
 	if err != nil {
 		return nil, err
