@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"encoding/pem"
 	"fmt"
+	"net/url"
 	"strings"
 	"sync"
 
@@ -48,8 +49,30 @@ func init() {
 	intelRootCertPool.AddCert(cert)
 }
 
-// tdxGetter fetches TDX collateral from Intel PCS at runtime with in-memory caching.
-type tdxGetter struct{}
+// TDXGetterOption configures a TDXGetter.
+type TDXGetterOption func(*tdxGetter)
+
+// WithProxyServer routes collateral requests through a proxy, encoding the
+// original host as a path prefix (e.g. https://proxy.example.com/api.intel.com/path).
+func WithProxyServer(host string) TDXGetterOption {
+	return func(g *tdxGetter) {
+		g.proxyHost = host
+	}
+}
+
+// NewTDXGetter creates a TDX collateral getter that implements the
+// verify/trust.HTTPSGetter interface with in-memory caching.
+func NewTDXGetter(opts ...TDXGetterOption) *tdxGetter {
+	g := &tdxGetter{}
+	for _, opt := range opts {
+		opt(g)
+	}
+	return g
+}
+
+type tdxGetter struct {
+	proxyHost string
+}
 
 type collateralCacheEntry struct {
 	headers map[string][]string
@@ -61,7 +84,8 @@ var (
 	collateralCacheMu sync.RWMutex
 )
 
-func (t tdxGetter) Get(requestURL string) (map[string][]string, []byte, error) {
+// Get implements verify/trust.HTTPSGetter
+func (t *tdxGetter) Get(requestURL string) (map[string][]string, []byte, error) {
 	collateralCacheMu.RLock()
 	if entry, ok := collateralCache[requestURL]; ok {
 		collateralCacheMu.RUnlock()
@@ -69,7 +93,17 @@ func (t tdxGetter) Get(requestURL string) (map[string][]string, []byte, error) {
 	}
 	collateralCacheMu.RUnlock()
 
-	body, headers, err := util.Get(requestURL)
+	// Inject the Intel TDX API proxy if set
+	fetchURL := requestURL
+	if t.proxyHost != "" {
+		parsed, err := url.Parse(requestURL)
+		if err != nil {
+			return nil, nil, fmt.Errorf("failed to parse collateral URL: %w", err)
+		}
+		fetchURL = fmt.Sprintf("https://%s/%s%s", t.proxyHost, parsed.Host, parsed.RequestURI())
+	}
+
+	body, headers, err := util.Get(fetchURL)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to fetch collateral from %s: %w", requestURL, err)
 	}
@@ -136,7 +170,7 @@ func verifyTdxReport(attestationDoc string, isCompressed bool) ([]string, []byte
 	}
 
 	opts := verify.DefaultOptions()
-	opts.Getter = tdxGetter{}
+	opts.Getter = NewTDXGetter(WithProxyServer("tdx-proxy.tinfoil.sh"))
 	opts.TrustedRoots = intelRootCertPool
 	opts.GetCollateral = true
 	opts.CheckRevocations = true
