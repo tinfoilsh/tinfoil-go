@@ -12,6 +12,7 @@ import (
 	"net/url"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/google/go-tdx-guest/abi"
 	pb "github.com/google/go-tdx-guest/proto/tdx"
@@ -60,6 +61,18 @@ func WithProxyServer(host string) TDXGetterOption {
 	}
 }
 
+// WithCachePrefetchDuration sets how early before expiry cached collateral is
+// re-fetched. For example, 1 hour means entries are treated as expired when
+// less than 1 hour of validity remains.
+func WithCachePrefetchDuration(d time.Duration) TDXGetterOption {
+	return func(g *tdxGetter) {
+		if d < 0 {
+			d = 0
+		}
+		g.cachePrefetchDuration = d
+	}
+}
+
 // NewTDXGetter creates a TDX collateral getter that implements the
 // verify/trust.HTTPSGetter interface with in-memory caching.
 func NewTDXGetter(opts ...TDXGetterOption) *tdxGetter {
@@ -71,12 +84,14 @@ func NewTDXGetter(opts ...TDXGetterOption) *tdxGetter {
 }
 
 type tdxGetter struct {
-	proxyHost string
+	proxyHost              string
+	cachePrefetchDuration  time.Duration
 }
 
 type collateralCacheEntry struct {
-	headers map[string][]string
-	body    []byte
+	headers   map[string][]string
+	body      []byte
+	expiresAt time.Time
 }
 
 var (
@@ -87,7 +102,7 @@ var (
 // Get implements verify/trust.HTTPSGetter
 func (t *tdxGetter) Get(requestURL string) (map[string][]string, []byte, error) {
 	collateralCacheMu.RLock()
-	if entry, ok := collateralCache[requestURL]; ok {
+	if entry, ok := collateralCache[requestURL]; ok && time.Now().Add(t.cachePrefetchDuration).Before(entry.expiresAt) {
 		collateralCacheMu.RUnlock()
 		return entry.headers, entry.body, nil
 	}
@@ -112,9 +127,16 @@ func (t *tdxGetter) Get(requestURL string) (map[string][]string, []byte, error) 
 		return nil, nil, err
 	}
 
-	collateralCacheMu.Lock()
-	collateralCache[requestURL] = &collateralCacheEntry{headers: headers, body: body}
-	collateralCacheMu.Unlock()
+	expiresAt := parseNextUpdate(requestURL, body)
+	if !expiresAt.IsZero() {
+		collateralCacheMu.Lock()
+		collateralCache[requestURL] = &collateralCacheEntry{
+			headers:   headers,
+			body:      body,
+			expiresAt: expiresAt,
+		}
+		collateralCacheMu.Unlock()
+	}
 
 	return headers, body, nil
 }
@@ -156,6 +178,40 @@ func validateTcbEvaluationDataNumber(requestURL string, body []byte) error {
 	return nil
 }
 
+// parseNextUpdate extracts the nextUpdate timestamp from collateral response
+// bodies to use as a cache expiry. Returns zero time if the response type is
+// unrecognized or unparseable.
+func parseNextUpdate(requestURL string, body []byte) time.Time {
+	if strings.Contains(requestURL, "/qe/identity") {
+		var resp struct {
+			EnclaveIdentity struct {
+				NextUpdate time.Time `json:"nextUpdate"`
+			} `json:"enclaveIdentity"`
+		}
+		if json.Unmarshal(body, &resp) == nil {
+			return resp.EnclaveIdentity.NextUpdate
+		}
+	}
+
+	if strings.Contains(requestURL, "/tcb?fmspc=") {
+		var resp struct {
+			TcbInfo struct {
+				NextUpdate time.Time `json:"nextUpdate"`
+			} `json:"tcbInfo"`
+		}
+		if json.Unmarshal(body, &resp) == nil {
+			return resp.TcbInfo.NextUpdate
+		}
+	}
+
+	// CRL responses (PCK CRL, Root CA CRL) are DER-encoded
+	if crl, err := x509.ParseRevocationList(body); err == nil {
+		return crl.NextUpdate
+	}
+
+	return time.Time{}
+}
+
 func verifyTdxReport(attestationDoc string, isCompressed bool) ([]string, []byte, error) {
 	attDocBytes, err := base64.StdEncoding.DecodeString(attestationDoc)
 	if err != nil {
@@ -170,7 +226,7 @@ func verifyTdxReport(attestationDoc string, isCompressed bool) ([]string, []byte
 	}
 
 	opts := verify.DefaultOptions()
-	opts.Getter = NewTDXGetter(WithProxyServer("tdx-proxy.tinfoil.sh"))
+	opts.Getter = NewTDXGetter(WithProxyServer("tdx-proxy.tinfoil.sh"), WithCachePrefetchDuration(time.Hour))
 	opts.TrustedRoots = intelRootCertPool
 	opts.GetCollateral = true
 	opts.CheckRevocations = true
