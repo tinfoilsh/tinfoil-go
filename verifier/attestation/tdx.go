@@ -30,7 +30,7 @@ var sgxRootCACertPEM []byte
 // MinimumTcbEvaluationDataNumber is the minimum TCB evaluation data number
 // required for collateral. This prevents accepting collateral issued before
 // critical security updates. See Intel's TCB Recovery best practices.
-const MinimumTcbEvaluationDataNumber = 18
+const MinimumTcbEvaluationDataNumber = 19
 
 // IntelQeVendorID is Intel's QE Vendor ID (939a7233-f79c-4ca9-940a-0db3957f0607)
 var IntelQeVendorID = []byte{
@@ -84,8 +84,8 @@ func NewTDXGetter(opts ...TDXGetterOption) *tdxGetter {
 }
 
 type tdxGetter struct {
-	proxyHost              string
-	cachePrefetchDuration  time.Duration
+	proxyHost             string
+	cachePrefetchDuration time.Duration
 }
 
 type collateralCacheEntry struct {
@@ -108,13 +108,24 @@ func (t *tdxGetter) Get(requestURL string) (map[string][]string, []byte, error) 
 	}
 	collateralCacheMu.RUnlock()
 
-	// Inject the Intel TDX API proxy if set
-	fetchURL := requestURL
+	parsed, err := url.Parse(requestURL)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to parse collateral URL: %w", err)
+	}
+
+	// TCB info and QE identity endpoints support requesting a specific
+	// tcbEvaluationDataNumber so Intel returns collateral at the required
+	// level. Other endpoints (CRLs, certs) don't use this parameter.
+	switch {
+	case strings.HasSuffix(parsed.Path, "/tcb"),
+		strings.HasSuffix(parsed.Path, "/qe/identity"):
+		q := parsed.Query()
+		q.Set("tcbEvaluationDataNumber", fmt.Sprintf("%d", MinimumTcbEvaluationDataNumber))
+		parsed.RawQuery = q.Encode()
+	}
+
+	fetchURL := parsed.String()
 	if t.proxyHost != "" {
-		parsed, err := url.Parse(requestURL)
-		if err != nil {
-			return nil, nil, fmt.Errorf("failed to parse collateral URL: %w", err)
-		}
 		fetchURL = fmt.Sprintf("https://%s/%s%s", t.proxyHost, parsed.Host, parsed.RequestURI())
 	}
 
