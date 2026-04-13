@@ -12,8 +12,8 @@ jobs:
     runs-on: ubuntu-latest
     env:
       TINFOIL_API_KEY: ${{ secrets.TINFOIL_API_KEY }}
-      TINFOIL_ENCLAVE: ${{ secrets.TINFOIL_ENCLAVE }}
-      TINFOIL_REPO: ${{ secrets.TINFOIL_REPO }}
+      TINFOIL_ENCLAVE: inference.tinfoil.sh
+      TINFOIL_REPO: tinfoilsh/confidential-model-router
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
