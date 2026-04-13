@@ -28,7 +28,7 @@ jobs:
         run: go build -v ./...
 
       - name: Install gotestfmt
-        run: go install github.com/gotesttools/gotestfmt/v2/cmd/gotestfmt@latest
+        run: go install github.com/gotesttools/gotestfmt/v2/cmd/gotestfmt@v2.5.0
 
       - name: Run tests
         env:
