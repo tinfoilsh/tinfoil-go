@@ -14,10 +14,6 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-    env:
-      TINFOIL_API_KEY: ${{ secrets.TINFOIL_API_KEY }}
-      TINFOIL_ENCLAVE: inference.tinfoil.sh
-      TINFOIL_REPO: tinfoilsh/confidential-model-router
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
@@ -35,6 +31,10 @@ jobs:
         run: go install github.com/gotesttools/gotestfmt/v2/cmd/gotestfmt@latest
 
       - name: Run tests
+        env:
+          TINFOIL_API_KEY: ${{ secrets.TINFOIL_API_KEY }}
+          TINFOIL_ENCLAVE: inference.tinfoil.sh
+          TINFOIL_REPO: tinfoilsh/confidential-model-router
         run: |
           set -euo pipefail
           go test -race -p 1 -json -v -covermode atomic -coverprofile=coverage.out ./... 2>&1 | tee /tmp/gotest.log | gotestfmt
