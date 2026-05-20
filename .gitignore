@@ -4,6 +4,9 @@ Tinfoil.xcframework.zip
 coverage.out
 .env
 
+# Cross-SDK conformance binary (built via `go build -o bin/tinfoil-conformance ./cmd/tinfoil-conformance/`)
+/bin/
+
 # Verifier build artifacts
 verifier/TinfoilVerifier.xcframework
 verifier/TinfoilVerifier.xcframework.zip
