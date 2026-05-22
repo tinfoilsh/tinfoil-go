@@ -57,6 +57,8 @@ func main() {
 		os.Exit(cmdVerifySigstore())
 	case "verify-measurement":
 		os.Exit(cmdVerifyMeasurement())
+	case "verify-hardware-measurements":
+		os.Exit(cmdVerifyHardwareMeasurements())
 	case "", "help", "-h", "--help":
 		printHelp()
 		os.Exit(0)
@@ -95,7 +97,7 @@ func cmdCapabilities() int {
 		"schema_version":   "1",
 		"sdk":              sdkName,
 		"sdk_version":      sdkVersion(),
-		"stages_supported": []string{"verify-sigstore", "verify-measurement"},
+		"stages_supported": []string{"verify-sigstore", "verify-measurement", "verify-hardware-measurements"},
 		"sigstore": map[string]any{
 			"trust_root_loading": "configurable",
 			// sigstore-go scopes cert validity to bundle-supplied times
@@ -573,6 +575,108 @@ func cmdVerifyMeasurement() int {
 		"outputs": map[string]any{
 			"source_fingerprint_hex": sourceFP,
 			"target_fingerprint_hex": targetFP,
+		},
+	}
+	out, _ := json.MarshalIndent(body, "", "  ")
+	fmt.Println(string(out))
+	return exitAccept
+}
+
+// -----------------------------------------------------------------------------
+// verify-hardware-measurements (SPEC §6)
+// -----------------------------------------------------------------------------
+
+type hwMeasurementInput struct {
+	ID    string `json:"id"`
+	MRTD  string `json:"mrtd"`
+	RTMR0 string `json:"rtmr0"`
+}
+
+type verifyHardwareInput struct {
+	SchemaVersion        string               `json:"schema_version"`
+	EnclaveMeasurement   measurementInput     `json:"enclave_measurement"`
+	HardwareMeasurements []hwMeasurementInput `json:"hardware_measurements"`
+}
+
+func emitHardwareRejection(code, specRef, message string) int {
+	body := map[string]any{
+		"stage":    "verify-hardware-measurements",
+		"accepted": false,
+		"rejection": map[string]string{
+			"code":     code,
+			"spec_ref": specRef,
+			"message":  message,
+		},
+	}
+	out, _ := json.MarshalIndent(body, "", "  ")
+	fmt.Println(string(out))
+	return exitReject
+}
+
+func cmdVerifyHardwareMeasurements() int {
+	raw, err := io.ReadAll(os.Stdin)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error reading stdin: %v\n", err)
+		return exitInternal
+	}
+	var in verifyHardwareInput
+	if err := json.Unmarshal(raw, &in); err != nil {
+		fmt.Fprintf(os.Stderr, "input schema violation: %v\n", err)
+		return exitBadInput
+	}
+	if in.SchemaVersion != "1" {
+		fmt.Fprintln(os.Stderr, `schema_version must be "1"`)
+		return exitBadInput
+	}
+
+	// SPEC §6.3 step 1: enclave_measurement MUST be TdxGuestV2 with exactly 5
+	// registers. We validate type + count up-front before consulting the lib's
+	// VerifyHardware (which only checks `< 2` registers — a more permissive
+	// shape that fixture 221's list-form rejection_code documents).
+	if in.EnclaveMeasurement.Type != tdxURI {
+		return emitHardwareRejection(
+			"ENCLAVE_MEASUREMENT_TYPE_INVALID", "6.3",
+			"enclave measurement type is not TdxGuestV2",
+		)
+	}
+	if len(in.EnclaveMeasurement.Registers) != 5 {
+		return emitHardwareRejection(
+			"ENCLAVE_REGISTER_COUNT_INVALID", "6.3",
+			fmt.Sprintf("TDX enclave measurement must have 5 registers, got %d",
+				len(in.EnclaveMeasurement.Registers)),
+		)
+	}
+
+	// SPEC §7.3 lowercase normalization carries over to MRTD/RTMR0 comparisons.
+	encRegs := make([]string, len(in.EnclaveMeasurement.Registers))
+	for i, r := range in.EnclaveMeasurement.Registers {
+		encRegs[i] = strings.ToLower(r)
+	}
+	hw := make([]*attestation.HardwareMeasurement, len(in.HardwareMeasurements))
+	for i, h := range in.HardwareMeasurements {
+		hw[i] = &attestation.HardwareMeasurement{
+			ID:    h.ID,
+			MRTD:  strings.ToLower(h.MRTD),
+			RTMR0: strings.ToLower(h.RTMR0),
+		}
+	}
+	enc := &attestation.Measurement{
+		Type:      attestation.TdxGuestV2,
+		Registers: encRegs,
+	}
+
+	match, err := attestation.VerifyHardware(hw, enc)
+	if err != nil {
+		return emitHardwareRejection("HARDWARE_NO_MATCH", "6.3", err.Error())
+	}
+
+	body := map[string]any{
+		"stage":    "verify-hardware-measurements",
+		"accepted": true,
+		"outputs": map[string]any{
+			"matched_id":    match.ID,
+			"matched_mrtd":  match.MRTD,
+			"matched_rtmr0": match.RTMR0,
 		},
 	}
 	out, _ := json.MarshalIndent(body, "", "  ")
