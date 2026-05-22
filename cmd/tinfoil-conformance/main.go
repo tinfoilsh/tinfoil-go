@@ -20,14 +20,17 @@
 package main
 
 import (
+	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
 	"runtime/debug"
 	"strings"
 
+	"github.com/tinfoilsh/tinfoil-go/verifier/attestation"
 	"github.com/tinfoilsh/tinfoil-go/verifier/sigstore"
 )
 
@@ -52,6 +55,8 @@ func main() {
 		os.Exit(cmdCapabilities())
 	case "verify-sigstore":
 		os.Exit(cmdVerifySigstore())
+	case "verify-measurement":
+		os.Exit(cmdVerifyMeasurement())
 	case "", "help", "-h", "--help":
 		printHelp()
 		os.Exit(0)
@@ -90,7 +95,7 @@ func cmdCapabilities() int {
 		"schema_version":   "1",
 		"sdk":              sdkName,
 		"sdk_version":      sdkVersion(),
-		"stages_supported": []string{"verify-sigstore"},
+		"stages_supported": []string{"verify-sigstore", "verify-measurement"},
 		"sigstore": map[string]any{
 			"trust_root_loading": "configurable",
 			// sigstore-go scopes cert validity to bundle-supplied times
@@ -144,6 +149,9 @@ func cmdCapabilities() int {
 			// sigstore-go's in-toto parser rejects unknown top-level fields
 			// on the statement.
 			"in_toto_statement_tolerates_extra_fields": false,
+		},
+		"measurement": map[string]any{
+			"compare_multiplatform_to_tdx_supported": true,
 		},
 		"platforms_supported":       []string{"sev-snp", "tdx"},
 		"transport_modes_supported": []string{"tls-pinning", "ehbp"},
@@ -401,4 +409,173 @@ func classifyError(msg string) (string, string) {
 		return "DSSE_SIGNATURE_INVALID", "5.2"
 	}
 	return "BUNDLE_MALFORMED", "5.2"
+}
+
+// -----------------------------------------------------------------------------
+// verify-measurement (SPEC §7)
+// -----------------------------------------------------------------------------
+
+type measurementInput struct {
+	Type      string   `json:"type"`
+	Registers []string `json:"registers"`
+}
+
+type verifyMeasurementInput struct {
+	SchemaVersion string            `json:"schema_version"`
+	Source        measurementInput  `json:"source"`
+	Target        *measurementInput `json:"target,omitempty"`
+}
+
+const (
+	sevURI = "https://tinfoil.sh/predicate/sev-snp-guest/v2"
+	tdxURI = "https://tinfoil.sh/predicate/tdx-guest/v2"
+	mpURI  = "https://tinfoil.sh/predicate/snp-tdx-multiplatform/v1"
+)
+
+func expectedRegisterCount(t attestation.PredicateType) (int, bool) {
+	switch t {
+	case attestation.SevGuestV2:
+		return 1, true
+	case attestation.TdxGuestV2:
+		return 5, true
+	case attestation.SnpTdxMultiPlatformV1:
+		return 3, true
+	}
+	return 0, false
+}
+
+func parsePredicateType(s string) (attestation.PredicateType, bool) {
+	switch s {
+	case sevURI:
+		return attestation.SevGuestV2, true
+	case tdxURI:
+		return attestation.TdxGuestV2, true
+	case mpURI:
+		return attestation.SnpTdxMultiPlatformV1, true
+	}
+	return "", false
+}
+
+// normalizeMeasurement validates the predicate type + register count and
+// lowercase-normalizes all register values per SPEC §7.3.
+func normalizeMeasurement(in measurementInput) (*attestation.Measurement, string, string) {
+	t, ok := parsePredicateType(in.Type)
+	if !ok {
+		return nil, "MEASUREMENT_TYPE_UNKNOWN", "2.3"
+	}
+	want, _ := expectedRegisterCount(t)
+	if len(in.Registers) != want {
+		return nil, "MEASUREMENT_REGISTER_COUNT_INVALID", "7.1"
+	}
+	regs := make([]string, len(in.Registers))
+	for i, r := range in.Registers {
+		regs[i] = strings.ToLower(r)
+	}
+	return &attestation.Measurement{Type: t, Registers: regs}, "", ""
+}
+
+// fingerprintForOwnType computes the SPEC §7.2 fingerprint of m using its own
+// predicate type as the hash prefix. sigstore-gos public attestation.Fingerprint
+// helper requires a target type + optional hardware measurement and rejects the
+// MP→MP self-fingerprint case; the SPEC defines the formula plainly enough that
+// we implement it directly here.
+func fingerprintForOwnType(m *attestation.Measurement) string {
+	if len(m.Registers) == 1 {
+		return m.Registers[0]
+	}
+	h := sha256.Sum256([]byte(string(m.Type) + strings.Join(m.Registers, "")))
+	return fmt.Sprintf("%x", h)
+}
+
+func classifyMeasurementError(err error) (string, string) {
+	switch {
+	case errors.Is(err, attestation.ErrRtmr3Mismatch):
+		return "MEASUREMENT_RTMR3_NONZERO", "7.3.2"
+	case errors.Is(err, attestation.ErrFewRegisters):
+		return "MEASUREMENT_REGISTER_COUNT_INVALID", "7.1"
+	case errors.Is(err, attestation.ErrFormatMismatch):
+		return "MEASUREMENT_TYPE_COMBINATION_UNSUPPORTED", "7.3.5"
+	case errors.Is(err, attestation.ErrRtmr1Mismatch),
+		errors.Is(err, attestation.ErrRtmr2Mismatch),
+		errors.Is(err, attestation.ErrMultiPlatformMismatch),
+		errors.Is(err, attestation.ErrMultiPlatformSevSnpMismatch),
+		errors.Is(err, attestation.ErrMeasurementMismatch):
+		return "MEASUREMENT_MISMATCH", "7.3"
+	}
+	low := strings.ToLower(err.Error())
+	if strings.Contains(low, "unsupported") || strings.Contains(low, "platform") {
+		return "MEASUREMENT_TYPE_COMBINATION_UNSUPPORTED", "7.3.5"
+	}
+	return "MEASUREMENT_MISMATCH", "7.3"
+}
+
+func emitMeasurementRejection(code, specRef, message string) int {
+	body := map[string]any{
+		"stage":    "verify-measurement",
+		"accepted": false,
+		"rejection": map[string]string{
+			"code":     code,
+			"spec_ref": specRef,
+			"message":  message,
+		},
+	}
+	out, _ := json.MarshalIndent(body, "", "  ")
+	fmt.Println(string(out))
+	return exitReject
+}
+
+func cmdVerifyMeasurement() int {
+	raw, err := io.ReadAll(os.Stdin)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error reading stdin: %v\n", err)
+		return exitInternal
+	}
+	var in verifyMeasurementInput
+	if err := json.Unmarshal(raw, &in); err != nil {
+		fmt.Fprintf(os.Stderr, "input schema violation: %v\n", err)
+		return exitBadInput
+	}
+	if in.SchemaVersion != "1" {
+		fmt.Fprintln(os.Stderr, "schema_version must be \"1\"")
+		return exitBadInput
+	}
+
+	src, code, specRef := normalizeMeasurement(in.Source)
+	if src == nil {
+		return emitMeasurementRejection(code, specRef, "source measurement invalid")
+	}
+	var tgt *attestation.Measurement
+	if in.Target != nil {
+		tgt, code, specRef = normalizeMeasurement(*in.Target)
+		if tgt == nil {
+			return emitMeasurementRejection(code, specRef, "target measurement invalid")
+		}
+	}
+
+	sourceFP := fingerprintForOwnType(src)
+	var targetFP any
+	if tgt != nil {
+		targetFP = fingerprintForOwnType(tgt)
+	} else {
+		targetFP = nil
+	}
+
+	if tgt != nil {
+		if err := src.Equals(tgt); err != nil {
+			code, specRef := classifyMeasurementError(err)
+			return emitMeasurementRejection(code, specRef, err.Error())
+		}
+	}
+
+	body := map[string]any{
+		"stage":    "verify-measurement",
+		"accepted": true,
+		"outputs": map[string]any{
+			"source_fingerprint_hex": sourceFP,
+			"target_fingerprint_hex": targetFP,
+		},
+	}
+	out, _ := json.MarshalIndent(body, "", "  ")
+	fmt.Println(string(out))
+	return exitAccept
 }
