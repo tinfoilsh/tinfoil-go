@@ -1,7 +1,7 @@
 // tinfoil-conformance is the cross-SDK conformance binary for tinfoil-go.
 //
 // It speaks the JSON-in / JSON-out CLI contract defined in
-// https://github.com/lsd-cat/tinfoil-conformance. Distinct from the
+// https://github.com/tinfoilsh/tinfoil-conformance. Distinct from the
 // consumer-facing SDK; this is a thin wrapper around verifier/sigstore's
 // VerifyBundleWithPolicy entry point.
 //
