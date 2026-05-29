@@ -155,6 +155,16 @@ func cmdCapabilities() int {
 		"measurement": map[string]any{
 			"compare_multiplatform_to_tdx_supported": true,
 		},
+		"attestation_tdx": map[string]any{
+			// sigstore-go's TDX verifier (google/go-tdx-guest) is wired up
+			// in verifier/attestation/tdx.go but uses a network-fetching
+			// Getter against tdx-proxy.tinfoil.sh. Conformance support
+			// (injecting fixture collateral via a custom Getter) lands in
+			// Phase 1.5; declared false here so attestation-tdx fixtures
+			// skip cleanly until the wrapper exists.
+			"supported":                     false,
+			"injected_collateral_supported": false,
+		},
 		"platforms_supported":       []string{"sev-snp", "tdx"},
 		"transport_modes_supported": []string{"tls-pinning", "ehbp"},
 		"flow_modes_supported":      []string{"standard"},
