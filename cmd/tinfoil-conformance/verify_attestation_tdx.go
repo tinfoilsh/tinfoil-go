@@ -233,21 +233,58 @@ func classifyTdxError(err error) (string, string) {
 		return "PCK_CHAIN_INCOMPLETE", "4.2"
 	}
 	low := strings.ToLower(err.Error())
+	// Order matters: cert-chain errors include "signature" substrings (the
+	// chain-validation routines say "certificate signature verification …
+	// failed"). Test more specific markers first so they aren't swallowed
+	// by the generic "signature" pattern.
 	switch {
+	// Parse-time failures from go-tdx-guest/abi.QuoteToProto:
+	case strings.Contains(low, "quote format not supported"):
+		return "QUOTE_FORMAT_UNSUPPORTED", "A.3"
+	case strings.Contains(low, "raw quote size"),
+		strings.Contains(low, "minimum size"):
+		return "QUOTE_TRUNCATED", "A.3"
+	case strings.Contains(low, "size of certificate data"):
+		return "QUOTE_FORMAT_UNSUPPORTED", "A.3.9"
+	case strings.Contains(low, "truncat"),
+		strings.Contains(low, "too short"):
+		return "QUOTE_TRUNCATED", "A.3"
+
+	// PCK cert chain (BEFORE the generic "signature" matcher):
+	case strings.Contains(low, "incomplete pck"),
+		strings.Contains(low, "pck certificate chain"):
+		return "PCK_CHAIN_INCOMPLETE", "A.3.9"
+	case strings.Contains(low, "certificate has expired"),
+		strings.Contains(low, "not yet valid"):
+		return "PCK_EXPIRED", "4.2"
+	case strings.Contains(low, "pck leaf certificate"),
+		strings.Contains(low, "intermediate ca certificate"),
+		strings.Contains(low, "root cert"),
+		strings.Contains(low, "pck cert"):
+		return "PCK_CHAIN_INVALID", "4.2"
+
+	// AK / quote signature (generic "signature" — must come after chain):
+	case strings.Contains(low, "ecdsa attestation key"),
+		strings.Contains(low, "quote's signature"):
+		return "QUOTE_SIGNATURE_INVALID", "4.3"
+	case strings.Contains(low, "qe report"):
+		return "QE_REPORT_SIGNATURE_INVALID", "4.4"
 	case strings.Contains(low, "signature"):
 		return "QUOTE_SIGNATURE_INVALID", "4.3"
-	case strings.Contains(low, "revoked") || strings.Contains(low, "crl"):
+
+	// Header / policy field misuse:
+	case strings.Contains(low, "revoked"),
+		strings.Contains(low, "crl"):
 		return "PCK_REVOKED", "4.2"
 	case strings.Contains(low, "fmspc"):
 		return "PCK_FMSPC_MISMATCH", "4.6"
-	case strings.Contains(low, "tee_type") || strings.Contains(low, "tee type"):
+	case strings.Contains(low, "tee_type"),
+		strings.Contains(low, "tee type"):
 		return "WRONG_TEE_TYPE", "A.3.1"
 	case strings.Contains(low, "attestation key type"):
 		return "ATTESTATION_KEY_TYPE_UNSUPPORTED", "A.3.1"
 	case strings.Contains(low, "qe vendor"):
 		return "QE_VENDOR_UNKNOWN", "A.3.1"
-	case strings.Contains(low, "truncat") || strings.Contains(low, "too short"):
-		return "QUOTE_TRUNCATED", "A.3"
 	}
 	return "QV_RESULT_TERMINAL_UNSPECIFIED", "4.1.2"
 }

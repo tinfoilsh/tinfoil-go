@@ -169,6 +169,10 @@ func cmdCapabilities() int {
 			// network call to Intel PCS happens during conformance runs.
 			"supported":                     true,
 			"injected_collateral_supported": true,
+			// go-tdx-guest's verify.Options.Now is honored end-to-end —
+			// cert NotBefore/NotAfter, CRL nextUpdate, JSON nextUpdate
+			// all compared against opts.Now from policy.
+			"verification_time_override": "supported",
 		},
 		"platforms_supported":       []string{"sev-snp", "tdx"},
 		"transport_modes_supported": []string{"tls-pinning", "ehbp"},
