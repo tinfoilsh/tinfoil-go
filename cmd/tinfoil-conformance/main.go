@@ -59,6 +59,8 @@ func main() {
 		os.Exit(cmdVerifyMeasurement())
 	case "verify-hardware-measurements":
 		os.Exit(cmdVerifyHardwareMeasurements())
+	case "verify-attestation-tdx":
+		os.Exit(cmdVerifyAttestationTDX())
 	case "", "help", "-h", "--help":
 		printHelp()
 		os.Exit(0)
@@ -97,7 +99,12 @@ func cmdCapabilities() int {
 		"schema_version":   "1",
 		"sdk":              sdkName,
 		"sdk_version":      sdkVersion(),
-		"stages_supported": []string{"verify-sigstore", "verify-measurement", "verify-hardware-measurements"},
+		"stages_supported": []string{
+			"verify-sigstore",
+			"verify-measurement",
+			"verify-hardware-measurements",
+			"verify-attestation-tdx",
+		},
 		"sigstore": map[string]any{
 			"trust_root_loading": "configurable",
 			// sigstore-go scopes cert validity to bundle-supplied times
@@ -156,14 +163,12 @@ func cmdCapabilities() int {
 			"compare_multiplatform_to_tdx_supported": true,
 		},
 		"attestation_tdx": map[string]any{
-			// sigstore-go's TDX verifier (google/go-tdx-guest) is wired up
-			// in verifier/attestation/tdx.go but uses a network-fetching
-			// Getter against tdx-proxy.tinfoil.sh. Conformance support
-			// (injecting fixture collateral via a custom Getter) lands in
-			// Phase 1.5; declared false here so attestation-tdx fixtures
-			// skip cleanly until the wrapper exists.
-			"supported":                     false,
-			"injected_collateral_supported": false,
+			// Phase 1.5 wired: cmd/tinfoil-conformance/verify_attestation_tdx.go
+			// wraps google/go-tdx-guest's verify.TdxQuote with an in-process
+			// HTTPSGetter that returns fixture-injected collateral, so no
+			// network call to Intel PCS happens during conformance runs.
+			"supported":                     true,
+			"injected_collateral_supported": true,
 		},
 		"platforms_supported":       []string{"sev-snp", "tdx"},
 		"transport_modes_supported": []string{"tls-pinning", "ehbp"},
