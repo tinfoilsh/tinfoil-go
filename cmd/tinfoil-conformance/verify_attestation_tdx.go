@@ -250,6 +250,30 @@ func classifyTdxError(err error) (string, string) {
 		strings.Contains(low, "too short"):
 		return "QUOTE_TRUNCATED", "A.3"
 
+	// CRL / revocation (BEFORE the chain matchers — CRL error messages
+	// often include "PCK Certificate chain" as context).
+	case strings.Contains(low, "pck crl"),
+		strings.Contains(low, "pck cert revocation"):
+		return "PCK_REVOKED", "4.7"
+	case strings.Contains(low, "root ca crl"),
+		strings.Contains(low, "root crl"):
+		return "ROOT_CA_UNTRUSTED", "4.7"
+
+	// TCB Info / QE Identity collateral
+	case strings.Contains(low, "tcb info") || strings.Contains(low, "tcbinfo"):
+		if strings.Contains(low, "expired") {
+			return "TCB_INFO_EXPIRED", "4.7"
+		}
+		if strings.Contains(low, "no matching tcb") || strings.Contains(low, "tcb status") {
+			return "TCB_REVOKED", "4.7"
+		}
+		return "TCB_INFO_SIGNATURE_INVALID", "4.7"
+	case strings.Contains(low, "qe identity") || strings.Contains(low, "qeidentity") || strings.Contains(low, "enclave identity"):
+		if strings.Contains(low, "expired") {
+			return "QE_IDENTITY_EXPIRED", "4.7"
+		}
+		return "QE_IDENTITY_SIGNATURE_INVALID", "4.7"
+
 	// PCK cert chain (BEFORE the generic "signature" matcher):
 	case strings.Contains(low, "incomplete pck"),
 		strings.Contains(low, "pck certificate chain"):

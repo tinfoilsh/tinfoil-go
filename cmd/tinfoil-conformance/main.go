@@ -173,6 +173,11 @@ func cmdCapabilities() int {
 			// cert NotBefore/NotAfter, CRL nextUpdate, JSON nextUpdate
 			// all compared against opts.Now from policy.
 			"verification_time_override": "supported",
+			// CheckRevocations + GetCollateral=true (the tcb_evaluation_
+			// required=true path in cmdVerifyAttestationTDX) runs the full
+			// §4.7 evaluation: PCK/Root CRL, TCB Info, QE Identity, TCB
+			// level matching.
+			"tcb_evaluation_supported": true,
 		},
 		"platforms_supported":       []string{"sev-snp", "tdx"},
 		"transport_modes_supported": []string{"tls-pinning", "ehbp"},
