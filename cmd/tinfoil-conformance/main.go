@@ -178,6 +178,10 @@ func cmdCapabilities() int {
 			// §4.7 evaluation: PCK/Root CRL, TCB Info, QE Identity, TCB
 			// level matching.
 			"tcb_evaluation_supported": true,
+			// Phase 4: cmd_verify_attestation_tdx.enforceExtendedPolicy
+			// applies SPEC §4.8 / Intel §2.3.2 checks against every
+			// policy.expected_*_hex pin the fixture sets.
+			"extended_td_checks_supported": true,
 		},
 		"platforms_supported":       []string{"sev-snp", "tdx"},
 		"transport_modes_supported": []string{"tls-pinning", "ehbp"},

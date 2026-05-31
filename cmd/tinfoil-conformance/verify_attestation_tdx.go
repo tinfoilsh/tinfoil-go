@@ -67,6 +67,22 @@ type tdxPolicyInput struct {
 	AcceptedQvResults     []string `json:"accepted_qv_results"`
 	ExpectedFmspcHex      string   `json:"expected_fmspc_hex"`
 	TcbEvaluationRequired *bool    `json:"tcb_evaluation_required"`
+
+	// Phase 4 — Intel §2.3.2 / SPEC §4.8 extended TD checks. Each is
+	// optional; only fields set in the fixture get enforced.
+	ExpectedTdAttributesHex   string   `json:"expected_td_attributes_hex"`
+	ExpectedXfamHex           string   `json:"expected_xfam_hex"`
+	ExpectedMrSignerSeamHex   string   `json:"expected_mr_signer_seam_hex"`
+	ExpectedSeamAttributesHex string   `json:"expected_seam_attributes_hex"`
+	ExpectedMrseamAllowlist   []string `json:"expected_mrseam_allowlist"`
+	ExpectedMrtdHex           string   `json:"expected_mrtd_hex"`
+	ExpectedMrConfigIdHex     string   `json:"expected_mr_config_id_hex"`
+	ExpectedMrOwnerHex        string   `json:"expected_mr_owner_hex"`
+	ExpectedMrOwnerConfigHex  string   `json:"expected_mr_owner_config_hex"`
+	ExpectedRtmr3Hex          string   `json:"expected_rtmr3_hex"`
+	ExpectedReportDataHex     string   `json:"expected_report_data_hex"`
+	MinTeeTcbSvnHex           string   `json:"min_tee_tcb_svn_hex"`
+	ExpectedQeVendorIdHex     string   `json:"expected_qe_vendor_id_hex"`
 }
 
 type verifyAttestationTdxInput struct {
@@ -171,6 +187,17 @@ func cmdVerifyAttestationTDX() int {
 	if verifyErr != nil {
 		code, ref := classifyTdxError(verifyErr)
 		return emitTdxRejection(code, ref, verifyErr.Error())
+	}
+
+	// Phase 4: extended-TD policy checks (SPEC §4.8 / Intel §2.3.2). Each
+	// pin is optional; only enforced when the fixture sets the policy
+	// field. The unmutated quote's body fields are deterministic so
+	// fixtures that pin a *different* value trigger the corresponding
+	// mismatch code.
+	if in.Policy != nil {
+		if code, msg := enforceExtendedPolicy(quoteBytes, in.Policy); code != "" {
+			return emitTdxRejection(code, "4.8", msg)
+		}
 	}
 
 	// Verification succeeded — emit the parsed body fields for the harness.
@@ -415,6 +442,133 @@ func buildTdxOutputs(quote any, rawQuote []byte) (map[string]any, error) {
 	_ = quote
 	_ = tdxtrust.SimpleHTTPSGetter{}
 	return out, nil
+}
+
+// enforceExtendedPolicy applies SPEC §4.8 / Intel §2.3.2 checks against the
+// quote body fields, reading expected pins from policy. Returns ("", "") when
+// every set pin matches, otherwise (rejection_code, message). Pins that are
+// empty in the policy are skipped — fixture-by-fixture opt-in.
+func enforceExtendedPolicy(rawQuote []byte, p *tdxPolicyInput) (string, string) {
+	if len(rawQuote) < 48+584 {
+		return "", "" // can't enforce; let upstream parse have failed already
+	}
+	header := rawQuote[:48]
+	body := rawQuote[48 : 48+584]
+
+	qeVendor := header[12:28]
+	teeTcbSvn := body[0:16]
+	mrSeam := body[16:64]
+	mrSignerSeam := body[64:112]
+	seamAttrs := body[112:120]
+	tdAttrs := body[120:128]
+	xfam := body[128:136]
+	mrTd := body[136:184]
+	mrConfigId := body[184:232]
+	mrOwner := body[232:280]
+	mrOwnerConfig := body[280:328]
+	rtmr3 := body[472:520]
+	reportData := body[520:584]
+
+	// Helper: compare hex string (case-insensitive) against raw bytes.
+	matchHex := func(expectedHex string, got []byte) bool {
+		if expectedHex == "" {
+			return true
+		}
+		expected, err := hex.DecodeString(strings.ToLower(strings.TrimSpace(expectedHex)))
+		if err != nil || len(expected) != len(got) {
+			return false
+		}
+		return strings.EqualFold(hex.EncodeToString(got), hex.EncodeToString(expected))
+	}
+
+	if !matchHex(p.ExpectedTdAttributesHex, tdAttrs) {
+		return "TD_ATTRIBUTES_MISMATCH", fmt.Sprintf(
+			"td_attributes %s != policy expected %s",
+			hex.EncodeToString(tdAttrs), strings.ToLower(p.ExpectedTdAttributesHex))
+	}
+	if !matchHex(p.ExpectedXfamHex, xfam) {
+		return "XFAM_MISMATCH", fmt.Sprintf(
+			"xfam %s != policy expected %s",
+			hex.EncodeToString(xfam), strings.ToLower(p.ExpectedXfamHex))
+	}
+	if !matchHex(p.ExpectedMrSignerSeamHex, mrSignerSeam) {
+		return "MR_SIGNER_SEAM_MISMATCH", fmt.Sprintf(
+			"mr_signer_seam %s != policy expected %s",
+			hex.EncodeToString(mrSignerSeam), strings.ToLower(p.ExpectedMrSignerSeamHex))
+	}
+	if !matchHex(p.ExpectedSeamAttributesHex, seamAttrs) {
+		return "SEAM_ATTRIBUTES_MISMATCH", fmt.Sprintf(
+			"seam_attributes %s != policy expected %s",
+			hex.EncodeToString(seamAttrs), strings.ToLower(p.ExpectedSeamAttributesHex))
+	}
+	if len(p.ExpectedMrseamAllowlist) > 0 {
+		got := hex.EncodeToString(mrSeam)
+		ok := false
+		for _, allowed := range p.ExpectedMrseamAllowlist {
+			if strings.EqualFold(got, strings.TrimSpace(allowed)) {
+				ok = true
+				break
+			}
+		}
+		if !ok {
+			return "MR_SEAM_NOT_ALLOWED", fmt.Sprintf(
+				"mr_seam %s not in policy allowlist (%d entries)",
+				got, len(p.ExpectedMrseamAllowlist))
+		}
+	}
+	if !matchHex(p.ExpectedMrtdHex, mrTd) {
+		return "MRTD_MISMATCH", fmt.Sprintf(
+			"mrtd %s != policy expected %s",
+			hex.EncodeToString(mrTd), strings.ToLower(p.ExpectedMrtdHex))
+	}
+	if !matchHex(p.ExpectedMrConfigIdHex, mrConfigId) {
+		return "MR_CONFIG_ID_MISMATCH", fmt.Sprintf(
+			"mr_config_id %s != policy expected %s",
+			hex.EncodeToString(mrConfigId), strings.ToLower(p.ExpectedMrConfigIdHex))
+	}
+	if !matchHex(p.ExpectedMrOwnerHex, mrOwner) {
+		return "MR_OWNER_MISMATCH", fmt.Sprintf(
+			"mr_owner %s != policy expected %s",
+			hex.EncodeToString(mrOwner), strings.ToLower(p.ExpectedMrOwnerHex))
+	}
+	if !matchHex(p.ExpectedMrOwnerConfigHex, mrOwnerConfig) {
+		return "MR_OWNER_CONFIG_MISMATCH", fmt.Sprintf(
+			"mr_owner_config %s != policy expected %s",
+			hex.EncodeToString(mrOwnerConfig), strings.ToLower(p.ExpectedMrOwnerConfigHex))
+	}
+	if !matchHex(p.ExpectedRtmr3Hex, rtmr3) {
+		return "RTMR3_NONZERO", fmt.Sprintf(
+			"rtmr3 %s != policy expected %s",
+			hex.EncodeToString(rtmr3), strings.ToLower(p.ExpectedRtmr3Hex))
+	}
+	if !matchHex(p.ExpectedReportDataHex, reportData) {
+		return "REPORT_DATA_MISMATCH", fmt.Sprintf(
+			"report_data %s != policy expected %s",
+			hex.EncodeToString(reportData), strings.ToLower(p.ExpectedReportDataHex))
+	}
+	if !matchHex(p.ExpectedQeVendorIdHex, qeVendor) {
+		return "QE_VENDOR_ID_MISMATCH", fmt.Sprintf(
+			"qe_vendor_id %s != policy expected %s",
+			hex.EncodeToString(qeVendor), strings.ToLower(p.ExpectedQeVendorIdHex))
+	}
+
+	// Min TEE_TCB_SVN — component-wise comparison per SPEC §4.8.7.
+	if p.MinTeeTcbSvnHex != "" {
+		minimum, err := hex.DecodeString(strings.ToLower(strings.TrimSpace(p.MinTeeTcbSvnHex)))
+		if err == nil && len(minimum) == 16 {
+			for i := 0; i < 16; i++ {
+				if teeTcbSvn[i] < minimum[i] {
+					return "TEE_TCB_SVN_BELOW_MINIMUM", fmt.Sprintf(
+						"tee_tcb_svn[%d]=%d < min[%d]=%d (quote=%s, minimum=%s)",
+						i, teeTcbSvn[i], i, minimum[i],
+						hex.EncodeToString(teeTcbSvn),
+						hex.EncodeToString(minimum))
+				}
+			}
+		}
+	}
+
+	return "", ""
 }
 
 func emitTdxRejection(code, specRef, message string) int {
