@@ -182,6 +182,11 @@ func cmdCapabilities() int {
 			// applies SPEC §4.8 / Intel §2.3.2 checks against every
 			// policy.expected_*_hex pin the fixture sets.
 			"extended_td_checks_supported": true,
+			// go-tdx-guest's ErrTcbStatus collapses every non-UpToDate
+			// status into a single rejection (strict-only). SPEC §4.7.7
+			// would let SWHardeningNeeded etc. through with permissive
+			// policy; lib doesn't expose that knob.
+			"accepts_non_terminal_tcb_statuses": false,
 		},
 		"platforms_supported":       []string{"sev-snp", "tdx"},
 		"transport_modes_supported": []string{"tls-pinning", "ehbp"},
