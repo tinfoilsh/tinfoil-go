@@ -14,13 +14,16 @@
 package main
 
 import (
+	"crypto/x509"
 	"encoding/base64"
 	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
+	"encoding/pem"
 	"errors"
 	"fmt"
 	"io"
+	urlpkg "net/url"
 	"os"
 	"strings"
 	"time"
@@ -56,11 +59,14 @@ func withStdoutSilenced(fn func()) {
 }
 
 type tdxCollateralInput struct {
-	TcbInfoJSON     string `json:"tcb_info_json"`
-	QeIdentityJSON  string `json:"qe_identity_json"`
-	PckCRLDerB64    string `json:"pck_crl_der_b64"`
-	RootCRLDerB64   string `json:"root_crl_der_b64"`
-	IntelRootCAPEM  string `json:"intel_root_ca_pem"`
+	TcbInfoJSON                  string `json:"tcb_info_json"`
+	QeIdentityJSON               string `json:"qe_identity_json"`
+	PckCRLDerB64                 string `json:"pck_crl_der_b64"`
+	RootCRLDerB64                string `json:"root_crl_der_b64"`
+	IntelRootCAPEM               string `json:"intel_root_ca_pem"`
+	TcbInfoIssuerChainPEM        string `json:"tcb_info_issuer_chain_pem"`
+	QeIdentityIssuerChainPEM     string `json:"qe_identity_issuer_chain_pem"`
+	PckCRLIssuerChainPEM         string `json:"pck_crl_issuer_chain_pem"`
 }
 
 type tdxPolicyInput struct {
@@ -95,28 +101,42 @@ type verifyAttestationTdxInput struct {
 
 // injectedGetter implements trust.HTTPSGetter by pattern-matching the URL
 // path (so any fmspc query value resolves) and returning the fixture body
-// plus the standard Intel issuer-chain header. Returns 404-style error for
-// URLs not relevant to this fixture's verification path.
+// plus the appropriate issuer-chain header. Per-collateral headers can be
+// overridden with synthetic-chain PEMs (Phase 3) via the *Header fields;
+// when blank, the stock Intel issuer chain from go-tdx-guest's testing
+// package is used.
 type injectedGetter struct {
 	tcbInfoBody    []byte
 	qeIdentityBody []byte
 	pckCRLBody     []byte
 	rootCRLBody    []byte
+
+	tcbInfoHeader    map[string][]string
+	qeIdentityHeader map[string][]string
+	pckCRLHeader     map[string][]string
 }
 
 func (g *injectedGetter) Get(rawURL string) (map[string][]string, []byte, error) {
 	switch {
 	case strings.HasSuffix(rawURL, "/qe/identity"):
-		return tdxtesting.QeIdentityHeader, g.qeIdentityBody, nil
+		return g.qeIdentityHeader, g.qeIdentityBody, nil
 	case strings.Contains(rawURL, "/tcb?fmspc="):
-		return tdxtesting.TcbInfoHeader, g.tcbInfoBody, nil
+		return g.tcbInfoHeader, g.tcbInfoBody, nil
 	case strings.Contains(rawURL, "/pckcrl?ca="):
-		return tdxtesting.PckCrlHeader, g.pckCRLBody, nil
+		return g.pckCRLHeader, g.pckCRLBody, nil
 	case strings.HasSuffix(rawURL, "/IntelSGXRootCA.der"):
-		// go-tdx-guest's testdata uses no header for the Root CA CRL.
+		// Root CA CRL needs no issuer chain header — go-tdx-guest verifies
+		// it against the trusted root directly.
 		return nil, g.rootCRLBody, nil
 	}
 	return nil, nil, fmt.Errorf("conformance injected getter: no injected response for URL %q", rawURL)
+}
+
+// pemToURLEncoded mirrors what Intel PCS does to populate issuer chain
+// headers. go-tdx-guest's headerToIssuerChain calls net/url.QueryUnescape;
+// using url.QueryEscape produces a round-trippable encoding.
+func pemToURLEncoded(pem string) string {
+	return urlpkg.QueryEscape(pem)
 }
 
 func cmdVerifyAttestationTDX() int {
@@ -152,10 +172,31 @@ func cmdVerifyAttestationTDX() int {
 	}
 
 	getter := &injectedGetter{
-		tcbInfoBody:    []byte(in.Collateral.TcbInfoJSON),
-		qeIdentityBody: []byte(in.Collateral.QeIdentityJSON),
-		pckCRLBody:     pckCRLDer,
-		rootCRLBody:    rootCRLDer,
+		tcbInfoBody:      []byte(in.Collateral.TcbInfoJSON),
+		qeIdentityBody:   []byte(in.Collateral.QeIdentityJSON),
+		pckCRLBody:       pckCRLDer,
+		rootCRLBody:      rootCRLDer,
+		tcbInfoHeader:    tdxtesting.TcbInfoHeader,
+		qeIdentityHeader: tdxtesting.QeIdentityHeader,
+		pckCRLHeader:     tdxtesting.PckCrlHeader,
+	}
+	// Synthetic-chain fixtures (Phase 3) override the issuer-chain headers
+	// so the lib's tcbInfo/qeIdentity/pckCRL signature verification uses
+	// the synthetic Platform/TCB Signing CAs instead of the real Intel ones.
+	if in.Collateral.TcbInfoIssuerChainPEM != "" {
+		getter.tcbInfoHeader = map[string][]string{
+			"Tcb-Info-Issuer-Chain": {pemToURLEncoded(in.Collateral.TcbInfoIssuerChainPEM)},
+		}
+	}
+	if in.Collateral.QeIdentityIssuerChainPEM != "" {
+		getter.qeIdentityHeader = map[string][]string{
+			"Sgx-Enclave-Identity-Issuer-Chain": {pemToURLEncoded(in.Collateral.QeIdentityIssuerChainPEM)},
+		}
+	}
+	if in.Collateral.PckCRLIssuerChainPEM != "" {
+		getter.pckCRLHeader = map[string][]string{
+			"Sgx-Pck-Crl-Issuer-Chain": {pemToURLEncoded(in.Collateral.PckCRLIssuerChainPEM)},
+		}
 	}
 
 	var quote any
@@ -171,6 +212,21 @@ func cmdVerifyAttestationTDX() int {
 	opts := tdxverify.DefaultOptions()
 	opts.Getter = getter
 	opts.Now = time.Unix(in.ExpirationCheckDateUnix, 0).UTC()
+	// Honor an optional synthetic Intel SGX Root CA passed via input.
+	// Phase 3 synthetic fixtures use a self-issued root in place of the
+	// real Intel root so we can re-sign TCB Info, QE Identity, and CRLs
+	// at controlled TCB statuses. When unset, the embedded Intel root
+	// from go-tdx-guest is used.
+	if in.Collateral.IntelRootCAPEM != "" {
+		pool := x509.NewCertPool()
+		if !pool.AppendCertsFromPEM([]byte(in.Collateral.IntelRootCAPEM)) {
+			return emitTdxRejection("ROOT_CA_UNTRUSTED", "4.2",
+				"intel_root_ca_pem could not be parsed as PEM certificate(s)")
+		}
+		opts.TrustedRoots = pool
+		// Silence unused import warning if no PEM blocks ever parsed.
+		_ = pem.Block{}
+	}
 	// Default: full §4.7 collateral evaluation. Fixtures can opt out via
 	// policy.tcb_evaluation_required=false for structural-only verification
 	// (PCK chain + AK + sig, no TCB / CRL).
