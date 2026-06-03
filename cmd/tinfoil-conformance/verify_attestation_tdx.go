@@ -89,6 +89,7 @@ type tdxPolicyInput struct {
 	ExpectedReportDataHex     string   `json:"expected_report_data_hex"`
 	MinTeeTcbSvnHex           string   `json:"min_tee_tcb_svn_hex"`
 	ExpectedQeVendorIdHex     string   `json:"expected_qe_vendor_id_hex"`
+	EnforceSpecDefaults       bool     `json:"enforce_spec_defaults"`
 }
 
 type verifyAttestationTdxInput struct {
@@ -606,6 +607,40 @@ func enforceExtendedPolicy(rawQuote []byte, p *tdxPolicyInput) (string, string) 
 		return "QE_VENDOR_ID_MISMATCH", fmt.Sprintf(
 			"qe_vendor_id %s != policy expected %s",
 			hex.EncodeToString(qeVendor), strings.ToLower(p.ExpectedQeVendorIdHex))
+	}
+
+	// SPEC §4.8.1 / §4.8.2 normative defaults — applied regardless of pin
+	// presence when enforce_spec_defaults=true. Tests the canonical
+	// "DEBUG TD" and "reserved bit set" cases.
+	if p.EnforceSpecDefaults {
+		const (
+			TD_ATTR_DEBUG  uint64 = 1 << 0
+			TD_ATTR_FIXED0 uint64 = (1 << 0) | (1 << 28) | (1 << 30) | (1 << 63)
+			XFAM_FIXED1    uint64 = 0x3
+			XFAM_FIXED0    uint64 = 0x6DBE7
+		)
+		tdAttrVal := binary.LittleEndian.Uint64(tdAttrs)
+		if tdAttrVal&TD_ATTR_DEBUG != 0 {
+			return "TD_ATTRIBUTES_DEBUG_SET", fmt.Sprintf(
+				"TD Attributes DEBUG bit is set (td_attributes=%s)",
+				hex.EncodeToString(tdAttrs))
+		}
+		if tdAttrVal&^TD_ATTR_FIXED0 != 0 {
+			return "TD_ATTRIBUTES_RESERVED_BIT_SET", fmt.Sprintf(
+				"TD Attributes has bit(s) outside FIXED0 set (td_attributes=%s, FIXED0=%016x)",
+				hex.EncodeToString(tdAttrs), TD_ATTR_FIXED0)
+		}
+		xfamVal := binary.LittleEndian.Uint64(xfam)
+		if xfamVal&XFAM_FIXED1 != XFAM_FIXED1 {
+			return "XFAM_REQUIRED_BIT_CLEAR", fmt.Sprintf(
+				"XFAM required bits 0 (FP) + 1 (SSE) not both set (xfam=%s)",
+				hex.EncodeToString(xfam))
+		}
+		if xfamVal&^XFAM_FIXED0 != 0 {
+			return "XFAM_FORBIDDEN_BIT_SET", fmt.Sprintf(
+				"XFAM has bit(s) outside FIXED0 set (xfam=%s, FIXED0=%016x)",
+				hex.EncodeToString(xfam), XFAM_FIXED0)
+		}
 	}
 
 	// Min TEE_TCB_SVN — component-wise comparison per SPEC §4.8.7.
