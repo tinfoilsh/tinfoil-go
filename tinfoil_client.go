@@ -71,12 +71,13 @@ type Client struct {
 	secureClient  *client.SecureClient
 	httpClient    *http.Client
 	enclave, repo string
+	transport     TransportMode
 }
 
 // NewClientWithParams creates a new secure OpenAI client with explicit enclave and repo parameters
 func NewClientWithParams(enclave, repo string, openaiOpts ...option.RequestOption) (*Client, error) {
 	secureClient := client.NewSecureClient(enclave, repo)
-	return createClientFromSecureClient(secureClient, openaiOpts...)
+	return createClientFromSecureClient(secureClient, defaultTransportMode, openaiOpts...)
 }
 
 // NewClient creates a new secure OpenAI client using default parameters
@@ -85,23 +86,15 @@ func NewClient(openaiOpts ...option.RequestOption) (*Client, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to create secure client: %w", err)
 	}
-	return createClientFromSecureClient(secureClient, openaiOpts...)
+	return createClientFromSecureClient(secureClient, defaultTransportMode, openaiOpts...)
 }
 
 // createClientFromSecureClient is a helper function to create a Client from a SecureClient
-func createClientFromSecureClient(secureClient *client.SecureClient, openaiOpts ...option.RequestOption) (*Client, error) {
-	// Create an HTTP client with our custom transport
-	httpClient, err := secureClient.HTTPClient()
+func createClientFromSecureClient(secureClient *client.SecureClient, mode TransportMode, openaiOpts ...option.RequestOption) (*Client, error) {
+	httpClient, err := secureHTTPClient(secureClient, mode)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create HTTP client: %w", err)
+		return nil, err
 	}
-
-	// Wrap with re-verifying transport to handle certificate rotation
-	reVerifying := &reVerifyingTransport{
-		secureClient: secureClient,
-		transport:    httpClient.Transport,
-	}
-	httpClient.Transport = reVerifying
 
 	// Add our HTTP client and base URL to the options
 	allOpts := append(openaiOpts,
@@ -116,6 +109,7 @@ func createClientFromSecureClient(secureClient *client.SecureClient, openaiOpts 
 		httpClient:   httpClient,
 		enclave:      secureClient.Enclave(),
 		repo:         secureClient.Repo(),
+		transport:    mode,
 	}, nil
 }
 
@@ -125,6 +119,11 @@ func (c *Client) Enclave() string {
 
 func (c *Client) Repo() string {
 	return c.repo
+}
+
+// Transport returns the transport mode used to secure traffic to the enclave.
+func (c *Client) Transport() TransportMode {
+	return c.transport
 }
 
 // Verify re-verifies the enclave attestation and returns the ground truth

@@ -195,9 +195,9 @@ func TestHTTPClient(t *testing.T) {
 	httpClient := client.HTTPClient()
 	require.NotNil(t, httpClient, "HTTPClient() should return a non-nil client")
 
-	// Verify the transport is the reVerifyingTransport
-	_, ok := httpClient.Transport.(*reVerifyingTransport)
-	require.True(t, ok, "HTTPClient transport should be reVerifyingTransport")
+	// Verify the transport is the EHBP re-verifying transport (the default mode)
+	_, ok := httpClient.Transport.(*ehbpReVerifyingTransport)
+	require.True(t, ok, "HTTPClient transport should be ehbpReVerifyingTransport")
 
 	// Verify it returns the same instance (shared client)
 	httpClient2 := client.HTTPClient()
