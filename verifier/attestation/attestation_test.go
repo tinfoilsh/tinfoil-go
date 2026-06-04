@@ -185,3 +185,9 @@ func TestAttestationFingerprint(t *testing.T) {
 		})
 	}
 }
+
+func TestFetchBundleFromRejectsNonHTTPS(t *testing.T) {
+	_, err := FetchBundleFrom("http://atc.example")
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "https")
+}

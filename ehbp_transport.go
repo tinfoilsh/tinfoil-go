@@ -247,8 +247,15 @@ func ehbpHTTPClient(secureClient *client.SecureClient, baseURL string) (*http.Cl
 	}
 
 	var transport http.RoundTripper = newEHBPReVerifyingTransport(secureClient, inner)
-	if headerValue, ok := enclaveURLHeaderValue(baseURL, secureClient.Enclave()); ok {
-		transport = &enclaveURLHeaderTransport{enclaveURL: headerValue, transport: transport}
+	// With a proxy base URL, recompute the header per request from the client's
+	// current enclave so it stays correct after a re-verification swaps in a
+	// different enclave (for example when attesting from a bundle).
+	if baseURL != "" {
+		transport = &enclaveURLHeaderTransport{
+			enclave:   secureClient,
+			baseURL:   baseURL,
+			transport: transport,
+		}
 	}
 
 	return &http.Client{
@@ -293,14 +300,24 @@ func originOf(rawURL string) (string, error) {
 // delegating to the wrapped transport. EHBP leaves request headers in
 // plaintext, so the header reaches the proxy while the body stays sealed to the
 // enclave's HPKE key.
+// enclaveSource provides the currently verified enclave host. *client.SecureClient
+// satisfies it; the header transport reads it per request so the value follows a
+// re-verification that swaps in a different enclave.
+type enclaveSource interface {
+	Enclave() string
+}
+
 type enclaveURLHeaderTransport struct {
-	enclaveURL string
-	transport  http.RoundTripper
+	enclave   enclaveSource
+	baseURL   string
+	transport http.RoundTripper
 }
 
 func (t *enclaveURLHeaderTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	req = req.Clone(req.Context())
-	req.Header.Set(enclaveURLHeader, t.enclaveURL)
+	if headerValue, ok := enclaveURLHeaderValue(t.baseURL, t.enclave.Enclave()); ok {
+		req.Header.Set(enclaveURLHeader, headerValue)
+	}
 	return t.transport.RoundTrip(req)
 }
 

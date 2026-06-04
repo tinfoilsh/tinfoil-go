@@ -342,6 +342,16 @@ func FetchBundle() (*Bundle, error) {
 
 // FetchBundleFrom retrieves a complete attestation bundle from a custom base URL
 func FetchBundleFrom(attestationBundleURL string) (*Bundle, error) {
+	// The bundle is the entire trust root for verification; fetching it over a
+	// plaintext connection would let an attacker substitute it (MITM).
+	u, err := url.Parse(attestationBundleURL)
+	if err != nil {
+		return nil, fmt.Errorf("invalid attestation bundle URL %q: %v", attestationBundleURL, err)
+	}
+	if u.Scheme != "https" {
+		return nil, fmt.Errorf("attestation bundle URL must use https; got %q", attestationBundleURL)
+	}
+
 	bundleURL := attestationBundleURL + "/attestation"
 
 	resp, _, err := util.Get(bundleURL)

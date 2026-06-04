@@ -99,6 +99,10 @@ func TestEnclaveURLHeaderValue(t *testing.T) {
 	}
 }
 
+type fakeEnclaveSource struct{ host string }
+
+func (f *fakeEnclaveSource) Enclave() string { return f.host }
+
 func TestEnclaveURLHeaderTransportInjectsHeader(t *testing.T) {
 	var seen string
 	inner := roundTripFunc(func(req *http.Request) (*http.Response, error) {
@@ -107,8 +111,9 @@ func TestEnclaveURLHeaderTransportInjectsHeader(t *testing.T) {
 	})
 
 	transport := &enclaveURLHeaderTransport{
-		enclaveURL: "https://enclave.example.com",
-		transport:  inner,
+		enclave:   &fakeEnclaveSource{host: "enclave.example.com"},
+		baseURL:   "https://proxy.example.com/",
+		transport: inner,
 	}
 
 	req, err := http.NewRequest(http.MethodPost, "https://proxy.example.com/v1/chat/completions", bytes.NewBufferString("payload"))
@@ -119,6 +124,35 @@ func TestEnclaveURLHeaderTransportInjectsHeader(t *testing.T) {
 	require.Equal(t, http.StatusOK, resp.StatusCode)
 	require.Equal(t, "https://enclave.example.com", seen, "the proxy must receive the enclave URL header")
 	require.Empty(t, req.Header.Get(enclaveURLHeader), "the original request must not be mutated")
+}
+
+func TestEnclaveURLHeaderTransportReflectsEnclaveChange(t *testing.T) {
+	var seen string
+	inner := roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		seen = req.Header.Get(enclaveURLHeader)
+		return newResponse(http.StatusOK, "ok"), nil
+	})
+
+	source := &fakeEnclaveSource{host: "old.example.com"}
+	transport := &enclaveURLHeaderTransport{
+		enclave:   source,
+		baseURL:   "https://proxy.example.com/",
+		transport: inner,
+	}
+
+	req, err := http.NewRequest(http.MethodPost, "https://proxy.example.com/v1/x", bytes.NewBufferString("p"))
+	require.NoError(t, err)
+	_, err = transport.RoundTrip(req)
+	require.NoError(t, err)
+	require.Equal(t, "https://old.example.com", seen)
+
+	// A re-verification may swap in a different enclave; the header must follow.
+	source.host = "new.example.com"
+	req, err = http.NewRequest(http.MethodPost, "https://proxy.example.com/v1/x", bytes.NewBufferString("p"))
+	require.NoError(t, err)
+	_, err = transport.RoundTrip(req)
+	require.NoError(t, err)
+	require.Equal(t, "https://new.example.com", seen)
 }
 
 func TestHostBoundRoundTripperAllowsEnclaveAndProxy(t *testing.T) {
