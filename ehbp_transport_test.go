@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"sync"
 	"testing"
 
 	"github.com/openai/openai-go/v3"
@@ -141,6 +142,49 @@ func TestEHBPReVerifyingTransportRetriesOnKeyRotation(t *testing.T) {
 	require.Equal(t, 1, reverifyCalls)
 	require.Equal(t, "payload", firstBody)
 	require.Equal(t, "payload", retryBody, "the request body must be replayed on retry")
+}
+
+// TestEHBPReVerifyingTransportSerializesReverify drives many concurrent
+// RoundTrip calls through a transport that always reports a key rotation,
+// asserting that re-verification (which mutates shared, unsynchronized
+// SecureClient state) runs exactly once. Run with -race to detect any data
+// race on that shared state.
+func TestEHBPReVerifyingTransportSerializesReverify(t *testing.T) {
+	keyErr := ehbpidentity.NewKeyConfigError(fmt.Errorf("key configuration mismatch"))
+	rotated := roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		return newResponse(http.StatusOK, "ok"), nil
+	})
+
+	transport := &ehbpReVerifyingTransport{
+		transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			return nil, keyErr
+		}),
+	}
+
+	// sharedState models the unsynchronized writes SecureClient.Verify performs.
+	// reverifyOnce must serialize and coalesce calls so this is touched once.
+	var sharedState int
+	transport.reverify = func() (http.RoundTripper, error) {
+		sharedState++
+		return rotated, nil
+	}
+
+	const goroutines = 64
+	var wg sync.WaitGroup
+	wg.Add(goroutines)
+	for i := 0; i < goroutines; i++ {
+		go func() {
+			defer wg.Done()
+			req, err := http.NewRequest(http.MethodGet, "https://enclave.example.com/v1/models", nil)
+			require.NoError(t, err)
+			resp, err := transport.RoundTrip(req)
+			require.NoError(t, err)
+			require.Equal(t, http.StatusOK, resp.StatusCode)
+		}()
+	}
+	wg.Wait()
+
+	require.Equal(t, 1, sharedState, "re-verification should be coalesced to a single run")
 }
 
 func TestEHBPReVerifyingTransportSurfacesOriginalErrorWhenReverifyFails(t *testing.T) {

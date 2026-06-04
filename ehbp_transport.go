@@ -171,38 +171,38 @@ func buildEHBPTransport(hpkePublicKeyHex string) (http.RoundTripper, error) {
 // attestation when the enclave rotates its HPKE key, mirroring the certificate
 // rotation handling of the TLS transport.
 type ehbpReVerifyingTransport struct {
-	mu        sync.RWMutex
-	transport http.RoundTripper
+	mu         sync.RWMutex
+	transport  http.RoundTripper
+	generation uint64
 
-	// reverify re-runs attestation, installs an EHBP transport built from the
-	// freshly attested HPKE key, and returns it.
+	// reverifyMu serializes re-verification. Re-verification mutates shared
+	// attestation state on the SecureClient, which is not safe for concurrent
+	// use, so concurrent RoundTrip calls that observe the same key rotation
+	// must not run it simultaneously.
+	reverifyMu sync.Mutex
+
+	// reverify re-runs attestation and returns an EHBP transport built from the
+	// freshly attested HPKE key.
 	reverify func() (http.RoundTripper, error)
 }
 
 func newEHBPReVerifyingTransport(secureClient *client.SecureClient, inner http.RoundTripper) *ehbpReVerifyingTransport {
-	t := &ehbpReVerifyingTransport{transport: inner}
-	t.reverify = func() (http.RoundTripper, error) {
-		groundTruth, err := secureClient.Verify()
-		if err != nil {
-			return nil, err
-		}
-
-		newTransport, err := buildEHBPTransport(groundTruth.HPKEPublicKey)
-		if err != nil {
-			return nil, err
-		}
-
-		t.mu.Lock()
-		t.transport = newTransport
-		t.mu.Unlock()
-		return newTransport, nil
+	return &ehbpReVerifyingTransport{
+		transport: inner,
+		reverify: func() (http.RoundTripper, error) {
+			groundTruth, err := secureClient.Verify()
+			if err != nil {
+				return nil, err
+			}
+			return buildEHBPTransport(groundTruth.HPKEPublicKey)
+		},
 	}
-	return t
 }
 
 func (t *ehbpReVerifyingTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	t.mu.RLock()
 	transport := t.transport
+	generation := t.generation
 	t.mu.RUnlock()
 
 	resp, err := transport.RoundTrip(req)
@@ -218,14 +218,44 @@ func (t *ehbpReVerifyingTransport) RoundTrip(req *http.Request) (*http.Response,
 		return nil, err
 	}
 
-	newTransport, reverifyErr := t.reverify()
+	newTransport, reverifyErr := t.reverifyOnce(generation)
 	if reverifyErr != nil {
 		// Re-verification failed; surface the original key mismatch error.
 		return nil, err
 	}
 
-	log.Info("HPKE key rotation detected, re-verified attestation successfully")
 	return newTransport.RoundTrip(retryReq)
+}
+
+// reverifyOnce re-verifies attestation and installs an EHBP transport built
+// from the freshly attested HPKE key. Re-verification is serialized so that
+// concurrent RoundTrip calls triggered by the same key rotation do not race on
+// the shared SecureClient; callers that arrive after another goroutine has
+// already rebuilt the transport reuse the freshly installed one instead of
+// re-verifying again.
+func (t *ehbpReVerifyingTransport) reverifyOnce(seenGeneration uint64) (http.RoundTripper, error) {
+	t.reverifyMu.Lock()
+	defer t.reverifyMu.Unlock()
+
+	t.mu.RLock()
+	current, currentGeneration := t.transport, t.generation
+	t.mu.RUnlock()
+	if currentGeneration != seenGeneration {
+		return current, nil
+	}
+
+	newTransport, err := t.reverify()
+	if err != nil {
+		return nil, err
+	}
+
+	t.mu.Lock()
+	t.transport = newTransport
+	t.generation++
+	t.mu.Unlock()
+
+	log.Info("HPKE key rotation detected, re-verified attestation successfully")
+	return newTransport, nil
 }
 
 // resetRequestBody returns a request whose body can be sent again. EHBP
