@@ -344,6 +344,12 @@ func (s *SecureClient) makeRequest(req *http.Request) (*Response, error) {
 		req.URL.Host = s.enclave
 	}
 
+	// Request headers (which may carry the API key) are not encrypted, so never
+	// send them over a plaintext connection.
+	if req.URL.Scheme != "https" {
+		return nil, fmt.Errorf("refusing to send request over non-https URL %q", req.URL.String())
+	}
+
 	resp, err := httpClient.Do(req)
 	if err != nil {
 		return nil, err

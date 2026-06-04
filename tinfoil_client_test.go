@@ -195,9 +195,12 @@ func TestHTTPClient(t *testing.T) {
 	httpClient := client.HTTPClient()
 	require.NotNil(t, httpClient, "HTTPClient() should return a non-nil client")
 
-	// Verify the transport is the EHBP re-verifying transport (the default mode)
-	_, ok := httpClient.Transport.(*ehbpReVerifyingTransport)
-	require.True(t, ok, "HTTPClient transport should be ehbpReVerifyingTransport")
+	// The outermost transport binds requests to the enclave/proxy host; the
+	// EHBP re-verifying transport (the default mode) sits inside it.
+	hostBound, ok := httpClient.Transport.(*hostBoundRoundTripper)
+	require.True(t, ok, "HTTPClient transport should be hostBoundRoundTripper")
+	_, ok = hostBound.transport.(*ehbpReVerifyingTransport)
+	require.True(t, ok, "inner transport should be ehbpReVerifyingTransport")
 
 	// Verify it returns the same instance (shared client)
 	httpClient2 := client.HTTPClient()

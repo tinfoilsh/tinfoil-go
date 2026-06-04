@@ -129,15 +129,80 @@ func NewClientWithOptions(opts ...ClientOption) (*Client, error) {
 }
 
 // secureHTTPClient builds an *http.Client for the requested transport mode.
+//
+// The returned client is bound to the verified enclave (and the configured
+// proxy, if any): neither EHBP nor TLS pinning encrypts request headers, which
+// may carry the API key, so requests to any other host or over plain http are
+// refused.
 func secureHTTPClient(secureClient *client.SecureClient, mode TransportMode, baseURL string) (*http.Client, error) {
+	var (
+		httpClient *http.Client
+		err        error
+	)
 	switch mode {
 	case TransportTLS:
-		return tlsPinnedHTTPClient(secureClient)
+		httpClient, err = tlsPinnedHTTPClient(secureClient)
 	case TransportEHBP, "":
-		return ehbpHTTPClient(secureClient, baseURL)
+		httpClient, err = ehbpHTTPClient(secureClient, baseURL)
 	default:
 		return nil, fmt.Errorf("unknown transport mode: %q", mode)
 	}
+	if err != nil {
+		return nil, err
+	}
+
+	origins, err := allowedOrigins(secureClient.Enclave(), baseURL)
+	if err != nil {
+		return nil, fmt.Errorf("failed to determine allowed request origins: %w", err)
+	}
+	httpClient.Transport = &hostBoundRoundTripper{
+		allowedOrigins: origins,
+		enclave:        secureClient.Enclave(),
+		transport:      httpClient.Transport,
+	}
+	return httpClient, nil
+}
+
+// allowedOrigins returns the set of origins a secured request may target: the
+// verified enclave and, when set, the proxy base URL.
+func allowedOrigins(enclave, baseURL string) (map[string]struct{}, error) {
+	origins := make(map[string]struct{}, 2)
+	if enclave != "" {
+		origin, err := originOf("https://" + enclave)
+		if err != nil {
+			return nil, err
+		}
+		origins[origin] = struct{}{}
+	}
+	if baseURL != "" {
+		origin, err := originOf(baseURL)
+		if err != nil {
+			return nil, err
+		}
+		origins[origin] = struct{}{}
+	}
+	return origins, nil
+}
+
+// hostBoundRoundTripper rejects requests to any origin other than the verified
+// enclave or the configured proxy, and refuses non-https requests. This guards
+// the escape-hatch HTTP client (and the OpenAI client) from leaking plaintext
+// request headers, such as the API key, to an arbitrary host.
+type hostBoundRoundTripper struct {
+	allowedOrigins map[string]struct{}
+	enclave        string
+	transport      http.RoundTripper
+}
+
+func (t *hostBoundRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
+	if req.URL.Scheme != "https" {
+		return nil, fmt.Errorf("refusing to send request over non-https URL %q", req.URL.String())
+	}
+	origin := req.URL.Scheme + "://" + req.URL.Host
+	if _, ok := t.allowedOrigins[origin]; !ok {
+		return nil, fmt.Errorf("refusing to send request to %q: client is bound to enclave %q", origin, t.enclave)
+	}
+	return t.transport.RoundTrip(req)
 }
 
 // tlsPinnedHTTPClient returns the enclave-pinned HTTP client that re-verifies

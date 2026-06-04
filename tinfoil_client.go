@@ -138,9 +138,11 @@ func (c *Client) Verify() (*client.GroundTruth, error) {
 	return c.secureClient.Verify()
 }
 
-// HTTPClient returns the underlying HTTP client that is configured with
-// automatic certificate re-verification and is restricted to TLS connections
-// to the verified enclave. This can be used for secure, direct HTTP requests
+// HTTPClient returns the underlying HTTP client used to reach the enclave. It
+// re-verifies attestation automatically when the enclave rotates its key, and
+// it is bound to the verified enclave (and the configured proxy, if any):
+// requests to any other host, or over plain http, are refused because request
+// headers are not encrypted. This can be used for secure, direct HTTP requests
 // to the enclave.
 func (c *Client) HTTPClient() *http.Client {
 	return c.httpClient
