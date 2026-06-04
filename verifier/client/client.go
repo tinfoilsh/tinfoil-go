@@ -167,7 +167,17 @@ func (s *SecureClient) Verify() (*GroundTruth, error) {
 		if s.codeMeasurement != nil {
 			return nil, fmt.Errorf("cannot combine a pinned measurement with an attestation bundle URL")
 		}
-		bundle, err := attestation.FetchBundleFrom(s.attestationBundleURL)
+		// Ask the bundle service for an enclave/repo-specific bundle when either
+		// is set; otherwise fetch the default router bundle.
+		enclaveURL := ""
+		if s.enclave != "" {
+			enclaveURL = "https://" + s.enclave
+		}
+		repo := ""
+		if s.repo != defaultRouterRepo {
+			repo = s.repo
+		}
+		bundle, err := attestation.FetchBundleFor(s.attestationBundleURL, enclaveURL, repo)
 		if err != nil {
 			return nil, fmt.Errorf("fetchBundle: failed to fetch attestation bundle: %v", err)
 		}

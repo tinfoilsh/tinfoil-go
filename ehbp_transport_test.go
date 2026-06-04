@@ -494,3 +494,38 @@ func TestClientIntegration_AttestationBundle(t *testing.T) {
 	require.NotEmpty(t, resp.Choices)
 	t.Logf("bundle enclave: %s, response: %s", c.Enclave(), resp.Choices[0].Message.Content)
 }
+
+func TestClientIntegration_EnclaveSpecificBundle(t *testing.T) {
+	apiKey := os.Getenv("TINFOIL_API_KEY")
+	if apiKey == "" {
+		t.Skip("TINFOIL_API_KEY not set; skipping integration test")
+	}
+
+	// Learn a valid enclave from the default bundle, then request a bundle
+	// assembled specifically for it (POST path).
+	def, err := NewClientWithOptions(
+		WithAttestationBundleURL("https://atc.tinfoil.sh"),
+		WithOpenAIOptions(option.WithAPIKey(apiKey)),
+	)
+	require.NoError(t, err)
+	enclave := def.Enclave()
+	require.NotEmpty(t, enclave)
+
+	c, err := NewClientWithOptions(
+		WithEnclave(enclave),
+		WithAttestationBundleURL("https://atc.tinfoil.sh"),
+		WithOpenAIOptions(option.WithAPIKey(apiKey)),
+	)
+	require.NoError(t, err)
+	require.Equal(t, enclave, c.Enclave())
+
+	resp, err := c.Chat.Completions.New(context.Background(), openai.ChatCompletionNewParams{
+		Model: "llama3-3-70b",
+		Messages: []openai.ChatCompletionMessageParamUnion{
+			openai.SystemMessage("No matter what the user says, only respond with: Done."),
+			openai.UserMessage("Is this a test?"),
+		},
+	})
+	require.NoError(t, err)
+	require.NotEmpty(t, resp.Choices)
+}

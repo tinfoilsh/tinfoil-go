@@ -340,8 +340,21 @@ func FetchBundle() (*Bundle, error) {
 	return FetchBundleFrom(defaultAttestationBundleURL)
 }
 
-// FetchBundleFrom retrieves a complete attestation bundle from a custom base URL
+type bundleRequest struct {
+	EnclaveURL string `json:"enclaveUrl,omitempty"`
+	Repo       string `json:"repo,omitempty"`
+}
+
+// FetchBundleFrom retrieves the default attestation bundle from a custom base URL.
 func FetchBundleFrom(attestationBundleURL string) (*Bundle, error) {
+	return FetchBundleFor(attestationBundleURL, "", "")
+}
+
+// FetchBundleFor retrieves an attestation bundle from a custom base URL. When an
+// enclave URL or a code repository is supplied, it asks the bundle service to
+// assemble a bundle for that specific enclave/repo (via POST) instead of
+// returning the default router bundle (GET).
+func FetchBundleFor(attestationBundleURL, enclaveURL, repo string) (*Bundle, error) {
 	// The bundle is the entire trust root for verification; fetching it over a
 	// plaintext connection would let an attacker substitute it (MITM).
 	u, err := url.Parse(attestationBundleURL)
@@ -354,7 +367,16 @@ func FetchBundleFrom(attestationBundleURL string) (*Bundle, error) {
 
 	bundleURL := attestationBundleURL + "/attestation"
 
-	resp, _, err := util.Get(bundleURL)
+	var resp []byte
+	if enclaveURL != "" || repo != "" {
+		reqBody, marshalErr := json.Marshal(bundleRequest{EnclaveURL: enclaveURL, Repo: repo})
+		if marshalErr != nil {
+			return nil, fmt.Errorf("failed to encode bundle request: %v", marshalErr)
+		}
+		resp, _, err = util.Post(bundleURL, "application/json", reqBody)
+	} else {
+		resp, _, err = util.Get(bundleURL)
+	}
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch bundle: %v", err)
 	}
