@@ -161,6 +161,12 @@ func (s *SecureClient) Verify() (*GroundTruth, error) {
 	// When an attestation bundle URL is configured, attest from the bundle so
 	// the enclave does not need to be reached directly (proxy-friendly).
 	if s.attestationBundleURL != "" {
+		// A pinned measurement and an attestation bundle are mutually exclusive
+		// verification methods: the bundle carries its own code measurement, so
+		// honoring a pinned measurement would be ambiguous.
+		if s.codeMeasurement != nil {
+			return nil, fmt.Errorf("cannot combine a pinned measurement with an attestation bundle URL")
+		}
 		bundle, err := attestation.FetchBundleFrom(s.attestationBundleURL)
 		if err != nil {
 			return nil, fmt.Errorf("fetchBundle: failed to fetch attestation bundle: %v", err)
