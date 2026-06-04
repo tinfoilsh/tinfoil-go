@@ -195,13 +195,38 @@ func TestHTTPClient(t *testing.T) {
 	httpClient := client.HTTPClient()
 	require.NotNil(t, httpClient, "HTTPClient() should return a non-nil client")
 
-	// Verify the transport is the reVerifyingTransport
-	_, ok := httpClient.Transport.(*reVerifyingTransport)
-	require.True(t, ok, "HTTPClient transport should be reVerifyingTransport")
+	// Verify the transport is the EHBP re-verifying transport (the default mode)
+	_, ok := httpClient.Transport.(*ehbpReVerifyingTransport)
+	require.True(t, ok, "HTTPClient transport should be ehbpReVerifyingTransport")
 
 	// Verify it returns the same instance (shared client)
 	httpClient2 := client.HTTPClient()
 	require.Same(t, httpClient, httpClient2, "HTTPClient() should return the same instance")
+}
+
+// TestClientIntegration_AudioTranscription mirrors the Python audio integration
+// test: it transcribes a known clip through the high-level client over the
+// default (EHBP) transport and checks the recognized text.
+func TestClientIntegration_AudioTranscription(t *testing.T) {
+	apiKey := os.Getenv("TINFOIL_API_KEY")
+	if apiKey == "" {
+		t.Skip("TINFOIL_API_KEY not set; skipping integration test")
+	}
+
+	c, err := NewClient(option.WithAPIKey(apiKey))
+	require.NoError(t, err)
+
+	audioFile, err := os.Open("testdata/jackhammer.wav")
+	require.NoError(t, err)
+	defer audioFile.Close()
+
+	transcription, err := c.Audio.Transcriptions.New(context.Background(), openai.AudioTranscriptionNewParams{
+		Model:    "whisper-large-v3-turbo",
+		File:     audioFile,
+		Language: openai.String("en"),
+	})
+	require.NoError(t, err)
+	require.Contains(t, strings.ToLower(transcription.Text), "stale smell of old beer")
 }
 
 func TestIsCertificateError(t *testing.T) {
