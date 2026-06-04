@@ -58,6 +58,60 @@ func TestClientOptionsApply(t *testing.T) {
 	require.Len(t, cfg.openaiOpts, 2)
 }
 
+func TestProxyClientOptionsApply(t *testing.T) {
+	cfg := &clientConfig{}
+	WithBaseURL("https://proxy.example.com/")(cfg)
+	WithAttestationBundleURL("https://proxy.example.com")(cfg)
+
+	require.Equal(t, "https://proxy.example.com/", cfg.baseURL)
+	require.Equal(t, "https://proxy.example.com", cfg.attestationBundleURL)
+}
+
+func TestEnclaveURLHeaderValue(t *testing.T) {
+	tests := []struct {
+		name    string
+		baseURL string
+		enclave string
+		wantVal string
+		wantOK  bool
+	}{
+		{"proxy different origin", "https://proxy.example.com/", "enclave.example.com", "https://enclave.example.com", true},
+		{"proxy keeps path but different origin", "https://proxy.example.com/api/v1/", "enclave.example.com", "https://enclave.example.com", true},
+		{"base url is the enclave itself", "https://enclave.example.com/v1/", "enclave.example.com", "", false},
+		{"no base url", "", "enclave.example.com", "", false},
+		{"no enclave", "https://proxy.example.com/", "", "", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			val, ok := enclaveURLHeaderValue(tt.baseURL, tt.enclave)
+			require.Equal(t, tt.wantOK, ok)
+			require.Equal(t, tt.wantVal, val)
+		})
+	}
+}
+
+func TestEnclaveURLHeaderTransportInjectsHeader(t *testing.T) {
+	var seen string
+	inner := roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		seen = req.Header.Get(enclaveURLHeader)
+		return newResponse(http.StatusOK, "ok"), nil
+	})
+
+	transport := &enclaveURLHeaderTransport{
+		enclaveURL: "https://enclave.example.com",
+		transport:  inner,
+	}
+
+	req, err := http.NewRequest(http.MethodPost, "https://proxy.example.com/v1/chat/completions", bytes.NewBufferString("payload"))
+	require.NoError(t, err)
+
+	resp, err := transport.RoundTrip(req)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	require.Equal(t, "https://enclave.example.com", seen, "the proxy must receive the enclave URL header")
+	require.Empty(t, req.Header.Get(enclaveURLHeader), "the original request must not be mutated")
+}
+
 func TestBuildEHBPTransportRequiresKey(t *testing.T) {
 	_, err := buildEHBPTransport("")
 	require.Error(t, err)
@@ -321,4 +375,33 @@ func TestClientIntegration_LowLevelEHBP(t *testing.T) {
 			require.Contains(t, string(data), "choices")
 		})
 	}
+}
+
+// TestClientIntegration_AttestationBundle exercises the attestation-through-proxy
+// path against the live ATC bundle endpoint: the bundle is fetched and verified
+// client-side, the enclave host is taken from the verified bundle, and a chat
+// completion is sent end-to-end over the EHBP transport.
+func TestClientIntegration_AttestationBundle(t *testing.T) {
+	apiKey := os.Getenv("TINFOIL_API_KEY")
+	if apiKey == "" {
+		t.Skip("TINFOIL_API_KEY not set; skipping integration test")
+	}
+
+	c, err := NewClientWithOptions(
+		WithAttestationBundleURL("https://atc.tinfoil.sh"),
+		WithOpenAIOptions(option.WithAPIKey(apiKey)),
+	)
+	require.NoError(t, err)
+	require.NotEmpty(t, c.Enclave(), "enclave host should come from the verified bundle")
+
+	resp, err := c.Chat.Completions.New(context.Background(), openai.ChatCompletionNewParams{
+		Model: "llama3-3-70b",
+		Messages: []openai.ChatCompletionMessageParamUnion{
+			openai.SystemMessage("No matter what the user says, only respond with: Done."),
+			openai.UserMessage("Is this a test?"),
+		},
+	})
+	require.NoError(t, err)
+	require.NotEmpty(t, resp.Choices)
+	t.Logf("bundle enclave: %s, response: %s", c.Enclave(), resp.Choices[0].Message.Content)
 }

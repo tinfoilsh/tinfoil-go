@@ -3,6 +3,7 @@ package tinfoil
 import (
 	"fmt"
 	"net/http"
+	"net/url"
 	"sync"
 
 	"github.com/openai/openai-go/v3/option"
@@ -11,6 +12,10 @@ import (
 	ehbpidentity "github.com/tinfoilsh/encrypted-http-body-protocol/identity"
 	"github.com/tinfoilsh/tinfoil-go/verifier/client"
 )
+
+// enclaveURLHeader tells a proxy which enclave to forward an encrypted request
+// to, so the request reaches the same enclave the client verified.
+const enclaveURLHeader = "X-Tinfoil-Enclave-Url"
 
 // TransportMode selects how the SDK secures traffic to the enclave.
 type TransportMode string
@@ -33,10 +38,12 @@ const (
 )
 
 type clientConfig struct {
-	enclave    string
-	repo       string
-	transport  TransportMode
-	openaiOpts []option.RequestOption
+	enclave              string
+	repo                 string
+	transport            TransportMode
+	baseURL              string
+	attestationBundleURL string
+	openaiOpts           []option.RequestOption
 }
 
 // ClientOption configures a Client created with NewClientWithOptions.
@@ -56,6 +63,24 @@ func WithRepo(repo string) ClientOption {
 // WithTransport selects the transport mode. Defaults to TransportEHBP.
 func WithTransport(mode TransportMode) ClientOption {
 	return func(c *clientConfig) { c.transport = mode }
+}
+
+// WithBaseURL routes requests through the given base URL (for example your own
+// proxy) instead of sending them directly to the enclave. Request bodies stay
+// encrypted end-to-end to the verified enclave; when the base URL's origin
+// differs from the enclave's, the SDK adds the X-Tinfoil-Enclave-Url header so
+// the proxy can forward the encrypted request to the right enclave. Only
+// supported with the EHBP transport.
+func WithBaseURL(baseURL string) ClientOption {
+	return func(c *clientConfig) { c.baseURL = baseURL }
+}
+
+// WithAttestationBundleURL fetches the attestation bundle from the given base
+// URL (for example your own proxy) instead of attesting the enclave directly,
+// so the client only needs to reach a single origin. The bundle is still
+// verified client-side. The enclave host is taken from the verified bundle.
+func WithAttestationBundleURL(attestationBundleURL string) ClientOption {
+	return func(c *clientConfig) { c.attestationBundleURL = attestationBundleURL }
 }
 
 // WithOpenAIOptions appends options passed through to the underlying OpenAI client.
@@ -84,26 +109,32 @@ func NewClientWithOptions(opts ...ClientOption) (*Client, error) {
 	}
 
 	var secureClient *client.SecureClient
-	if cfg.enclave == "" {
+	switch {
+	case cfg.attestationBundleURL != "":
+		// The verified bundle supplies the enclave host, so the router lookup
+		// in NewDefaultClient is unnecessary even when no enclave is set.
+		secureClient = client.NewSecureClient(cfg.enclave, cfg.repo)
+		secureClient.SetAttestationBundleURL(cfg.attestationBundleURL)
+	case cfg.enclave == "":
 		var err error
 		secureClient, err = client.NewDefaultClient()
 		if err != nil {
 			return nil, fmt.Errorf("failed to create secure client: %w", err)
 		}
-	} else {
+	default:
 		secureClient = client.NewSecureClient(cfg.enclave, cfg.repo)
 	}
 
-	return createClientFromSecureClient(secureClient, cfg.transport, cfg.openaiOpts...)
+	return createClientFromSecureClient(secureClient, cfg.transport, cfg.baseURL, cfg.openaiOpts...)
 }
 
 // secureHTTPClient builds an *http.Client for the requested transport mode.
-func secureHTTPClient(secureClient *client.SecureClient, mode TransportMode) (*http.Client, error) {
+func secureHTTPClient(secureClient *client.SecureClient, mode TransportMode, baseURL string) (*http.Client, error) {
 	switch mode {
 	case TransportTLS:
 		return tlsPinnedHTTPClient(secureClient)
 	case TransportEHBP, "":
-		return ehbpHTTPClient(secureClient)
+		return ehbpHTTPClient(secureClient, baseURL)
 	default:
 		return nil, fmt.Errorf("unknown transport mode: %q", mode)
 	}
@@ -127,8 +158,10 @@ func tlsPinnedHTTPClient(secureClient *client.SecureClient) (*http.Client, error
 
 // ehbpHTTPClient returns an HTTP client whose request bodies are encrypted to
 // the enclave's attested HPKE public key and that re-verifies attestation when
-// the server rotates its HPKE key.
-func ehbpHTTPClient(secureClient *client.SecureClient) (*http.Client, error) {
+// the server rotates its HPKE key. When baseURL routes requests through a proxy
+// whose origin differs from the enclave's, the client adds the
+// X-Tinfoil-Enclave-Url header so the proxy can forward to the verified enclave.
+func ehbpHTTPClient(secureClient *client.SecureClient, baseURL string) (*http.Client, error) {
 	groundTruth := secureClient.GroundTruth()
 	if groundTruth == nil {
 		var err error
@@ -143,9 +176,62 @@ func ehbpHTTPClient(secureClient *client.SecureClient) (*http.Client, error) {
 		return nil, err
 	}
 
+	var transport http.RoundTripper = newEHBPReVerifyingTransport(secureClient, inner)
+	if headerValue, ok := enclaveURLHeaderValue(baseURL, secureClient.Enclave()); ok {
+		transport = &enclaveURLHeaderTransport{enclaveURL: headerValue, transport: transport}
+	}
+
 	return &http.Client{
-		Transport: newEHBPReVerifyingTransport(secureClient, inner),
+		Transport: transport,
 	}, nil
+}
+
+// enclaveURLHeaderValue returns the X-Tinfoil-Enclave-Url header value and
+// whether it should be injected. The header is only needed when requests are
+// routed through a proxy whose origin differs from the verified enclave's.
+func enclaveURLHeaderValue(baseURL, enclave string) (string, bool) {
+	if baseURL == "" || enclave == "" {
+		return "", false
+	}
+	enclaveURL := "https://" + enclave
+	proxyOrigin, err := originOf(baseURL)
+	if err != nil {
+		return "", false
+	}
+	enclaveOrigin, err := originOf(enclaveURL)
+	if err != nil {
+		return "", false
+	}
+	if proxyOrigin == enclaveOrigin {
+		return "", false
+	}
+	return enclaveURL, true
+}
+
+func originOf(rawURL string) (string, error) {
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return "", err
+	}
+	if u.Host == "" {
+		return "", fmt.Errorf("missing host in URL %q", rawURL)
+	}
+	return u.Scheme + "://" + u.Host, nil
+}
+
+// enclaveURLHeaderTransport injects the X-Tinfoil-Enclave-Url header before
+// delegating to the wrapped transport. EHBP leaves request headers in
+// plaintext, so the header reaches the proxy while the body stays sealed to the
+// enclave's HPKE key.
+type enclaveURLHeaderTransport struct {
+	enclaveURL string
+	transport  http.RoundTripper
+}
+
+func (t *enclaveURLHeaderTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	req = req.Clone(req.Context())
+	req.Header.Set(enclaveURLHeader, t.enclaveURL)
+	return t.transport.RoundTrip(req)
 }
 
 // buildEHBPTransport creates an EHBP round tripper bound to a hex-encoded HPKE

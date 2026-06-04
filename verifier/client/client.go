@@ -38,6 +38,12 @@ type GroundTruth struct {
 type SecureClient struct {
 	enclave, repo string
 
+	// When set, Verify fetches a pre-assembled attestation bundle from
+	// {attestationBundleURL}/attestation and verifies it client-side instead of
+	// attesting the enclave directly. This lets attestation traffic flow through
+	// a proxy so the client only needs to reach a single origin.
+	attestationBundleURL string
+
 	// Pinned measurement mode
 	codeMeasurement      *attestation.Measurement
 	hardwareMeasurements []*attestation.HardwareMeasurement
@@ -118,6 +124,13 @@ func (s *SecureClient) Repo() string {
 	return s.repo
 }
 
+// SetAttestationBundleURL configures the client to fetch and verify a
+// pre-assembled attestation bundle from {url}/attestation instead of attesting
+// the enclave directly. Pass an empty string to restore direct attestation.
+func (s *SecureClient) SetAttestationBundleURL(url string) {
+	s.attestationBundleURL = url
+}
+
 // GroundTruth returns the last verified enclave state
 func (s *SecureClient) GroundTruth() *GroundTruth {
 	return s.groundTruth
@@ -145,6 +158,16 @@ func (s *SecureClient) getSigstoreClient() (*sigstore.Client, error) {
 
 // Verify fetches the latest verification information from GitHub and Sigstore and stores the ground truth results in the client
 func (s *SecureClient) Verify() (*GroundTruth, error) {
+	// When an attestation bundle URL is configured, attest from the bundle so
+	// the enclave does not need to be reached directly (proxy-friendly).
+	if s.attestationBundleURL != "" {
+		bundle, err := attestation.FetchBundleFrom(s.attestationBundleURL)
+		if err != nil {
+			return nil, fmt.Errorf("fetchBundle: failed to fetch attestation bundle: %v", err)
+		}
+		return s.VerifyFromBundle(bundle)
+	}
+
 	var codeMeasurement = s.codeMeasurement
 	var digest = pinnedNoDigest
 	if s.codeMeasurement == nil {
