@@ -107,6 +107,11 @@ func NewClientWithOptions(opts ...ClientOption) (*Client, error) {
 	if cfg.repo == "" {
 		cfg.repo = defaultConfigRepo
 	}
+	// Routing through a proxy base URL relies on EHBP sealing the body to the
+	// enclave; TLS certificate pinning would reject the proxy's certificate.
+	if cfg.baseURL != "" && cfg.transport == TransportTLS {
+		return nil, fmt.Errorf("WithBaseURL is only supported with the EHBP transport")
+	}
 
 	var secureClient *client.SecureClient
 	switch {

@@ -67,6 +67,15 @@ func TestProxyClientOptionsApply(t *testing.T) {
 	require.Equal(t, "https://proxy.example.com", cfg.attestationBundleURL)
 }
 
+func TestNewClientWithOptionsRejectsBaseURLInTLSMode(t *testing.T) {
+	_, err := NewClientWithOptions(
+		WithBaseURL("https://proxy.example.com/"),
+		WithTransport(TransportTLS),
+	)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "EHBP")
+}
+
 func TestEnclaveURLHeaderValue(t *testing.T) {
 	tests := []struct {
 		name    string
