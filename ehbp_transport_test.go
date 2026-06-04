@@ -12,6 +12,7 @@ import (
 
 	"github.com/openai/openai-go/v3"
 	"github.com/openai/openai-go/v3/option"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	ehbpidentity "github.com/tinfoilsh/encrypted-http-body-protocol/identity"
 )
@@ -176,10 +177,14 @@ func TestEHBPReVerifyingTransportSerializesReverify(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			req, err := http.NewRequest(http.MethodGet, "https://enclave.example.com/v1/models", nil)
-			require.NoError(t, err)
+			if !assert.NoError(t, err) {
+				return
+			}
 			resp, err := transport.RoundTrip(req)
-			require.NoError(t, err)
-			require.Equal(t, http.StatusOK, resp.StatusCode)
+			if !assert.NoError(t, err) {
+				return
+			}
+			assert.Equal(t, http.StatusOK, resp.StatusCode)
 		}()
 	}
 	wg.Wait()
