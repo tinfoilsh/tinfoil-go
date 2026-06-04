@@ -99,10 +99,6 @@ func TestEnclaveURLHeaderValue(t *testing.T) {
 	}
 }
 
-type fakeEnclaveSource struct{ host string }
-
-func (f *fakeEnclaveSource) Enclave() string { return f.host }
-
 func TestEnclaveURLHeaderTransportInjectsHeader(t *testing.T) {
 	var seen string
 	inner := roundTripFunc(func(req *http.Request) (*http.Response, error) {
@@ -111,9 +107,8 @@ func TestEnclaveURLHeaderTransportInjectsHeader(t *testing.T) {
 	})
 
 	transport := &enclaveURLHeaderTransport{
-		enclave:   &fakeEnclaveSource{host: "enclave.example.com"},
-		baseURL:   "https://proxy.example.com/",
-		transport: inner,
+		enclaveURL: "https://enclave.example.com",
+		transport:  inner,
 	}
 
 	req, err := http.NewRequest(http.MethodPost, "https://proxy.example.com/v1/chat/completions", bytes.NewBufferString("payload"))
@@ -126,33 +121,43 @@ func TestEnclaveURLHeaderTransportInjectsHeader(t *testing.T) {
 	require.Empty(t, req.Header.Get(enclaveURLHeader), "the original request must not be mutated")
 }
 
-func TestEnclaveURLHeaderTransportReflectsEnclaveChange(t *testing.T) {
-	var seen string
-	inner := roundTripFunc(func(req *http.Request) (*http.Response, error) {
-		seen = req.Header.Get(enclaveURLHeader)
-		return newResponse(http.StatusOK, "ok"), nil
+// TestEHBPReVerifyingTransportRefreshesEnclaveHeaderOnRotation verifies that
+// after a key rotation triggers re-verification, the retried request carries the
+// header for the newly verified enclave rather than a stale one. The header
+// transport is the inner layer that reverify rebuilds, so the retry flows
+// through the refreshed value.
+func TestEHBPReVerifyingTransportRefreshesEnclaveHeaderOnRotation(t *testing.T) {
+	keyErr := ehbpidentity.NewKeyConfigError(fmt.Errorf("key configuration mismatch"))
+
+	var firstHeader, retryHeader string
+	firstInner := roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		firstHeader = req.Header.Get(enclaveURLHeader)
+		return nil, keyErr
+	})
+	secondInner := roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		retryHeader = req.Header.Get(enclaveURLHeader)
+		return newResponse(http.StatusOK, "recovered"), nil
 	})
 
-	source := &fakeEnclaveSource{host: "old.example.com"}
-	transport := &enclaveURLHeaderTransport{
-		enclave:   source,
-		baseURL:   "https://proxy.example.com/",
-		transport: inner,
+	first := &enclaveURLHeaderTransport{enclaveURL: "https://old.example.com", transport: firstInner}
+	second := &enclaveURLHeaderTransport{enclaveURL: "https://new.example.com", transport: secondInner}
+
+	transport := &ehbpReVerifyingTransport{transport: first}
+	transport.reverify = func() (http.RoundTripper, error) {
+		transport.mu.Lock()
+		transport.transport = second
+		transport.mu.Unlock()
+		return second, nil
 	}
 
-	req, err := http.NewRequest(http.MethodPost, "https://proxy.example.com/v1/x", bytes.NewBufferString("p"))
+	req, err := http.NewRequest(http.MethodPost, "https://proxy.example.com/v1/x", bytes.NewBufferString("payload"))
 	require.NoError(t, err)
-	_, err = transport.RoundTrip(req)
-	require.NoError(t, err)
-	require.Equal(t, "https://old.example.com", seen)
 
-	// A re-verification may swap in a different enclave; the header must follow.
-	source.host = "new.example.com"
-	req, err = http.NewRequest(http.MethodPost, "https://proxy.example.com/v1/x", bytes.NewBufferString("p"))
+	resp, err := transport.RoundTrip(req)
 	require.NoError(t, err)
-	_, err = transport.RoundTrip(req)
-	require.NoError(t, err)
-	require.Equal(t, "https://new.example.com", seen)
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	require.Equal(t, "https://old.example.com", firstHeader, "first attempt carries the original enclave header")
+	require.Equal(t, "https://new.example.com", retryHeader, "retry must carry the refreshed enclave header after re-verification")
 }
 
 func TestHostBoundRoundTripperAllowsEnclaveAndProxy(t *testing.T) {

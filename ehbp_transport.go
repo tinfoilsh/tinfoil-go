@@ -241,25 +241,33 @@ func ehbpHTTPClient(secureClient *client.SecureClient, baseURL string) (*http.Cl
 		}
 	}
 
-	inner, err := buildEHBPTransport(groundTruth.HPKEPublicKey)
+	// buildTransport builds an EHBP transport for an attested HPKE key, wrapping
+	// it with the enclave-URL header when requests route through a proxy. The
+	// enclave host is captured here rather than read per request: re-verification
+	// rebuilds the transport with the then-current enclave, which keeps the
+	// header correct (including on the retry that follows a key rotation) without
+	// an unsynchronized read of the client's mutable state.
+	buildTransport := func(hpkePublicKeyHex string) (http.RoundTripper, error) {
+		inner, err := buildEHBPTransport(hpkePublicKeyHex)
+		if err != nil {
+			return nil, err
+		}
+		if headerValue, ok := enclaveURLHeaderValue(baseURL, secureClient.Enclave()); ok {
+			return &enclaveURLHeaderTransport{
+				enclaveURL: headerValue,
+				transport:  inner,
+			}, nil
+		}
+		return inner, nil
+	}
+
+	inner, err := buildTransport(groundTruth.HPKEPublicKey)
 	if err != nil {
 		return nil, err
 	}
 
-	var transport http.RoundTripper = newEHBPReVerifyingTransport(secureClient, inner)
-	// With a proxy base URL, recompute the header per request from the client's
-	// current enclave so it stays correct after a re-verification swaps in a
-	// different enclave (for example when attesting from a bundle).
-	if baseURL != "" {
-		transport = &enclaveURLHeaderTransport{
-			enclave:   secureClient,
-			baseURL:   baseURL,
-			transport: transport,
-		}
-	}
-
 	return &http.Client{
-		Transport: transport,
+		Transport: newEHBPReVerifyingTransport(secureClient, inner, buildTransport),
 	}, nil
 }
 
@@ -299,25 +307,17 @@ func originOf(rawURL string) (string, error) {
 // enclaveURLHeaderTransport injects the X-Tinfoil-Enclave-Url header before
 // delegating to the wrapped transport. EHBP leaves request headers in
 // plaintext, so the header reaches the proxy while the body stays sealed to the
-// enclave's HPKE key.
-// enclaveSource provides the currently verified enclave host. *client.SecureClient
-// satisfies it; the header transport reads it per request so the value follows a
-// re-verification that swaps in a different enclave.
-type enclaveSource interface {
-	Enclave() string
-}
-
+// enclave's HPKE key. The value is captured when the transport is built; a
+// re-verification that swaps in a different enclave rebuilds this transport with
+// the new value, which also keeps every retry pointed at the right enclave.
 type enclaveURLHeaderTransport struct {
-	enclave   enclaveSource
-	baseURL   string
-	transport http.RoundTripper
+	enclaveURL string
+	transport  http.RoundTripper
 }
 
 func (t *enclaveURLHeaderTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	req = req.Clone(req.Context())
-	if headerValue, ok := enclaveURLHeaderValue(t.baseURL, t.enclave.Enclave()); ok {
-		req.Header.Set(enclaveURLHeader, headerValue)
-	}
+	req.Header.Set(enclaveURLHeader, t.enclaveURL)
 	return t.transport.RoundTrip(req)
 }
 
@@ -359,7 +359,7 @@ type ehbpReVerifyingTransport struct {
 	reverify func() (http.RoundTripper, error)
 }
 
-func newEHBPReVerifyingTransport(secureClient *client.SecureClient, inner http.RoundTripper) *ehbpReVerifyingTransport {
+func newEHBPReVerifyingTransport(secureClient *client.SecureClient, inner http.RoundTripper, build func(hpkePublicKeyHex string) (http.RoundTripper, error)) *ehbpReVerifyingTransport {
 	return &ehbpReVerifyingTransport{
 		transport: inner,
 		reverify: func() (http.RoundTripper, error) {
@@ -367,7 +367,7 @@ func newEHBPReVerifyingTransport(secureClient *client.SecureClient, inner http.R
 			if err != nil {
 				return nil, err
 			}
-			return buildEHBPTransport(groundTruth.HPKEPublicKey)
+			return build(groundTruth.HPKEPublicKey)
 		},
 	}
 }
