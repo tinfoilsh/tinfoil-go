@@ -1,6 +1,7 @@
 package attestation
 
 import (
+	"encoding/json"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -184,4 +185,27 @@ func TestAttestationFingerprint(t *testing.T) {
 			assert.Equal(t, tc.expectedEnclaveFingerprint, enclaveFP)
 		})
 	}
+}
+
+func TestFetchBundleFromRejectsNonHTTPS(t *testing.T) {
+	_, err := FetchBundleFrom("http://atc.example")
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "https")
+}
+
+func TestFetchBundleForRejectsNonHTTPS(t *testing.T) {
+	_, err := FetchBundleFor("http://atc.example", "https://enclave.test", "org/repo")
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "https")
+}
+
+func TestBundleRequestJSON(t *testing.T) {
+	b, err := json.Marshal(bundleRequest{EnclaveURL: "https://e.test", Repo: "org/repo"})
+	require.NoError(t, err)
+	require.JSONEq(t, `{"enclaveUrl":"https://e.test","repo":"org/repo"}`, string(b))
+
+	// Empty fields are omitted so the service falls back to its defaults.
+	b, err = json.Marshal(bundleRequest{EnclaveURL: "https://e.test"})
+	require.NoError(t, err)
+	require.JSONEq(t, `{"enclaveUrl":"https://e.test"}`, string(b))
 }

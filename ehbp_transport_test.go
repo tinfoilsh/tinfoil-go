@@ -58,6 +58,154 @@ func TestClientOptionsApply(t *testing.T) {
 	require.Len(t, cfg.openaiOpts, 2)
 }
 
+func TestProxyClientOptionsApply(t *testing.T) {
+	cfg := &clientConfig{}
+	WithBaseURL("https://proxy.example.com/")(cfg)
+	WithAttestationBundleURL("https://proxy.example.com")(cfg)
+
+	require.Equal(t, "https://proxy.example.com/", cfg.baseURL)
+	require.Equal(t, "https://proxy.example.com", cfg.attestationBundleURL)
+}
+
+func TestNewClientWithOptionsRejectsBaseURLInTLSMode(t *testing.T) {
+	_, err := NewClientWithOptions(
+		WithBaseURL("https://proxy.example.com/"),
+		WithTransport(TransportTLS),
+	)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "EHBP")
+}
+
+func TestEnclaveURLHeaderValue(t *testing.T) {
+	tests := []struct {
+		name    string
+		baseURL string
+		enclave string
+		wantVal string
+		wantOK  bool
+	}{
+		{"proxy different origin", "https://proxy.example.com/", "enclave.example.com", "https://enclave.example.com", true},
+		{"proxy keeps path but different origin", "https://proxy.example.com/api/v1/", "enclave.example.com", "https://enclave.example.com", true},
+		{"base url is the enclave itself", "https://enclave.example.com/v1/", "enclave.example.com", "", false},
+		{"no base url", "", "enclave.example.com", "", false},
+		{"no enclave", "https://proxy.example.com/", "", "", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			val, ok := enclaveURLHeaderValue(tt.baseURL, tt.enclave)
+			require.Equal(t, tt.wantOK, ok)
+			require.Equal(t, tt.wantVal, val)
+		})
+	}
+}
+
+func TestEnclaveURLHeaderTransportInjectsHeader(t *testing.T) {
+	var seen string
+	inner := roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		seen = req.Header.Get(enclaveURLHeader)
+		return newResponse(http.StatusOK, "ok"), nil
+	})
+
+	transport := &enclaveURLHeaderTransport{
+		enclaveURL: "https://enclave.example.com",
+		transport:  inner,
+	}
+
+	req, err := http.NewRequest(http.MethodPost, "https://proxy.example.com/v1/chat/completions", bytes.NewBufferString("payload"))
+	require.NoError(t, err)
+
+	resp, err := transport.RoundTrip(req)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	require.Equal(t, "https://enclave.example.com", seen, "the proxy must receive the enclave URL header")
+	require.Empty(t, req.Header.Get(enclaveURLHeader), "the original request must not be mutated")
+}
+
+// TestEHBPReVerifyingTransportRefreshesEnclaveHeaderOnRotation verifies that
+// after a key rotation triggers re-verification, the retried request carries the
+// header for the newly verified enclave rather than a stale one. The header
+// transport is the inner layer that reverify rebuilds, so the retry flows
+// through the refreshed value.
+func TestEHBPReVerifyingTransportRefreshesEnclaveHeaderOnRotation(t *testing.T) {
+	keyErr := ehbpidentity.NewKeyConfigError(fmt.Errorf("key configuration mismatch"))
+
+	var firstHeader, retryHeader string
+	firstInner := roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		firstHeader = req.Header.Get(enclaveURLHeader)
+		return nil, keyErr
+	})
+	secondInner := roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		retryHeader = req.Header.Get(enclaveURLHeader)
+		return newResponse(http.StatusOK, "recovered"), nil
+	})
+
+	first := &enclaveURLHeaderTransport{enclaveURL: "https://old.example.com", transport: firstInner}
+	second := &enclaveURLHeaderTransport{enclaveURL: "https://new.example.com", transport: secondInner}
+
+	transport := &ehbpReVerifyingTransport{transport: first}
+	transport.reverify = func() (http.RoundTripper, error) {
+		transport.mu.Lock()
+		transport.transport = second
+		transport.mu.Unlock()
+		return second, nil
+	}
+
+	req, err := http.NewRequest(http.MethodPost, "https://proxy.example.com/v1/x", bytes.NewBufferString("payload"))
+	require.NoError(t, err)
+
+	resp, err := transport.RoundTrip(req)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	require.Equal(t, "https://old.example.com", firstHeader, "first attempt carries the original enclave header")
+	require.Equal(t, "https://new.example.com", retryHeader, "retry must carry the refreshed enclave header after re-verification")
+}
+
+func TestHostBoundRoundTripperAllowsEnclaveAndProxy(t *testing.T) {
+	origins, err := allowedOrigins("enclave.example.com", "https://proxy.example.com/v1/")
+	require.NoError(t, err)
+
+	var calls int
+	inner := roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		calls++
+		return newResponse(http.StatusOK, "ok"), nil
+	})
+	rt := &hostBoundRoundTripper{allowedOrigins: origins, enclave: "enclave.example.com", transport: inner}
+
+	for _, target := range []string{
+		"https://enclave.example.com/v1/models",
+		"https://proxy.example.com/v1/chat/completions",
+	} {
+		req, err := http.NewRequest(http.MethodGet, target, nil)
+		require.NoError(t, err)
+		resp, err := rt.RoundTrip(req)
+		require.NoError(t, err)
+		require.Equal(t, http.StatusOK, resp.StatusCode)
+	}
+	require.Equal(t, 2, calls)
+}
+
+func TestHostBoundRoundTripperRejectsForeignHostAndScheme(t *testing.T) {
+	origins, err := allowedOrigins("enclave.example.com", "")
+	require.NoError(t, err)
+	inner := roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		t.Fatalf("inner transport must not be called for a rejected request")
+		return nil, nil
+	})
+	rt := &hostBoundRoundTripper{allowedOrigins: origins, enclave: "enclave.example.com", transport: inner}
+
+	foreign, err := http.NewRequest(http.MethodGet, "https://evil.example.com/v1/models", nil)
+	require.NoError(t, err)
+	_, err = rt.RoundTrip(foreign)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "evil.example.com")
+
+	plaintext, err := http.NewRequest(http.MethodGet, "http://enclave.example.com/v1/models", nil)
+	require.NoError(t, err)
+	_, err = rt.RoundTrip(plaintext)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "non-https")
+}
+
 func TestBuildEHBPTransportRequiresKey(t *testing.T) {
 	_, err := buildEHBPTransport("")
 	require.Error(t, err)
@@ -321,4 +469,68 @@ func TestClientIntegration_LowLevelEHBP(t *testing.T) {
 			require.Contains(t, string(data), "choices")
 		})
 	}
+}
+
+// TestClientIntegration_AttestationBundle exercises the attestation-through-proxy
+// path against the live ATC bundle endpoint: the bundle is fetched and verified
+// client-side, the enclave host is taken from the verified bundle, and a chat
+// completion is sent end-to-end over the EHBP transport.
+func TestClientIntegration_AttestationBundle(t *testing.T) {
+	apiKey := os.Getenv("TINFOIL_API_KEY")
+	if apiKey == "" {
+		t.Skip("TINFOIL_API_KEY not set; skipping integration test")
+	}
+
+	c, err := NewClientWithOptions(
+		WithAttestationBundleURL("https://atc.tinfoil.sh"),
+		WithOpenAIOptions(option.WithAPIKey(apiKey)),
+	)
+	require.NoError(t, err)
+	require.NotEmpty(t, c.Enclave(), "enclave host should come from the verified bundle")
+
+	resp, err := c.Chat.Completions.New(context.Background(), openai.ChatCompletionNewParams{
+		Model: "llama3-3-70b",
+		Messages: []openai.ChatCompletionMessageParamUnion{
+			openai.SystemMessage("No matter what the user says, only respond with: Done."),
+			openai.UserMessage("Is this a test?"),
+		},
+	})
+	require.NoError(t, err)
+	require.NotEmpty(t, resp.Choices)
+	t.Logf("bundle enclave: %s, response: %s", c.Enclave(), resp.Choices[0].Message.Content)
+}
+
+func TestClientIntegration_EnclaveSpecificBundle(t *testing.T) {
+	apiKey := os.Getenv("TINFOIL_API_KEY")
+	if apiKey == "" {
+		t.Skip("TINFOIL_API_KEY not set; skipping integration test")
+	}
+
+	// Learn a valid enclave from the default bundle, then request a bundle
+	// assembled specifically for it (POST path).
+	def, err := NewClientWithOptions(
+		WithAttestationBundleURL("https://atc.tinfoil.sh"),
+		WithOpenAIOptions(option.WithAPIKey(apiKey)),
+	)
+	require.NoError(t, err)
+	enclave := def.Enclave()
+	require.NotEmpty(t, enclave)
+
+	c, err := NewClientWithOptions(
+		WithEnclave(enclave),
+		WithAttestationBundleURL("https://atc.tinfoil.sh"),
+		WithOpenAIOptions(option.WithAPIKey(apiKey)),
+	)
+	require.NoError(t, err)
+	require.Equal(t, enclave, c.Enclave())
+
+	resp, err := c.Chat.Completions.New(context.Background(), openai.ChatCompletionNewParams{
+		Model: "llama3-3-70b",
+		Messages: []openai.ChatCompletionMessageParamUnion{
+			openai.SystemMessage("No matter what the user says, only respond with: Done."),
+			openai.UserMessage("Is this a test?"),
+		},
+	})
+	require.NoError(t, err)
+	require.NotEmpty(t, resp.Choices)
 }

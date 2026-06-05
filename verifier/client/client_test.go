@@ -98,6 +98,19 @@ func TestVerifyFromBundle(t *testing.T) {
 	assert.Equal(t, bundle.Digest, groundTruth.Digest)
 }
 
+func TestVerifyRejectsPinnedMeasurementWithBundle(t *testing.T) {
+	codeMeasurement := &attestation.Measurement{
+		Type:      attestation.SnpTdxMultiPlatformV1,
+		Registers: []string{"a", "b"},
+	}
+	client := NewPinnedSecureClient("enclave.test", codeMeasurement, nil)
+	client.SetAttestationBundleURL("https://atc.example")
+
+	_, err := client.Verify()
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "cannot combine")
+}
+
 func TestVerifyFromBundleJSON(t *testing.T) {
 	bundle, err := attestation.FetchBundle()
 	assert.NoError(t, err)

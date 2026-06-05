@@ -77,7 +77,7 @@ type Client struct {
 // NewClientWithParams creates a new secure OpenAI client with explicit enclave and repo parameters
 func NewClientWithParams(enclave, repo string, openaiOpts ...option.RequestOption) (*Client, error) {
 	secureClient := client.NewSecureClient(enclave, repo)
-	return createClientFromSecureClient(secureClient, defaultTransportMode, openaiOpts...)
+	return createClientFromSecureClient(secureClient, defaultTransportMode, "", openaiOpts...)
 }
 
 // NewClient creates a new secure OpenAI client using default parameters
@@ -86,20 +86,27 @@ func NewClient(openaiOpts ...option.RequestOption) (*Client, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to create secure client: %w", err)
 	}
-	return createClientFromSecureClient(secureClient, defaultTransportMode, openaiOpts...)
+	return createClientFromSecureClient(secureClient, defaultTransportMode, "", openaiOpts...)
 }
 
 // createClientFromSecureClient is a helper function to create a Client from a SecureClient
-func createClientFromSecureClient(secureClient *client.SecureClient, mode TransportMode, openaiOpts ...option.RequestOption) (*Client, error) {
-	httpClient, err := secureHTTPClient(secureClient, mode)
+func createClientFromSecureClient(secureClient *client.SecureClient, mode TransportMode, baseURL string, openaiOpts ...option.RequestOption) (*Client, error) {
+	httpClient, err := secureHTTPClient(secureClient, mode, baseURL)
 	if err != nil {
 		return nil, err
+	}
+
+	// Route requests through the proxy base URL when set, otherwise straight to
+	// the verified enclave.
+	resolvedBaseURL := baseURL
+	if resolvedBaseURL == "" {
+		resolvedBaseURL = fmt.Sprintf("https://%s/v1/", secureClient.Enclave())
 	}
 
 	// Add our HTTP client and base URL to the options
 	allOpts := append(openaiOpts,
 		option.WithHTTPClient(httpClient),
-		option.WithBaseURL(fmt.Sprintf("https://%s/v1/", secureClient.Enclave())),
+		option.WithBaseURL(resolvedBaseURL),
 	)
 
 	openaiClient := openai.NewClient(allOpts...)
@@ -131,9 +138,11 @@ func (c *Client) Verify() (*client.GroundTruth, error) {
 	return c.secureClient.Verify()
 }
 
-// HTTPClient returns the underlying HTTP client that is configured with
-// automatic certificate re-verification and is restricted to TLS connections
-// to the verified enclave. This can be used for secure, direct HTTP requests
+// HTTPClient returns the underlying HTTP client used to reach the enclave. It
+// re-verifies attestation automatically when the enclave rotates its key, and
+// it is bound to the verified enclave (and the configured proxy, if any):
+// requests to any other host, or over plain http, are refused because request
+// headers are not encrypted. This can be used for secure, direct HTTP requests
 // to the enclave.
 func (c *Client) HTTPClient() *http.Client {
 	return c.httpClient

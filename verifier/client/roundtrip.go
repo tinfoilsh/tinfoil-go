@@ -1,13 +1,10 @@
 package client
 
 import (
-	"context"
 	"crypto/tls"
 	"errors"
-	"net"
 	"net/http"
 	"sync"
-	"time"
 
 	"github.com/tinfoilsh/tinfoil-go/verifier/attestation"
 )
@@ -29,42 +26,37 @@ var _ http.RoundTripper = &TLSBoundRoundTripper{}
 func (t *TLSBoundRoundTripper) getTransport() *http.Transport {
 	t.once.Do(func() {
 		// Clone DefaultTransport settings for timeouts, proxy, keep-alive, etc.
-		// then override DialTLSContext to inject our certificate pinning check.
+		// then verify the attested public key after normal TLS verification.
+		// VerifyConnection runs for direct HTTPS and HTTPS-over-CONNECT proxy
+		// connections; DialTLSContext only covers non-proxied HTTPS.
 		dt := http.DefaultTransport.(*http.Transport).Clone()
-		dt.DialTLSContext = t.dialTLSContext
+
+		tlsConfig := &tls.Config{}
+		if dt.TLSClientConfig != nil {
+			tlsConfig = dt.TLSClientConfig.Clone()
+		}
+		prevVerifyConnection := tlsConfig.VerifyConnection
+		tlsConfig.VerifyConnection = func(state tls.ConnectionState) error {
+			if prevVerifyConnection != nil {
+				if err := prevVerifyConnection(state); err != nil {
+					return err
+				}
+			}
+
+			certFP, err := attestation.ConnectionCertFP(state)
+			if err != nil {
+				return err
+			}
+			if certFP != t.ExpectedPublicKey {
+				return ErrCertMismatch
+			}
+			return nil
+		}
+
+		dt.TLSClientConfig = tlsConfig
 		t.transport = dt
 	})
 	return t.transport
-}
-
-// dialTLSContext performs the TLS handshake and verifies the certificate
-// fingerprint BEFORE any HTTP request data is sent over the connection.
-func (t *TLSBoundRoundTripper) dialTLSContext(ctx context.Context, network, addr string) (net.Conn, error) {
-	dialer := &tls.Dialer{
-		NetDialer: &net.Dialer{Timeout: 30 * time.Second},
-	}
-	conn, err := dialer.DialContext(ctx, network, addr)
-	if err != nil {
-		return nil, err
-	}
-
-	tlsConn, ok := conn.(*tls.Conn)
-	if !ok {
-		conn.Close()
-		return nil, ErrNoTLS
-	}
-
-	certFP, err := attestation.ConnectionCertFP(tlsConn.ConnectionState())
-	if err != nil {
-		conn.Close()
-		return nil, err
-	}
-	if certFP != t.ExpectedPublicKey {
-		conn.Close()
-		return nil, ErrCertMismatch
-	}
-
-	return conn, nil
 }
 
 func (t *TLSBoundRoundTripper) RoundTrip(r *http.Request) (*http.Response, error) {
