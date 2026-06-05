@@ -61,6 +61,10 @@ func main() {
 		os.Exit(cmdVerifyHardwareMeasurements())
 	case "verify-attestation-tdx":
 		os.Exit(cmdVerifyAttestationTDX())
+	case "verify-attestation-sev":
+		os.Exit(cmdVerifyAttestationSEV())
+	case "verify-full":
+		os.Exit(cmdVerifyFull())
 	case "", "help", "-h", "--help":
 		printHelp()
 		os.Exit(0)
@@ -104,6 +108,8 @@ func cmdCapabilities() int {
 			"verify-measurement",
 			"verify-hardware-measurements",
 			"verify-attestation-tdx",
+			"verify-attestation-sev",
+			"verify-full",
 		},
 		"sigstore": map[string]any{
 			"trust_root_loading": "configurable",
@@ -162,6 +168,21 @@ func cmdCapabilities() int {
 		"measurement": map[string]any{
 			"compare_multiplatform_to_tdx_supported": true,
 		},
+		"attestation_sev": map[string]any{
+			// Phase 1 wired: cmd/tinfoil-conformance/verify_attestation_sev.go
+			// wraps google/go-sev-guest's verify.SnpAttestation with a VCEK
+			// cert injected via input.vcek_der_b64.
+			"supported":                     true,
+			"injected_collateral_supported": true,
+			// enforceSevPolicy applies SPEC §3.7 / §3.8 / §8.2-3 pins from
+			// policy.expected_*_hex + enforce_spec_defaults.
+			"extended_checks_supported":  true,
+			"verification_time_override": "supported",
+			// input.amd_root_ca_pem + input.ask_pem swap go-sev-guest's
+			// TrustedRoots with the fixture's synthetic ARK+ASK chain and
+			// set DisableCertFetching=true. Required for Phase 4B-SEV.
+			"amd_root_ca_injection_supported": true,
+		},
 		"attestation_tdx": map[string]any{
 			// Phase 1.5 wired: cmd/tinfoil-conformance/verify_attestation_tdx.go
 			// wraps google/go-tdx-guest's verify.TdxQuote with an in-process
@@ -190,7 +211,7 @@ func cmdCapabilities() int {
 		},
 		"platforms_supported":       []string{"sev-snp", "tdx"},
 		"transport_modes_supported": []string{"tls-pinning", "ehbp"},
-		"flow_modes_supported":      []string{"standard"},
+		"flow_modes_supported":      []string{"standard", "bundle", "pinned"},
 		"known_quirks": map[string]any{
 			"sigstore.workflow_ref_check_via_extension": "Workflow_ref policy is enforced as a post-verification startsWith() check against the cert's .1.6 extension; sigstore-go's NewShortCertificateIdentity does a SAN regex on BuildSignerURI which is SPEC §5.3-non-canonical.",
 		},
