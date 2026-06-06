@@ -210,7 +210,12 @@ func cmdCapabilities() int {
 			"accepts_non_terminal_tcb_statuses": false,
 		},
 		"platforms_supported":       []string{"sev-snp", "tdx"},
-		"transport_modes_supported": []string{"tls-pinning", "ehbp"},
+		// tinfoil-go's client only implements TLS pinning today. The
+		// previous "ehbp" entry was aspirational — there's no HPKE
+		// crypto stack in the lib, so a fixture gating on "ehbp" would
+		// pass capabilities and then fail when the binary couldn't
+		// actually run it. Honest declaration only.
+		"transport_modes_supported": []string{"tls-pinning"},
 		"flow_modes_supported":      []string{"standard", "bundle", "pinned"},
 		"known_quirks": map[string]any{
 			"sigstore.workflow_ref_check_via_extension": "Workflow_ref policy is enforced as a post-verification startsWith() check against the cert's .1.6 extension; sigstore-go's NewShortCertificateIdentity does a SAN regex on BuildSignerURI which is SPEC §5.3-non-canonical.",
