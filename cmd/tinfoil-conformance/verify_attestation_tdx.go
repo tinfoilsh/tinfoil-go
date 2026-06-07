@@ -59,20 +59,21 @@ func withStdoutSilenced(fn func()) {
 }
 
 type tdxCollateralInput struct {
-	TcbInfoJSON                  string `json:"tcb_info_json"`
-	QeIdentityJSON               string `json:"qe_identity_json"`
-	PckCRLDerB64                 string `json:"pck_crl_der_b64"`
-	RootCRLDerB64                string `json:"root_crl_der_b64"`
-	IntelRootCAPEM               string `json:"intel_root_ca_pem"`
-	TcbInfoIssuerChainPEM        string `json:"tcb_info_issuer_chain_pem"`
-	QeIdentityIssuerChainPEM     string `json:"qe_identity_issuer_chain_pem"`
-	PckCRLIssuerChainPEM         string `json:"pck_crl_issuer_chain_pem"`
+	TcbInfoJSON              string `json:"tcb_info_json"`
+	QeIdentityJSON           string `json:"qe_identity_json"`
+	PckCRLDerB64             string `json:"pck_crl_der_b64"`
+	RootCRLDerB64            string `json:"root_crl_der_b64"`
+	IntelRootCAPEM           string `json:"intel_root_ca_pem"`
+	TcbInfoIssuerChainPEM    string `json:"tcb_info_issuer_chain_pem"`
+	QeIdentityIssuerChainPEM string `json:"qe_identity_issuer_chain_pem"`
+	PckCRLIssuerChainPEM     string `json:"pck_crl_issuer_chain_pem"`
 }
 
 type tdxPolicyInput struct {
-	AcceptedQvResults     []string `json:"accepted_qv_results"`
-	ExpectedFmspcHex      string   `json:"expected_fmspc_hex"`
-	TcbEvaluationRequired *bool    `json:"tcb_evaluation_required"`
+	AcceptedQvResults          []string `json:"accepted_qv_results"`
+	ExpectedFmspcHex           string   `json:"expected_fmspc_hex"`
+	TcbEvaluationRequired      *bool    `json:"tcb_evaluation_required"`
+	MinTcbEvaluationDataNumber *int     `json:"min_tcb_evaluation_data_number"`
 
 	// Phase 4 — Intel §2.3.2 / SPEC §4.8 extended TD checks. Each is
 	// optional; only fields set in the fixture get enforced.
@@ -246,6 +247,10 @@ func cmdVerifyAttestationTDX() int {
 		return emitTdxRejection(code, ref, verifyErr.Error())
 	}
 
+	if code, msg := enforceTcbEvaluationDataNumberPolicy(in); code != "" {
+		return emitTdxRejection(code, "4.7.11", msg)
+	}
+
 	// Phase 4: extended-TD policy checks (SPEC §4.8 / Intel §2.3.2). Each
 	// pin is optional; only enforced when the fixture sets the policy
 	// field. The unmutated quote's body fields are deterministic so
@@ -275,6 +280,43 @@ func cmdVerifyAttestationTDX() int {
 	return exitAccept
 }
 
+func enforceTcbEvaluationDataNumberPolicy(in verifyAttestationTdxInput) (string, string) {
+	if in.Policy == nil || in.Policy.MinTcbEvaluationDataNumber == nil {
+		return "", ""
+	}
+	minimum := *in.Policy.MinTcbEvaluationDataNumber
+	var tcb struct {
+		TcbInfo struct {
+			TcbEvaluationDataNumber int `json:"tcbEvaluationDataNumber"`
+		} `json:"tcbInfo"`
+	}
+	if err := json.Unmarshal([]byte(in.Collateral.TcbInfoJSON), &tcb); err != nil {
+		return "QV_RESULT_TERMINAL_UNSPECIFIED",
+			fmt.Sprintf("failed to parse TCB Info for tcbEvaluationDataNumber policy: %v", err)
+	}
+	if tcb.TcbInfo.TcbEvaluationDataNumber < minimum {
+		return "TCB_EVAL_DATA_NUMBER_TOO_LOW",
+			fmt.Sprintf("TCB Info tcbEvaluationDataNumber %d below minimum %d",
+				tcb.TcbInfo.TcbEvaluationDataNumber, minimum)
+	}
+
+	var qe struct {
+		EnclaveIdentity struct {
+			TcbEvaluationDataNumber int `json:"tcbEvaluationDataNumber"`
+		} `json:"enclaveIdentity"`
+	}
+	if err := json.Unmarshal([]byte(in.Collateral.QeIdentityJSON), &qe); err != nil {
+		return "QV_RESULT_TERMINAL_UNSPECIFIED",
+			fmt.Sprintf("failed to parse QE Identity for tcbEvaluationDataNumber policy: %v", err)
+	}
+	if qe.EnclaveIdentity.TcbEvaluationDataNumber < minimum {
+		return "TCB_EVAL_DATA_NUMBER_TOO_LOW",
+			fmt.Sprintf("QE Identity tcbEvaluationDataNumber %d below minimum %d",
+				qe.EnclaveIdentity.TcbEvaluationDataNumber, minimum)
+	}
+	return "", ""
+}
+
 // classifyTdxError maps a go-tdx-guest error to a SPEC-anchored rejection
 // code. Recognized sentinels first; substring fallthrough for messages from
 // deeper layers (abi parser, signature verify) where no sentinel exists.
@@ -287,9 +329,10 @@ func classifyTdxError(err error) (string, string) {
 		return "PCK_CHAIN_INVALID", "4.2"
 	case errors.Is(err, tdxverify.ErrMissingRootCaCrl):
 		return "ROOT_CA_UNTRUSTED", "4.1.2"
-	case errors.Is(err, tdxverify.ErrRootCaCrlExpired),
-		errors.Is(err, tdxverify.ErrPCKCrlExpired):
-		return "PCK_REVOKED", "4.2"
+	case errors.Is(err, tdxverify.ErrPCKCrlExpired):
+		return "PCK_CRL_EXPIRED", "4.7.4"
+	case errors.Is(err, tdxverify.ErrRootCaCrlExpired):
+		return "ROOT_CRL_EXPIRED", "4.7.4"
 	case errors.Is(err, tdxverify.ErrMissingTcbInfoBody),
 		errors.Is(err, tdxverify.ErrTcbInfoNil),
 		errors.Is(err, tdxverify.ErrMissingTcbInfoSigningCert),
@@ -334,8 +377,22 @@ func classifyTdxError(err error) (string, string) {
 		strings.Contains(low, "too short"):
 		return "QUOTE_TRUNCATED", "A.3"
 
+	// QE-report signature failures mention the PCK leaf because it signs
+	// the QE report; classify this before generic PCK-chain matching.
+	case strings.Contains(low, "qe report") && strings.Contains(low, "signature"):
+		return "QE_REPORT_SIGNATURE_INVALID", "4.4"
+
 	// CRL / revocation (BEFORE the chain matchers — CRL error messages
 	// often include "PCK Certificate chain" as context).
+	case strings.Contains(low, "pck crl") && strings.Contains(low, "expired"):
+		return "PCK_CRL_EXPIRED", "4.7.4"
+	case (strings.Contains(low, "root ca crl") || strings.Contains(low, "root crl")) &&
+		strings.Contains(low, "expired"):
+		return "ROOT_CRL_EXPIRED", "4.7.4"
+	case strings.Contains(low, "intermediate") && strings.Contains(low, "revoked"):
+		return "INTERMEDIATE_REVOKED", "4.7.4"
+	case strings.Contains(low, "pck certificate") && strings.Contains(low, "revoked"):
+		return "PCK_REVOKED", "4.7.4"
 	case strings.Contains(low, "pck crl"),
 		strings.Contains(low, "pck cert revocation"):
 		return "PCK_REVOKED", "4.7"
@@ -348,6 +405,12 @@ func classifyTdxError(err error) (string, string) {
 		if strings.Contains(low, "expired") {
 			return "TCB_INFO_EXPIRED", "4.7"
 		}
+		if strings.Contains(low, "response body") || strings.Contains(low, "signature") {
+			return "TCB_INFO_SIGNATURE_INVALID", "4.7"
+		}
+		if strings.Contains(low, "chain") || strings.Contains(low, "root cert") || strings.Contains(low, "signing cert") {
+			return "TCB_INFO_CHAIN_INVALID", "4.7.3"
+		}
 		if strings.Contains(low, "no matching tcb") || strings.Contains(low, "tcb status") {
 			return "TCB_REVOKED", "4.7"
 		}
@@ -355,6 +418,24 @@ func classifyTdxError(err error) (string, string) {
 	case strings.Contains(low, "qe identity") || strings.Contains(low, "qeidentity") || strings.Contains(low, "enclave identity"):
 		if strings.Contains(low, "expired") {
 			return "QE_IDENTITY_EXPIRED", "4.7"
+		}
+		if strings.Contains(low, "version") {
+			return "QE_IDENTITY_VERSION_INVALID", "4.7.9"
+		}
+		if strings.Contains(low, "mrsigner") || strings.Contains(low, "mr_signer") {
+			return "QE_IDENTITY_MRSIGNER_MISMATCH", "4.7.9"
+		}
+		if strings.Contains(low, "miscselect") ||
+			strings.Contains(low, "attributes") ||
+			strings.Contains(low, "isvprodid") ||
+			strings.Contains(low, "isv prod") {
+			return "QE_IDENTITY_FIELD_MISMATCH", "4.7.9"
+		}
+		if strings.Contains(low, "identity id") ||
+			strings.Contains(low, "expected id") ||
+			strings.Contains(low, "id \"") ||
+			strings.Contains(low, "td_qe") {
+			return "QE_IDENTITY_ID_INVALID", "4.7.9"
 		}
 		return "QE_IDENTITY_SIGNATURE_INVALID", "4.7"
 
@@ -372,9 +453,19 @@ func classifyTdxError(err error) (string, string) {
 		return "PCK_CHAIN_INVALID", "4.2"
 
 	// AK / quote signature (generic "signature" — must come after chain):
+	case strings.Contains(low, "attestation key") &&
+		(strings.Contains(low, "bind") || strings.Contains(low, "report data")):
+		return "AK_BINDING_INVALID", "4.5"
 	case strings.Contains(low, "ecdsa attestation key"),
 		strings.Contains(low, "quote's signature"):
 		return "QUOTE_SIGNATURE_INVALID", "4.3"
+	case strings.Contains(low, "mrsigner") || strings.Contains(low, "mr_signer"):
+		return "QE_IDENTITY_MRSIGNER_MISMATCH", "4.7.9"
+	case strings.Contains(low, "miscselect") ||
+		strings.Contains(low, "attributes") ||
+		strings.Contains(low, "isvprodid") ||
+		strings.Contains(low, "isv prod"):
+		return "QE_IDENTITY_FIELD_MISMATCH", "4.7.9"
 	case strings.Contains(low, "qe report"):
 		return "QE_REPORT_SIGNATURE_INVALID", "4.4"
 	case strings.Contains(low, "signature"):
@@ -474,24 +565,24 @@ func buildTdxOutputs(quote any, rawQuote []byte) (map[string]any, error) {
 				"user_data_hex":        hex.EncodeToString(userData),
 			},
 			"body_fields": map[string]any{
-				"tee_tcb_svn_hex":        hex.EncodeToString(teeTcbSvn),
-				"mrseam_hex":             hex.EncodeToString(mrSeam),
-				"mrsignerseam_hex":       hex.EncodeToString(mrSignerSeam),
-				"seam_attributes_hex":    hex.EncodeToString(seamAttrs),
-				"td_attributes_hex":      hex.EncodeToString(tdAttrs),
-				"td_attributes_decoded":  tdDecoded,
-				"xfam_hex":               hex.EncodeToString(xfam),
-				"mrtd_hex":               hex.EncodeToString(mrTd),
-				"mrconfigid_hex":         hex.EncodeToString(mrConfigID),
-				"mrowner_hex":            hex.EncodeToString(mrOwner),
-				"mrownerconfig_hex":      hex.EncodeToString(mrOwnerConfig),
+				"tee_tcb_svn_hex":       hex.EncodeToString(teeTcbSvn),
+				"mrseam_hex":            hex.EncodeToString(mrSeam),
+				"mrsignerseam_hex":      hex.EncodeToString(mrSignerSeam),
+				"seam_attributes_hex":   hex.EncodeToString(seamAttrs),
+				"td_attributes_hex":     hex.EncodeToString(tdAttrs),
+				"td_attributes_decoded": tdDecoded,
+				"xfam_hex":              hex.EncodeToString(xfam),
+				"mrtd_hex":              hex.EncodeToString(mrTd),
+				"mrconfigid_hex":        hex.EncodeToString(mrConfigID),
+				"mrowner_hex":           hex.EncodeToString(mrOwner),
+				"mrownerconfig_hex":     hex.EncodeToString(mrOwnerConfig),
 				"rtmrs_hex": []string{
 					hex.EncodeToString(rtmr0),
 					hex.EncodeToString(rtmr1),
 					hex.EncodeToString(rtmr2),
 					hex.EncodeToString(rtmr3),
 				},
-				"report_data_hex":        hex.EncodeToString(reportData),
+				"report_data_hex": hex.EncodeToString(reportData),
 			},
 		},
 	}

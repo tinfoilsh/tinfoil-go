@@ -100,9 +100,9 @@ func sdkVersion() string {
 
 func cmdCapabilities() int {
 	caps := map[string]any{
-		"schema_version":   "1",
-		"sdk":              sdkName,
-		"sdk_version":      sdkVersion(),
+		"schema_version": "1",
+		"sdk":            sdkName,
+		"sdk_version":    sdkVersion(),
 		"stages_supported": []string{
 			"verify-sigstore",
 			"verify-measurement",
@@ -207,9 +207,14 @@ func cmdCapabilities() int {
 			// status into a single rejection (strict-only). SPEC §4.7.7
 			// would let SWHardeningNeeded etc. through with permissive
 			// policy; lib doesn't expose that knob.
-			"accepts_non_terminal_tcb_statuses": false,
+			"accepts_non_terminal_tcb_statuses":           false,
+			"enforces_tcb_evaluation_data_number_minimum": true,
+			"policy_fields_supported": map[string]any{
+				"expected_fmspc_hex":  false,
+				"accepted_qv_results": false,
+			},
 		},
-		"platforms_supported":       []string{"sev-snp", "tdx"},
+		"platforms_supported": []string{"sev-snp", "tdx"},
 		// tinfoil-go's client only implements TLS pinning today. The
 		// previous "ehbp" entry was aspirational — there's no HPKE
 		// crypto stack in the lib, so a fixture gating on "ehbp" would
