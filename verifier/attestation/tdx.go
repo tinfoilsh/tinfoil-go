@@ -223,7 +223,20 @@ func parseNextUpdate(requestURL string, body []byte) time.Time {
 	return time.Time{}
 }
 
+func defaultTdxVerifyOptions() *verify.Options {
+	opts := verify.DefaultOptions()
+	opts.Getter = NewTDXGetter(WithProxyServer("tdx-proxy.tinfoil.sh"), WithCachePrefetchDuration(time.Hour))
+	opts.TrustedRoots = intelRootCertPool
+	opts.GetCollateral = true
+	opts.CheckRevocations = true
+	return opts
+}
+
 func verifyTdxReport(attestationDoc string, isCompressed bool) ([]string, []byte, error) {
+	return verifyTdxReportWithVerifyOptions(attestationDoc, isCompressed, defaultTdxVerifyOptions())
+}
+
+func verifyTdxReportWithVerifyOptions(attestationDoc string, isCompressed bool, opts *verify.Options) ([]string, []byte, error) {
 	attDocBytes, err := base64.StdEncoding.DecodeString(attestationDoc)
 	if err != nil {
 		return nil, nil, err
@@ -236,11 +249,9 @@ func verifyTdxReport(attestationDoc string, isCompressed bool) ([]string, []byte
 		}
 	}
 
-	opts := verify.DefaultOptions()
-	opts.Getter = NewTDXGetter(WithProxyServer("tdx-proxy.tinfoil.sh"), WithCachePrefetchDuration(time.Hour))
-	opts.TrustedRoots = intelRootCertPool
-	opts.GetCollateral = true
-	opts.CheckRevocations = true
+	if opts == nil {
+		opts = defaultTdxVerifyOptions()
+	}
 
 	parsedReport, err := abi.QuoteToProto(attDocBytes)
 	if err != nil {

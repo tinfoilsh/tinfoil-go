@@ -199,6 +199,10 @@ func cmdCapabilities() int {
 			// §4.7 evaluation: PCK/Root CRL, TCB Info, QE Identity, TCB
 			// level matching.
 			"tcb_evaluation_supported": true,
+			// execution_mode=public_api builds a verifier/attestation.Document
+			// and calls the SDK public TDX verification path. The hook API is
+			// compiled only into conformance builds with -tags tinfoil_conformance.
+			"public_api_hooks_supported": tdxPublicAPIHooksSupported,
 			// Phase 4: cmd_verify_attestation_tdx.enforceExtendedPolicy
 			// applies SPEC §4.8 / Intel §2.3.2 checks against every
 			// policy.expected_*_hex pin the fixture sets.

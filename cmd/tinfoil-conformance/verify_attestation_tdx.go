@@ -19,7 +19,6 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
-	"encoding/pem"
 	"errors"
 	"fmt"
 	"io"
@@ -31,7 +30,6 @@ import (
 	tdxabi "github.com/google/go-tdx-guest/abi"
 	tdxtesting "github.com/google/go-tdx-guest/testing"
 	tdxverify "github.com/google/go-tdx-guest/verify"
-	tdxtrust "github.com/google/go-tdx-guest/verify/trust"
 
 	"syscall"
 )
@@ -95,6 +93,7 @@ type tdxPolicyInput struct {
 
 type verifyAttestationTdxInput struct {
 	SchemaVersion           string             `json:"schema_version"`
+	ExecutionMode           string             `json:"execution_mode"`
 	QuoteB64                string             `json:"quote_b64"`
 	Collateral              tdxCollateralInput `json:"collateral"`
 	ExpirationCheckDateUnix int64              `json:"expiration_check_date_unix"`
@@ -139,6 +138,25 @@ func (g *injectedGetter) Get(rawURL string) (map[string][]string, []byte, error)
 // using url.QueryEscape produces a round-trippable encoding.
 func pemToURLEncoded(pem string) string {
 	return urlpkg.QueryEscape(pem)
+}
+
+func boolPtr(v bool) *bool {
+	return &v
+}
+
+func trustedRootsFromPEM(pemBytes string) (*x509.CertPool, error) {
+	pool := x509.NewCertPool()
+	if !pool.AppendCertsFromPEM([]byte(pemBytes)) {
+		return nil, fmt.Errorf("intel_root_ca_pem could not be parsed as PEM certificate(s)")
+	}
+	return pool, nil
+}
+
+func tcbEvaluationRequired(policy *tdxPolicyInput) bool {
+	if policy != nil && policy.TcbEvaluationRequired != nil {
+		return *policy.TcbEvaluationRequired
+	}
+	return true
 }
 
 func cmdVerifyAttestationTDX() int {
@@ -200,6 +218,9 @@ func cmdVerifyAttestationTDX() int {
 			"Sgx-Pck-Crl-Issuer-Chain": {pemToURLEncoded(in.Collateral.PckCRLIssuerChainPEM)},
 		}
 	}
+	if in.ExecutionMode == "public_api" {
+		return cmdVerifyAttestationTDXPublic(in, quoteBytes, getter)
+	}
 
 	var quote any
 	var verifyErr error
@@ -220,22 +241,16 @@ func cmdVerifyAttestationTDX() int {
 	// at controlled TCB statuses. When unset, the embedded Intel root
 	// from go-tdx-guest is used.
 	if in.Collateral.IntelRootCAPEM != "" {
-		pool := x509.NewCertPool()
-		if !pool.AppendCertsFromPEM([]byte(in.Collateral.IntelRootCAPEM)) {
-			return emitTdxRejection("ROOT_CA_UNTRUSTED", "4.2",
-				"intel_root_ca_pem could not be parsed as PEM certificate(s)")
+		pool, err := trustedRootsFromPEM(in.Collateral.IntelRootCAPEM)
+		if err != nil {
+			return emitTdxRejection("ROOT_CA_UNTRUSTED", "4.2", err.Error())
 		}
 		opts.TrustedRoots = pool
-		// Silence unused import warning if no PEM blocks ever parsed.
-		_ = pem.Block{}
 	}
 	// Default: full §4.7 collateral evaluation. Fixtures can opt out via
 	// policy.tcb_evaluation_required=false for structural-only verification
 	// (PCK chain + AK + sig, no TCB / CRL).
-	tcbEval := true
-	if in.Policy != nil && in.Policy.TcbEvaluationRequired != nil {
-		tcbEval = *in.Policy.TcbEvaluationRequired
-	}
+	tcbEval := tcbEvaluationRequired(in.Policy)
 	opts.CheckRevocations = tcbEval
 	opts.GetCollateral = tcbEval
 
@@ -588,7 +603,6 @@ func buildTdxOutputs(quote any, rawQuote []byte) (map[string]any, error) {
 	}
 	// Suppress lints on quote (we accept any to avoid pulling pb.QuoteV4 here).
 	_ = quote
-	_ = tdxtrust.SimpleHTTPSGetter{}
 	return out, nil
 }
 
