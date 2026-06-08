@@ -34,7 +34,7 @@ jobs:
           cache: true
 
       - name: Build tinfoil-conformance binary
-        run: go build -o bin/tinfoil-conformance ./cmd/tinfoil-conformance/
+        run: go build -tags tinfoil_conformance -o bin/tinfoil-conformance ./cmd/tinfoil-conformance/
 
       - name: Checkout tinfoil-conformance suite
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -63,7 +63,8 @@ jobs:
         run: |
           tinfoil-conformance run \
             --sdk "tinfoil-go=${{ github.workspace }}/bin/tinfoil-conformance" \
-            --vectors tinfoil-conformance/vectors/sigstore
+            --vectors tinfoil-conformance/vectors \
+            --tdx-public-api-variants
 
       - name: Upload results
         if: always()
