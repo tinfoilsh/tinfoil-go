@@ -22,6 +22,7 @@ package main
 import (
 	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -30,6 +31,7 @@ import (
 	"runtime/debug"
 	"strings"
 
+	ehbpidentity "github.com/tinfoilsh/encrypted-http-body-protocol/identity"
 	"github.com/tinfoilsh/tinfoil-go/verifier/attestation"
 	"github.com/tinfoilsh/tinfoil-go/verifier/sigstore"
 )
@@ -65,6 +67,8 @@ func main() {
 		os.Exit(cmdVerifyAttestationSEV())
 	case "verify-full":
 		os.Exit(cmdVerifyFull())
+	case "verify-ehbp-key-binding":
+		os.Exit(cmdVerifyEHBPKeyBinding())
 	case "", "help", "-h", "--help":
 		printHelp()
 		os.Exit(0)
@@ -110,6 +114,7 @@ func cmdCapabilities() int {
 			"verify-attestation-tdx",
 			"verify-attestation-sev",
 			"verify-full",
+			"verify-ehbp-key-binding",
 		},
 		"sigstore": map[string]any{
 			"trust_root_loading": "configurable",
@@ -226,6 +231,13 @@ func cmdCapabilities() int {
 		// No fixture gates on transport today; this declares library capability.
 		"transport_modes_supported": []string{"tls-pinning", "ehbp"},
 		"flow_modes_supported":      []string{"standard", "bundle", "pinned"},
+		// SPEC §14.2 EHBP key binding: the transport HPKE key must equal the
+		// attested key from report_data[32:64]; a swapped key is rejected.
+		// tinfoil-go binds by construction (buildEHBPTransport seals only to
+		// the attested key) — see ehbp_transport.go.
+		"ehbp": map[string]any{
+			"key_binding_supported": true,
+		},
 		"known_quirks": map[string]any{
 			"sigstore.workflow_ref_check_via_extension": "Workflow_ref policy is enforced as a post-verification startsWith() check against the cert's .1.6 extension; sigstore-go's NewShortCertificateIdentity does a SAN regex on BuildSignerURI which is SPEC §5.3-non-canonical.",
 		},
@@ -643,6 +655,82 @@ func cmdVerifyMeasurement() int {
 		"outputs": map[string]any{
 			"source_fingerprint_hex": sourceFP,
 			"target_fingerprint_hex": targetFP,
+		},
+	}
+	out, _ := json.MarshalIndent(body, "", "  ")
+	fmt.Println(string(out))
+	return exitAccept
+}
+
+// -----------------------------------------------------------------------------
+// verify-ehbp-key-binding (SPEC §14.2)
+// -----------------------------------------------------------------------------
+
+type ehbpKeyBindingInput struct {
+	SchemaVersion           string `json:"schema_version"`
+	ReportDataHex           string `json:"report_data_hex"`
+	OfferedHPKEPublicKeyHex string `json:"offered_hpke_public_key_hex"`
+}
+
+func cmdVerifyEHBPKeyBinding() int {
+	raw, err := io.ReadAll(os.Stdin)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error reading stdin: %v\n", err)
+		return exitInternal
+	}
+	var in ehbpKeyBindingInput
+	if err := json.Unmarshal(raw, &in); err != nil {
+		fmt.Fprintf(os.Stderr, "input schema violation: %v\n", err)
+		return exitBadInput
+	}
+	if in.SchemaVersion != "1" {
+		fmt.Fprintln(os.Stderr, "schema_version must be \"1\"")
+		return exitBadInput
+	}
+
+	reportData, err := hex.DecodeString(in.ReportDataHex)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "report_data_hex not valid hex: %v\n", err)
+		return exitBadInput
+	}
+	// Real extraction: report_data[0:32] = TLS fingerprint, [32:64] = HPKE key
+	// (SPEC §14.2), via the same slice the verifier applies to a real report.
+	tlsFP, attestedHPKE, err := attestation.HPKEKeyFromReportData(reportData)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "malformed report_data: %v\n", err)
+		return exitBadInput
+	}
+	// Validate the offered key with the same EHBP key parser the transport
+	// uses (ehbp_transport.go buildEHBPTransport -> FromPublicKeyHex).
+	if _, err := ehbpidentity.FromPublicKeyHex(in.OfferedHPKEPublicKeyHex); err != nil {
+		fmt.Fprintf(os.Stderr, "offered hpke key not a valid X25519 public key: %v\n", err)
+		return exitBadInput
+	}
+	// SPEC §14.2 fail-closed: the offered transport key MUST equal the attested
+	// key from report_data[32:64]. tinfoil-go enforces this by construction —
+	// it only ever seals to the attested key — so a mismatch is a binding
+	// violation.
+	if !strings.EqualFold(in.OfferedHPKEPublicKeyHex, attestedHPKE) {
+		body := map[string]any{
+			"stage":    "verify-ehbp-key-binding",
+			"accepted": false,
+			"rejection": map[string]string{
+				"code":     "EHBP_KEY_BINDING_MISMATCH",
+				"spec_ref": "14.2",
+				"message":  "offered HPKE key does not match the attested key in report_data[32:64]",
+			},
+		}
+		out, _ := json.MarshalIndent(body, "", "  ")
+		fmt.Println(string(out))
+		return exitReject
+	}
+
+	body := map[string]any{
+		"stage":    "verify-ehbp-key-binding",
+		"accepted": true,
+		"outputs": map[string]any{
+			"attested_hpke_public_key_hex": attestedHPKE,
+			"tls_fingerprint_hex":          tlsFP,
 		},
 	}
 	out, _ := json.MarshalIndent(body, "", "  ")

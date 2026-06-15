@@ -103,6 +103,19 @@ func newVerificationV2(measurement *Measurement, keys []byte) *Verification {
 	}
 }
 
+// HPKEKeyFromReportData extracts the Tinfoil transport keys from a 64-byte
+// attestation report_data per SPEC §14.2: [0:32] = TLS SPKI fingerprint,
+// [32:64] = HPKE X25519 public key. This is the same slice newVerificationV2
+// applies to a verified report, exposed so the conformance binary can exercise
+// the real extraction offset in the EHBP key-binding check.
+func HPKEKeyFromReportData(reportData []byte) (tlsFingerprintHex, hpkePublicKeyHex string, err error) {
+	if len(reportData) != 64 {
+		return "", "", fmt.Errorf("report_data must be 64 bytes, got %d", len(reportData))
+	}
+	v := newVerificationV2(nil, reportData)
+	return v.TLSPublicKeyFP, v.HPKEPublicKey, nil
+}
+
 func (m *Measurement) EqualsDisplay(other *Measurement) (string, error) {
 	// Base case: if both measurements are multi-platform, compare directly
 	if m.Type == SnpTdxMultiPlatformV1 && other.Type == SnpTdxMultiPlatformV1 {
