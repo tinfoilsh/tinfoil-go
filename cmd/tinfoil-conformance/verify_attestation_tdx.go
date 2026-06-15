@@ -375,6 +375,23 @@ func classifyTdxError(err error) (string, string) {
 		return "PCK_CHAIN_INCOMPLETE", "4.2"
 	}
 	low := strings.ToLower(err.Error())
+	// SPEC §4.8 extended-TD policy validation (validate.TdxQuote). go-tdx-guest
+	// emits "unauthorized tdAttributes 0x… as tdAttributesFixed0/1 …" and
+	// "unauthorized xfam 0x… as xfamFixed1/0 …". Classify these BEFORE the
+	// generic "attributes" pattern below (which would mis-map them to
+	// QE_IDENTITY_FIELD_MISMATCH).
+	if strings.Contains(low, "tdattributes") {
+		if strings.Contains(low, "debug") {
+			return "TD_ATTRIBUTES_DEBUG_SET", "4.8"
+		}
+		return "TD_ATTRIBUTES_RESERVED_BIT_SET", "4.8"
+	}
+	if strings.Contains(low, "xfam") {
+		if strings.Contains(low, "fixed1") {
+			return "XFAM_REQUIRED_BIT_CLEAR", "4.8"
+		}
+		return "XFAM_FORBIDDEN_BIT_SET", "4.8"
+	}
 	// Order matters: cert-chain errors include "signature" substrings (the
 	// chain-validation routines say "certificate signature verification …
 	// failed"). Test more specific markers first so they aren't swallowed

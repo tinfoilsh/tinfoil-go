@@ -33,6 +33,21 @@ func cmdVerifyAttestationTDXPublic(in verifyAttestationTdxInput, quoteBytes []by
 		opts.TrustedRoots = pool
 	}
 
+	// Re-baseline the verifier to the synthetic vector's own TD-body baseline.
+	// Production verification (tdx.go) hard-codes the real Tinfoil enclave's
+	// expected TD_ATTRIBUTES/XFAM/MinimumTeeTcbSvn/MrSeam, which synthetic test
+	// vectors don't match — that would reject them before the fixture's
+	// targeted check. The fixture's §4.8 pins are still enforced precisely by
+	// enforceExtendedPolicy below. Mirrors tinfoil-python's TdxVerificationConfig.
+	// Body field offsets match enforceExtendedPolicy (header[:48], body[48:632]).
+	if len(quoteBytes) >= 48+584 {
+		body := quoteBytes[48 : 48+584]
+		opts.ExpectedMinimumTeeTcbSvn = append([]byte(nil), body[0:16]...)
+		opts.AcceptedMrSeams = [][]byte{append([]byte(nil), body[16:64]...)}
+		opts.ExpectedTdAttributes = append([]byte(nil), body[120:128]...)
+		opts.ExpectedXfam = append([]byte(nil), body[128:136]...)
+	}
+
 	var verifyErr error
 	withStdoutSilenced(func() {
 		_, verifyErr = doc.VerifyWithTDXOptions(opts)
