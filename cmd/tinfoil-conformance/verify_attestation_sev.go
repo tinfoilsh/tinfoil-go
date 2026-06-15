@@ -72,6 +72,7 @@ type verifyAttestationSevInput struct {
 	AskPEM                   string         `json:"ask_pem"`
 	ExpirationCheckDateUnix  int64          `json:"expiration_check_date_unix"`
 	Policy                   *sevPolicyInput `json:"policy"`
+	ExecutionMode            string         `json:"execution_mode"`
 }
 
 func gunzipBytes(in []byte) ([]byte, error) {
@@ -213,6 +214,10 @@ func cmdVerifyAttestationSEV() int {
 	if in.SchemaVersion != "1" {
 		fmt.Fprintln(os.Stderr, `schema_version must be "1"`)
 		return exitBadInput
+	}
+
+	if in.ExecutionMode == "public_api" {
+		return cmdVerifyAttestationSEVPublic(&in)
 	}
 
 	parsed, rej := runVerifyAttestationSev(&in)

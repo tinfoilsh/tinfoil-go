@@ -179,6 +179,10 @@ func cmdCapabilities() int {
 			// cert injected via input.vcek_der_b64.
 			"supported":                     true,
 			"injected_collateral_supported": true,
+			// execution_mode=public_api drives the SDK's real public verifier
+			// (attestation.Document.VerifyWithVCEK) with only the VCEK injected
+			// (embedded AMD root, no network) — see verify_attestation_sev_public.go.
+			"public_api_hooks_supported": true,
 			// enforceSevPolicy applies SPEC §3.7 / §3.8 / §8.2-3 pins from
 			// policy.expected_*_hex + enforce_spec_defaults.
 			"extended_checks_supported":  true,
