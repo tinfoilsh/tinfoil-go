@@ -93,6 +93,7 @@ type Verification struct {
 	Measurement    *Measurement `json:"measurement"`
 	TLSPublicKeyFP string       `json:"tls_public_key,omitempty"`
 	HPKEPublicKey  string       `json:"hpke_public_key,omitempty"`
+	VCEK           []byte       `json:"-"`
 }
 
 func newVerificationV2(measurement *Measurement, keys []byte) *Verification {
@@ -225,6 +226,7 @@ func (m *Measurement) String() string {
 type Document struct {
 	Format PredicateType `json:"format"`
 	Body   string        `json:"body"`
+	VCEK   string        `json:"vcek,omitempty"` // base64 DER VCEK certificate
 }
 
 // Bundle represents a complete attestation bundle for single-request verification
@@ -268,6 +270,14 @@ func (d *Document) Verify() (*Verification, error) {
 
 // VerifyWithVCEK checks the attestation document using an optional pre-provided VCEK certificate
 func (d *Document) VerifyWithVCEK(vcekDER []byte) (*Verification, error) {
+	// If no VCEK was passed explicitly, try the document's embedded VCEK
+	if vcekDER == nil && d.VCEK != "" {
+		decoded, err := base64.StdEncoding.DecodeString(d.VCEK)
+		if err != nil {
+			return nil, fmt.Errorf("failed to decode document VCEK: %w", err)
+		}
+		vcekDER = decoded
+	}
 	switch d.Format {
 	case SevGuestV2:
 		return verifySevAttestationV2WithVCEK(d.Body, vcekDER)

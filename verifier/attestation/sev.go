@@ -51,16 +51,16 @@ var (
 	_ trust.HTTPSGetter = &getter{}
 )
 
-func verifySevReport(attestationDoc string, isCompressed bool, vcekDER []byte) (*sevsnp.Report, error) {
+func verifySevReport(attestationDoc string, isCompressed bool, vcekDER []byte) (*sevsnp.Report, []byte, error) {
 	attDocBytes, err := base64.StdEncoding.DecodeString(attestationDoc)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	if isCompressed {
 		attDocBytes, err = gzipDecompress(attDocBytes)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 	}
 
@@ -73,7 +73,7 @@ func verifySevReport(attestationDoc string, isCompressed bool, vcekDER []byte) (
 
 	parsedReport, err := abi.ReportToProto(attDocBytes)
 	if err != nil {
-		return nil, fmt.Errorf("failed to parse report: %w", err)
+		return nil, nil, fmt.Errorf("failed to parse report: %w", err)
 	}
 
 	var attestation *sevsnp.Attestation
@@ -90,12 +90,16 @@ func verifySevReport(attestationDoc string, isCompressed bool, vcekDER []byte) (
 		// Fetch VCEK from AMD KDS
 		attestation, err = verify.GetAttestationFromReport(parsedReport, opts)
 		if err != nil {
-			return nil, fmt.Errorf("could not recreate attestation from report: %w", err)
+			return nil, nil, fmt.Errorf("could not recreate attestation from report: %w", err)
+		}
+		// Retain the fetched VCEK so callers can serve self-contained attestation documents
+		if attestation.CertificateChain != nil {
+			vcekDER = attestation.CertificateChain.VcekCert
 		}
 	}
 
 	if err := verify.SnpAttestation(attestation, opts); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	mintcb := kds.TCBParts{
@@ -145,10 +149,10 @@ func verifySevReport(attestationDoc string, isCompressed bool, vcekDER []byte) (
 	}
 
 	if err := validate.SnpAttestation(attestation, valOpts); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
-	return parsedReport, nil
+	return parsedReport, vcekDER, nil
 }
 
 func verifySevAttestationV2(attestationDoc string) (*Verification, error) {
@@ -156,7 +160,7 @@ func verifySevAttestationV2(attestationDoc string) (*Verification, error) {
 }
 
 func verifySevAttestationV2WithVCEK(attestationDoc string, vcekDER []byte) (*Verification, error) {
-	report, err := verifySevReport(attestationDoc, true, vcekDER)
+	report, resolvedVCEK, err := verifySevReport(attestationDoc, true, vcekDER)
 	if err != nil {
 		return nil, err
 	}
@@ -167,5 +171,7 @@ func verifySevAttestationV2WithVCEK(attestationDoc string, vcekDER []byte) (*Ver
 			hex.EncodeToString(report.Measurement),
 		},
 	}
-	return newVerificationV2(measurement, report.ReportData), nil
+	v := newVerificationV2(measurement, report.ReportData)
+	v.VCEK = resolvedVCEK
+	return v, nil
 }
