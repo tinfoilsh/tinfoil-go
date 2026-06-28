@@ -95,6 +95,12 @@ func VerifyBundleWithPolicy(
 		return nil, classifyVerifyError(err)
 	}
 
+	// SPEC §5.2: reject duplicate-log SCTs (sigstore-go dedups rather than
+	// rejecting). Mirrors the production VerifyBundle path and rs/js.
+	if err := checkDuplicateSCTLogs(leafCertDERFromBundleJSON(bundleJSON)); err != nil {
+		return nil, err
+	}
+
 	// Pull the cert summary from the verification result so we can do the
 	// SPEC §5.3-anchored workflow-ref prefix check on the .1.6 extension
 	// directly.
@@ -281,33 +287,8 @@ func extractRekorObservables(bundleJSON []byte) (string, int64, int) {
 // counts the SCTs in its SCT extension. Mirrors what the Rust/JS/Python
 // conformance binaries emit so the harness sees the same value.
 func extractSCTCountFromBundle(bundleJSON []byte) int {
-	var raw map[string]json.RawMessage
-	if err := json.Unmarshal(bundleJSON, &raw); err != nil {
-		return -1
-	}
-	vmRaw, ok := raw["verificationMaterial"]
-	if !ok {
-		return -1
-	}
-	var vm map[string]json.RawMessage
-	if err := json.Unmarshal(vmRaw, &vm); err != nil {
-		return -1
-	}
-	certWrap, ok := vm["certificate"]
-	if !ok {
-		return -1
-	}
-	var certObj struct {
-		RawBytes string `json:"rawBytes"`
-	}
-	if err := json.Unmarshal(certWrap, &certObj); err != nil {
-		return -1
-	}
-	if certObj.RawBytes == "" {
-		return -1
-	}
-	der, err := base64.StdEncoding.DecodeString(certObj.RawBytes)
-	if err != nil {
+	der := leafCertDERFromBundleJSON(bundleJSON)
+	if der == nil {
 		return -1
 	}
 	count, err := CountSCTsInCertDER(der)
@@ -315,6 +296,42 @@ func extractSCTCountFromBundle(bundleJSON []byte) int {
 		return -1
 	}
 	return count
+}
+
+// leafCertDERFromBundleJSON pulls the leaf certificate's raw DER out of a
+// bundle's JSON, handling the single-certificate layout. Returns nil if absent
+// or malformed.
+func leafCertDERFromBundleJSON(bundleJSON []byte) []byte {
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(bundleJSON, &raw); err != nil {
+		return nil
+	}
+	vmRaw, ok := raw["verificationMaterial"]
+	if !ok {
+		return nil
+	}
+	var vm map[string]json.RawMessage
+	if err := json.Unmarshal(vmRaw, &vm); err != nil {
+		return nil
+	}
+	certWrap, ok := vm["certificate"]
+	if !ok {
+		return nil
+	}
+	var certObj struct {
+		RawBytes string `json:"rawBytes"`
+	}
+	if err := json.Unmarshal(certWrap, &certObj); err != nil {
+		return nil
+	}
+	if certObj.RawBytes == "" {
+		return nil
+	}
+	der, err := base64.StdEncoding.DecodeString(certObj.RawBytes)
+	if err != nil {
+		return nil
+	}
+	return der
 }
 
 // CountSCTsInCertDER hand-parses the SCT extension (OID

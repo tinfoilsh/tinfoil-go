@@ -159,9 +159,10 @@ func cmdCapabilities() int {
 			// sigstore-go counts SCTs (rejects "Expected one SCT, found N")
 			// but does NOT have a separate duplicate-log-id check.
 			"scts_count_distinguish_missing_vs_duplicate": false,
-			// sigstore-go silently accepts a leaf cert carrying two SCTs
-			// from the same CT log — no per-log-id uniqueness check.
-			"rejects_duplicate_sct_log": false,
+			// sigstore-go dedups SCTs by log id rather than rejecting, so the
+			// tinfoil verifier adds a per-log-id uniqueness guard
+			// (checkDuplicateSCTLogs) per SPEC §5.2, matching rs/js.
+			"rejects_duplicate_sct_log": true,
 			// sigstore-go's WithArtifactDigest iterates ALL subjects, but the
 			// tinfoil verifier re-checks subject[0] specifically afterward
 			// (enforceSubject0Digest) per SPEC §5.4's "only subject[0] is
