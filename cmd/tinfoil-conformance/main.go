@@ -156,9 +156,10 @@ func cmdCapabilities() int {
 			// sigstore-go's certificate.ParseExtensions reads .1.8 (V2)
 			// when present; falls back to .1.1 (V1).
 			"oidc_issuer_v2_preferred": true,
-			// sigstore-go counts SCTs (rejects "Expected one SCT, found N")
-			// but does NOT have a separate duplicate-log-id check.
-			"scts_count_distinguish_missing_vs_duplicate": false,
+			// The tinfoil verifier now distinguishes the two: missing SCTs
+			// classify as SCT_INSUFFICIENT, and the checkDuplicateSCTLogs guard
+			// classifies a repeated log id as SCT_DUPLICATE_LOG.
+			"scts_count_distinguish_missing_vs_duplicate": true,
 			// sigstore-go dedups SCTs by log id rather than rejecting, so the
 			// tinfoil verifier adds a per-log-id uniqueness guard
 			// (checkDuplicateSCTLogs) per SPEC §5.2, matching rs/js.
