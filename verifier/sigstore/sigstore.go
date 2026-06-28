@@ -71,6 +71,9 @@ func (c *Client) VerifyBundle(bundleJSON []byte, repo, hexDigest string) (*verif
 	if err := b.UnmarshalJSON(bundleJSON); err != nil {
 		return nil, fmt.Errorf("parsing bundle: %w", err)
 	}
+	if err := rejectLegacyBundleFormat(b.Bundle); err != nil {
+		return nil, err
+	}
 
 	verifier, err := verify.NewSignedEntityVerifier(
 		c.trustRoot,
