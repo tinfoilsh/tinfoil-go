@@ -144,8 +144,9 @@ func cmdCapabilities() int {
 			"predicate_types_understood": []string{
 				"https://tinfoil.sh/predicate/snp-tdx-multiplatform/v1",
 			},
-			// v0.3 bundle layout only (sigstore-go's bundle.UnmarshalJSON
-			// validates against the protobuf schema).
+			// The tinfoil verifier rejects the legacy v0.1/v0.2
+			// x509CertificateChain layout (rejectLegacyBundleFormat); only the
+			// v0.3 single-certificate form is accepted. SPEC §5.2.
 			"legacy_bundle_format_supported": false,
 			// sigstore-go's tlogEntriesThreshold is a minimum (>= 1), so it
 			// accepts bundles with multiple verified tlog entries — matching
@@ -420,6 +421,13 @@ func classifyError(msg string) (string, string) {
 		}
 	}
 	low := strings.ToLower(msg)
+
+	// Legacy (v0.1/v0.2 x509CertificateChain) bundle layout, rejected by
+	// rejectLegacyBundleFormat. Check before the generic "certificate chain"
+	// pattern so it doesn't fall through to FULCIO_CHAIN_INVALID.
+	if strings.Contains(low, "legacy bundle format") {
+		return "BUNDLE_MALFORMED", "5.2"
+	}
 
 	// sigstore-go's certificate-identity check. The "no matching
 	// certificateidentity" wrapper text contains the inner cause; check the

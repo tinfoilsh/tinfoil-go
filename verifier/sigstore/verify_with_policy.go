@@ -48,6 +48,9 @@ func VerifyBundleWithPolicy(
 	if err := b.UnmarshalJSON(bundleJSON); err != nil {
 		return nil, fmt.Errorf("BUNDLE_MALFORMED: parsing bundle: %w", err)
 	}
+	if err := rejectLegacyBundleFormat(b.Bundle); err != nil {
+		return nil, err
+	}
 
 	verifier, err := verify.NewSignedEntityVerifier(
 		trustRoot,
