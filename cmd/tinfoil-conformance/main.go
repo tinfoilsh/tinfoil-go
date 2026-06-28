@@ -147,12 +147,12 @@ func cmdCapabilities() int {
 			// v0.3 bundle layout only (sigstore-go's bundle.UnmarshalJSON
 			// validates against the protobuf schema).
 			"legacy_bundle_format_supported": false,
-			// sigstore-go's verifier accepts bundles with multiple tlog
-			// entries provided each verifies.
-			// sigstore-go accepts multi-tlog bundles in principle but
-			// our synthetic shape (each entry in its own size-1 tree)
-			// trips the per-entry "logIndex < treeSize" check.
-			"accepts_multi_tlog_entries": false,
+			// sigstore-go's tlogEntriesThreshold is a minimum (>= 1), so it
+			// accepts bundles with multiple verified tlog entries — matching
+			// SPEC §5.2 #3 ("at least 1"). The synthetic size-1-tree shape that
+			// tripped a per-entry check under v1.1.4 verifies cleanly under
+			// v1.2.1, so fixture 067 passes.
+			"accepts_multi_tlog_entries": true,
 			// sigstore-go's certificate.ParseExtensions reads .1.8 (V2)
 			// when present; falls back to .1.1 (V1).
 			"oidc_issuer_v2_preferred": true,
