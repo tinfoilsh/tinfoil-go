@@ -128,12 +128,15 @@ func VerifyBundleWithPolicy(
 		)
 	}
 
-	// Subject + digest (sigstore-go's WithArtifactDigest already enforced
-	// equality, but we read subject[0] for diagnostic output. Lowercase
-	// normalize per SPEC §7.3.).
-	if len(result.Statement.Subject) == 0 {
-		return nil, fmt.Errorf("SUBJECT_MISSING: in-toto statement has no subject")
+	// SPEC §5.4: only subject[0] is checked against the expected artifact
+	// digest. sigstore-go's WithArtifactDigest matched the digest against ANY
+	// subject in the statement (valid generic in-toto semantics), so we must
+	// re-check subject[0] specifically to honor the SPEC and match the other
+	// Tinfoil SDKs (rs/py/js).
+	if err := enforceSubject0Digest(result, expectedDigest); err != nil {
+		return nil, err
 	}
+	// Read subject[0] for diagnostic output (lowercase-normalize per SPEC §7.3).
 	subj := result.Statement.Subject[0]
 	subjDigest := subj.Digest["sha256"]
 

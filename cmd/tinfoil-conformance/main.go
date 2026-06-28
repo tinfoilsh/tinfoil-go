@@ -162,10 +162,11 @@ func cmdCapabilities() int {
 			// sigstore-go silently accepts a leaf cert carrying two SCTs
 			// from the same CT log — no per-log-id uniqueness check.
 			"rejects_duplicate_sct_log": false,
-			// sigstore-go's WithArtifactDigest iterates ALL subjects and
-			// accepts if any matches — diverges from SPEC §5.4's "only
-			// subject[0] is checked".
-			"checks_only_subject_0": false,
+			// sigstore-go's WithArtifactDigest iterates ALL subjects, but the
+			// tinfoil verifier re-checks subject[0] specifically afterward
+			// (enforceSubject0Digest) per SPEC §5.4's "only subject[0] is
+			// checked", matching rs/py/js.
+			"checks_only_subject_0": true,
 			// sigstore-go's in-toto parser rejects unknown top-level fields
 			// on the statement.
 			"in_toto_statement_tolerates_extra_fields": false,
@@ -431,6 +432,15 @@ func classifyError(msg string) (string, string) {
 	}
 	if strings.Contains(low, "no matching certificateidentity") {
 		return "OIDC_ISSUER_MISMATCH", "5.3"
+	}
+
+	// SPEC §5.4 subject[0] check (enforceSubject0Digest emits Go-style
+	// lowercase errors; map them to the rejection codes here).
+	if strings.Contains(low, "subject[0] digest") {
+		return "SUBJECT_DIGEST_MISMATCH", "5.4"
+	}
+	if strings.Contains(low, "statement has no subject") {
+		return "SUBJECT_MISSING", "5.4"
 	}
 
 	// sigstore-go phrases empty-tlog and missing-rekor-key the same way
