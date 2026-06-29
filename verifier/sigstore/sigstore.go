@@ -3,6 +3,7 @@ package sigstore
 import (
 	"encoding/hex"
 	"fmt"
+	"strings"
 
 	protobundle "github.com/sigstore/protobuf-specs/gen/pb-go/bundle/v1"
 	"github.com/sigstore/sigstore-go/pkg/bundle"
@@ -107,7 +108,38 @@ func (c *Client) VerifyBundle(bundleJSON []byte, repo, hexDigest string) (*verif
 		return nil, fmt.Errorf("verifying: %w", err)
 	}
 
+	// SPEC §5.4: WithArtifactDigest matched the digest against ANY subject in
+	// the in-toto statement; narrow that to subject[0] only, matching the SPEC
+	// and the rs/py/js SDKs.
+	if err := enforceSubject0Digest(result, hexDigest); err != nil {
+		return nil, err
+	}
+
 	return result, nil
+}
+
+// enforceSubject0Digest applies SPEC §5.4: only the FIRST in-toto subject is
+// checked against the expected artifact digest. sigstore-go's WithArtifactDigest
+// matches the digest against ANY subject in the statement (valid generic in-toto
+// semantics — a Statement's subject array may legitimately list several
+// artifacts), so we re-check subject[0] specifically here to honor the SPEC and
+// match the other Tinfoil SDKs (rs/py/js), which all key on subject[0]. Digests
+// are compared case-insensitively (lowercase-normalized per SPEC §7.3).
+func enforceSubject0Digest(result *verify.VerificationResult, expectedDigest string) error {
+	if result == nil || result.Statement == nil {
+		return fmt.Errorf("verification result has no in-toto statement")
+	}
+	if len(result.Statement.Subject) == 0 {
+		return fmt.Errorf("in-toto statement has no subject")
+	}
+	got := result.Statement.Subject[0].Digest["sha256"]
+	if !strings.EqualFold(got, expectedDigest) {
+		return fmt.Errorf(
+			"subject[0] digest %q does not match expected artifact digest %q",
+			got, expectedDigest,
+		)
+	}
+	return nil
 }
 
 func (c *Client) VerifyAttestation(
