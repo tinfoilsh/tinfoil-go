@@ -108,6 +108,20 @@ func (c *Client) VerifyBundle(bundleJSON []byte, repo, hexDigest string) (*verif
 		return nil, fmt.Errorf("verifying: %w", err)
 	}
 
+	// SPEC §5.2: reject duplicate-log SCTs. sigstore-go dedups SCTs by log ID
+	// rather than rejecting, so a leaf cert carrying two SCTs from the same CT
+	// log would pass; reject it here, matching the rs/js SDKs.
+	vm := b.Bundle.GetVerificationMaterial()
+	var leafCertDER []byte
+	if c := vm.GetCertificate(); c != nil && len(c.GetRawBytes()) > 0 {
+		leafCertDER = c.GetRawBytes()
+	} else if chain := vm.GetX509CertificateChain(); chain != nil && len(chain.GetCertificates()) > 0 {
+		leafCertDER = chain.GetCertificates()[0].GetRawBytes()
+	}
+	if err := checkDuplicateSCTLogs(leafCertDER); err != nil {
+		return nil, err
+	}
+
 	// SPEC §5.4: WithArtifactDigest matched the digest against ANY subject in
 	// the in-toto statement; narrow that to subject[0] only, matching the SPEC
 	// and the rs/py/js SDKs.
