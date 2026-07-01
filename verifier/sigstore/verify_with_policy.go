@@ -51,6 +51,9 @@ func VerifyBundleWithPolicy(
 	if err := rejectLegacyBundleFormat(b.Bundle); err != nil {
 		return nil, err
 	}
+	if err := requireExactlyOneDSSESignature(b.Bundle); err != nil {
+		return nil, err
+	}
 
 	verifier, err := verify.NewSignedEntityVerifier(
 		trustRoot,
