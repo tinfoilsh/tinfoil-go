@@ -20,3 +20,22 @@ func rejectLegacyBundleFormat(b *protobundle.Bundle) error {
 	}
 	return nil
 }
+
+// requireExactlyOneDSSESignature enforces the Sigstore bundle rule (SPEC §5.2)
+// that a DSSE-envelope bundle carries exactly one signature. sigstore-go rejects
+// the empty-signatures case only indirectly — an emptied signatures array
+// changes the envelope and breaks the Rekor tlog binding, so it fails as a
+// transparency-log mismatch rather than a signature-count error. We check the
+// count directly and early so both the empty (0) and duplicate (>1) cases fail
+// with a clear, uniform reason, matching tinfoil-rs/-py/-js.
+func requireExactlyOneDSSESignature(b *protobundle.Bundle) error {
+	env := b.GetDsseEnvelope()
+	if env == nil {
+		// Not a DSSE-envelope bundle (e.g. message signature); nothing to check.
+		return nil
+	}
+	if n := len(env.GetSignatures()); n != 1 {
+		return fmt.Errorf("DSSE envelope must have exactly one signature, got %d", n)
+	}
+	return nil
+}

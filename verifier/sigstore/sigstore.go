@@ -74,6 +74,9 @@ func (c *Client) VerifyBundle(bundleJSON []byte, repo, hexDigest string) (*verif
 	if err := rejectLegacyBundleFormat(b.Bundle); err != nil {
 		return nil, err
 	}
+	if err := requireExactlyOneDSSESignature(b.Bundle); err != nil {
+		return nil, err
+	}
 
 	verifier, err := verify.NewSignedEntityVerifier(
 		c.trustRoot,
