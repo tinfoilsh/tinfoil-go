@@ -77,7 +77,7 @@ type Client struct {
 // NewClientWithParams creates a new secure OpenAI client with explicit enclave and repo parameters
 func NewClientWithParams(enclave, repo string, openaiOpts ...option.RequestOption) (*Client, error) {
 	secureClient := client.NewSecureClient(enclave, repo)
-	return createClientFromSecureClient(secureClient, defaultTransportMode, "", openaiOpts...)
+	return createClientFromSecureClient(secureClient, defaultTransportMode, "", resolveUserCacheSecret("", false), openaiOpts...)
 }
 
 // NewClient creates a new secure OpenAI client using default parameters
@@ -86,12 +86,12 @@ func NewClient(openaiOpts ...option.RequestOption) (*Client, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to create secure client: %w", err)
 	}
-	return createClientFromSecureClient(secureClient, defaultTransportMode, "", openaiOpts...)
+	return createClientFromSecureClient(secureClient, defaultTransportMode, "", resolveUserCacheSecret("", false), openaiOpts...)
 }
 
 // createClientFromSecureClient is a helper function to create a Client from a SecureClient
-func createClientFromSecureClient(secureClient *client.SecureClient, mode TransportMode, baseURL string, openaiOpts ...option.RequestOption) (*Client, error) {
-	httpClient, err := secureHTTPClient(secureClient, mode, baseURL)
+func createClientFromSecureClient(secureClient *client.SecureClient, mode TransportMode, baseURL, userCacheSecret string, openaiOpts ...option.RequestOption) (*Client, error) {
+	httpClient, err := secureHTTPClient(secureClient, mode, baseURL, userCacheSecret)
 	if err != nil {
 		return nil, err
 	}
