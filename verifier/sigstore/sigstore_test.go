@@ -9,6 +9,9 @@ import (
 )
 
 func TestFetchHardwarePlatformMeasurements(t *testing.T) {
+	if testing.Short() {
+		t.Skip("live external services test; skipped with -short")
+	}
 	client, err := NewClient()
 	assert.NoError(t, err)
 
@@ -31,6 +34,9 @@ func TestFetchHardwarePlatformMeasurements(t *testing.T) {
 }
 
 func TestVerifyAttestation(t *testing.T) {
+	if testing.Short() {
+		t.Skip("live external services test; skipped with -short")
+	}
 	client, err := NewClient()
 	assert.NoError(t, err)
 

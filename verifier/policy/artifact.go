@@ -148,6 +148,9 @@ func (a *Artifact) validate() error {
 			if p.TDX == nil || p.SEVSNP != nil {
 				return fmt.Errorf("policy %q: platform tdx requires exactly the tdx block", name)
 			}
+			if p.TDX.MinimumTCBEvaluationDataNumber < 0 {
+				return fmt.Errorf("policy %q: minimum_tcb_evaluation_data_number must not be negative", name)
+			}
 			for _, ref := range p.TDX.PlatformMeasurements {
 				if _, ok := a.Measurements[ref]; !ok {
 					return fmt.Errorf("policy %q: platform_measurements ref %q not in measurements", name, ref)
