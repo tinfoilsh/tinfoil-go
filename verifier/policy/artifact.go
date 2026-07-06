@@ -17,6 +17,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"regexp"
 )
 
@@ -128,7 +129,7 @@ func ParseArtifact(data []byte) (*Artifact, error) {
 	if err := dec.Decode(&a); err != nil {
 		return nil, fmt.Errorf("parsing platform-endorsements artifact: %w", err)
 	}
-	if dec.More() {
+	if _, err := dec.Token(); err != io.EOF {
 		return nil, fmt.Errorf("trailing data after platform-endorsements artifact")
 	}
 	if a.Format != ArtifactFormat {

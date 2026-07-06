@@ -48,6 +48,13 @@ func TestParseArtifactFailClosed(t *testing.T) {
 	danglingRef := strings.Replace(string(data), `"amd-genoa-prod"`, `"no-such-policy"`, 1)
 	_, err = ParseArtifact([]byte(danglingRef))
 	assert.ErrorContains(t, err, "unknown policy")
+
+	// "}" and "]" are the cases a dec.More() guard misses: More() peeks one
+	// byte and returns false for closing brackets, silently accepting them.
+	for _, trailing := range []string{"}", "]", "{}", "[1]", `"x"`, "{"} {
+		_, err = ParseArtifact([]byte(string(data) + trailing))
+		assert.ErrorContains(t, err, "trailing data", "trailing %q must be rejected", trailing)
+	}
 }
 
 func TestPolicyLookup(t *testing.T) {
@@ -124,6 +131,10 @@ func TestTDXOptionsAndChecks(t *testing.T) {
 	require.NoError(t, a.CheckPlatformMeasurement(p.TDX, m.MRTD, m.RTMR0))
 	assert.ErrorContains(t, a.CheckPlatformMeasurement(p.TDX, strings.Repeat("ff", 48), m.RTMR0),
 		"do not match any allowed configuration")
+
+	require.NoError(t, p.TDX.CheckTCBEvaluationDataNumber(p.TDX.MinimumTCBEvaluationDataNumber))
+	assert.ErrorContains(t, p.TDX.CheckTCBEvaluationDataNumber(p.TDX.MinimumTCBEvaluationDataNumber-1),
+		"below the policy minimum")
 }
 
 func TestSEVIdentity(t *testing.T) {
