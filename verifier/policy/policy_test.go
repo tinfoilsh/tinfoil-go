@@ -52,6 +52,15 @@ func TestParseArtifactFailClosed(t *testing.T) {
 	_, err = ParseArtifact([]byte(danglingRef))
 	assert.ErrorContains(t, err, "unknown policy")
 
+	// A negative minimum would make checkTCBEvaluationDataNumber pass for
+	// any collateral, silently disabling the freshness floor.
+	negativeMin := strings.Replace(string(data),
+		`"minimum_tcb_evaluation_data_number": 19`,
+		`"minimum_tcb_evaluation_data_number": -1`, 1)
+	require.NotEqual(t, string(data), negativeMin)
+	_, err = ParseArtifact([]byte(negativeMin))
+	assert.ErrorContains(t, err, "must not be negative")
+
 	// "}" and "]" are the cases a dec.More() guard misses: More() peeks one
 	// byte and returns false for closing brackets, silently accepting them.
 	for _, trailing := range []string{"}", "]", "{}", "[1]", `"x"`, "{"} {
