@@ -6,6 +6,9 @@ import (
 	"strings"
 	"testing"
 
+	tdxabi "github.com/google/go-tdx-guest/abi"
+	tdxpb "github.com/google/go-tdx-guest/proto/tdx"
+	tdxtestdata "github.com/google/go-tdx-guest/testing/testdata"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -115,25 +118,76 @@ func TestTDXOptionsAndChecks(t *testing.T) {
 	_, p, err := a.PolicyFor(inf7PPID, PlatformTDX)
 	require.NoError(t, err)
 
-	opts, err := p.TDX.TDXOptions()
+	opts, err := p.TDX.tdxOptions()
 	require.NoError(t, err)
 	assert.Equal(t, mustHex(t, "939a7233f79c4ca9940a0db3957f0607"), opts.HeaderOptions.QeVendorID)
 	assert.Equal(t, make([]byte, 48), opts.TdQuoteBodyOptions.MrConfigID)
 	assert.Equal(t, mustHex(t, "0000001000000000"), opts.TdQuoteBodyOptions.TdAttributes)
 
 	require.NotEmpty(t, p.TDX.AcceptedMRSeams)
-	require.NoError(t, p.TDX.CheckMRSeam(mustHex(t, p.TDX.AcceptedMRSeams[0])))
-	assert.ErrorContains(t, p.TDX.CheckMRSeam(make([]byte, 48)), "not in the policy's accepted set")
+	require.NoError(t, p.TDX.checkMRSeam(mustHex(t, p.TDX.AcceptedMRSeams[0])))
+	assert.ErrorContains(t, p.TDX.checkMRSeam(make([]byte, 48)), "not in the policy's accepted set")
 
 	ref := p.TDX.PlatformMeasurements[0]
 	m := a.Measurements[ref]
-	require.NoError(t, a.CheckPlatformMeasurement(p.TDX, m.MRTD, m.RTMR0))
-	assert.ErrorContains(t, a.CheckPlatformMeasurement(p.TDX, strings.Repeat("ff", 48), m.RTMR0),
+	require.NoError(t, a.checkPlatformMeasurement(p.TDX, m.MRTD, m.RTMR0))
+	assert.ErrorContains(t, a.checkPlatformMeasurement(p.TDX, strings.Repeat("ff", 48), m.RTMR0),
 		"do not match any allowed configuration")
 
-	require.NoError(t, p.TDX.CheckTCBEvaluationDataNumber(p.TDX.MinimumTCBEvaluationDataNumber))
-	assert.ErrorContains(t, p.TDX.CheckTCBEvaluationDataNumber(p.TDX.MinimumTCBEvaluationDataNumber-1),
+	require.NoError(t, p.TDX.checkTCBEvaluationDataNumber(p.TDX.MinimumTCBEvaluationDataNumber))
+	assert.ErrorContains(t, p.TDX.checkTCBEvaluationDataNumber(p.TDX.MinimumTCBEvaluationDataNumber-1),
 		"below the policy minimum")
+}
+
+// TestValidateTDXQuote exercises the single composed enforcement entry point
+// against go-tdx-guest's production sample quote, with a policy derived from
+// the quote itself, then flips each policy dimension that is NOT covered by
+// the library options (MR_SEAM set, tcbEvaluationDataNumber, platform
+// measurements) to prove none of them can be silently skipped.
+func TestValidateTDXQuote(t *testing.T) {
+	parsed, err := tdxabi.QuoteToProto(tdxtestdata.RawQuote)
+	require.NoError(t, err)
+	quote, ok := parsed.(*tdxpb.QuoteV4)
+	require.True(t, ok)
+	body := quote.GetTdQuoteBody()
+
+	matching := &TDXPolicy{
+		QEVendorID:                     hex.EncodeToString(quote.GetHeader().GetQeVendorId()),
+		MinimumTEETCBSVN:               hex.EncodeToString(body.GetTeeTcbSvn()),
+		AcceptedMRSeams:                []string{hex.EncodeToString(body.GetMrSeam())},
+		TDAttributes:                   hex.EncodeToString(body.GetTdAttributes()),
+		XFAM:                           hex.EncodeToString(body.GetXfam()),
+		MinimumTCBEvaluationDataNumber: 5,
+		PlatformMeasurements:           []string{"sample"},
+	}
+	a := &Artifact{
+		Measurements: map[string]PlatformMeasurement{
+			"sample": {
+				MRTD:  hex.EncodeToString(body.GetMrTd()),
+				RTMR0: hex.EncodeToString(body.GetRtmrs()[0]),
+			},
+		},
+	}
+
+	require.NoError(t, a.ValidateTDXQuote(matching, quote, 5))
+
+	badSeam := *matching
+	badSeam.AcceptedMRSeams = []string{strings.Repeat("00", 48)}
+	assert.ErrorContains(t, a.ValidateTDXQuote(&badSeam, quote, 5), "not in the policy's accepted set")
+
+	assert.ErrorContains(t, a.ValidateTDXQuote(matching, quote, 4), "below the policy minimum")
+
+	badMeasurements := &Artifact{
+		Measurements: map[string]PlatformMeasurement{
+			"sample": {MRTD: strings.Repeat("ff", 48), RTMR0: strings.Repeat("ff", 48)},
+		},
+	}
+	assert.ErrorContains(t, badMeasurements.ValidateTDXQuote(matching, quote, 5),
+		"do not match any allowed configuration")
+
+	badOpts := *matching
+	badOpts.TDAttributes = strings.Repeat("42", 8)
+	assert.Error(t, a.ValidateTDXQuote(&badOpts, quote, 5))
 }
 
 func TestSEVIdentity(t *testing.T) {
