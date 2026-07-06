@@ -1,7 +1,6 @@
 package policy
 
 import (
-	"encoding/binary"
 	"encoding/hex"
 	"os"
 	"strings"
@@ -91,42 +90,18 @@ func TestSEVOptionsGenoa(t *testing.T) {
 	assert.True(t, opts.PlatformInfo.TSMEEnabled)
 }
 
-func TestSEVOptionsTurin(t *testing.T) {
+// Turin (family 1Ah) is intentionally unsupported by the v3 verifier for now
+// (see MASTER_PLAN.md); SEVOptions must reject any non-Genoa product line.
+func TestSEVOptionsRejectsNonGenoa(t *testing.T) {
 	a := loadFixture(t)
 	_, p, err := a.PolicyFor(box2TurinID, PlatformSEVSNP)
 	require.NoError(t, err)
 
-	opts, err := p.SEVSNP.SEVOptions(ProductTurin)
-	require.NoError(t, err)
-	// Turin TCB floors are enforced via CheckTurinTCB, not library options.
-	assert.Zero(t, opts.MinimumTCB.UcodeSpl)
-
-	// A Turin policy fed to the Genoa translation must fail (fmc_spl set).
-	_, err = p.SEVSNP.SEVOptions(ProductGenoa)
-	assert.ErrorContains(t, err, "fmc_spl")
+	_, err = p.SEVSNP.SEVOptions("Turin")
+	assert.ErrorContains(t, err, "unsupported SEV product line")
 
 	_, err = p.SEVSNP.SEVOptions("Milan")
 	assert.ErrorContains(t, err, "unsupported SEV product line")
-}
-
-func TestCheckTurinTCB(t *testing.T) {
-	a := loadFixture(t)
-	_, p, err := a.PolicyFor(box2TurinID, PlatformSEVSNP)
-	require.NoError(t, err)
-
-	// box2's real reported TCB bytes as they appear in the report (little endian).
-	raw := binary.LittleEndian.Uint64(mustHex(t, "0101010400000052"))
-	decomposed := DecomposeTurinTCB(raw)
-	assert.Equal(t, uint8(1), decomposed.FmcSpl)
-	assert.Equal(t, uint8(1), decomposed.BlSpl)
-	assert.Equal(t, uint8(1), decomposed.TeeSpl)
-	assert.Equal(t, uint8(4), decomposed.SnpSpl)
-	assert.Equal(t, uint8(82), decomposed.UcodeSpl)
-
-	require.NoError(t, p.SEVSNP.CheckTurinTCB("reported_tcb", raw, p.SEVSNP.MinimumTCB))
-
-	older := binary.LittleEndian.Uint64(mustHex(t, "0101010400000051")) // ucode 81 < floor 82
-	assert.ErrorContains(t, p.SEVSNP.CheckTurinTCB("reported_tcb", older, p.SEVSNP.MinimumTCB), "below policy floor")
 }
 
 func TestTDXOptionsAndChecks(t *testing.T) {

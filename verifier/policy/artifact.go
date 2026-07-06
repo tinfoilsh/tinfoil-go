@@ -70,8 +70,9 @@ type SEVSNPPolicy struct {
 	VMPL                      *int        `json:"vmpl"`
 }
 
-// TCB holds AMD security patch levels. FmcSpl is present only for Turin
-// (family 1Ah) policies, whose TCB_VERSION layout differs from Genoa.
+// TCB holds AMD security patch levels. FmcSpl (family 1Ah / Turin only) is
+// accepted for forward-compatibility but Turin verification is not yet
+// supported (see MASTER_PLAN.md).
 type TCB struct {
 	FmcSpl   *uint8 `json:"fmc_spl,omitempty"`
 	BlSpl    uint8  `json:"bl_spl"`

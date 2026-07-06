@@ -16,6 +16,7 @@ import (
 	"github.com/google/go-sev-guest/verify/trust"
 	"google.golang.org/protobuf/types/known/wrapperspb"
 
+	"github.com/tinfoilsh/tinfoil-go/verifier/policy"
 	"github.com/tinfoilsh/tinfoil-go/verifier/util"
 )
 
@@ -34,9 +35,8 @@ func (*getter) Get(targetURL string) ([]byte, error) {
 	if strings.HasSuffix(u.Path, "/cert_chain") {
 		if u.Path == "/vcek/v1/Genoa/cert_chain" {
 			return vcekGenoaCertChain, nil
-		} else {
-			return nil, fmt.Errorf("cert_chain is not supported")
 		}
+		return nil, fmt.Errorf("cert_chain is not supported")
 	}
 
 	u.Host = "kds-proxy.tinfoil.sh"
@@ -51,7 +51,24 @@ var (
 	_ trust.HTTPSGetter = &getter{}
 )
 
-func verifySevReport(attestationDoc string, isCompressed bool, vcekDER []byte) (*sevsnp.Report, error) {
+// sevProductFromReport derives the SEV product from the report's CPUID
+// family/model/stepping field (present in report version 3+). Reports
+// without the field (version 2) predate Turin and are treated as Genoa.
+func sevProductFromReport(report *sevsnp.Report) *sevsnp.SevProduct {
+	if fms := report.GetCpuid1EaxFms(); fms != 0 {
+		return abi.SevProductFromCpuid1Eax(fms)
+	}
+	return &sevsnp.SevProduct{
+		Name:            sevsnp.SevProduct_SEV_PRODUCT_GENOA,
+		MachineStepping: &wrapperspb.UInt32Value{Value: uint32(0)},
+	}
+}
+
+// verifySevSignature decodes a report, derives its product, and verifies the
+// report signature under the AMD roots (VCEK provided or fetched from KDS).
+// It performs no policy validation; callers must validate the returned
+// attestation before trusting any report field.
+func verifySevSignature(attestationDoc string, isCompressed bool, vcekDER []byte) (*sevsnp.Attestation, error) {
 	attDocBytes, err := base64.StdEncoding.DecodeString(attestationDoc)
 	if err != nil {
 		return nil, err
@@ -64,17 +81,14 @@ func verifySevReport(attestationDoc string, isCompressed bool, vcekDER []byte) (
 		}
 	}
 
-	opts := verify.DefaultOptions()
-	opts.Getter = &getter{}
-	opts.Product = &sevsnp.SevProduct{
-		Name:            sevsnp.SevProduct_SEV_PRODUCT_GENOA,
-		MachineStepping: &wrapperspb.UInt32Value{Value: uint32(0)},
-	}
-
 	parsedReport, err := abi.ReportToProto(attDocBytes)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse report: %w", err)
 	}
+
+	opts := verify.DefaultOptions()
+	opts.Getter = &getter{}
+	opts.Product = sevProductFromReport(parsedReport)
 
 	var attestation *sevsnp.Attestation
 	if vcekDER != nil {
@@ -95,6 +109,47 @@ func verifySevReport(attestationDoc string, isCompressed bool, vcekDER []byte) (
 	}
 
 	if err := verify.SnpAttestation(attestation, opts); err != nil {
+		return nil, err
+	}
+	return attestation, nil
+}
+
+// verifySevReportWithEndorsements verifies a report signature, extracts the
+// authenticated platform identity, looks up the machine's endorsed policy in
+// the platform-endorsements artifact, and validates the report against that
+// policy. Returns the verified report and the matched policy name. A machine
+// absent from the artifact fails verification.
+func verifySevReportWithEndorsements(attestationDoc string, isCompressed bool, vcekDER []byte, endorsements *policy.Artifact) (*sevsnp.Report, string, error) {
+	attestation, err := verifySevSignature(attestationDoc, isCompressed, vcekDER)
+	if err != nil {
+		return nil, "", err
+	}
+	report := attestation.GetReport()
+
+	identity, err := policy.SEVIdentity(report.GetChipId())
+	if err != nil {
+		return nil, "", err
+	}
+	policyName, machinePolicy, err := endorsements.PolicyFor(identity, policy.PlatformSEVSNP)
+	if err != nil {
+		return nil, "", err
+	}
+
+	productLine := kds.ProductLine(attestation.GetProduct())
+	valOpts, err := machinePolicy.SEVSNP.SEVOptions(productLine)
+	if err != nil {
+		return nil, "", err
+	}
+	if err := validate.SnpAttestation(attestation, valOpts); err != nil {
+		return nil, "", err
+	}
+
+	return report, policyName, nil
+}
+
+func verifySevReport(attestationDoc string, isCompressed bool, vcekDER []byte) (*sevsnp.Report, error) {
+	attestation, err := verifySevSignature(attestationDoc, isCompressed, vcekDER)
+	if err != nil {
 		return nil, err
 	}
 
@@ -148,7 +203,7 @@ func verifySevReport(attestationDoc string, isCompressed bool, vcekDER []byte) (
 		return nil, err
 	}
 
-	return parsedReport, nil
+	return attestation.GetReport(), nil
 }
 
 func verifySevAttestationV2(attestationDoc string) (*Verification, error) {

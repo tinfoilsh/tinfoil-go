@@ -5,7 +5,7 @@ go 1.26.4
 require (
 	github.com/Masterminds/semver/v3 v3.4.0
 	github.com/charmbracelet/log v1.0.0
-	github.com/google/go-sev-guest v0.14.1
+	github.com/google/go-sev-guest v0.15.0
 	github.com/google/go-tdx-guest v0.3.1
 	github.com/openai/openai-go/v3 v3.16.0
 	github.com/sigstore/protobuf-specs v0.5.1
