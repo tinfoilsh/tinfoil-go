@@ -71,9 +71,8 @@ type SEVSNPPolicy struct {
 	VMPL                      *int        `json:"vmpl"`
 }
 
-// TCB holds AMD security patch levels. FmcSpl (family 1Ah / Turin only) is
-// accepted for forward-compatibility but Turin verification is not yet
-// supported (see MASTER_PLAN.md).
+// TCB holds AMD security patch levels. FmcSpl applies to family 1Ah (Turin)
+// parts only, which are not yet supported for verification.
 type TCB struct {
 	FmcSpl   *uint8 `json:"fmc_spl,omitempty"`
 	BlSpl    uint8  `json:"bl_spl"`
@@ -116,12 +115,9 @@ type TDXPolicy struct {
 }
 
 // ParseArtifact strictly decodes and validates a platform-endorsements
-// artifact. Unknown fields anywhere in the document are rejected.
-//
-// Duplicate JSON member names are NOT detected (Go's decoder keeps the last
-// value): the artifact is Sigstore-signed and its publishing pipeline
-// rejects duplicates before signing, so auditing "one machine, one policy"
-// is the publisher's and auditors' job, not the client verifier's.
+// artifact. Unknown fields anywhere in the document are rejected. Duplicate
+// JSON member names are not detected; rejecting them is the publisher's
+// responsibility.
 func ParseArtifact(data []byte) (*Artifact, error) {
 	dec := json.NewDecoder(bytes.NewReader(data))
 	dec.DisallowUnknownFields()

@@ -13,10 +13,8 @@ import (
 	tdxvalidate "github.com/google/go-tdx-guest/validate"
 )
 
-// ProductGenoa is the AMD product line supported by the v3 verifier. Turin
-// (family 1Ah) is intentionally not supported yet (see MASTER_PLAN.md): its
-// TCB_VERSION layout and VCEK HWID differ, and a firmware PLATFORM_INFO
-// discrepancy on our Turin hardware is still under investigation with AMD.
+// ProductGenoa is the only AMD product line currently supported by the
+// verifier. Turin (family 1Ah) is not supported yet.
 const ProductGenoa = "Genoa"
 
 // SEVOptions translates the policy block into go-sev-guest validation
@@ -114,9 +112,7 @@ func (p *TDXPolicy) TDXOptions() (*tdxvalidate.Options, error) {
 }
 
 // CheckTCBEvaluationDataNumber verifies that collateral (QE Identity or TCB
-// Info) meets the policy's minimum tcbEvaluationDataNumber. Callers fetching
-// collateral with a hard-coded floor must still apply this check so a policy
-// advertising a stricter minimum is never silently weakened.
+// Info) meets the policy's minimum tcbEvaluationDataNumber.
 func (p *TDXPolicy) CheckTCBEvaluationDataNumber(n int) error {
 	if n < p.MinimumTCBEvaluationDataNumber {
 		return fmt.Errorf("tcbEvaluationDataNumber %d is below the policy minimum %d",

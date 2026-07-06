@@ -97,8 +97,7 @@ func TestSEVOptionsGenoa(t *testing.T) {
 	assert.True(t, opts.PlatformInfo.TSMEEnabled)
 }
 
-// Turin (family 1Ah) is intentionally unsupported by the v3 verifier for now
-// (see MASTER_PLAN.md); SEVOptions must reject any non-Genoa product line.
+// SEVOptions must reject any non-Genoa product line.
 func TestSEVOptionsRejectsNonGenoa(t *testing.T) {
 	a := loadFixture(t)
 	_, p, err := a.PolicyFor(box2TurinID, PlatformSEVSNP)
