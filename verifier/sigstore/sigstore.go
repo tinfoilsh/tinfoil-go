@@ -20,10 +20,13 @@ import (
 const (
 	oidcIssuer = "https://token.actions.githubusercontent.com"
 
-	// platformEndorsementsRepo publishes the platform-endorsements artifact
-	// and is the only signing workflow identity accepted for it. Its digest
-	// is published under the standard tinfoil.hash release asset.
+	// platformEndorsementsRepo publishes the platform-endorsements artifact.
 	platformEndorsementsRepo = "tinfoilsh/platform-endorsements"
+
+	// platformEndorsementsIdentity is the only signing certificate identity
+	// accepted for the platform-endorsements artifact.
+	platformEndorsementsIdentity = "^https://github.com/" + platformEndorsementsRepo +
+		"/.github/workflows/build.yml@refs/tags/v[0-9]"
 )
 
 type Client struct {
@@ -69,6 +72,14 @@ func FetchTrustRoot() ([]byte, error) {
 }
 
 func (c *Client) VerifyBundle(bundleJSON []byte, repo, hexDigest string) (*verify.VerificationResult, error) {
+	// TODO: Can we pin this to latest without fetching the latest release?
+	sanRegex := "^https://github.com/" + repo + "/.github/workflows/.*@refs/tags/*"
+	return c.verifyBundleWithIdentity(bundleJSON, sanRegex, hexDigest)
+}
+
+// verifyBundleWithIdentity verifies a Sigstore bundle against an explicit
+// signing certificate SAN regex.
+func (c *Client) verifyBundleWithIdentity(bundleJSON []byte, sanRegex, hexDigest string) (*verify.VerificationResult, error) {
 	if c.trustRoot == nil {
 		return nil, fmt.Errorf("trust root is not set")
 	}
@@ -99,8 +110,7 @@ func (c *Client) VerifyBundle(bundleJSON []byte, repo, hexDigest string) (*verif
 		oidcIssuer,
 		"",
 		"",
-		// TODO: Can we pin this to latest without fetching the latest release?
-		"^https://github.com/"+repo+"/.github/workflows/.*@refs/tags/*",
+		sanRegex,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("creating certificate identity: %w", err)
@@ -295,7 +305,7 @@ func VerifyAttestation(
 // platform-endorsements artifact against the publisher identity and returns
 // the parsed, validated artifact.
 func (c *Client) VerifyPlatformEndorsements(bundleJSON []byte, hexDigest string) (*policy.Artifact, error) {
-	result, err := c.VerifyBundle(bundleJSON, platformEndorsementsRepo, hexDigest)
+	result, err := c.verifyBundleWithIdentity(bundleJSON, platformEndorsementsIdentity, hexDigest)
 	if err != nil {
 		return nil, fmt.Errorf("verifying platform endorsements bundle: %w", err)
 	}

@@ -113,6 +113,18 @@ func (p *TDXPolicy) TDXOptions() (*tdxvalidate.Options, error) {
 	return opts, nil
 }
 
+// CheckTCBEvaluationDataNumber verifies that collateral (QE Identity or TCB
+// Info) meets the policy's minimum tcbEvaluationDataNumber. Callers fetching
+// collateral with a hard-coded floor must still apply this check so a policy
+// advertising a stricter minimum is never silently weakened.
+func (p *TDXPolicy) CheckTCBEvaluationDataNumber(n int) error {
+	if n < p.MinimumTCBEvaluationDataNumber {
+		return fmt.Errorf("tcbEvaluationDataNumber %d is below the policy minimum %d",
+			n, p.MinimumTCBEvaluationDataNumber)
+	}
+	return nil
+}
+
 // CheckMRSeam verifies membership of the quote's MR_SEAM in the policy's
 // accepted set.
 func (p *TDXPolicy) CheckMRSeam(mrSeam []byte) error {
