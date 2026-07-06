@@ -119,6 +119,11 @@ func verifySevSignature(attestationDoc string, isCompressed bool, vcekDER []byte
 // the platform-endorsements artifact, and validates the report against that
 // policy. Returns the verified report and the matched policy name. A machine
 // absent from the artifact fails verification.
+//
+// The launch measurement (report.Measurement) is intentionally NOT checked
+// here — it attests the workload, not the platform, and is not part of the
+// endorsement policy. Callers MUST compare it against the expected code
+// measurement, exactly as with verifySevReport.
 func verifySevReportWithEndorsements(attestationDoc string, isCompressed bool, vcekDER []byte, endorsements *policy.Artifact) (*sevsnp.Report, string, error) {
 	attestation, err := verifySevSignature(attestationDoc, isCompressed, vcekDER)
 	if err != nil {

@@ -24,9 +24,12 @@ const (
 	platformEndorsementsRepo = "tinfoilsh/platform-endorsements"
 
 	// platformEndorsementsIdentity is the only signing certificate identity
-	// accepted for the platform-endorsements artifact.
-	platformEndorsementsIdentity = "^https://github.com/" + platformEndorsementsRepo +
-		"/.github/workflows/build.yml@refs/tags/v[0-9]"
+	// accepted for the platform-endorsements artifact: the tag-triggered
+	// build workflow of the publisher repo. Dots are escaped and the pattern
+	// is anchored at both ends so no other workflow path, ref type, or
+	// trailing SAN content can match.
+	platformEndorsementsIdentity = "^https://github\\.com/" + platformEndorsementsRepo +
+		"/\\.github/workflows/build\\.yml@refs/tags/v[0-9][^@]*$"
 )
 
 type Client struct {
