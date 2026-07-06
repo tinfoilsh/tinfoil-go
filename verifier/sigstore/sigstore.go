@@ -10,13 +10,20 @@ import (
 	"github.com/sigstore/sigstore-go/pkg/root"
 	"github.com/sigstore/sigstore-go/pkg/tuf"
 	"github.com/sigstore/sigstore-go/pkg/verify"
+	"google.golang.org/protobuf/encoding/protojson"
 
 	"github.com/tinfoilsh/tinfoil-go/verifier/attestation"
 	"github.com/tinfoilsh/tinfoil-go/verifier/github"
+	"github.com/tinfoilsh/tinfoil-go/verifier/policy"
 )
 
 const (
 	oidcIssuer = "https://token.actions.githubusercontent.com"
+
+	// platformEndorsementsRepo publishes the platform-endorsements artifact
+	// and is the only signing workflow identity accepted for it. Its digest
+	// is published under the standard tinfoil.hash release asset.
+	platformEndorsementsRepo = "tinfoilsh/platform-endorsements"
 )
 
 type Client struct {
@@ -282,6 +289,41 @@ func VerifyAttestation(
 	}
 	client := &Client{trustRoot: trustRoot}
 	return client.VerifyAttestation(bundleJSON, repo, hexDigest)
+}
+
+// VerifyPlatformEndorsements verifies a Sigstore bundle for the
+// platform-endorsements artifact against the publisher identity and returns
+// the parsed, validated artifact.
+func (c *Client) VerifyPlatformEndorsements(bundleJSON []byte, hexDigest string) (*policy.Artifact, error) {
+	result, err := c.VerifyBundle(bundleJSON, platformEndorsementsRepo, hexDigest)
+	if err != nil {
+		return nil, fmt.Errorf("verifying platform endorsements bundle: %w", err)
+	}
+
+	if result.Statement.PredicateType != policy.ArtifactFormat {
+		return nil, fmt.Errorf("unexpected predicate type: %s", result.Statement.PredicateType)
+	}
+
+	predicateJSON, err := protojson.Marshal(result.Statement.Predicate)
+	if err != nil {
+		return nil, fmt.Errorf("encoding platform endorsements predicate: %w", err)
+	}
+	return policy.ParseArtifact(predicateJSON)
+}
+
+// LatestPlatformEndorsements fetches and verifies the latest
+// platform-endorsements artifact (endorsed machine identities and their
+// appraisal policies) from GitHub+Sigstore.
+func (c *Client) LatestPlatformEndorsements() (*policy.Artifact, error) {
+	digest, err := github.FetchLatestDigest(platformEndorsementsRepo)
+	if err != nil {
+		return nil, fmt.Errorf("fetching platform endorsements digest: %w", err)
+	}
+	bundleJSON, err := github.FetchAttestationBundle(platformEndorsementsRepo, digest)
+	if err != nil {
+		return nil, fmt.Errorf("fetching platform endorsements bundle: %w", err)
+	}
+	return c.VerifyPlatformEndorsements(bundleJSON, digest)
 }
 
 // LatestHardwareMeasurements fetches the latest hardware measurements from GitHub+Sigstore

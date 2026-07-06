@@ -13,27 +13,27 @@ import (
 	tdxvalidate "github.com/google/go-tdx-guest/validate"
 )
 
-// AMD product lines with distinct TCB_VERSION layouts.
-const (
-	ProductGenoa = "Genoa"
-	ProductTurin = "Turin"
-)
+// ProductGenoa is the AMD product line supported by the v3 verifier. Turin
+// (family 1Ah) is intentionally not supported yet (see MASTER_PLAN.md): its
+// TCB_VERSION layout and VCEK HWID differ, and a firmware PLATFORM_INFO
+// discrepancy on our Turin hardware is still under investigation with AMD.
+const ProductGenoa = "Genoa"
 
 // SEVOptions translates the policy block into go-sev-guest validation
-// options for the given product line.
-//
-// For Genoa (family 19h) the TCB floors map onto the library's TCBParts.
-// For Turin (family 1Ah) the TCB_VERSION layout differs (FMC[7:0] BL[15:8]
-// TEE[23:16] SNP[31:24] UCODE[63:56]) and go-sev-guest v0.14.x has no FMC
-// support, so the library TCB floors are left unset and callers MUST enforce
-// TCB via CheckTurinTCB on the verified report's reported and launch TCBs.
+// options for the given product line. Only Genoa (family 19h) is supported.
 func (p *SEVSNPPolicy) SEVOptions(productLine string) (*sevvalidate.Options, error) {
+	if productLine != ProductGenoa {
+		return nil, fmt.Errorf("unsupported SEV product line %q (only %s is supported)", productLine, ProductGenoa)
+	}
 	version, err := parseAPIVersion(p.MinimumAPIVersion)
 	if err != nil {
 		return nil, err
 	}
+	if p.MinimumTCB.FmcSpl != nil || p.MinimumLaunchTCB.FmcSpl != nil {
+		return nil, fmt.Errorf("fmc_spl is not valid for product line %s", productLine)
+	}
 
-	opts := &sevvalidate.Options{
+	return &sevvalidate.Options{
 		GuestPolicy: sevabi.SnpPolicy{
 			Debug:        p.GuestPolicy.Debug,
 			SMT:          p.GuestPolicy.SMT,
@@ -51,70 +51,20 @@ func (p *SEVSNPPolicy) SEVOptions(productLine string) (*sevvalidate.Options, err
 			RAPLDisabled:                p.PlatformInfo.RAPLDisabled,
 			CiphertextHidingDRAMEnabled: p.PlatformInfo.CiphertextHidingDRAM,
 		},
-		VMPL: p.VMPL,
-	}
-
-	switch productLine {
-	case ProductGenoa:
-		if p.MinimumTCB.FmcSpl != nil || p.MinimumLaunchTCB.FmcSpl != nil {
-			return nil, fmt.Errorf("fmc_spl is not valid for product line %s", productLine)
-		}
-		opts.MinimumTCB = kds.TCBParts{
+		MinimumTCB: kds.TCBParts{
 			BlSpl:    p.MinimumTCB.BlSpl,
 			TeeSpl:   p.MinimumTCB.TeeSpl,
 			SnpSpl:   p.MinimumTCB.SnpSpl,
 			UcodeSpl: p.MinimumTCB.UcodeSpl,
-		}
-		opts.MinimumLaunchTCB = kds.TCBParts{
+		},
+		MinimumLaunchTCB: kds.TCBParts{
 			BlSpl:    p.MinimumLaunchTCB.BlSpl,
 			TeeSpl:   p.MinimumLaunchTCB.TeeSpl,
 			SnpSpl:   p.MinimumLaunchTCB.SnpSpl,
 			UcodeSpl: p.MinimumLaunchTCB.UcodeSpl,
-		}
-	case ProductTurin:
-		// Library TCB comparison uses the Genoa layout; leave zero and
-		// enforce via CheckTurinTCB instead.
-	default:
-		return nil, fmt.Errorf("unsupported SEV product line %q", productLine)
-	}
-
-	return opts, nil
-}
-
-// TurinTCB is the decomposition of a family-1Ah TCB_VERSION.
-type TurinTCB struct {
-	FmcSpl   uint8
-	BlSpl    uint8
-	TeeSpl   uint8
-	SnpSpl   uint8
-	UcodeSpl uint8
-}
-
-// DecomposeTurinTCB interprets a raw TCB_VERSION under the Turin layout:
-// FMC[7:0] BL[15:8] TEE[23:16] SNP[31:24] reserved[55:32] UCODE[63:56].
-func DecomposeTurinTCB(tcb uint64) TurinTCB {
-	return TurinTCB{
-		FmcSpl:   uint8(tcb),
-		BlSpl:    uint8(tcb >> 8),
-		TeeSpl:   uint8(tcb >> 16),
-		SnpSpl:   uint8(tcb >> 24),
-		UcodeSpl: uint8(tcb >> 56),
-	}
-}
-
-// CheckTurinTCB enforces the policy TCB floor against a raw Turin
-// TCB_VERSION value from a verified report.
-func (p *SEVSNPPolicy) CheckTurinTCB(field string, raw uint64, floor TCB) error {
-	got := DecomposeTurinTCB(raw)
-	var wantFmc uint8
-	if floor.FmcSpl != nil {
-		wantFmc = *floor.FmcSpl
-	}
-	if got.FmcSpl < wantFmc || got.BlSpl < floor.BlSpl || got.TeeSpl < floor.TeeSpl ||
-		got.SnpSpl < floor.SnpSpl || got.UcodeSpl < floor.UcodeSpl {
-		return fmt.Errorf("%s %+v is below policy floor %+v", field, got, floor)
-	}
-	return nil
+		},
+		VMPL: p.VMPL,
+	}, nil
 }
 
 // TDXOptions translates the policy block into go-tdx-guest validation
