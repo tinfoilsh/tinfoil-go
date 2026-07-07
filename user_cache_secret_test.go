@@ -248,7 +248,18 @@ func TestUserCacheSecretTransportNeverClobbers(t *testing.T) {
 }
 
 func TestUserCacheSecretTransportNonObjectBodies(t *testing.T) {
-	for _, raw := range []string{`not json`, `[1,2,3]`, `null`, `{"model":"m"} trailing`} {
+	// The trailing '}' / ']' cases are the regression: dec.More() reports
+	// "no more elements" at either byte, so they used to be re-marshaled
+	// with the trailing bytes silently dropped.
+	for _, raw := range []string{
+		`not json`,
+		`[1,2,3]`,
+		`null`,
+		`{"model":"m"} trailing`,
+		`{"model":"m"}}`,
+		`{"model":"m"}]`,
+		`{"model":"m"}} garbage`,
+	} {
 		t.Run(raw, func(t *testing.T) {
 			var got []byte
 			transport := captureTransport("s1", &got, nil)
@@ -257,6 +268,20 @@ func TestUserCacheSecretTransportNonObjectBodies(t *testing.T) {
 			require.Equal(t, raw, string(got), "bodies the router-side schema would reject must be forwarded untouched")
 		})
 	}
+}
+
+func TestUserCacheSecretTransportAllowsTrailingWhitespace(t *testing.T) {
+	// Trailing whitespace is not trailing data: strict JSON parsers accept
+	// it, so the injection must too — clients routinely end bodies with \n.
+	var got []byte
+	transport := captureTransport("s1", &got, nil)
+	_, err := transport.RoundTrip(postJSONRequest(t,
+		"https://enclave.example.com/v1/chat/completions", "{\"model\":\"m\"}\n\t "))
+	require.NoError(t, err)
+
+	var body map[string]any
+	require.NoError(t, json.Unmarshal(got, &body))
+	require.Equal(t, "s1", body[userCacheSecretField])
 }
 
 func TestUserCacheSecretTransportPreservesNumberPrecision(t *testing.T) {

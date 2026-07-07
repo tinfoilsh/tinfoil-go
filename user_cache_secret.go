@@ -240,7 +240,7 @@ func injectUserCacheSecret(raw []byte, secret string) ([]byte, bool) {
 	dec := json.NewDecoder(bytes.NewReader(raw))
 	dec.UseNumber()
 	var body map[string]any
-	if err := dec.Decode(&body); err != nil || dec.More() || body == nil {
+	if err := dec.Decode(&body); err != nil || !decodeConsumedAll(dec) || body == nil {
 		return nil, false
 	}
 	if _, ok := body[userCacheSecretField]; ok {
@@ -252,4 +252,15 @@ func injectUserCacheSecret(raw []byte, secret string) ([]byte, bool) {
 		return nil, false
 	}
 	return newBody, true
+}
+
+// decodeConsumedAll reports whether dec has nothing left but trailing
+// whitespace: a follow-up Token read returns io.EOF only at true end of
+// input. dec.More() is not enough here — it reports "no more elements" at a
+// trailing '}' or ']', so a malformed body like `{...}}` would be
+// re-marshaled without its trailing bytes and a request the server rejects
+// would quietly become one it accepts.
+func decodeConsumedAll(dec *json.Decoder) bool {
+	_, err := dec.Token()
+	return err == io.EOF
 }
