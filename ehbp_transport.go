@@ -43,6 +43,8 @@ type clientConfig struct {
 	transport            TransportMode
 	baseURL              string
 	attestationBundleURL string
+	userCacheSecret      string
+	userCacheSecretSet   bool
 	openaiOpts           []option.RequestOption
 }
 
@@ -130,7 +132,8 @@ func NewClientWithOptions(opts ...ClientOption) (*Client, error) {
 		secureClient = client.NewSecureClient(cfg.enclave, cfg.repo)
 	}
 
-	return createClientFromSecureClient(secureClient, cfg.transport, cfg.baseURL, cfg.openaiOpts...)
+	return createClientFromSecureClient(secureClient, cfg.transport, cfg.baseURL,
+		resolveUserCacheSecret(cfg.userCacheSecret, cfg.userCacheSecretSet), cfg.openaiOpts...)
 }
 
 // secureHTTPClient builds an *http.Client for the requested transport mode.
@@ -139,7 +142,7 @@ func NewClientWithOptions(opts ...ClientOption) (*Client, error) {
 // proxy, if any): neither EHBP nor TLS pinning encrypts request headers, which
 // may carry the API key, so requests to any other host or over plain http are
 // refused.
-func secureHTTPClient(secureClient *client.SecureClient, mode TransportMode, baseURL string) (*http.Client, error) {
+func secureHTTPClient(secureClient *client.SecureClient, mode TransportMode, baseURL, userCacheSecret string) (*http.Client, error) {
 	var (
 		httpClient *http.Client
 		err        error
@@ -156,6 +159,17 @@ func secureHTTPClient(secureClient *client.SecureClient, mode TransportMode, bas
 		return nil, err
 	}
 
+	// The cache-secret layer sits above the sealing transport, so the field it
+	// injects is encrypted with the rest of the body (EHBP) or sent over the
+	// pinned connection (TLS).
+	transport := httpClient.Transport
+	if userCacheSecret != "" {
+		transport = &userCacheSecretTransport{
+			secret:    userCacheSecret,
+			transport: transport,
+		}
+	}
+
 	origins, err := allowedOrigins(secureClient.Enclave(), baseURL)
 	if err != nil {
 		return nil, fmt.Errorf("failed to determine allowed request origins: %w", err)
@@ -163,7 +177,7 @@ func secureHTTPClient(secureClient *client.SecureClient, mode TransportMode, bas
 	httpClient.Transport = &hostBoundRoundTripper{
 		allowedOrigins: origins,
 		enclave:        secureClient.Enclave(),
-		transport:      httpClient.Transport,
+		transport:      transport,
 	}
 	return httpClient, nil
 }
