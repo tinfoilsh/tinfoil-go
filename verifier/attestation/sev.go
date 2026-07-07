@@ -211,10 +211,6 @@ func verifySevReport(attestationDoc string, isCompressed bool, vcekDER []byte) (
 	return attestation.GetReport(), nil
 }
 
-func verifySevAttestationV2(attestationDoc string) (*Verification, error) {
-	return verifySevAttestationV2WithVCEK(attestationDoc, nil)
-}
-
 func verifySevAttestationV2WithVCEK(attestationDoc string, vcekDER []byte) (*Verification, error) {
 	report, err := verifySevReport(attestationDoc, true, vcekDER)
 	if err != nil {
