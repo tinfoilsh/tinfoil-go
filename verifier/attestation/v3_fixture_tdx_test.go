@@ -4,6 +4,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -85,7 +86,10 @@ func allowObservedShape(doc *DocumentV3, artifact *policy.Artifact) error {
 	if err != nil {
 		return err
 	}
-	quote := parsed.(*tdxpb.QuoteV4)
+	quote, ok := parsed.(*tdxpb.QuoteV4)
+	if !ok {
+		return fmt.Errorf("unsupported TDX quote version (want v4)")
+	}
 	body := quote.GetTdQuoteBody()
 	artifact.Measurements["dev-shape"] = policy.PlatformMeasurement{
 		MRTD:  hex.EncodeToString(body.GetMrTd()),

@@ -171,13 +171,28 @@ func TestParseDocumentV3RejectsDuplicateItemIDs(t *testing.T) {
 
 	// Duplicate the tls entry (raw byte surgery keeps the rest intact; the
 	// endorsed hash no longer matters because parsing rejects first).
+	filler := hex.EncodeToString(bytes.Repeat([]byte{0xcc}, 32))
 	dup := bytes.Replace(docBytes,
 		[]byte(`"items":[{"id":"tls"`),
-		[]byte(`"items":[{"id":"tls","format":"`+KeySPKIFPSHA256V1Format+`","data":""},{"id":"tls"`), 1)
+		[]byte(`"items":[{"id":"tls","format":"`+KeySPKIFPSHA256V1Format+`","data":"`+filler+`"},{"id":"tls"`), 1)
 	require.NotEqual(t, docBytes, dup)
 
 	_, err := ParseDocumentV3(dup)
 	assert.ErrorContains(t, err, `duplicate crypto_material item id "tls"`)
+}
+
+func TestParseDocumentV3RejectsMalformedKeyMaterial(t *testing.T) {
+	nonce := testNonce()
+	_, docBytes := buildTestDocumentV3(t, nonce)
+
+	// Known key formats must carry exactly 32 bytes of lowercase hex; a
+	// truncated TLS fingerprint is rejected at parse time.
+	short := bytes.Replace(docBytes,
+		[]byte(hex.EncodeToString(bytes.Repeat([]byte{0xaa}, 32))),
+		[]byte(hex.EncodeToString(bytes.Repeat([]byte{0xaa}, 8))), 1)
+	require.NotEqual(t, docBytes, short)
+	_, err := ParseDocumentV3(short)
+	assert.ErrorContains(t, err, "must be 32 bytes")
 }
 
 func TestParseDocumentV3RejectsUppercaseHex(t *testing.T) {
