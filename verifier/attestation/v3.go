@@ -308,8 +308,17 @@ func ParseDocumentV3(docBytes []byte) (*DocumentV3, error) {
 			return nil, fmt.Errorf("duplicate crypto_material item id %q", item.ID)
 		}
 		seen[item.ID] = true
-		if !lowerHexV3.MatchString(item.Data) {
-			return nil, fmt.Errorf("crypto_material item %q data is not lowercase hex", item.ID)
+		switch item.Format {
+		case KeySPKIFPSHA256V1Format, KeyX25519HPKEV1Format:
+			// Known key formats are exactly 32 bytes; reject short, empty,
+			// or odd-length material before callers trust it.
+			if _, err := decodeLowerHex(fmt.Sprintf("crypto_material item %q data", item.ID), item.Data, 32); err != nil {
+				return nil, err
+			}
+		default:
+			if !lowerHexV3.MatchString(item.Data) {
+				return nil, fmt.Errorf("crypto_material item %q data is not lowercase hex", item.ID)
+			}
 		}
 	}
 

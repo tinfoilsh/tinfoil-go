@@ -133,7 +133,7 @@ func (s *SecureClient) VerifyV3() (*VerifiedDocumentV3, error) {
 		var err error
 		s.sigstoreClient, err = getSigstoreClient(nil)
 		if err != nil {
-			return nil, fmt.Errorf("failed to create sigstore client: %v", err)
+			return nil, fmt.Errorf("failed to create sigstore client: %w", err)
 		}
 	}
 	sigstoreClient := s.sigstoreClient
@@ -158,18 +158,44 @@ func (s *SecureClient) VerifyV3() (*VerifiedDocumentV3, error) {
 	if err != nil {
 		return nil, fmt.Errorf("binding: %w", err)
 	}
-	hpkeKey, _ := verified.HPKEPublicKey()
+	hpkeKey, err := verified.HPKEPublicKey()
+	if err != nil {
+		return nil, fmt.Errorf("binding: %w", err)
+	}
 	if err := enclaveValidPubKey(s.enclave, &attestation.Verification{TLSPublicKeyFP: tlsFP}); err != nil {
-		return nil, fmt.Errorf("binding: %v", err)
+		return nil, fmt.Errorf("binding: %w", err)
+	}
+
+	// Fingerprints mirror the legacy flow for consumers that display or
+	// compare them. TDX fingerprints incorporate the platform registers,
+	// which in v3 come from the verified quote itself (their values were
+	// already appraised against the endorsed platform measurements).
+	var hw *attestation.HardwareMeasurement
+	if verified.EnclaveMeasurement.Type == attestation.TdxGuestV2 && len(verified.EnclaveMeasurement.Registers) >= 2 {
+		hw = &attestation.HardwareMeasurement{
+			MRTD:  verified.EnclaveMeasurement.Registers[0],
+			RTMR0: verified.EnclaveMeasurement.Registers[1],
+		}
+	}
+	codeFingerprint, err := attestation.Fingerprint(verified.CodeMeasurement, hw, verified.EnclaveMeasurement.Type)
+	if err != nil {
+		return nil, fmt.Errorf("measurements: failed to compute code fingerprint: %w", err)
+	}
+	enclaveFingerprint, err := attestation.Fingerprint(verified.EnclaveMeasurement, hw, verified.EnclaveMeasurement.Type)
+	if err != nil {
+		return nil, fmt.Errorf("measurements: failed to compute enclave fingerprint: %w", err)
 	}
 
 	s.groundTruth = &GroundTruth{
-		EnclaveHost:        s.enclave,
-		TLSPublicKey:       tlsFP,
-		HPKEPublicKey:      hpkeKey,
-		Digest:             verified.CodeDigest,
-		CodeMeasurement:    verified.CodeMeasurement,
-		EnclaveMeasurement: verified.EnclaveMeasurement,
+		EnclaveHost:         s.enclave,
+		TLSPublicKey:        tlsFP,
+		HPKEPublicKey:       hpkeKey,
+		Digest:              verified.CodeDigest,
+		CodeMeasurement:     verified.CodeMeasurement,
+		EnclaveMeasurement:  verified.EnclaveMeasurement,
+		HardwareMeasurement: hw,
+		CodeFingerprint:     codeFingerprint,
+		EnclaveFingerprint:  enclaveFingerprint,
 	}
 	return verified, nil
 }
