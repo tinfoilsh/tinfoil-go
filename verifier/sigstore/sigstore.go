@@ -3,6 +3,7 @@ package sigstore
 import (
 	"encoding/hex"
 	"fmt"
+	"regexp"
 	"strings"
 
 	protobundle "github.com/sigstore/protobuf-specs/gen/pb-go/bundle/v1"
@@ -74,9 +75,26 @@ func FetchTrustRoot() ([]byte, error) {
 	return client.GetTarget("trusted_root.json")
 }
 
+// repoNameRE matches a GitHub "owner/name" repository slug.
+var repoNameRE = regexp.MustCompile(`^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$`)
+
+// signingIdentity returns the anchored SAN regex accepted for artifacts
+// signed from repo: one workflow file directly under the repository's
+// .github/workflows directory, run from a tag ref. The repository name is
+// validated and escaped so it cannot alter the pattern.
+func signingIdentity(repo string) (string, error) {
+	if !repoNameRE.MatchString(repo) {
+		return "", fmt.Errorf("invalid repository name %q", repo)
+	}
+	return "^https://github\\.com/" + regexp.QuoteMeta(repo) +
+		"/\\.github/workflows/[^/@]+@refs/tags/[^@]+$", nil
+}
+
 func (c *Client) VerifyBundle(bundleJSON []byte, repo, hexDigest string) (*verify.VerificationResult, error) {
-	// TODO: Can we pin this to latest without fetching the latest release?
-	sanRegex := "^https://github.com/" + repo + "/.github/workflows/.*@refs/tags/*"
+	sanRegex, err := signingIdentity(repo)
+	if err != nil {
+		return nil, err
+	}
 	return c.verifyBundleWithIdentity(bundleJSON, sanRegex, hexDigest)
 }
 
