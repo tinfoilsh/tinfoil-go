@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"github.com/tinfoilsh/tinfoil-go/verifier/attestation"
 	"github.com/tinfoilsh/tinfoil-go/verifier/github"
 )
@@ -16,6 +17,31 @@ func TestReleaseIdentityMatchesExactTag(t *testing.T) {
 	assert.False(t, identity.MatchString("https://github.com/owner/repo.name/.github/workflows/build.yml@refs/tags/v1.2.4"))
 	assert.False(t, identity.MatchString("https://github.com/owner/repoXname/.github/workflows/build.yml@refs/tags/v1.2.3+build"))
 	assert.False(t, identity.MatchString("https://github.com/owner/repo.name/.github/workflows/build.yml@refs/tags/v1.2.3+build/extra"))
+}
+
+func TestSigningIdentity(t *testing.T) {
+	pattern, err := signingIdentity("tinfoilsh/confidential-model")
+	require.NoError(t, err)
+	re := regexp.MustCompile(pattern)
+
+	assert.True(t, re.MatchString(
+		"https://github.com/tinfoilsh/confidential-model/.github/workflows/release.yml@refs/tags/v1.2.3"))
+
+	for name, san := range map[string]string{
+		"other repo prefix":     "https://github.com/tinfoilsh/confidential-modelx/.github/workflows/release.yml@refs/tags/v1",
+		"unescaped dot in host": "https://githubXcom/tinfoilsh/confidential-model/.github/workflows/release.yml@refs/tags/v1",
+		"branch ref":            "https://github.com/tinfoilsh/confidential-model/.github/workflows/release.yml@refs/heads/main",
+		"nested workflow path":  "https://github.com/tinfoilsh/confidential-model/.github/workflows/a/b.yml@refs/tags/v1",
+		"trailing content":      "https://github.com/tinfoilsh/confidential-model/.github/workflows/release.yml@refs/tags/v1@evil",
+		"embedded match":        "prefix https://github.com/tinfoilsh/confidential-model/.github/workflows/release.yml@refs/tags/v1",
+	} {
+		assert.False(t, re.MatchString(san), name)
+	}
+
+	for _, repo := range []string{"", "noslash", "a/b/c", "a/(b|c)"} {
+		_, err := signingIdentity(repo)
+		assert.Error(t, err, repo)
+	}
 }
 
 func TestFetchHardwarePlatformMeasurements(t *testing.T) {
