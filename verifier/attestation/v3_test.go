@@ -229,6 +229,120 @@ func TestParseDocumentV3RejectsUppercaseHex(t *testing.T) {
 	assert.ErrorContains(t, err, "lowercase hex")
 }
 
+func TestParseDocumentV3RejectsCaseMismatchedMembers(t *testing.T) {
+	nonce := testNonce()
+	_, docBytes := buildTestDocumentV3(t, nonce)
+
+	// encoding/json alone would fill Format from "FORMAT" case-insensitively
+	// (last member wins) without any error; strict parsing must reject it.
+	var loose map[string]json.RawMessage
+	require.NoError(t, json.Unmarshal(docBytes, &loose))
+	loose["FORMAT"] = loose["format"]
+	tampered, err := json.Marshal(loose)
+	require.NoError(t, err)
+
+	_, err = ParseDocumentV3(tampered)
+	assert.ErrorContains(t, err, `unknown object member "FORMAT"`)
+}
+
+func TestParseDocumentV3RejectsDuplicateMembers(t *testing.T) {
+	nonce := testNonce()
+	_, docBytes := buildTestDocumentV3(t, nonce)
+
+	dup := bytes.Replace(docBytes,
+		[]byte(`{"format"`),
+		[]byte(`{"format":"`+AttestationV3Format+`","format"`), 1)
+	require.NotEqual(t, docBytes, dup)
+
+	_, err := ParseDocumentV3(dup)
+	assert.ErrorContains(t, err, `duplicate object member "format"`)
+}
+
+func TestParseDocumentV3RejectsDuplicateMembersInCollateralData(t *testing.T) {
+	nonce := testNonce()
+	_, docBytes := buildTestDocumentV3(t, nonce)
+
+	// Collateral data is an opaque json.RawMessage, but duplicate member
+	// names are still rejected inside it: those bytes are attacker-chosen
+	// and duplicates parse differently across languages.
+	dup := bytes.Replace(docBytes,
+		[]byte(`"cert_chain_pem":""`),
+		[]byte(`"vcek_der_base64":""`), 1)
+	require.NotEqual(t, docBytes, dup)
+
+	_, err := ParseDocumentV3(dup)
+	assert.ErrorContains(t, err, `duplicate object member "vcek_der_base64"`)
+}
+
+func TestParseDocumentV3RejectsNonCanonicalBase64(t *testing.T) {
+	nonce := testNonce()
+	_, docBytes := buildTestDocumentV3(t, nonce)
+
+	// Insert a newline into the crypto_material base64: the decoded bytes
+	// (and thus the endorsed hash) are unchanged, so acceptance would mean
+	// two distinct documents with identical endorsed content.
+	var loose map[string]json.RawMessage
+	require.NoError(t, json.Unmarshal(docBytes, &loose))
+	var encoded string
+	require.NoError(t, json.Unmarshal(loose["crypto_material"], &encoded))
+	mangled, err := json.Marshal(encoded[:8] + "\n" + encoded[8:])
+	require.NoError(t, err)
+	loose["crypto_material"] = mangled
+	tampered, err := json.Marshal(loose)
+	require.NoError(t, err)
+
+	_, err = ParseDocumentV3(tampered)
+	assert.ErrorContains(t, err, "crypto_material is not canonical base64")
+}
+
+func TestParseDocumentV3RejectsOddLengthUnknownFormatData(t *testing.T) {
+	nonce := testNonce()
+	_, docBytes := buildTestDocumentV3(t, nonce)
+
+	insert := func(item string) []byte {
+		return mutateCryptoSection(t, docBytes, func(section []byte) []byte {
+			return bytes.Replace(section,
+				[]byte(`"items":[`),
+				[]byte(`"items":[`+item+`,`), 1)
+		})
+	}
+
+	// "abc" matches the lowercase-hex character class but is not decodable.
+	_, err := ParseDocumentV3(insert(`{"id":"x","format":"https://example.com/key/v9","data":"abc"}`))
+	assert.ErrorContains(t, err, `crypto_material item "x" data is not lowercase hex`)
+
+	_, err = ParseDocumentV3(insert(`{"id":"x","format":"https://example.com/key/v9","data":""}`))
+	assert.ErrorContains(t, err, `crypto_material item "x" data is empty`)
+}
+
+func TestParseDocumentV3RejectsDuplicateCollateralIDs(t *testing.T) {
+	nonce := testNonce()
+	doc, _ := buildTestDocumentV3(t, nonce)
+
+	doc.Collateral = append(doc.Collateral, CollateralEntry{
+		ID:     doc.Collateral[0].ID,
+		Role:   RoleReferenceValues,
+		Format: CollateralSigstoreCodeV1Format,
+		Data:   json.RawMessage(`{}`),
+	})
+	docBytes, err := json.Marshal(doc)
+	require.NoError(t, err)
+
+	_, err = ParseDocumentV3(docBytes)
+	assert.ErrorContains(t, err, `duplicate collateral entry id "cpu-endorsement"`)
+}
+
+func TestParseDocumentV3RejectsInvalidUTF8(t *testing.T) {
+	nonce := testNonce()
+	_, docBytes := buildTestDocumentV3(t, nonce)
+
+	tampered := bytes.Replace(docBytes, []byte("cpu-endorsement"), []byte("cpu-endors\xffment"), 1)
+	require.NotEqual(t, docBytes, tampered)
+
+	_, err := ParseDocumentV3(tampered)
+	assert.ErrorContains(t, err, "not valid UTF-8")
+}
+
 func TestComputeReportDataV3(t *testing.T) {
 	nonce := testNonce()
 	cmHash := sha256.Sum256([]byte("crypto"))
