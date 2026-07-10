@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"crypto/rand"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -94,18 +95,23 @@ const (
 const NonceSize = 32
 
 // DocumentV3 is the wire shape of a v3 attestation document. The endorsed
-// sections are kept as raw bytes: their hashes are computed over the exact
-// transmitted bytes, never a re-serialization.
+// sections travel base64-encoded: the builder serializes each section once
+// and the encoded string carries those exact bytes, so every verifier
+// recovers them with a plain base64 decode — no re-serialization, no
+// canonicalization, no raw-span extraction (the same envelope discipline as
+// DSSE and JWS).
 type DocumentV3 struct {
 	Format         string            `json:"format"`
 	Challenge      ChallengeV3       `json:"challenge"`
 	CPUEvidence    CPUEvidenceV3     `json:"cpu_evidence"`
-	CryptoMaterial json.RawMessage   `json:"crypto_material"`
-	DeviceEvidence json.RawMessage   `json:"device_evidence"`
+	CryptoMaterial string            `json:"crypto_material"`
+	DeviceEvidence string            `json:"device_evidence"`
 	Collateral     []CollateralEntry `json:"collateral"`
 
-	cryptoMaterial *CryptoMaterialSection
-	deviceEvidence *DeviceEvidenceSection
+	cryptoMaterialBytes []byte
+	deviceEvidenceBytes []byte
+	cryptoMaterial      *CryptoMaterialSection
+	deviceEvidence      *DeviceEvidenceSection
 }
 
 // ChallengeV3 binds the document to a verifier-chosen nonce.
@@ -282,15 +288,23 @@ func ParseDocumentV3(docBytes []byte) (*DocumentV3, error) {
 	if doc.CPUEvidence.Format == "" || doc.CPUEvidence.ReportBase64 == "" {
 		return nil, fmt.Errorf("cpu_evidence is incomplete")
 	}
-	if len(doc.CryptoMaterial) == 0 {
+	if doc.CryptoMaterial == "" {
 		return nil, fmt.Errorf("crypto_material section is missing")
 	}
-	if len(doc.DeviceEvidence) == 0 {
+	if doc.DeviceEvidence == "" {
 		return nil, fmt.Errorf("device_evidence section is missing")
+	}
+	cryptoBytes, err := base64.StdEncoding.DecodeString(doc.CryptoMaterial)
+	if err != nil {
+		return nil, fmt.Errorf("decoding crypto_material: %w", err)
+	}
+	deviceBytes, err := base64.StdEncoding.DecodeString(doc.DeviceEvidence)
+	if err != nil {
+		return nil, fmt.Errorf("decoding device_evidence: %w", err)
 	}
 
 	var cm CryptoMaterialSection
-	if err := strictUnmarshal(doc.CryptoMaterial, &cm); err != nil {
+	if err := strictUnmarshal(cryptoBytes, &cm); err != nil {
 		return nil, fmt.Errorf("parsing crypto_material: %w", err)
 	}
 	if cm.Format != CryptoMaterialV1Format {
@@ -323,7 +337,7 @@ func ParseDocumentV3(docBytes []byte) (*DocumentV3, error) {
 	}
 
 	var de DeviceEvidenceSection
-	if err := strictUnmarshal(doc.DeviceEvidence, &de); err != nil {
+	if err := strictUnmarshal(deviceBytes, &de); err != nil {
 		return nil, fmt.Errorf("parsing device_evidence: %w", err)
 	}
 	if de.Format != DeviceEvidenceV1Format {
@@ -352,6 +366,8 @@ func ParseDocumentV3(docBytes []byte) (*DocumentV3, error) {
 		}
 	}
 
+	doc.cryptoMaterialBytes = cryptoBytes
+	doc.deviceEvidenceBytes = deviceBytes
 	doc.cryptoMaterial = &cm
 	doc.deviceEvidence = &de
 	return &doc, nil
@@ -386,9 +402,9 @@ func (d *DocumentV3) CryptoMaterialItem(id string) (*CryptoMaterialItem, bool) {
 // VerifyEnvelopeV3 parses a v3 document from its transmitted bytes and
 // performs the challenge and hash-binding checks: the nonce matches the
 // verifier's expected nonce, the endorsed-section hashes recomputed over the
-// transported bytes match cpu_evidence.endorsed, and REPORT_DATA recomputed
-// from them matches challenge.report_data. It returns the parsed document
-// and the expected REPORT_DATA the CPU quote must bind.
+// base64-decoded section bytes match cpu_evidence.endorsed, and REPORT_DATA
+// recomputed from them matches challenge.report_data. It returns the parsed
+// document and the expected REPORT_DATA the CPU quote must bind.
 //
 // This authenticates nothing by itself: callers must verify the CPU evidence
 // (which proves the hardware bound this REPORT_DATA) before trusting any
@@ -406,8 +422,8 @@ func VerifyEnvelopeV3(docBytes []byte, expectedNonce []byte) (*DocumentV3, [64]b
 		return nil, zero, fmt.Errorf("challenge nonce does not match the expected nonce")
 	}
 
-	cryptoHash := sha256.Sum256(doc.CryptoMaterial)
-	deviceHash := sha256.Sum256(doc.DeviceEvidence)
+	cryptoHash := sha256.Sum256(doc.cryptoMaterialBytes)
+	deviceHash := sha256.Sum256(doc.deviceEvidenceBytes)
 	if hex.EncodeToString(cryptoHash[:]) != doc.CPUEvidence.Endorsed.CryptoMaterialHash {
 		return nil, zero, fmt.Errorf("crypto_material hash does not match cpu_evidence.endorsed.crypto_material_hash")
 	}
@@ -426,9 +442,7 @@ func VerifyEnvelopeV3(docBytes []byte, expectedNonce []byte) (*DocumentV3, [64]b
 }
 
 // FetchV3 retrieves a v3 attestation document from an enclave host using a
-// fresh challenge nonce. It returns the raw response bytes: verification
-// hashes the transported bytes, so the document must not be re-serialized
-// between fetch and verify.
+// fresh challenge nonce, returning the raw response bytes for verification.
 func FetchV3(host string, nonce []byte) ([]byte, error) {
 	if len(nonce) != NonceSize {
 		return nil, fmt.Errorf("nonce must be %d bytes, got %d", NonceSize, len(nonce))
