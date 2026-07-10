@@ -18,6 +18,17 @@ import (
 	"github.com/tinfoilsh/tinfoil-go/verifier/policy"
 )
 
+func tdxFixturePolicy(t *testing.T) string {
+	t.Helper()
+	metaBytes, err := os.ReadFile(filepath.Join("..", "..", "..", "attestation-samples", "inf14-tdx-v3", "metadata.json"))
+	require.NoError(t, err)
+	var meta struct {
+		Policy string `json:"policy"`
+	}
+	require.NoError(t, json.Unmarshal(metaBytes, &meta))
+	return meta.Policy
+}
+
 // TestVerifyV3LiveFixtureTDX runs envelope and TDX CPU-evidence verification
 // against a v3 document captured from real TDX hardware over the
 // single-request flow. Quote verification replays the document's own
@@ -30,34 +41,12 @@ import (
 // collateral replay, TCB evaluation floor, MR_SEAM, PPID identity, policy).
 // Skips when the fixture is absent or its captured collateral has expired.
 func TestVerifyV3LiveFixtureTDX(t *testing.T) {
-	root := filepath.Join("..", "..", "..", "attestation-samples", "inf14-tdx-v3")
-	docBytes, err := os.ReadFile(filepath.Join(root, "fresh-v3.json"))
-	if os.IsNotExist(err) {
-		t.Skip("live TDX v3 fixture not collected")
-	}
-	require.NoError(t, err)
-
-	metaBytes, err := os.ReadFile(filepath.Join(root, "metadata.json"))
-	require.NoError(t, err)
-	var meta struct {
-		Nonce  string `json:"nonce"`
-		Policy string `json:"policy"`
-	}
-	require.NoError(t, json.Unmarshal(metaBytes, &meta))
-	nonce, err := hex.DecodeString(meta.Nonce)
-	require.NoError(t, err)
-
-	doc, reportData, err := VerifyEnvelopeV3(docBytes, nonce)
-	require.NoError(t, err)
+	doc, reportData, _ := loadLiveFixture(t, "inf14-tdx-v3")
 	require.Equal(t, TDXQuoteV1Format, doc.CPUEvidence.Format)
-
-	artifactBytes, err := os.ReadFile(filepath.Join("..", "policy", "testdata", "platform-endorsements.json"))
-	require.NoError(t, err)
-	artifact, err := policy.ParseArtifact(artifactBytes)
-	require.NoError(t, err)
+	artifact := loadEndorsementArtifact(t)
 
 	// The dev shape must be rejected by the endorsed platform measurements.
-	_, err = VerifyCPUEvidenceV3(doc, reportData, artifact)
+	_, err := VerifyCPUEvidenceV3(doc, reportData, artifact)
 	if err != nil && strings.Contains(err.Error(), "expired") {
 		t.Skipf("captured Intel PCS collateral has expired: %v", err)
 	}
@@ -69,7 +58,7 @@ func TestVerifyV3LiveFixtureTDX(t *testing.T) {
 	evidence, err := VerifyCPUEvidenceV3(doc, reportData, artifact)
 	require.NoError(t, err)
 	assert.Equal(t, policy.PlatformTDX, evidence.Platform)
-	assert.Equal(t, meta.Policy, evidence.PolicyName)
+	assert.Equal(t, tdxFixturePolicy(t), evidence.PolicyName)
 	require.NotNil(t, evidence.Measurement)
 	assert.Equal(t, TdxGuestV2, evidence.Measurement.Type)
 	assert.Len(t, evidence.Measurement.Registers, 5)

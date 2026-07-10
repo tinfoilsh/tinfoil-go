@@ -238,6 +238,7 @@ func TestComputeReportDataV3(t *testing.T) {
 	require.NoError(t, err)
 
 	h := sha256.New()
+	h.Write([]byte(ReportDataV1Algorithm))
 	h.Write(nonce)
 	h.Write(cmHash[:])
 	h.Write(deHash[:])

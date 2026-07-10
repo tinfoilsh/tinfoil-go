@@ -226,8 +226,9 @@ func decodeLowerHex(name, value string, wantLen int) ([]byte, error) {
 }
 
 // ComputeReportDataV3 derives the 64-byte REPORT_DATA per the
-// https://tinfoil.sh/report-data/v1 algorithm. All inputs are exactly 32
-// bytes; the concatenation is fixed-order and fixed-length.
+// https://tinfoil.sh/report-data/v1 algorithm: SHA-256 over the algorithm
+// URI (domain-separation label) followed by the three fixed-length 32-byte
+// inputs in order.
 func ComputeReportDataV3(nonce, cryptoMaterialHash, deviceEvidenceHash []byte) ([64]byte, error) {
 	var out [64]byte
 	if len(nonce) != 32 || len(cryptoMaterialHash) != 32 || len(deviceEvidenceHash) != 32 {
@@ -235,6 +236,7 @@ func ComputeReportDataV3(nonce, cryptoMaterialHash, deviceEvidenceHash []byte) (
 			len(nonce), len(cryptoMaterialHash), len(deviceEvidenceHash))
 	}
 	h := sha256.New()
+	h.Write([]byte(ReportDataV1Algorithm))
 	h.Write(nonce)
 	h.Write(cryptoMaterialHash)
 	h.Write(deviceEvidenceHash)
