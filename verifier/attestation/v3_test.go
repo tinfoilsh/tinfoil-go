@@ -23,7 +23,7 @@ func testNonce() []byte {
 // buildTestDocumentV3 assembles a well-formed document around a dummy quote
 // so envelope logic can be tested without hardware. This is a test-local
 // reimplementation of what production builders (cvmimage) do: serialize the
-// endorsed sections once, hash the transported bytes, and walk the
+// endorsed sections once, hash those bytes, base64-wrap them, and walk the
 // REPORT_DATA ladder.
 func buildTestDocumentV3(t *testing.T, nonce []byte) (*DocumentV3, []byte) {
 	t.Helper()
@@ -63,8 +63,8 @@ func buildTestDocumentV3(t *testing.T, nonce []byte) (*DocumentV3, []byte) {
 				DeviceEvidenceHash: hex.EncodeToString(deviceHash[:]),
 			},
 		},
-		CryptoMaterial: json.RawMessage(cryptoBytes),
-		DeviceEvidence: json.RawMessage(deviceBytes),
+		CryptoMaterial: base64.StdEncoding.EncodeToString(cryptoBytes),
+		DeviceEvidence: base64.StdEncoding.EncodeToString(deviceBytes),
 		Collateral: []CollateralEntry{
 			{
 				ID:       "cpu-endorsement",
@@ -109,18 +109,35 @@ func TestVerifyEnvelopeV3NonceMismatch(t *testing.T) {
 	assert.ErrorContains(t, err, "nonce")
 }
 
-// TestVerifyEnvelopeV3TransportedBytes verifies the endorsed sections are
-// hashed as transmitted: any change to the section bytes — even
+// mutateCryptoSection decodes the document's crypto_material, applies mutate
+// to the section bytes, re-encodes the result without updating the endorsed
+// hashes, and returns the re-marshaled document bytes.
+func mutateCryptoSection(t *testing.T, docBytes []byte, mutate func([]byte) []byte) []byte {
+	t.Helper()
+	var loose map[string]json.RawMessage
+	require.NoError(t, json.Unmarshal(docBytes, &loose))
+	var encoded string
+	require.NoError(t, json.Unmarshal(loose["crypto_material"], &encoded))
+	section, err := base64.StdEncoding.DecodeString(encoded)
+	require.NoError(t, err)
+	reencoded, err := json.Marshal(base64.StdEncoding.EncodeToString(mutate(section)))
+	require.NoError(t, err)
+	loose["crypto_material"] = reencoded
+	out, err := json.Marshal(loose)
+	require.NoError(t, err)
+	return out
+}
+
+// TestVerifyEnvelopeV3TransportedBytes verifies the endorsed hashes cover the
+// builder's exact section bytes: any change to the decoded section — even
 // JSON-equivalent whitespace — must break the hash binding.
 func TestVerifyEnvelopeV3TransportedBytes(t *testing.T) {
 	nonce := testNonce()
 	_, docBytes := buildTestDocumentV3(t, nonce)
 
-	// Inserting JSON-equivalent whitespace inside the section changes the
-	// transported bytes and must break the hash binding.
-	tampered := bytes.Replace(docBytes,
-		[]byte(`"crypto_material":{"format"`),
-		[]byte(`"crypto_material":{ "format"`), 1)
+	tampered := mutateCryptoSection(t, docBytes, func(section []byte) []byte {
+		return bytes.Replace(section, []byte(`{"format"`), []byte(`{ "format"`), 1)
+	})
 	require.NotEqual(t, docBytes, tampered)
 
 	_, _, err := VerifyEnvelopeV3(tampered, nonce)
@@ -131,9 +148,11 @@ func TestVerifyEnvelopeV3TamperedKey(t *testing.T) {
 	nonce := testNonce()
 	_, docBytes := buildTestDocumentV3(t, nonce)
 
-	tampered := bytes.Replace(docBytes,
-		[]byte(hex.EncodeToString(bytes.Repeat([]byte{0xaa}, 32))),
-		[]byte(hex.EncodeToString(bytes.Repeat([]byte{0xac}, 32))), 1)
+	tampered := mutateCryptoSection(t, docBytes, func(section []byte) []byte {
+		return bytes.Replace(section,
+			[]byte(hex.EncodeToString(bytes.Repeat([]byte{0xaa}, 32))),
+			[]byte(hex.EncodeToString(bytes.Repeat([]byte{0xac}, 32))), 1)
+	})
 	require.NotEqual(t, docBytes, tampered)
 
 	_, _, err := VerifyEnvelopeV3(tampered, nonce)
@@ -169,12 +188,14 @@ func TestParseDocumentV3RejectsDuplicateItemIDs(t *testing.T) {
 	nonce := testNonce()
 	_, docBytes := buildTestDocumentV3(t, nonce)
 
-	// Duplicate the tls entry (raw byte surgery keeps the rest intact; the
-	// endorsed hash no longer matters because parsing rejects first).
+	// Duplicate the tls entry inside the decoded section (the endorsed hash
+	// no longer matters because parsing rejects first).
 	filler := hex.EncodeToString(bytes.Repeat([]byte{0xcc}, 32))
-	dup := bytes.Replace(docBytes,
-		[]byte(`"items":[{"id":"tls"`),
-		[]byte(`"items":[{"id":"tls","format":"`+KeySPKIFPSHA256V1Format+`","data":"`+filler+`"},{"id":"tls"`), 1)
+	dup := mutateCryptoSection(t, docBytes, func(section []byte) []byte {
+		return bytes.Replace(section,
+			[]byte(`"items":[{"id":"tls"`),
+			[]byte(`"items":[{"id":"tls","format":"`+KeySPKIFPSHA256V1Format+`","data":"`+filler+`"},{"id":"tls"`), 1)
+	})
 	require.NotEqual(t, docBytes, dup)
 
 	_, err := ParseDocumentV3(dup)
@@ -187,9 +208,11 @@ func TestParseDocumentV3RejectsMalformedKeyMaterial(t *testing.T) {
 
 	// Known key formats must carry exactly 32 bytes of lowercase hex; a
 	// truncated TLS fingerprint is rejected at parse time.
-	short := bytes.Replace(docBytes,
-		[]byte(hex.EncodeToString(bytes.Repeat([]byte{0xaa}, 32))),
-		[]byte(hex.EncodeToString(bytes.Repeat([]byte{0xaa}, 8))), 1)
+	short := mutateCryptoSection(t, docBytes, func(section []byte) []byte {
+		return bytes.Replace(section,
+			[]byte(hex.EncodeToString(bytes.Repeat([]byte{0xaa}, 32))),
+			[]byte(hex.EncodeToString(bytes.Repeat([]byte{0xaa}, 8))), 1)
+	})
 	require.NotEqual(t, docBytes, short)
 	_, err := ParseDocumentV3(short)
 	assert.ErrorContains(t, err, "must be 32 bytes")
@@ -231,13 +254,20 @@ func TestDocumentV3RoundTripPreservesEndorsedBytes(t *testing.T) {
 	nonce := testNonce()
 	built, docBytes := buildTestDocumentV3(t, nonce)
 
-	// The marshaled document must embed the exact endorsed bytes that were
-	// hashed at build time.
+	// The marshaled document must carry the exact endorsed bytes that were
+	// hashed at build time, recoverable with a plain base64 decode.
 	var loose map[string]json.RawMessage
 	require.NoError(t, json.Unmarshal(docBytes, &loose))
-	cmHash := sha256.Sum256(loose["crypto_material"])
+	decode := func(field string) []byte {
+		var encoded string
+		require.NoError(t, json.Unmarshal(loose[field], &encoded))
+		section, err := base64.StdEncoding.DecodeString(encoded)
+		require.NoError(t, err)
+		return section
+	}
+	cmHash := sha256.Sum256(decode("crypto_material"))
 	assert.Equal(t, built.CPUEvidence.Endorsed.CryptoMaterialHash, hex.EncodeToString(cmHash[:]))
-	deHash := sha256.Sum256(loose["device_evidence"])
+	deHash := sha256.Sum256(decode("device_evidence"))
 	assert.Equal(t, built.CPUEvidence.Endorsed.DeviceEvidenceHash, hex.EncodeToString(deHash[:]))
 }
 
