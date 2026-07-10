@@ -10,6 +10,9 @@ import (
 	"net/url"
 	"strings"
 
+	"github.com/google/go-sev-guest/kds"
+	"github.com/google/go-sev-guest/proto/sevsnp"
+	"github.com/google/go-sev-guest/validate"
 	tdxabi "github.com/google/go-tdx-guest/abi"
 	tdxpb "github.com/google/go-tdx-guest/proto/tdx"
 	tdxverify "github.com/google/go-tdx-guest/verify"
@@ -29,27 +32,137 @@ type EvidenceV3 struct {
 	// PolicyName is the appraisal policy the machine is endorsed with.
 	PolicyName string
 	// Measurement carries the launch measurement (SEV) or MRTD+RTMRs (TDX).
-	// It is NOT compared against the code measurement here; callers must do
-	// that against verified reference values.
 	Measurement *Measurement
 }
 
-// VerifyCPUEvidenceV3 verifies a v3 document's CPU evidence: quote signature
-// chain against pinned vendor roots, REPORT_DATA equality with the expected
-// value recomputed from the endorsed sections, platform identity endorsement
-// (machines-map lookup), and the endorsed appraisal policy. Endorsement
-// collateral (VCEK / Intel PCS captures) comes from the document's own
-// collateral entries — v3 verification is single-request and performs no
-// network fetches; a document missing its endorsement entry is rejected.
-func VerifyCPUEvidenceV3(doc *DocumentV3, expectedReportData [64]byte, endorsements *policy.Artifact) (*EvidenceV3, error) {
+// AuthenticatedQuote holds the quote fields authenticated by VerifyQuoteV3.
+// Nothing in it has been compared against expected values yet: that is
+// ValidateQuoteV3's job.
+type AuthenticatedQuote struct {
+	// Platform is policy.PlatformSEVSNP or policy.PlatformTDX.
+	Platform string
+	// PlatformIdentity is the machine identifier from authenticated bytes
+	// (SEV CHIP_ID / TDX PPID from the PCK leaf), lowercase hex.
+	PlatformIdentity string
+	// Measurement is the launch measurement (SEV) or MRTD+RTMRs (TDX).
+	Measurement *Measurement
+
+	reportData []byte
+	sev        *sevsnp.Attestation
+	tdx        *tdxpb.QuoteV4
+	// tdxTCBEvaluationDataNumber is the minimum tcbEvaluationDataNumber
+	// observed in the verified Intel collateral.
+	tdxTCBEvaluationDataNumber int
+}
+
+// AssembledPolicy is the complete expected state of a quote, resolved from
+// verified reference values before validation runs.
+type AssembledPolicy struct {
+	// PolicyName is the matched appraisal policy name.
+	PolicyName string
+	// ReportData is the expected REPORT_DATA from the envelope.
+	ReportData [64]byte
+	// CodeMeasurement is the expected launch measurement from verified code
+	// provenance. When nil, the launch-measurement comparison is skipped and
+	// the caller is responsible for it.
+	CodeMeasurement *Measurement
+
+	artifact *policy.Artifact
+	machine  *policy.Policy
+}
+
+// VerifyQuoteV3 verifies the authenticity of a v3 document's CPU quote: the
+// signature chain up to the pinned vendor roots, using the endorsement
+// collateral (VCEK / Intel PCS captures) carried in the document itself —
+// verification is single-request and performs no network fetches. It makes
+// no reference-value comparison; callers must assemble a policy and run
+// ValidateQuoteV3 before trusting the platform.
+func VerifyQuoteV3(doc *DocumentV3) (*AuthenticatedQuote, error) {
 	switch doc.CPUEvidence.Format {
 	case SEVSNPReportV1Format:
-		return verifySevEvidenceV3(doc, expectedReportData, endorsements)
+		return verifySevQuoteV3(doc)
 	case TDXQuoteV1Format:
-		return verifyTdxEvidenceV3(doc, expectedReportData, endorsements)
+		return verifyTdxQuoteV3(doc)
 	default:
 		return nil, fmt.Errorf("unsupported cpu_evidence format %q", doc.CPUEvidence.Format)
 	}
+}
+
+// AssemblePolicyV3 resolves the complete expected state of an authenticated
+// quote: the machines-map lookup keyed by the authenticated platform
+// identity (a machine absent from the map is not endorsed), the expected
+// REPORT_DATA, and the expected launch measurement. codeMeasurement may be
+// nil when the caller compares the launch measurement itself.
+func AssemblePolicyV3(endorsements *policy.Artifact, codeMeasurement *Measurement, expectedReportData [64]byte, quote *AuthenticatedQuote) (*AssembledPolicy, error) {
+	name, machinePolicy, err := endorsements.PolicyFor(quote.PlatformIdentity, quote.Platform)
+	if err != nil {
+		return nil, err
+	}
+	return &AssembledPolicy{
+		PolicyName:      name,
+		ReportData:      expectedReportData,
+		CodeMeasurement: codeMeasurement,
+		artifact:        endorsements,
+		machine:         machinePolicy,
+	}, nil
+}
+
+// ValidateQuoteV3 compares an authenticated quote against an assembled
+// policy: REPORT_DATA equality, the platform policy block, and (when
+// present) the expected launch measurement. It performs no lookups and no
+// recomputation.
+func ValidateQuoteV3(quote *AuthenticatedQuote, assembled *AssembledPolicy) error {
+	if !bytes.Equal(quote.reportData, assembled.ReportData[:]) {
+		return fmt.Errorf("quote REPORT_DATA does not match the recomputed value")
+	}
+
+	switch quote.Platform {
+	case policy.PlatformSEVSNP:
+		productLine := kds.ProductLine(quote.sev.GetProduct())
+		valOpts, err := assembled.machine.SEVSNP.SEVOptions(productLine)
+		if err != nil {
+			return err
+		}
+		if err := validate.SnpAttestation(quote.sev, valOpts); err != nil {
+			return err
+		}
+	case policy.PlatformTDX:
+		if err := assembled.artifact.ValidateTDXQuote(assembled.machine.TDX, quote.tdx, quote.tdxTCBEvaluationDataNumber); err != nil {
+			return err
+		}
+	default:
+		return fmt.Errorf("unsupported platform %q", quote.Platform)
+	}
+
+	if assembled.CodeMeasurement != nil {
+		if err := assembled.CodeMeasurement.Equals(quote.Measurement); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// VerifyCPUEvidenceV3 composes VerifyQuoteV3, AssemblePolicyV3, and
+// ValidateQuoteV3 without a launch-measurement expectation; callers must
+// compare the returned Measurement against verified code provenance.
+func VerifyCPUEvidenceV3(doc *DocumentV3, expectedReportData [64]byte, endorsements *policy.Artifact) (*EvidenceV3, error) {
+	quote, err := VerifyQuoteV3(doc)
+	if err != nil {
+		return nil, err
+	}
+	assembled, err := AssemblePolicyV3(endorsements, nil, expectedReportData, quote)
+	if err != nil {
+		return nil, err
+	}
+	if err := ValidateQuoteV3(quote, assembled); err != nil {
+		return nil, err
+	}
+	return &EvidenceV3{
+		Platform:         quote.Platform,
+		PlatformIdentity: quote.PlatformIdentity,
+		PolicyName:       assembled.PolicyName,
+		Measurement:      quote.Measurement,
+	}, nil
 }
 
 // endorsementCollateral returns the first endorsement-role collateral entry
@@ -86,7 +199,7 @@ func (d *DocumentV3) ReferenceValuesCollateral(format string) (*SigstoreCollater
 	return nil, false, nil
 }
 
-func verifySevEvidenceV3(doc *DocumentV3, expectedReportData [64]byte, endorsements *policy.Artifact) (*EvidenceV3, error) {
+func verifySevQuoteV3(doc *DocumentV3) (*AuthenticatedQuote, error) {
 	// The VCEK comes from the document's own collateral; its chain is
 	// verified against the pinned AMD root, so the entry is untrusted input.
 	entry, ok := doc.endorsementCollateral(CollateralAMDVCEKV1Format, SubjectCPU)
@@ -102,31 +215,30 @@ func verifySevEvidenceV3(doc *DocumentV3, expectedReportData [64]byte, endorseme
 		return nil, fmt.Errorf("decoding vcek_der_base64: %w", err)
 	}
 
-	report, policyName, err := verifySevReportWithEndorsements(doc.CPUEvidence.ReportBase64, false, vcekDER, endorsements)
+	attestation, err := verifySevSignature(doc.CPUEvidence.ReportBase64, false, vcekDER)
 	if err != nil {
 		return nil, err
 	}
+	report := attestation.GetReport()
 
-	if !bytes.Equal(report.ReportData, expectedReportData[:]) {
-		return nil, fmt.Errorf("SEV report REPORT_DATA does not match the recomputed value")
-	}
 	identity, err := policy.SEVIdentity(report.GetChipId())
 	if err != nil {
 		return nil, err
 	}
 
-	return &EvidenceV3{
+	return &AuthenticatedQuote{
 		Platform:         policy.PlatformSEVSNP,
 		PlatformIdentity: identity,
-		PolicyName:       policyName,
 		Measurement: &Measurement{
 			Type:      SevGuestV2,
 			Registers: []string{hex.EncodeToString(report.Measurement)},
 		},
+		reportData: report.ReportData,
+		sev:        attestation,
 	}, nil
 }
 
-func verifyTdxEvidenceV3(doc *DocumentV3, expectedReportData [64]byte, endorsements *policy.Artifact) (*EvidenceV3, error) {
+func verifyTdxQuoteV3(doc *DocumentV3) (*AuthenticatedQuote, error) {
 	rawQuote, err := base64.StdEncoding.DecodeString(doc.CPUEvidence.ReportBase64)
 	if err != nil {
 		return nil, fmt.Errorf("decoding TDX quote: %w", err)
@@ -167,24 +279,12 @@ func verifyTdxEvidenceV3(doc *DocumentV3, expectedReportData [64]byte, endorseme
 		return nil, fmt.Errorf("verifying TDX quote: %w", err)
 	}
 
-	if !bytes.Equal(quote.GetTdQuoteBody().GetReportData(), expectedReportData[:]) {
-		return nil, fmt.Errorf("TDX quote REPORT_DATA does not match the recomputed value")
-	}
-
 	identity, err := policy.TDXIdentity(quote)
 	if err != nil {
 		return nil, err
 	}
-	policyName, machinePolicy, err := endorsements.PolicyFor(identity, policy.PlatformTDX)
-	if err != nil {
-		return nil, err
-	}
-
 	tcbEvaluationDataNumber, err := recorder.minimum()
 	if err != nil {
-		return nil, err
-	}
-	if err := endorsements.ValidateTDXQuote(machinePolicy.TDX, quote, tcbEvaluationDataNumber); err != nil {
 		return nil, err
 	}
 
@@ -193,14 +293,16 @@ func verifyTdxEvidenceV3(doc *DocumentV3, expectedReportData [64]byte, endorseme
 	for _, rtmr := range body.GetRtmrs() {
 		registers = append(registers, hex.EncodeToString(rtmr))
 	}
-	return &EvidenceV3{
+	return &AuthenticatedQuote{
 		Platform:         policy.PlatformTDX,
 		PlatformIdentity: identity,
-		PolicyName:       policyName,
 		Measurement: &Measurement{
 			Type:      TdxGuestV2,
 			Registers: registers,
 		},
+		reportData:                 body.GetReportData(),
+		tdx:                        quote,
+		tdxTCBEvaluationDataNumber: tcbEvaluationDataNumber,
 	}, nil
 }
 

@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"github.com/tinfoilsh/tinfoil-go/verifier/attestation"
+	"github.com/tinfoilsh/tinfoil-go/verifier/policy"
 	"github.com/tinfoilsh/tinfoil-go/verifier/sigstore"
 )
 
@@ -59,10 +60,10 @@ func (v *VerifiedDocumentV3) cryptoMaterialData(id, format string) (string, erro
 //     entries are verified against the Sigstore trust root and the pinned
 //     Tinfoil workflow identities, recovering the code measurement and the
 //     platform-endorsements artifact. Both entries are required.
-//  3. CPU evidence: quote signature chain against pinned vendor roots,
-//     REPORT_DATA binding, platform identity endorsement (machines-map
-//     lookup), and the endorsed appraisal policy.
-//  4. The code measurement is compared against the enclave measurement.
+//  3. Quote verification: signature chain against pinned vendor roots.
+//  4. Policy assembly: the machines-map lookup keyed by the authenticated
+//     platform identity, plus the expected REPORT_DATA and code measurement.
+//  5. Validation: the authenticated quote against the assembled policy.
 //
 // repo is the code repository the caller trusts (pins the sigstore-code
 // signing identity); the repo named inside the document is not trusted.
@@ -74,50 +75,64 @@ func VerifyDocumentV3(sigstoreClient *sigstore.Client, docBytes, nonce []byte, r
 		return nil, fmt.Errorf("envelope: %w", err)
 	}
 
-	// Reference values are verified before the CPU evidence because
-	// endorsement enforcement needs the platform artifact.
-	codeRef, found, err := doc.ReferenceValuesCollateral(attestation.CollateralSigstoreCodeV1Format)
+	codeMeasurement, codeDigest, endorsements, err := verifyReferenceValues(sigstoreClient, doc, repo)
 	if err != nil {
 		return nil, fmt.Errorf("reference values: %w", err)
 	}
+
+	quote, err := attestation.VerifyQuoteV3(doc)
+	if err != nil {
+		return nil, fmt.Errorf("cpu evidence: %w", err)
+	}
+	assembled, err := attestation.AssemblePolicyV3(endorsements, codeMeasurement, expectedReportData, quote)
+	if err != nil {
+		return nil, fmt.Errorf("policy assembly: %w", err)
+	}
+	if err := attestation.ValidateQuoteV3(quote, assembled); err != nil {
+		return nil, fmt.Errorf("validation: %w", err)
+	}
+
+	return &VerifiedDocumentV3{
+		Platform:           quote.Platform,
+		PlatformIdentity:   quote.PlatformIdentity,
+		PolicyName:         assembled.PolicyName,
+		CodeDigest:         codeDigest,
+		CodeMeasurement:    codeMeasurement,
+		EnclaveMeasurement: quote.Measurement,
+		CryptoMaterial:     doc.CryptoMaterialItems(),
+	}, nil
+}
+
+// verifyReferenceValues verifies the document's sigstore-code and
+// sigstore-platform collateral entries, returning the code measurement, the
+// code artifact digest, and the platform-endorsements artifact. Both entries
+// are required.
+func verifyReferenceValues(sigstoreClient *sigstore.Client, doc *attestation.DocumentV3, repo string) (*attestation.Measurement, string, *policy.Artifact, error) {
+	codeRef, found, err := doc.ReferenceValuesCollateral(attestation.CollateralSigstoreCodeV1Format)
+	if err != nil {
+		return nil, "", nil, err
+	}
 	if !found {
-		return nil, fmt.Errorf("reference values: document carries no sigstore-code collateral entry")
+		return nil, "", nil, fmt.Errorf("document carries no sigstore-code collateral entry")
 	}
 	codeMeasurement, err := sigstoreClient.VerifyAttestation(codeRef.SigstoreBundle, repo, codeRef.Digest)
 	if err != nil {
-		return nil, fmt.Errorf("reference values: verifying code measurement: %w", err)
+		return nil, "", nil, fmt.Errorf("verifying code measurement: %w", err)
 	}
 
 	platformRef, found, err := doc.ReferenceValuesCollateral(attestation.CollateralSigstorePlatformV1Format)
 	if err != nil {
-		return nil, fmt.Errorf("reference values: %w", err)
+		return nil, "", nil, err
 	}
 	if !found {
-		return nil, fmt.Errorf("reference values: document carries no sigstore-platform collateral entry")
+		return nil, "", nil, fmt.Errorf("document carries no sigstore-platform collateral entry")
 	}
 	endorsements, err := sigstoreClient.VerifyPlatformEndorsements(platformRef.SigstoreBundle, platformRef.Digest)
 	if err != nil {
-		return nil, fmt.Errorf("reference values: verifying platform endorsements: %w", err)
+		return nil, "", nil, fmt.Errorf("verifying platform endorsements: %w", err)
 	}
 
-	evidence, err := attestation.VerifyCPUEvidenceV3(doc, expectedReportData, endorsements)
-	if err != nil {
-		return nil, fmt.Errorf("cpu evidence: %w", err)
-	}
-
-	if err := codeMeasurement.Equals(evidence.Measurement); err != nil {
-		return nil, fmt.Errorf("measurements: %w", err)
-	}
-
-	return &VerifiedDocumentV3{
-		Platform:           evidence.Platform,
-		PlatformIdentity:   evidence.PlatformIdentity,
-		PolicyName:         evidence.PolicyName,
-		CodeDigest:         codeRef.Digest,
-		CodeMeasurement:    codeMeasurement,
-		EnclaveMeasurement: evidence.Measurement,
-		CryptoMaterial:     doc.CryptoMaterialItems(),
-	}, nil
+	return codeMeasurement, codeRef.Digest, endorsements, nil
 }
 
 // VerifyV3 runs the single-request v3 flow against the client's enclave:
