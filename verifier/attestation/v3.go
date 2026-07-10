@@ -1,14 +1,12 @@
 package attestation
 
 import (
-	"bytes"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/url"
 	"regexp"
 
@@ -225,6 +223,21 @@ func decodeLowerHex(name, value string, wantLen int) ([]byte, error) {
 	return b, nil
 }
 
+// decodeCanonicalBase64 decodes a required standard-base64 field and rejects
+// non-canonical encodings. Strict() rejects non-zero padding bits but still
+// skips \r and \n, so the round-trip comparison is what guarantees exactly
+// one accepted encoding per byte string.
+func decodeCanonicalBase64(name, value string) ([]byte, error) {
+	b, err := base64.StdEncoding.Strict().DecodeString(value)
+	if err != nil {
+		return nil, fmt.Errorf("decoding %s: %w", name, err)
+	}
+	if base64.StdEncoding.EncodeToString(b) != value {
+		return nil, fmt.Errorf("%s is not canonical base64", name)
+	}
+	return b, nil
+}
+
 // ComputeReportDataV3 derives the 64-byte REPORT_DATA per the
 // https://tinfoil.sh/report-data/v1 algorithm: SHA-256 over the algorithm
 // URI (domain-separation label) followed by the three fixed-length 32-byte
@@ -255,18 +268,14 @@ func RandomNonce() ([]byte, error) {
 
 // ParseDocumentV3 strictly parses a v3 attestation document from its
 // transmitted bytes. Unknown members anywhere in the fixed schema are
-// rejected, all hex is validated lowercase, and duplicate item ids within
-// an endorsed section are rejected. The endorsed sections are retained as
-// raw bytes for hashing.
+// rejected (case-sensitively), duplicate object member names are rejected
+// everywhere, all hex is validated lowercase, base64 must be canonical, and
+// duplicate item ids within an endorsed section or the collateral array are
+// rejected. The endorsed sections are retained as raw bytes for hashing.
 func ParseDocumentV3(docBytes []byte) (*DocumentV3, error) {
-	dec := json.NewDecoder(bytes.NewReader(docBytes))
-	dec.DisallowUnknownFields()
 	var doc DocumentV3
-	if err := dec.Decode(&doc); err != nil {
+	if err := strictUnmarshal(docBytes, &doc); err != nil {
 		return nil, fmt.Errorf("parsing attestation document: %w", err)
-	}
-	if _, err := dec.Token(); err != io.EOF {
-		return nil, fmt.Errorf("trailing data after attestation document")
 	}
 
 	if doc.Format != AttestationV3Format {
@@ -296,13 +305,13 @@ func ParseDocumentV3(docBytes []byte) (*DocumentV3, error) {
 	if doc.DeviceEvidence == "" {
 		return nil, fmt.Errorf("device_evidence section is missing")
 	}
-	cryptoBytes, err := base64.StdEncoding.DecodeString(doc.CryptoMaterial)
+	cryptoBytes, err := decodeCanonicalBase64("crypto_material", doc.CryptoMaterial)
 	if err != nil {
-		return nil, fmt.Errorf("decoding crypto_material: %w", err)
+		return nil, err
 	}
-	deviceBytes, err := base64.StdEncoding.DecodeString(doc.DeviceEvidence)
+	deviceBytes, err := decodeCanonicalBase64("device_evidence", doc.DeviceEvidence)
 	if err != nil {
-		return nil, fmt.Errorf("decoding device_evidence: %w", err)
+		return nil, err
 	}
 
 	var cm CryptoMaterialSection
@@ -332,7 +341,13 @@ func ParseDocumentV3(docBytes []byte) (*DocumentV3, error) {
 				return nil, err
 			}
 		default:
-			if !lowerHexV3.MatchString(item.Data) {
+			// Unknown formats still must carry non-empty, decodable
+			// lowercase hex: the character class alone would admit
+			// odd-length strings that no hex decoder accepts.
+			if item.Data == "" {
+				return nil, fmt.Errorf("crypto_material item %q data is empty", item.ID)
+			}
+			if !lowerHexV3.MatchString(item.Data) || len(item.Data)%2 != 0 {
 				return nil, fmt.Errorf("crypto_material item %q data is not lowercase hex", item.ID)
 			}
 		}
@@ -359,10 +374,15 @@ func ParseDocumentV3(docBytes []byte) (*DocumentV3, error) {
 		seen[item.ID] = true
 	}
 
+	seen = make(map[string]bool, len(doc.Collateral))
 	for i, entry := range doc.Collateral {
 		if entry.ID == "" || entry.Format == "" {
 			return nil, fmt.Errorf("collateral entry %d is incomplete", i)
 		}
+		if seen[entry.ID] {
+			return nil, fmt.Errorf("duplicate collateral entry id %q", entry.ID)
+		}
+		seen[entry.ID] = true
 		if entry.Role != RoleEndorsement && entry.Role != RoleReferenceValues {
 			return nil, fmt.Errorf("collateral entry %q has unknown role %q", entry.ID, entry.Role)
 		}
@@ -460,16 +480,4 @@ func FetchV3(host string, nonce []byte) ([]byte, error) {
 		return nil, err
 	}
 	return body, nil
-}
-
-func strictUnmarshal(data []byte, v any) error {
-	dec := json.NewDecoder(bytes.NewReader(data))
-	dec.DisallowUnknownFields()
-	if err := dec.Decode(v); err != nil {
-		return err
-	}
-	if _, err := dec.Token(); err != io.EOF {
-		return fmt.Errorf("trailing data")
-	}
-	return nil
 }
