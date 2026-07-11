@@ -8,6 +8,7 @@ import (
 
 	protobundle "github.com/sigstore/protobuf-specs/gen/pb-go/bundle/v1"
 	"github.com/sigstore/sigstore-go/pkg/bundle"
+	"github.com/sigstore/sigstore-go/pkg/fulcio/certificate"
 	"github.com/sigstore/sigstore-go/pkg/root"
 	"github.com/sigstore/sigstore-go/pkg/tuf"
 	"github.com/sigstore/sigstore-go/pkg/verify"
@@ -127,11 +128,21 @@ func (c *Client) verifyBundleWithIdentity(bundleJSON []byte, sanRegex, hexDigest
 		return nil, fmt.Errorf("creating signed entity verifier: %w", err)
 	}
 
-	certID, err := verify.NewShortCertificateIdentity(
-		oidcIssuer,
-		"",
-		"",
-		sanRegex,
+	sanMatcher, err := verify.NewSANMatcher("", sanRegex)
+	if err != nil {
+		return nil, fmt.Errorf("creating SAN matcher: %w", err)
+	}
+	issuerMatcher, err := verify.NewIssuerMatcher(oidcIssuer, "")
+	if err != nil {
+		return nil, fmt.Errorf("creating issuer matcher: %w", err)
+	}
+	// runner_environment comes from the OIDC token, so a workflow retargeted
+	// to self-hosted (operator-controlled) infrastructure cannot claim
+	// github-hosted.
+	certID, err := verify.NewCertificateIdentity(
+		sanMatcher,
+		issuerMatcher,
+		certificate.Extensions{RunnerEnvironment: "github-hosted"},
 	)
 	if err != nil {
 		return nil, fmt.Errorf("creating certificate identity: %w", err)
