@@ -2,8 +2,10 @@ package tinfoil
 
 import (
 	"fmt"
+	"net"
 	"net/http"
 	"net/url"
+	"strings"
 	"sync"
 
 	"github.com/openai/openai-go/v3/option"
@@ -42,6 +44,7 @@ type clientConfig struct {
 	repo                 string
 	transport            TransportMode
 	baseURL              string
+	baseURLSet           bool
 	attestationBundleURL string
 	userCacheSecret      string
 	userCacheSecretSet   bool
@@ -72,9 +75,13 @@ func WithTransport(mode TransportMode) ClientOption {
 // encrypted end-to-end to the verified enclave; when the base URL's origin
 // differs from the enclave's, the SDK adds the X-Tinfoil-Enclave-Url header so
 // the proxy can forward the encrypted request to the right enclave. Only
-// supported with the EHBP transport.
+// supported with the EHBP transport unless it uses the verified enclave's
+// HTTPS origin.
 func WithBaseURL(baseURL string) ClientOption {
-	return func(c *clientConfig) { c.baseURL = baseURL }
+	return func(c *clientConfig) {
+		c.baseURL = baseURL
+		c.baseURLSet = true
+	}
 }
 
 // WithAttestationBundleURL fetches the attestation bundle from the given base
@@ -109,10 +116,10 @@ func NewClientWithOptions(opts ...ClientOption) (*Client, error) {
 	if cfg.repo == "" {
 		cfg.repo = defaultConfigRepo
 	}
-	// Routing through a proxy base URL relies on EHBP sealing the body to the
-	// enclave; TLS certificate pinning would reject the proxy's certificate.
-	if cfg.baseURL != "" && cfg.transport == TransportTLS {
-		return nil, fmt.Errorf("WithBaseURL is only supported with the EHBP transport")
+	if cfg.baseURLSet {
+		if _, err := originOf(cfg.baseURL); err != nil {
+			return nil, fmt.Errorf("invalid base URL: %w", err)
+		}
 	}
 
 	var secureClient *client.SecureClient
@@ -139,9 +146,9 @@ func NewClientWithOptions(opts ...ClientOption) (*Client, error) {
 // secureHTTPClient builds an *http.Client for the requested transport mode.
 //
 // The returned client is bound to the verified enclave (and the configured
-// proxy, if any): neither EHBP nor TLS pinning encrypts request headers, which
-// may carry the API key, so requests to any other host or over plain http are
-// refused.
+// proxy, if any). EHBP does not encrypt request headers end-to-end; TLS encrypts
+// them in transit, but sending them to another origin would disclose them to
+// that endpoint. Requests to any other origin are therefore refused.
 func secureHTTPClient(secureClient *client.SecureClient, mode TransportMode, baseURL, userCacheSecret string) (*http.Client, error) {
 	var (
 		httpClient *http.Client
@@ -157,6 +164,11 @@ func secureHTTPClient(secureClient *client.SecureClient, mode TransportMode, bas
 	}
 	if err != nil {
 		return nil, err
+	}
+	if mode == TransportTLS {
+		if err := validateTLSBaseURL(baseURL, secureClient.Enclave()); err != nil {
+			return nil, err
+		}
 	}
 
 	// The cache-secret layer sits above the sealing transport, so the field it
@@ -204,9 +216,9 @@ func allowedOrigins(enclave, baseURL string) (map[string]struct{}, error) {
 }
 
 // hostBoundRoundTripper rejects requests to any origin other than the verified
-// enclave or the configured proxy, and refuses non-https requests. This guards
-// the escape-hatch HTTP client (and the OpenAI client) from leaking plaintext
-// request headers, such as the API key, to an arbitrary host.
+// enclave or the configured proxy. This guards the escape-hatch HTTP client
+// (and the OpenAI client) from disclosing sensitive request headers, such as the
+// API key, to an arbitrary host.
 type hostBoundRoundTripper struct {
 	allowedOrigins map[string]struct{}
 	enclave        string
@@ -214,10 +226,7 @@ type hostBoundRoundTripper struct {
 }
 
 func (t *hostBoundRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
-	if req.URL.Scheme != "https" {
-		return nil, fmt.Errorf("refusing to send request over non-https URL %q", req.URL.String())
-	}
-	origin := req.URL.Scheme + "://" + req.URL.Host
+	origin := normalizedOrigin(req.URL)
 	if _, ok := t.allowedOrigins[origin]; !ok {
 		return nil, fmt.Errorf("refusing to send request to %q: client is bound to enclave %q", origin, t.enclave)
 	}
@@ -312,10 +321,52 @@ func originOf(rawURL string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if u.Host == "" {
-		return "", fmt.Errorf("missing host in URL %q", rawURL)
+	if u.Scheme == "" || u.Host == "" {
+		return "", fmt.Errorf("URL must be absolute: %q", rawURL)
 	}
-	return u.Scheme + "://" + u.Host, nil
+	scheme := strings.ToLower(u.Scheme)
+	if scheme != "https" && scheme != "http" {
+		return "", fmt.Errorf("URL must use http or https: %q", rawURL)
+	}
+	return normalizedOrigin(u), nil
+}
+
+// normalizedOrigin lowercases the scheme and host and drops an explicit
+// default port so that origins compare equal regardless of how the URL spells
+// them (for example https://host and https://host:443).
+func normalizedOrigin(u *url.URL) string {
+	scheme := strings.ToLower(u.Scheme)
+	hostname := strings.ToLower(u.Hostname())
+	port := u.Port()
+	if (scheme == "https" && port == "443") || (scheme == "http" && port == "80") {
+		port = ""
+	}
+	if port != "" {
+		return scheme + "://" + net.JoinHostPort(hostname, port)
+	}
+	if strings.Contains(hostname, ":") {
+		hostname = "[" + hostname + "]"
+	}
+	return scheme + "://" + hostname
+}
+
+func validateTLSBaseURL(baseURL, enclave string) error {
+	if baseURL == "" {
+		return nil
+	}
+
+	baseOrigin, err := originOf(baseURL)
+	if err != nil {
+		return fmt.Errorf("invalid base URL: %w", err)
+	}
+	enclaveOrigin, err := originOf("https://" + enclave)
+	if err != nil {
+		return err
+	}
+	if baseOrigin != enclaveOrigin {
+		return fmt.Errorf("TLS base URL must use the verified enclave origin %q", enclaveOrigin)
+	}
+	return nil
 }
 
 // enclaveURLHeaderTransport injects the X-Tinfoil-Enclave-Url header before

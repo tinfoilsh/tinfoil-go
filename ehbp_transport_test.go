@@ -64,16 +64,52 @@ func TestProxyClientOptionsApply(t *testing.T) {
 	WithAttestationBundleURL("https://proxy.example.com")(cfg)
 
 	require.Equal(t, "https://proxy.example.com/", cfg.baseURL)
+	require.True(t, cfg.baseURLSet)
 	require.Equal(t, "https://proxy.example.com", cfg.attestationBundleURL)
 }
 
-func TestNewClientWithOptionsRejectsBaseURLInTLSMode(t *testing.T) {
-	_, err := NewClientWithOptions(
-		WithBaseURL("https://proxy.example.com/"),
-		WithTransport(TransportTLS),
-	)
+func TestNewClientWithOptionsRejectsInvalidBaseURL(t *testing.T) {
+	for _, baseURL := range []string{"", "proxy.example.com", "ftp://proxy.example.com", "://"} {
+		t.Run(baseURL, func(t *testing.T) {
+			_, err := NewClientWithOptions(WithBaseURL(baseURL))
+			require.Error(t, err)
+			require.Contains(t, err.Error(), "invalid base URL")
+		})
+	}
+}
+
+func TestValidateTLSBaseURL(t *testing.T) {
+	require.NoError(t, validateTLSBaseURL("", "enclave.example.com"))
+	require.NoError(t, validateTLSBaseURL("https://enclave.example.com/custom/v1", "enclave.example.com"))
+	require.NoError(t, validateTLSBaseURL("https://enclave.example.com:443/custom/v1", "enclave.example.com"))
+
+	err := validateTLSBaseURL("https://proxy.example.com/v1", "enclave.example.com")
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "EHBP")
+	require.Contains(t, err.Error(), "verified enclave origin")
+
+	err = validateTLSBaseURL("http://enclave.example.com/v1", "enclave.example.com")
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "verified enclave origin")
+}
+
+func TestOriginOfNormalizesDefaultPorts(t *testing.T) {
+	tests := []struct {
+		rawURL string
+		want   string
+	}{
+		{"https://enclave.example.com:443/v1", "https://enclave.example.com"},
+		{"http://proxy.example.com:80/v1", "http://proxy.example.com"},
+		{"https://enclave.example.com:8443/v1", "https://enclave.example.com:8443"},
+		{"http://[::1]:80/v1", "http://[::1]"},
+		{"http://[::1]:8080/v1", "http://[::1]:8080"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.rawURL, func(t *testing.T) {
+			origin, err := originOf(tt.rawURL)
+			require.NoError(t, err)
+			require.Equal(t, tt.want, origin)
+		})
+	}
 }
 
 func TestEnclaveURLHeaderValue(t *testing.T) {
@@ -87,6 +123,7 @@ func TestEnclaveURLHeaderValue(t *testing.T) {
 		{"proxy different origin", "https://proxy.example.com/", "enclave.example.com", "https://enclave.example.com", true},
 		{"proxy keeps path but different origin", "https://proxy.example.com/api/v1/", "enclave.example.com", "https://enclave.example.com", true},
 		{"base url is the enclave itself", "https://enclave.example.com/v1/", "enclave.example.com", "", false},
+		{"base url uses explicit default port", "https://enclave.example.com:443/v1/", "enclave.example.com", "", false},
 		{"no base url", "", "enclave.example.com", "", false},
 		{"no enclave", "https://proxy.example.com/", "", "", false},
 	}
@@ -161,7 +198,7 @@ func TestEHBPReVerifyingTransportRefreshesEnclaveHeaderOnRotation(t *testing.T) 
 }
 
 func TestHostBoundRoundTripperAllowsEnclaveAndProxy(t *testing.T) {
-	origins, err := allowedOrigins("enclave.example.com", "https://proxy.example.com/v1/")
+	origins, err := allowedOrigins("enclave.example.com", "http://proxy.example.com/v1/")
 	require.NoError(t, err)
 
 	var calls int
@@ -173,7 +210,9 @@ func TestHostBoundRoundTripperAllowsEnclaveAndProxy(t *testing.T) {
 
 	for _, target := range []string{
 		"https://enclave.example.com/v1/models",
-		"https://proxy.example.com/v1/chat/completions",
+		"https://enclave.example.com:443/v1/models",
+		"http://proxy.example.com/v1/chat/completions",
+		"http://proxy.example.com:80/v1/chat/completions",
 	} {
 		req, err := http.NewRequest(http.MethodGet, target, nil)
 		require.NoError(t, err)
@@ -181,7 +220,7 @@ func TestHostBoundRoundTripperAllowsEnclaveAndProxy(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, http.StatusOK, resp.StatusCode)
 	}
-	require.Equal(t, 2, calls)
+	require.Equal(t, 4, calls)
 }
 
 func TestHostBoundRoundTripperRejectsForeignHostAndScheme(t *testing.T) {
@@ -203,7 +242,13 @@ func TestHostBoundRoundTripperRejectsForeignHostAndScheme(t *testing.T) {
 	require.NoError(t, err)
 	_, err = rt.RoundTrip(plaintext)
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "non-https")
+	require.Contains(t, err.Error(), "http://enclave.example.com")
+
+	unsupported, err := http.NewRequest(http.MethodGet, "ftp://enclave.example.com/v1/models", nil)
+	require.NoError(t, err)
+	_, err = rt.RoundTrip(unsupported)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "ftp://enclave.example.com")
 }
 
 func TestBuildEHBPTransportRequiresKey(t *testing.T) {
