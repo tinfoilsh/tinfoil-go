@@ -3,7 +3,7 @@
 // ready-to-embed v3 collateral entries.
 //
 // This is service plumbing, not part of the verification API: verifiers never
-// see these types. The response embeds attestation.CollateralEntry directly
+// see these types. The response embeds envelope.CollateralEntry directly
 // so the enclave serves the entries verbatim, with no translation layer.
 // Collateral is untrusted transport: the verifier re-checks every signature,
 // so a malformed or substituted entry can only cause verification to fail.
@@ -12,7 +12,7 @@ package collaterals
 import (
 	"time"
 
-	"github.com/tinfoilsh/tinfoil-go/verifier/attestation"
+	"github.com/tinfoilsh/tinfoil-go/verifier/envelope"
 )
 
 // FormatV2 identifies the collaterals response carrying v3 collateral entries.
@@ -42,5 +42,5 @@ type Response struct {
 	Format    string    `json:"format"`
 	ExpiresAt time.Time `json:"expires_at"`
 
-	Collateral []attestation.CollateralEntry `json:"collateral"`
+	Collateral []envelope.CollateralEntry `json:"collateral"`
 }

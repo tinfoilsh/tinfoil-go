@@ -5,8 +5,6 @@ import (
 	"errors"
 	"net/http"
 	"sync"
-
-	"github.com/tinfoilsh/tinfoil-go/verifier/attestation"
 )
 
 var (
@@ -43,7 +41,7 @@ func (t *TLSBoundRoundTripper) getTransport() *http.Transport {
 				}
 			}
 
-			certFP, err := attestation.ConnectionCertFP(state)
+			certFP, err := ConnectionCertFP(state)
 			if err != nil {
 				return err
 			}

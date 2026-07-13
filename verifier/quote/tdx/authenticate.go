@@ -1,0 +1,226 @@
+package tdx
+
+import (
+	"encoding/base64"
+	"encoding/hex"
+	"encoding/json"
+	"fmt"
+	"net/textproto"
+	"net/url"
+	"strings"
+	"time"
+
+	tdxabi "github.com/google/go-tdx-guest/abi"
+	tdxpb "github.com/google/go-tdx-guest/proto/tdx"
+	tdxverify "github.com/google/go-tdx-guest/verify"
+	tdxtrust "github.com/google/go-tdx-guest/verify/trust"
+
+	"github.com/tinfoilsh/tinfoil-go/verifier/envelope"
+	"github.com/tinfoilsh/tinfoil-go/verifier/internal/strictjson"
+	"github.com/tinfoilsh/tinfoil-go/verifier/measurement"
+)
+
+// Quote is an authenticated TDX quote: the signature chain up to the pinned
+// Intel SGX root has been verified against the document's own captured PCS
+// collateral. Nothing in it has been compared against expected values yet.
+type Quote struct {
+	// Identity is the machines-map lookup key (PPID, lowercase hex).
+	Identity string
+	// Measurement carries MRTD followed by the four RTMRs.
+	Measurement *measurement.Measurement
+	// TCBEvaluationDataNumber is the minimum tcbEvaluationDataNumber
+	// observed in the verified Intel collateral.
+	TCBEvaluationDataNumber int
+
+	quote *tdxpb.QuoteV4
+}
+
+// Proto returns the verified quote for policy assembly.
+func (q *Quote) Proto() *tdxpb.QuoteV4 { return q.quote }
+
+// Authenticate verifies a v3 document's TDX quote: the signature chain up
+// to the pinned Intel SGX root, replaying the Intel PCS collateral captured
+// in the document itself — single-request, no network fetches. It makes no
+// reference-value comparison; callers must assemble a policy and validate
+// before trusting the platform.
+func Authenticate(doc *envelope.Document) (*Quote, error) {
+	rawQuote, err := base64.StdEncoding.DecodeString(doc.CPUEvidence.ReportBase64)
+	if err != nil {
+		return nil, fmt.Errorf("decoding TDX quote: %w", err)
+	}
+	parsed, err := tdxabi.QuoteToProto(rawQuote)
+	if err != nil {
+		return nil, fmt.Errorf("parsing TDX quote: %w", err)
+	}
+	quote, ok := parsed.(*tdxpb.QuoteV4)
+	if !ok {
+		return nil, fmt.Errorf("unsupported TDX quote version (want v4)")
+	}
+
+	// The recorder observes the tcbEvaluationDataNumber of the TCB Info and
+	// QE Identity actually used so the policy floor is enforced on verified
+	// collateral.
+	entry, ok := doc.EndorsementCollateral(envelope.CollateralIntelPCSV1Format, envelope.SubjectCPU)
+	if !ok {
+		return nil, fmt.Errorf("document carries no intel-pcs endorsement collateral for the cpu")
+	}
+	var data envelope.IntelPCSCollateral
+	if err := strictjson.Unmarshal(entry.Data, &data); err != nil {
+		return nil, fmt.Errorf("parsing intel-pcs collateral entry %q: %w", entry.ID, err)
+	}
+	inner, err := newPCSReplayGetter(data.Responses)
+	if err != nil {
+		return nil, err
+	}
+	recorder := &tcbEvaluationRecorder{inner: inner}
+
+	// All options explicit: collateral replayed from the document, chain
+	// pinned to the embedded Intel root, revocation checking on, validity
+	// evaluated at the current time.
+	opts := &tdxverify.Options{
+		Getter:           recorder,
+		TrustedRoots:     intelRootCertPool,
+		GetCollateral:    true,
+		CheckRevocations: true,
+		Now:              time.Now(),
+	}
+	if err := tdxverify.TdxQuote(parsed, opts); err != nil {
+		return nil, fmt.Errorf("verifying TDX quote: %w", err)
+	}
+
+	identity, err := Identity(quote)
+	if err != nil {
+		return nil, err
+	}
+	tcbEvaluationDataNumber, err := recorder.minimum()
+	if err != nil {
+		return nil, err
+	}
+
+	body := quote.GetTdQuoteBody()
+	registers := []string{hex.EncodeToString(body.GetMrTd())}
+	for _, rtmr := range body.GetRtmrs() {
+		registers = append(registers, hex.EncodeToString(rtmr))
+	}
+	return &Quote{
+		Identity: identity,
+		Measurement: &measurement.Measurement{
+			Type:      measurement.TdxGuestV2,
+			Registers: registers,
+		},
+		TCBEvaluationDataNumber: tcbEvaluationDataNumber,
+		quote:                   quote,
+	}, nil
+}
+
+// pcsCollateralKey canonicalizes an Intel PCS URL for replay lookup: the
+// tcbEvaluationDataNumber query parameter selects which collateral edition
+// Intel serves, so a capture made at a specific number must still answer the
+// library's parameterless request for the same resource.
+func pcsCollateralKey(rawURL string) (string, error) {
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return "", fmt.Errorf("parsing PCS URL %q: %w", rawURL, err)
+	}
+	q := u.Query()
+	q.Del("tcbEvaluationDataNumber")
+	u.RawQuery = q.Encode()
+	return u.String(), nil
+}
+
+type pcsReplayGetter struct {
+	responses map[string]*envelope.PCSResponse
+}
+
+func newPCSReplayGetter(responses []envelope.PCSResponse) (*pcsReplayGetter, error) {
+	m := make(map[string]*envelope.PCSResponse, len(responses))
+	for i := range responses {
+		key, err := pcsCollateralKey(responses[i].URL)
+		if err != nil {
+			return nil, err
+		}
+		m[key] = &responses[i]
+	}
+	return &pcsReplayGetter{responses: m}, nil
+}
+
+func (g *pcsReplayGetter) Get(requestURL string) (map[string][]string, []byte, error) {
+	key, err := pcsCollateralKey(requestURL)
+	if err != nil {
+		return nil, nil, err
+	}
+	resp, ok := g.responses[key]
+	if !ok {
+		return nil, nil, fmt.Errorf("intel-pcs collateral has no captured response for %s", requestURL)
+	}
+	body, err := base64.StdEncoding.DecodeString(resp.BodyBase64)
+	if err != nil {
+		return nil, nil, fmt.Errorf("decoding captured PCS response body for %s: %w", requestURL, err)
+	}
+	// Header keys are matched verbatim by go-tdx-guest (canonical MIME form),
+	// so normalize whatever casing the capture used.
+	headers := make(map[string][]string, len(resp.Headers))
+	for k, v := range resp.Headers {
+		headers[textproto.CanonicalMIMEHeaderKey(k)] = v
+	}
+	return headers, body, nil
+}
+
+// tcbEvaluationRecorder observes the tcbEvaluationDataNumber carried by the
+// TCB Info and QE Identity responses that quote verification consumes.
+type tcbEvaluationRecorder struct {
+	inner      tdxtrust.HTTPSGetter
+	tcbInfo    *int
+	qeIdentity *int
+}
+
+func (r *tcbEvaluationRecorder) Get(requestURL string) (map[string][]string, []byte, error) {
+	headers, body, err := r.inner.Get(requestURL)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	// Parse failures below are ignored on purpose: these bytes are
+	// authenticated and interpreted by the verification library, and this
+	// wrapper only observes one field. A response that never parses leaves
+	// its pointer nil, which fails minimum() after verification.
+	u, parseErr := url.Parse(requestURL)
+	if parseErr != nil {
+		return headers, body, nil
+	}
+	switch {
+	case strings.HasSuffix(u.Path, "/tcb"):
+		var resp struct {
+			TcbInfo struct {
+				TcbEvaluationDataNumber int `json:"tcbEvaluationDataNumber"`
+			} `json:"tcbInfo"`
+		}
+		if json.Unmarshal(body, &resp) == nil {
+			n := resp.TcbInfo.TcbEvaluationDataNumber
+			r.tcbInfo = &n
+		}
+	case strings.HasSuffix(u.Path, "/qe/identity"):
+		var resp struct {
+			EnclaveIdentity struct {
+				TcbEvaluationDataNumber int `json:"tcbEvaluationDataNumber"`
+			} `json:"enclaveIdentity"`
+		}
+		if json.Unmarshal(body, &resp) == nil {
+			n := resp.EnclaveIdentity.TcbEvaluationDataNumber
+			r.qeIdentity = &n
+		}
+	}
+	return headers, body, nil
+}
+
+// minimum returns the lower of the two observed numbers; both responses must
+// have been seen (quote verification always fetches both when it succeeds).
+func (r *tcbEvaluationRecorder) minimum() (int, error) {
+	if r.tcbInfo == nil || r.qeIdentity == nil {
+		return 0, fmt.Errorf("collateral tcbEvaluationDataNumber was not observed during quote verification")
+	}
+	if *r.qeIdentity < *r.tcbInfo {
+		return *r.qeIdentity, nil
+	}
+	return *r.tcbInfo, nil
+}

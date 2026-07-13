@@ -7,7 +7,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
-	"github.com/tinfoilsh/tinfoil-go/verifier/attestation"
+	"github.com/tinfoilsh/tinfoil-go/verifier/measurement"
 )
 
 func TestVerify(t *testing.T) {
@@ -24,12 +24,12 @@ func TestVerify(t *testing.T) {
 }
 
 func TestClientGroundTruthJSON(t *testing.T) {
-	codeMeasurement := &attestation.Measurement{
-		Type:      attestation.SnpTdxMultiPlatformV1,
+	codeMeasurement := &measurement.Measurement{
+		Type:      measurement.SnpTdxMultiPlatformV1,
 		Registers: []string{"a", "b"},
 	}
-	enclaveMeasurement := &attestation.Measurement{
-		Type:      attestation.TdxGuestV2,
+	enclaveMeasurement := &measurement.Measurement{
+		Type:      measurement.TdxGuestV2,
 		Registers: []string{"a"},
 	}
 

@@ -7,8 +7,8 @@ import (
 	"fmt"
 	"net/http"
 
-	"github.com/tinfoilsh/tinfoil-go/verifier/attestation"
-	"github.com/tinfoilsh/tinfoil-go/verifier/sigstore"
+	"github.com/tinfoilsh/tinfoil-go/verifier/measurement"
+	"github.com/tinfoilsh/tinfoil-go/verifier/provenance"
 	"github.com/tinfoilsh/tinfoil-go/verifier/util"
 )
 
@@ -21,9 +21,9 @@ type GroundTruth struct {
 	TLSPublicKey        string                           `json:"tls_public_key,omitempty"`
 	HPKEPublicKey       string                           `json:"hpke_public_key,omitempty"`
 	Digest              string                           `json:"digest"`
-	CodeMeasurement     *attestation.Measurement         `json:"code_measurement"`
-	EnclaveMeasurement  *attestation.Measurement         `json:"enclave_measurement"`
-	HardwareMeasurement *attestation.HardwareMeasurement `json:"hardware_measurement,omitempty"`
+	CodeMeasurement     *measurement.Measurement         `json:"code_measurement"`
+	EnclaveMeasurement  *measurement.Measurement         `json:"enclave_measurement"`
+	HardwareMeasurement *measurement.HardwareMeasurement `json:"hardware_measurement,omitempty"`
 	CodeFingerprint     string                           `json:"code_fingerprint"`
 	EnclaveFingerprint  string                           `json:"enclave_fingerprint"`
 }
@@ -32,7 +32,7 @@ type SecureClient struct {
 	enclave, repo string
 
 	groundTruth    *GroundTruth
-	sigstoreClient *sigstore.Client
+	sigstoreClient *provenance.Client
 }
 
 var (
@@ -111,10 +111,10 @@ func (s *SecureClient) GroundTruthJSON() (string, error) {
 	return string(encoded), nil
 }
 
-func (s *SecureClient) getSigstoreClient() (*sigstore.Client, error) {
+func (s *SecureClient) getSigstoreClient() (*provenance.Client, error) {
 	if s.sigstoreClient == nil {
 		var err error
-		s.sigstoreClient, err = sigstore.NewClient()
+		s.sigstoreClient, err = provenance.NewClient()
 		if err != nil {
 			return nil, fmt.Errorf("failed to create sigstore client: %v", err)
 		}
@@ -242,7 +242,7 @@ func VerifyJSON(enclave, repo string, sigstoreTrustedRootJSON []byte) (string, e
 	return client.GroundTruthJSON()
 }
 
-func getSigstoreClient(sigstoreTrustedRootJSON []byte) (*sigstore.Client, error) {
+func getSigstoreClient(sigstoreTrustedRootJSON []byte) (*provenance.Client, error) {
 	var trustedRootJSON []byte
 	var err error
 
@@ -251,11 +251,11 @@ func getSigstoreClient(sigstoreTrustedRootJSON []byte) (*sigstore.Client, error)
 	} else if len(embeddedTrustedRoot) > 0 {
 		trustedRootJSON = embeddedTrustedRoot
 	} else {
-		trustedRootJSON, err = sigstore.FetchTrustRoot()
+		trustedRootJSON, err = provenance.FetchTrustRoot()
 		if err != nil {
 			return nil, fmt.Errorf("failed to fetch trusted root: %v", err)
 		}
 	}
 
-	return sigstore.NewClientFromJSON(trustedRootJSON)
+	return provenance.NewClientFromJSON(trustedRootJSON)
 }

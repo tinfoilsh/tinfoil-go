@@ -5,7 +5,7 @@ import (
 	"log"
 	"os"
 
-	"github.com/tinfoilsh/tinfoil-go/verifier/sigstore"
+	"github.com/tinfoilsh/tinfoil-go/verifier/provenance"
 )
 
 var (
@@ -17,7 +17,7 @@ func main() {
 
 	log.Print("Fetching latest SigStore trust root")
 
-	trustedRootJSON, err := sigstore.FetchTrustRoot()
+	trustedRootJSON, err := provenance.FetchTrustRoot()
 	if err != nil {
 		log.Fatal(err)
 	}
