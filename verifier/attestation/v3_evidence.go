@@ -102,7 +102,7 @@ func verifySevEvidenceV3(doc *DocumentV3, expectedReportData [64]byte, endorseme
 		return nil, fmt.Errorf("decoding vcek_der_base64: %w", err)
 	}
 
-	report, policyName, err := verifySevReportWithEndorsements(doc.CPUEvidence.ReportBase64, false, vcekDER, endorsements)
+	report, policyName, err := verifySevReportWithEndorsements(doc.CPUEvidence.ReportBase64, vcekDER, endorsements)
 	if err != nil {
 		return nil, err
 	}

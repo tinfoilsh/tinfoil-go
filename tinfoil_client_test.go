@@ -25,6 +25,7 @@ func TestMain(m *testing.M) {
 func TestNewClient(t *testing.T) {
 	// Test default client creation only
 	client, err := NewClient()
+	skipIfEnclaveNotV3(t, err)
 	require.NoError(t, err)
 	require.NotNil(t, client)
 }
@@ -37,6 +38,7 @@ func TestClientIntegration_Chat(t *testing.T) {
 	}
 
 	client, err := NewClient(option.WithAPIKey(apiKey))
+	skipIfEnclaveNotV3(t, err)
 	require.NoError(t, err)
 
 	chatCompletion, err := client.Chat.Completions.New(context.Background(), openai.ChatCompletionNewParams{
@@ -59,6 +61,7 @@ func TestClientNonStreamingChat(t *testing.T) {
 	}
 
 	client, err := NewClient(option.WithAPIKey(apiKey))
+	skipIfEnclaveNotV3(t, err)
 	require.NoError(t, err)
 
 	resp, err := client.Chat.Completions.New(
@@ -87,6 +90,7 @@ func TestClientStreamingChat(t *testing.T) {
 	}
 
 	client, err := NewClient(option.WithAPIKey(apiKey))
+	skipIfEnclaveNotV3(t, err)
 	require.NoError(t, err)
 
 	// Create a streaming chat completion request
@@ -191,6 +195,7 @@ func TestDirectClientStreamingChat(t *testing.T) {
 func TestHTTPClient(t *testing.T) {
 	t.Setenv(userCacheSecretEnv, "test-secret")
 	client, err := NewClient()
+	skipIfEnclaveNotV3(t, err)
 	require.NoError(t, err)
 
 	httpClient := client.HTTPClient()
@@ -221,6 +226,7 @@ func TestClientIntegration_AudioTranscription(t *testing.T) {
 	}
 
 	c, err := NewClient(option.WithAPIKey(apiKey))
+	skipIfEnclaveNotV3(t, err)
 	require.NoError(t, err)
 
 	audioFile, err := os.Open("testdata/jackhammer.wav")

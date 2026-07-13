@@ -38,14 +38,13 @@ const (
 )
 
 type clientConfig struct {
-	enclave              string
-	repo                 string
-	transport            TransportMode
-	baseURL              string
-	attestationBundleURL string
-	userCacheSecret      string
-	userCacheSecretSet   bool
-	openaiOpts           []option.RequestOption
+	enclave            string
+	repo               string
+	transport          TransportMode
+	baseURL            string
+	userCacheSecret    string
+	userCacheSecretSet bool
+	openaiOpts         []option.RequestOption
 }
 
 // ClientOption configures a Client created with NewClientWithOptions.
@@ -75,14 +74,6 @@ func WithTransport(mode TransportMode) ClientOption {
 // supported with the EHBP transport.
 func WithBaseURL(baseURL string) ClientOption {
 	return func(c *clientConfig) { c.baseURL = baseURL }
-}
-
-// WithAttestationBundleURL fetches the attestation bundle from the given base
-// URL (for example your own proxy) instead of attesting the enclave directly,
-// so the client only needs to reach a single origin. The bundle is still
-// verified client-side. The enclave host is taken from the verified bundle.
-func WithAttestationBundleURL(attestationBundleURL string) ClientOption {
-	return func(c *clientConfig) { c.attestationBundleURL = attestationBundleURL }
 }
 
 // WithOpenAIOptions appends options passed through to the underlying OpenAI client.
@@ -116,19 +107,13 @@ func NewClientWithOptions(opts ...ClientOption) (*Client, error) {
 	}
 
 	var secureClient *client.SecureClient
-	switch {
-	case cfg.attestationBundleURL != "":
-		// The verified bundle supplies the enclave host, so the router lookup
-		// in NewDefaultClient is unnecessary even when no enclave is set.
-		secureClient = client.NewSecureClient(cfg.enclave, cfg.repo)
-		secureClient.SetAttestationBundleURL(cfg.attestationBundleURL)
-	case cfg.enclave == "":
+	if cfg.enclave == "" {
 		var err error
 		secureClient, err = client.NewDefaultClient()
 		if err != nil {
 			return nil, fmt.Errorf("failed to create secure client: %w", err)
 		}
-	default:
+	} else {
 		secureClient = client.NewSecureClient(cfg.enclave, cfg.repo)
 	}
 
