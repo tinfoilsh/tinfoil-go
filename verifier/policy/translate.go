@@ -63,8 +63,18 @@ func (p *SEVSNPPolicy) SEVOptions(productLine string) (*sevvalidate.Options, err
 			SnpSpl:   p.MinimumLaunchTCB.SnpSpl,
 			UcodeSpl: p.MinimumLaunchTCB.UcodeSpl,
 		},
-		VMPL: p.VMPL,
+		VMPL: cloneIntPtr(p.VMPL),
 	}, nil
+}
+
+// cloneIntPtr copies an optional int so assembled expectations do not alias
+// the policy struct they were translated from.
+func cloneIntPtr(v *int) *int {
+	if v == nil {
+		return nil
+	}
+	c := *v
+	return &c
 }
 
 // SEVExpectations is the fully translated SEV-SNP expected state, resolved
@@ -157,7 +167,7 @@ func (e *TDXExpectations) Validate(quote *tdxpb.QuoteV4, tcbEvaluationDataNumber
 // tdxOptions translates the policy block into go-tdx-guest validation
 // options. MR_SEAM membership, the TCB evaluation data number, and platform
 // measurement matching are not expressible in the library options and are
-// enforced by the companion checks composed in ValidateTDXQuote.
+// enforced by the companion checks composed in TDXExpectations.Validate.
 func (p *TDXPolicy) tdxOptions() (*tdxvalidate.Options, error) {
 	qeVendor, err := hexField("qe_vendor_id", p.QEVendorID, 16)
 	if err != nil {
