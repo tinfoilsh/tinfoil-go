@@ -84,12 +84,15 @@ type SEVExpectations struct {
 }
 
 // AssembleSEV translates the policy block into the complete expected state
-// for the given product line.
-func (p *SEVSNPPolicy) AssembleSEV(productLine string) (*SEVExpectations, error) {
+// for the given product line. launchDigest is the expected 48-byte launch
+// measurement from code provenance; nil leaves it unchecked for callers
+// that compare it themselves.
+func (p *SEVSNPPolicy) AssembleSEV(productLine string, launchDigest []byte) (*SEVExpectations, error) {
 	opts, err := p.SEVOptions(productLine)
 	if err != nil {
 		return nil, err
 	}
+	opts.Measurement = launchDigest
 	return &SEVExpectations{opts: opts}, nil
 }
 
@@ -100,44 +103,92 @@ func (e *SEVExpectations) Validate(attestation *sevsnp.Attestation) error {
 	return sevvalidate.SnpAttestation(attestation, e.opts)
 }
 
-// TDXExpectations is the fully translated TDX expected state, resolved at
-// policy assembly so that validation performs no translation and no
-// artifact lookups.
+// TDXCodeRegisters are the expected workload registers from code
+// provenance. RTMR0 is a platform register and comes from the endorsed
+// platform measurements instead.
+type TDXCodeRegisters struct {
+	RTMR1 []byte
+	RTMR2 []byte
+	RTMR3 []byte
+}
+
+// TDXExpectations is the fully translated TDX expected state: complete
+// go-tdx-guest validation options plus the collateral floor, which is not a
+// quote field. Validation performs no translation and no artifact lookups.
 type TDXExpectations struct {
 	opts                           *tdxvalidate.Options
 	minimumTCBEvaluationDataNumber int
-	acceptedMRSeams                [][]byte
-	allowedPlatformMeasurements    []PlatformMeasurement
 }
 
-// AssembleTDX translates the policy block into the complete expected state:
-// go-tdx-guest validation options plus the values those options cannot
-// express (accepted MR_SEAMs, the collateral tcbEvaluationDataNumber floor,
-// and the allowed MRTD/RTMR0 platform measurements resolved from the
-// artifact).
-func (a *Artifact) AssembleTDX(p *TDXPolicy) (*TDXExpectations, error) {
+// AssembleTDX translates the policy block into complete library validation
+// options. The endorsed sets (accepted MR_SEAMs, allowed platform
+// measurements) are resolved to single expected values by selection with
+// the quote's authenticated registers, so a quote outside the endorsed sets
+// fails assembly; every register comparison then happens inside the
+// library.
+func (a *Artifact) AssembleTDX(p *TDXPolicy, quote *tdxpb.QuoteV4, code TDXCodeRegisters) (*TDXExpectations, error) {
 	opts, err := p.tdxOptions()
 	if err != nil {
 		return nil, err
 	}
-	seams := make([][]byte, 0, len(p.AcceptedMRSeams))
+	body := quote.GetTdQuoteBody()
+	if body == nil || len(body.GetRtmrs()) != 4 {
+		return nil, fmt.Errorf("TDX quote body must carry exactly 4 RTMRs")
+	}
+
+	opts.TdQuoteBodyOptions.MrSeam, err = p.selectMRSeam(body.GetMrSeam())
+	if err != nil {
+		return nil, err
+	}
+
+	m, err := a.selectPlatformMeasurement(p,
+		hex.EncodeToString(body.GetMrTd()),
+		hex.EncodeToString(body.GetRtmrs()[0]))
+	if err != nil {
+		return nil, err
+	}
+	mrtd, err := hex.DecodeString(m.MRTD)
+	if err != nil {
+		return nil, fmt.Errorf("platform measurement mrtd is not hex: %w", err)
+	}
+	rtmr0, err := hex.DecodeString(m.RTMR0)
+	if err != nil {
+		return nil, fmt.Errorf("platform measurement rtmr0 is not hex: %w", err)
+	}
+	opts.TdQuoteBodyOptions.MrTd = mrtd
+	opts.TdQuoteBodyOptions.Rtmrs = [][]byte{rtmr0, code.RTMR1, code.RTMR2, code.RTMR3}
+
+	return &TDXExpectations{
+		opts:                           opts,
+		minimumTCBEvaluationDataNumber: p.MinimumTCBEvaluationDataNumber,
+	}, nil
+}
+
+// selectMRSeam resolves the quote's authenticated MR_SEAM within the
+// policy's accepted set.
+func (p *TDXPolicy) selectMRSeam(mrSeam []byte) ([]byte, error) {
 	for _, accepted := range p.AcceptedMRSeams {
 		want, err := hex.DecodeString(accepted)
 		if err != nil {
 			return nil, fmt.Errorf("policy accepted_mr_seams entry is not hex: %w", err)
 		}
-		seams = append(seams, want)
+		if bytes.Equal(mrSeam, want) {
+			return want, nil
+		}
 	}
-	allowed := make([]PlatformMeasurement, 0, len(p.PlatformMeasurements))
+	return nil, fmt.Errorf("MR_SEAM %s is not in the policy's accepted set", hex.EncodeToString(mrSeam))
+}
+
+// selectPlatformMeasurement resolves the quote's authenticated MRTD/RTMR0
+// within the platform measurements the policy allows.
+func (a *Artifact) selectPlatformMeasurement(p *TDXPolicy, mrtdHex, rtmr0Hex string) (*PlatformMeasurement, error) {
 	for _, ref := range p.PlatformMeasurements {
-		allowed = append(allowed, a.Measurements[ref])
+		m := a.Measurements[ref]
+		if m.MRTD == mrtdHex && m.RTMR0 == rtmr0Hex {
+			return &m, nil
+		}
 	}
-	return &TDXExpectations{
-		opts:                           opts,
-		minimumTCBEvaluationDataNumber: p.MinimumTCBEvaluationDataNumber,
-		acceptedMRSeams:                seams,
-		allowedPlatformMeasurements:    allowed,
-	}, nil
+	return nil, fmt.Errorf("platform measurements (mrtd %s...) do not match any allowed configuration", truncID(mrtdHex))
 }
 
 // Validate compares a signature-verified quote against the assembled
@@ -146,8 +197,6 @@ func (a *Artifact) AssembleTDX(p *TDXPolicy) (*TDXExpectations, error) {
 // the only TDX policy enforcement entry point so that no subset of the
 // policy can be applied.
 func (e *TDXExpectations) Validate(quote *tdxpb.QuoteV4, tcbEvaluationDataNumber int) error {
-	// tdxvalidate.TdxQuote runs abi.CheckQuoteV4 first, which guarantees the
-	// TD quote body exists with 48-byte MRTD and exactly 4 48-byte RTMRs.
 	if err := tdxvalidate.TdxQuote(quote, e.opts); err != nil {
 		return err
 	}
@@ -155,13 +204,7 @@ func (e *TDXExpectations) Validate(quote *tdxpb.QuoteV4, tcbEvaluationDataNumber
 		return fmt.Errorf("tcbEvaluationDataNumber %d is below the policy minimum %d",
 			tcbEvaluationDataNumber, e.minimumTCBEvaluationDataNumber)
 	}
-	body := quote.GetTdQuoteBody()
-	if err := e.checkMRSeam(body.GetMrSeam()); err != nil {
-		return err
-	}
-	return e.checkPlatformMeasurement(
-		hex.EncodeToString(body.GetMrTd()),
-		hex.EncodeToString(body.GetRtmrs()[0]))
+	return nil
 }
 
 // tdxOptions translates the policy block into go-tdx-guest validation
@@ -208,28 +251,6 @@ func (p *TDXPolicy) tdxOptions() (*tdxvalidate.Options, error) {
 		opts.TdQuoteBodyOptions.MrOwnerConfig = make([]byte, 48)
 	}
 	return opts, nil
-}
-
-// checkMRSeam verifies membership of the quote's MR_SEAM in the assembled
-// accepted set.
-func (e *TDXExpectations) checkMRSeam(mrSeam []byte) error {
-	for _, want := range e.acceptedMRSeams {
-		if bytes.Equal(mrSeam, want) {
-			return nil
-		}
-	}
-	return fmt.Errorf("MR_SEAM %s is not in the policy's accepted set", hex.EncodeToString(mrSeam))
-}
-
-// checkPlatformMeasurement verifies the quote's MRTD/RTMR0 against the
-// assembled allowed platform measurements.
-func (e *TDXExpectations) checkPlatformMeasurement(mrtdHex, rtmr0Hex string) error {
-	for _, m := range e.allowedPlatformMeasurements {
-		if m.MRTD == mrtdHex && m.RTMR0 == rtmr0Hex {
-			return nil
-		}
-	}
-	return fmt.Errorf("platform measurements (mrtd %s...) do not match any allowed configuration", truncID(mrtdHex))
 }
 
 func parseAPIVersion(v string) (uint16, error) {

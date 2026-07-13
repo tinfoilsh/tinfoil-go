@@ -133,25 +133,26 @@ func TestTDXOptionsAndChecks(t *testing.T) {
 	assert.Equal(t, make([]byte, 48), opts.TdQuoteBodyOptions.MrConfigID)
 	assert.Equal(t, mustHex(t, "0000001000000000"), opts.TdQuoteBodyOptions.TdAttributes)
 
-	e, err := a.AssembleTDX(p.TDX)
-	require.NoError(t, err)
-
 	require.NotEmpty(t, p.TDX.AcceptedMRSeams)
-	require.NoError(t, e.checkMRSeam(mustHex(t, p.TDX.AcceptedMRSeams[0])))
-	assert.ErrorContains(t, e.checkMRSeam(make([]byte, 48)), "not in the policy's accepted set")
+	seam, err := p.TDX.selectMRSeam(mustHex(t, p.TDX.AcceptedMRSeams[0]))
+	require.NoError(t, err)
+	assert.Equal(t, mustHex(t, p.TDX.AcceptedMRSeams[0]), seam)
+	_, err = p.TDX.selectMRSeam(make([]byte, 48))
+	assert.ErrorContains(t, err, "not in the policy's accepted set")
 
 	ref := p.TDX.PlatformMeasurements[0]
 	m := a.Measurements[ref]
-	require.NoError(t, e.checkPlatformMeasurement(m.MRTD, m.RTMR0))
-	assert.ErrorContains(t, e.checkPlatformMeasurement(strings.Repeat("ff", 48), m.RTMR0),
-		"do not match any allowed configuration")
+	selected, err := a.selectPlatformMeasurement(p.TDX, m.MRTD, m.RTMR0)
+	require.NoError(t, err)
+	assert.Equal(t, m, *selected)
+	_, err = a.selectPlatformMeasurement(p.TDX, strings.Repeat("ff", 48), m.RTMR0)
+	assert.ErrorContains(t, err, "do not match any allowed configuration")
 }
 
-// TestValidateTDXQuote exercises the single composed enforcement entry point
-// against go-tdx-guest's production sample quote, with a policy derived from
-// the quote itself, then flips each policy dimension that is NOT covered by
-// the library options (MR_SEAM set, tcbEvaluationDataNumber, platform
-// measurements) to prove none of them can be silently skipped.
+// TestValidateTDXQuote exercises assembly and the single composed
+// enforcement entry point against go-tdx-guest's production sample quote,
+// with a policy derived from the quote itself, then flips each policy
+// dimension to prove none can be silently skipped.
 func TestValidateTDXQuote(t *testing.T) {
 	parsed, err := tdxabi.QuoteToProto(tdxtestdata.RawQuote)
 	require.NoError(t, err)
@@ -177,27 +178,43 @@ func TestValidateTDXQuote(t *testing.T) {
 		},
 	}
 
+	code := TDXCodeRegisters{
+		RTMR1: body.GetRtmrs()[1],
+		RTMR2: body.GetRtmrs()[2],
+		RTMR3: body.GetRtmrs()[3],
+	}
 	assemble := func(a *Artifact, p *TDXPolicy) *TDXExpectations {
-		e, err := a.AssembleTDX(p)
+		e, err := a.AssembleTDX(p, quote, code)
 		require.NoError(t, err)
 		return e
 	}
 
 	require.NoError(t, assemble(a, matching).Validate(quote, 5))
 
+	// A workload register differing from the code expectation must reject
+	// through the library options.
+	badCode := code
+	badCode.RTMR1 = make([]byte, 48)
+	badCodeExp, err := a.AssembleTDX(matching, quote, badCode)
+	require.NoError(t, err)
+	assert.Error(t, badCodeExp.Validate(quote, 5))
+
+	// A quote whose MR_SEAM or MRTD/RTMR0 fall outside the endorsed sets
+	// fails at assembly, before any validation runs.
 	badSeam := *matching
 	badSeam.AcceptedMRSeams = []string{strings.Repeat("00", 48)}
-	assert.ErrorContains(t, assemble(a, &badSeam).Validate(quote, 5), "not in the policy's accepted set")
-
-	assert.ErrorContains(t, assemble(a, matching).Validate(quote, 4), "below the policy minimum")
+	_, err = a.AssembleTDX(&badSeam, quote, code)
+	assert.ErrorContains(t, err, "not in the policy's accepted set")
 
 	badMeasurements := &Artifact{
 		Measurements: map[string]PlatformMeasurement{
 			"sample": {MRTD: strings.Repeat("ff", 48), RTMR0: strings.Repeat("ff", 48)},
 		},
 	}
-	assert.ErrorContains(t, assemble(badMeasurements, matching).Validate(quote, 5),
-		"do not match any allowed configuration")
+	_, err = badMeasurements.AssembleTDX(matching, quote, code)
+	assert.ErrorContains(t, err, "do not match any allowed configuration")
+
+	assert.ErrorContains(t, assemble(a, matching).Validate(quote, 4), "below the policy minimum")
 
 	badOpts := *matching
 	badOpts.TDAttributes = strings.Repeat("42", 8)

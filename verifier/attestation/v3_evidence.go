@@ -2,6 +2,7 @@ package attestation
 
 import (
 	"bytes"
+	"encoding/hex"
 	"errors"
 	"fmt"
 
@@ -116,9 +117,17 @@ func AssemblePolicyV3(endorsements *policy.Artifact, expected ExpectedValues, qu
 	}
 	switch quote.Platform {
 	case policy.PlatformSEVSNP:
-		assembled.sev, err = machinePolicy.SEVSNP.AssembleSEV(kds.ProductLine(quote.sev.GetProduct()))
+		var digest []byte
+		digest, err = sevLaunchDigest(expected.CodeMeasurement)
+		if err == nil {
+			assembled.sev, err = machinePolicy.SEVSNP.AssembleSEV(kds.ProductLine(quote.sev.GetProduct()), digest)
+		}
 	case policy.PlatformTDX:
-		assembled.tdx, err = endorsements.AssembleTDX(machinePolicy.TDX)
+		var code policy.TDXCodeRegisters
+		code, err = tdxCodeRegisters(expected.CodeMeasurement)
+		if err == nil {
+			assembled.tdx, err = endorsements.AssembleTDX(machinePolicy.TDX, quote.tdx, code)
+		}
 	default:
 		return nil, fmt.Errorf("unsupported platform %q", quote.Platform)
 	}
@@ -128,10 +137,69 @@ func AssemblePolicyV3(endorsements *policy.Artifact, expected ExpectedValues, qu
 	return assembled, nil
 }
 
+// sevLaunchDigest maps the expected code measurement onto the SEV launch
+// digest register.
+func sevLaunchDigest(m *Measurement) ([]byte, error) {
+	switch m.Type {
+	case SnpTdxMultiPlatformV1, SevGuestV2:
+		if len(m.Registers) < 1 {
+			return nil, fmt.Errorf("code measurement carries no registers")
+		}
+		return decodeRegister(m.Registers[0])
+	default:
+		return nil, fmt.Errorf("unsupported code measurement type %q for SEV-SNP", m.Type)
+	}
+}
+
+// tdxCodeRegisters maps the expected code measurement onto the TDX workload
+// registers. RTMR3 is unmeasured and must be zero.
+func tdxCodeRegisters(m *Measurement) (policy.TDXCodeRegisters, error) {
+	var indices [3]int
+	switch m.Type {
+	case SnpTdxMultiPlatformV1:
+		// Registers are [snp_measurement, rtmr1, rtmr2].
+		indices = [3]int{1, 2, -1}
+	case TdxGuestV2:
+		// Registers are [mrtd, rtmr0, rtmr1, rtmr2, rtmr3].
+		indices = [3]int{2, 3, 4}
+	default:
+		return policy.TDXCodeRegisters{}, fmt.Errorf("unsupported code measurement type %q for TDX", m.Type)
+	}
+
+	registers := [3][]byte{}
+	for i, idx := range indices {
+		if idx < 0 {
+			registers[i] = make([]byte, 48)
+			continue
+		}
+		if idx >= len(m.Registers) {
+			return policy.TDXCodeRegisters{}, fmt.Errorf("code measurement carries %d registers, need %d", len(m.Registers), idx+1)
+		}
+		reg, err := decodeRegister(m.Registers[idx])
+		if err != nil {
+			return policy.TDXCodeRegisters{}, err
+		}
+		registers[i] = reg
+	}
+	return policy.TDXCodeRegisters{RTMR1: registers[0], RTMR2: registers[1], RTMR3: registers[2]}, nil
+}
+
+// decodeRegister decodes a 48-byte hex measurement register.
+func decodeRegister(hexValue string) ([]byte, error) {
+	b, err := hex.DecodeString(hexValue)
+	if err != nil {
+		return nil, fmt.Errorf("code measurement register is not hex: %w", err)
+	}
+	if len(b) != 48 {
+		return nil, fmt.Errorf("code measurement register must be 48 bytes, got %d", len(b))
+	}
+	return b, nil
+}
+
 // ValidateQuoteV3 compares an authenticated quote against an assembled
-// policy: REPORT_DATA equality, the platform expectations, and the expected
-// launch measurement. It performs no lookups, no translation, and no
-// recomputation.
+// policy: REPORT_DATA equality and the platform expectations, which include
+// the expected launch measurement. It performs no lookups, no translation,
+// and no recomputation.
 func ValidateQuoteV3(quote *AuthenticatedQuote, assembled *AssembledPolicy) error {
 	if quote.Platform != assembled.platform || quote.PlatformIdentity != assembled.platformIdentity {
 		return fmt.Errorf("assembled policy does not correspond to the authenticated quote")
@@ -142,18 +210,12 @@ func ValidateQuoteV3(quote *AuthenticatedQuote, assembled *AssembledPolicy) erro
 
 	switch quote.Platform {
 	case policy.PlatformSEVSNP:
-		if err := assembled.sev.Validate(quote.sev); err != nil {
-			return err
-		}
+		return assembled.sev.Validate(quote.sev)
 	case policy.PlatformTDX:
-		if err := assembled.tdx.Validate(quote.tdx, quote.tdxTCBEvaluationDataNumber); err != nil {
-			return err
-		}
+		return assembled.tdx.Validate(quote.tdx, quote.tdxTCBEvaluationDataNumber)
 	default:
 		return fmt.Errorf("unsupported platform %q", quote.Platform)
 	}
-
-	return assembled.Expected.CodeMeasurement.Equals(quote.Measurement)
 }
 
 // VerifyCPUEvidenceV3 composes AuthenticateQuoteV3, AssemblePolicyV3, and
