@@ -95,6 +95,11 @@ func Authenticate(doc *envelope.Document) (*Quote, error) {
 	if err != nil {
 		return nil, fmt.Errorf("decoding vcek_der_base64: %w", err)
 	}
+	// An empty VCEK would make the library try to fetch one; reject it
+	// before verification so the failure is explicit (and offline).
+	if len(vcekDER) == 0 {
+		return nil, fmt.Errorf("amd-vcek collateral entry %q carries an empty VCEK", entry.ID)
+	}
 
 	// VCEK revocation is checked against the CRL when the document carries
 	// one; documents predating the amd-crl entry verify without it.
