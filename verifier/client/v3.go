@@ -146,14 +146,10 @@ func verifyReferenceValues(sigstoreClient *provenance.Client, doc *envelope.Docu
 // The enclave fetch is the only network request: all collateral travels in
 // the document and Sigstore verification uses the embedded trust root.
 func (s *SecureClient) VerifyV3() (*VerifiedDocumentV3, error) {
-	if s.sigstoreClient == nil {
-		var err error
-		s.sigstoreClient, err = getSigstoreClient(nil)
-		if err != nil {
-			return nil, fmt.Errorf("failed to create sigstore client: %w", err)
-		}
+	sigstoreClient, err := s.getSigstoreClient()
+	if err != nil {
+		return nil, err
 	}
-	sigstoreClient := s.sigstoreClient
 
 	nonce, err := envelope.RandomNonce()
 	if err != nil {

@@ -14,7 +14,6 @@ import (
 	"github.com/sigstore/sigstore-go/pkg/bundle"
 	"github.com/sigstore/sigstore-go/pkg/fulcio/certificate"
 	"github.com/sigstore/sigstore-go/pkg/root"
-	"github.com/sigstore/sigstore-go/pkg/tuf"
 	"github.com/sigstore/sigstore-go/pkg/verify"
 	"google.golang.org/protobuf/encoding/protojson"
 
@@ -22,7 +21,6 @@ import (
 	"google.golang.org/protobuf/types/known/structpb"
 
 	"github.com/tinfoilsh/tinfoil-go/verifier/endorsement"
-	"github.com/tinfoilsh/tinfoil-go/verifier/github"
 	"github.com/tinfoilsh/tinfoil-go/verifier/measurement"
 )
 
@@ -45,42 +43,14 @@ type Client struct {
 	trustRoot *root.TrustedRoot
 }
 
-func NewClient() (*Client, error) {
-	trustRootJSON, err := FetchTrustRoot()
-	if err != nil {
-		return nil, fmt.Errorf("fetching trust root: %w", err)
-	}
-
-	trustRoot, err := root.NewTrustedRootFromJSON(trustRootJSON)
-	if err != nil {
-		return nil, fmt.Errorf("parsing trust root: %w", err)
-	}
-
-	return &Client{
-		trustRoot: trustRoot,
-	}, nil
-}
-
+// NewClientFromJSON builds a client from a Sigstore trusted-root document
+// (conventionally the SDK's embedded copy, refreshed by the rootfetch tool).
 func NewClientFromJSON(trustRootJSON []byte) (*Client, error) {
 	trustRoot, err := root.NewTrustedRootFromJSON(trustRootJSON)
 	if err != nil {
 		return nil, fmt.Errorf("parsing trust root: %w", err)
 	}
 	return &Client{trustRoot: trustRoot}, nil
-}
-
-// FetchTrustRoot fetches the trust root from the Sigstore TUF repo
-func FetchTrustRoot() ([]byte, error) {
-	tufOpts := tuf.
-		DefaultOptions().
-		WithDisableLocalCache()
-	//WithFetcher(util.NewFetcher())
-	client, err := tuf.New(tufOpts)
-	if err != nil {
-		return nil, err
-	}
-
-	return client.GetTarget("trusted_root.json")
 }
 
 // repoNameRE matches a GitHub "owner/name" repository slug.
@@ -340,19 +310,4 @@ func (c *Client) VerifyPlatformEndorsements(bundleJSON []byte, hexDigest string)
 		return nil, fmt.Errorf("encoding platform endorsements predicate: %w", err)
 	}
 	return endorsement.Parse(predicateJSON)
-}
-
-// LatestPlatformEndorsements fetches and verifies the latest
-// platform-endorsements artifact (endorsed machine identities and their
-// appraisal policies) from GitHub+Sigstore.
-func (c *Client) LatestPlatformEndorsements() (*endorsement.Artifact, error) {
-	digest, err := github.FetchLatestDigest(platformEndorsementsRepo)
-	if err != nil {
-		return nil, fmt.Errorf("fetching platform endorsements digest: %w", err)
-	}
-	bundleJSON, err := github.FetchAttestationBundle(platformEndorsementsRepo, digest)
-	if err != nil {
-		return nil, fmt.Errorf("fetching platform endorsements bundle: %w", err)
-	}
-	return c.VerifyPlatformEndorsements(bundleJSON, digest)
 }

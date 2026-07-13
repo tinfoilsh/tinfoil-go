@@ -1,3 +1,6 @@
+// Command rootfetch refreshes the embedded Sigstore trusted-root document
+// from the Sigstore TUF repository. It is a maintenance tool: the verifier
+// itself only ever uses the embedded copy.
 package main
 
 import (
@@ -5,19 +8,21 @@ import (
 	"log"
 	"os"
 
-	"github.com/tinfoilsh/tinfoil-go/verifier/provenance"
+	"github.com/sigstore/sigstore-go/pkg/tuf"
 )
 
-var (
-	outputFile = flag.String("o", "trusted_root.json", "output file")
-)
+var outputFile = flag.String("o", "trusted_root.json", "output file")
 
 func main() {
 	flag.Parse()
 
-	log.Print("Fetching latest SigStore trust root")
+	log.Print("Fetching latest Sigstore trust root")
 
-	trustedRootJSON, err := provenance.FetchTrustRoot()
+	client, err := tuf.New(tuf.DefaultOptions().WithDisableLocalCache())
+	if err != nil {
+		log.Fatal(err)
+	}
+	trustedRootJSON, err := client.GetTarget("trusted_root.json")
 	if err != nil {
 		log.Fatal(err)
 	}

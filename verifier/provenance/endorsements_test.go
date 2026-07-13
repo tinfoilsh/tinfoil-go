@@ -6,8 +6,6 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-
-	"github.com/tinfoilsh/tinfoil-go/verifier/github"
 )
 
 // TestLatestPlatformEndorsements is a live test against the published
@@ -18,16 +16,19 @@ func TestLatestPlatformEndorsements(t *testing.T) {
 	if testing.Short() {
 		t.Skip("live external services test; skipped with -short")
 	}
-	if _, err := github.FetchLatestDigest(platformEndorsementsRepo); err != nil {
+	digest, err := fetchLatestDigest(platformEndorsementsRepo)
+	if err != nil {
 		// The proxy surfaces missing release assets as 4xx; skip until the
 		// first release carrying the endorsement assets is tagged.
 		t.Skipf("platform-endorsements digest not fetchable (asset not published yet?): %v", err)
 	}
 
-	client, err := NewClient()
+	client := testClient(t)
+
+	bundleJSON, err := fetchAttestationBundle(platformEndorsementsRepo, digest)
 	require.NoError(t, err)
 
-	artifact, err := client.LatestPlatformEndorsements()
+	artifact, err := client.VerifyPlatformEndorsements(bundleJSON, digest)
 	if err != nil && strings.Contains(err.Error(), "accepted_mr_seams") {
 		t.Skipf("published artifact predates the mr_seam policy schema; release the updated artifact: %v", err)
 	}

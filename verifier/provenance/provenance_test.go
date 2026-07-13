@@ -1,12 +1,13 @@
 package provenance
 
 import (
+	"os"
+	"path/filepath"
 	"regexp"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/tinfoilsh/tinfoil-go/verifier/github"
 	"github.com/tinfoilsh/tinfoil-go/verifier/measurement"
 )
 
@@ -39,12 +40,11 @@ func TestVerifyCode(t *testing.T) {
 	if testing.Short() {
 		t.Skip("live external services test; skipped with -short")
 	}
-	client, err := NewClient()
-	assert.NoError(t, err)
+	client := testClient(t)
 
 	const repo = "tinfoilsh/confidential-deepseek-r1-0528"
 	const hexDigest = "7e76d5a6d81f19ecdc1f3c18c8f0cf5b89d22ea107a05a1ae23ce46e79270f26"
-	bundle, err := github.FetchAttestationBundle(repo, hexDigest)
+	bundle, err := fetchAttestationBundle(repo, hexDigest)
 	assert.NoError(t, err)
 
 	code, err := client.VerifyCode(bundle, repo, hexDigest)
@@ -78,4 +78,15 @@ func TestVerifyCode(t *testing.T) {
 		},
 	}
 	assert.NoError(t, m.Equals(sevSNPMeasurement))
+}
+
+// testClient builds a client from the SDK's embedded trusted root, exactly
+// as production verification does.
+func testClient(t *testing.T) *Client {
+	t.Helper()
+	trustRootJSON, err := os.ReadFile(filepath.Join("..", "client", "trusted_root.json"))
+	require.NoError(t, err)
+	client, err := NewClientFromJSON(trustRootJSON)
+	require.NoError(t, err)
+	return client
 }

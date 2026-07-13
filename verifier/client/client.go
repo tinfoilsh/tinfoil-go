@@ -114,7 +114,7 @@ func (s *SecureClient) GroundTruthJSON() (string, error) {
 func (s *SecureClient) getSigstoreClient() (*provenance.Client, error) {
 	if s.sigstoreClient == nil {
 		var err error
-		s.sigstoreClient, err = provenance.NewClient()
+		s.sigstoreClient, err = getSigstoreClient(nil)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create sigstore client: %v", err)
 		}
@@ -242,20 +242,13 @@ func VerifyJSON(enclave, repo string, sigstoreTrustedRootJSON []byte) (string, e
 	return client.GroundTruthJSON()
 }
 
+// getSigstoreClient builds a provenance client from the given trusted root,
+// or from the embedded copy when nil. Sigstore verification never fetches
+// its trust root over the network.
 func getSigstoreClient(sigstoreTrustedRootJSON []byte) (*provenance.Client, error) {
-	var trustedRootJSON []byte
-	var err error
-
-	if len(sigstoreTrustedRootJSON) > 0 {
-		trustedRootJSON = sigstoreTrustedRootJSON
-	} else if len(embeddedTrustedRoot) > 0 {
+	trustedRootJSON := sigstoreTrustedRootJSON
+	if len(trustedRootJSON) == 0 {
 		trustedRootJSON = embeddedTrustedRoot
-	} else {
-		trustedRootJSON, err = provenance.FetchTrustRoot()
-		if err != nil {
-			return nil, fmt.Errorf("failed to fetch trusted root: %v", err)
-		}
 	}
-
 	return provenance.NewClientFromJSON(trustedRootJSON)
 }
