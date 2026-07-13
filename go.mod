@@ -3,7 +3,6 @@ module github.com/tinfoilsh/tinfoil-go
 go 1.26.5
 
 require (
-	github.com/Masterminds/semver/v3 v3.4.0
 	github.com/charmbracelet/log v1.0.0
 	github.com/google/go-sev-guest v0.15.0
 	github.com/google/go-tdx-guest v0.3.1
