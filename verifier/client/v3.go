@@ -60,7 +60,7 @@ func (v *VerifiedDocumentV3) cryptoMaterialData(id, format string) (string, erro
 //     entries are verified against the Sigstore trust root and the pinned
 //     Tinfoil workflow identities, recovering the code measurement and the
 //     platform-endorsements artifact. Both entries are required.
-//  3. Quote verification: signature chain against pinned vendor roots.
+//  3. Quote authentication: signature chain against pinned vendor roots.
 //  4. Policy assembly: the machines-map lookup keyed by the authenticated
 //     platform identity, plus the expected REPORT_DATA and code measurement.
 //  5. Validation: the authenticated quote against the assembled policy.
@@ -80,11 +80,14 @@ func VerifyDocumentV3(sigstoreClient *sigstore.Client, docBytes, nonce []byte, r
 		return nil, fmt.Errorf("reference values: %w", err)
 	}
 
-	quote, err := attestation.VerifyQuoteV3(doc)
+	quote, err := attestation.AuthenticateQuoteV3(doc)
 	if err != nil {
 		return nil, fmt.Errorf("cpu evidence: %w", err)
 	}
-	assembled, err := attestation.AssemblePolicyV3(endorsements, codeMeasurement, expectedReportData, quote)
+	assembled, err := attestation.AssemblePolicyV3(endorsements, attestation.ExpectedValues{
+		ReportData:      expectedReportData,
+		CodeMeasurement: codeMeasurement,
+	}, quote)
 	if err != nil {
 		return nil, fmt.Errorf("policy assembly: %w", err)
 	}
@@ -108,24 +111,18 @@ func VerifyDocumentV3(sigstoreClient *sigstore.Client, docBytes, nonce []byte, r
 // code artifact digest, and the platform-endorsements artifact. Both entries
 // are required.
 func verifyReferenceValues(sigstoreClient *sigstore.Client, doc *attestation.DocumentV3, repo string) (*attestation.Measurement, string, *policy.Artifact, error) {
-	codeRef, found, err := doc.ReferenceValuesCollateral(attestation.CollateralSigstoreCodeV1Format)
+	codeRef, err := doc.ReferenceValuesCollateral(attestation.CollateralSigstoreCodeV1Format)
 	if err != nil {
 		return nil, "", nil, err
-	}
-	if !found {
-		return nil, "", nil, fmt.Errorf("document carries no sigstore-code collateral entry")
 	}
 	codeMeasurement, err := sigstoreClient.VerifyAttestation(codeRef.SigstoreBundle, repo, codeRef.Digest)
 	if err != nil {
 		return nil, "", nil, fmt.Errorf("verifying code measurement: %w", err)
 	}
 
-	platformRef, found, err := doc.ReferenceValuesCollateral(attestation.CollateralSigstorePlatformV1Format)
+	platformRef, err := doc.ReferenceValuesCollateral(attestation.CollateralSigstorePlatformV1Format)
 	if err != nil {
 		return nil, "", nil, err
-	}
-	if !found {
-		return nil, "", nil, fmt.Errorf("document carries no sigstore-platform collateral entry")
 	}
 	endorsements, err := sigstoreClient.VerifyPlatformEndorsements(platformRef.SigstoreBundle, platformRef.Digest)
 	if err != nil {

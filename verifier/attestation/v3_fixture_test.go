@@ -71,13 +71,11 @@ func TestVerifyV3LiveFixture(t *testing.T) {
 	assert.Equal(t, KeyX25519HPKEV1Format, hpke.Format)
 
 	// Both reference-values entries travel in the document.
-	codeRef, found, err := doc.ReferenceValuesCollateral(CollateralSigstoreCodeV1Format)
+	codeRef, err := doc.ReferenceValuesCollateral(CollateralSigstoreCodeV1Format)
 	require.NoError(t, err)
-	require.True(t, found)
 	assert.NotEmpty(t, codeRef.Digest)
-	platformRef, found, err := doc.ReferenceValuesCollateral(CollateralSigstorePlatformV1Format)
+	platformRef, err := doc.ReferenceValuesCollateral(CollateralSigstorePlatformV1Format)
 	require.NoError(t, err)
-	require.True(t, found)
 	assert.NotEmpty(t, platformRef.Digest)
 
 	evidence, err := VerifyCPUEvidenceV3(doc, reportData, loadEndorsementArtifact(t))
