@@ -64,15 +64,19 @@ type ExpectedValues struct {
 }
 
 // AssembledPolicy is the complete expected state of a quote, resolved from
-// verified reference values before validation runs.
+// verified reference values before validation runs. It is bound to the
+// authenticated quote it was assembled for: validation rejects any other
+// quote.
 type AssembledPolicy struct {
 	// PolicyName is the matched appraisal policy name.
 	PolicyName string
 	// Expected carries the envelope and code-provenance expectations.
 	Expected ExpectedValues
 
-	artifact *policy.Artifact
-	machine  *policy.Policy
+	platform         string
+	platformIdentity string
+	artifact         *policy.Artifact
+	machine          *policy.Policy
 }
 
 // AuthenticateQuoteV3 authenticates a v3 document's CPU quote: the
@@ -102,10 +106,12 @@ func AssemblePolicyV3(endorsements *policy.Artifact, expected ExpectedValues, qu
 		return nil, err
 	}
 	return &AssembledPolicy{
-		PolicyName: name,
-		Expected:   expected,
-		artifact:   endorsements,
-		machine:    machinePolicy,
+		PolicyName:       name,
+		Expected:         expected,
+		platform:         quote.Platform,
+		platformIdentity: quote.PlatformIdentity,
+		artifact:         endorsements,
+		machine:          machinePolicy,
 	}, nil
 }
 
@@ -114,6 +120,9 @@ func AssemblePolicyV3(endorsements *policy.Artifact, expected ExpectedValues, qu
 // present) the expected launch measurement. It performs no lookups and no
 // recomputation.
 func ValidateQuoteV3(quote *AuthenticatedQuote, assembled *AssembledPolicy) error {
+	if quote.Platform != assembled.platform || quote.PlatformIdentity != assembled.platformIdentity {
+		return fmt.Errorf("assembled policy does not correspond to the authenticated quote")
+	}
 	if !bytes.Equal(quote.reportData, assembled.Expected.ReportData[:]) {
 		return fmt.Errorf("quote REPORT_DATA does not match the recomputed value")
 	}
