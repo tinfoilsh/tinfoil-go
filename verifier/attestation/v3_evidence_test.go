@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	sevabi "github.com/google/go-sev-guest/abi"
@@ -84,7 +85,14 @@ func TestVerifyCPUEvidenceV3SEV(t *testing.T) {
 		}},
 	}
 
-	evidence, err := VerifyCPUEvidenceV3(doc, reportData, artifact)
+	// The fixture predates per-release code provenance, so the expected
+	// launch measurement is the quote's own; the equality path is still
+	// exercised, and the mismatch case is covered below.
+	quote, err := AuthenticateQuoteV3(doc)
+	require.NoError(t, err)
+	expected := ExpectedValues{ReportData: reportData, CodeMeasurement: quote.Measurement}
+
+	evidence, err := VerifyCPUEvidenceV3(doc, expected, artifact)
 	require.NoError(t, err)
 	assert.Equal(t, policy.PlatformSEVSNP, evidence.Platform)
 	assert.Equal(t, "amd-genoa-prod", evidence.PolicyName)
@@ -93,22 +101,35 @@ func TestVerifyCPUEvidenceV3SEV(t *testing.T) {
 	assert.Equal(t, SevGuestV2, evidence.Measurement.Type)
 
 	// Wrong REPORT_DATA must reject even with a valid signature.
-	var wrongReportData [64]byte
-	wrongReportData[0] = reportData[0] ^ 0xff
+	wrongReportData := expected
+	wrongReportData.ReportData[0] ^= 0xff
 	_, err = VerifyCPUEvidenceV3(doc, wrongReportData, artifact)
 	assert.ErrorContains(t, err, "REPORT_DATA")
+
+	// A launch measurement differing from the code expectation must reject.
+	wrongMeasurement := expected
+	wrongMeasurement.CodeMeasurement = &Measurement{
+		Type:      SevGuestV2,
+		Registers: []string{strings.Repeat("ab", 48)},
+	}
+	_, err = VerifyCPUEvidenceV3(doc, wrongMeasurement, artifact)
+	assert.Error(t, err)
+
+	// An assembly without the required code expectation must reject.
+	_, err = AssemblePolicyV3(artifact, ExpectedValues{ReportData: reportData}, quote)
+	assert.ErrorContains(t, err, "code measurement is required")
 
 	// A machine absent from the artifact must reject.
 	unendorsed := *artifact
 	unendorsed.Machines = map[string]string{}
-	_, err = VerifyCPUEvidenceV3(doc, reportData, &unendorsed)
+	_, err = VerifyCPUEvidenceV3(doc, expected, &unendorsed)
 	assert.ErrorContains(t, err, "not endorsed")
 
 	// v3 is single-request: a document without its endorsement collateral is
 	// rejected, never patched up with a network fetch.
 	noVCEK := *doc
 	noVCEK.Collateral = nil
-	_, err = VerifyCPUEvidenceV3(&noVCEK, reportData, artifact)
+	_, err = VerifyCPUEvidenceV3(&noVCEK, expected, artifact)
 	assert.ErrorContains(t, err, "no amd-vcek endorsement collateral")
 }
 
@@ -116,7 +137,7 @@ func TestVerifyCPUEvidenceV3UnknownFormat(t *testing.T) {
 	doc := &DocumentV3{
 		CPUEvidence: CPUEvidenceV3{Format: "https://tinfoil.sh/format/unknown/v1"},
 	}
-	_, err := VerifyCPUEvidenceV3(doc, [64]byte{}, &policy.Artifact{})
+	_, err := VerifyCPUEvidenceV3(doc, ExpectedValues{}, &policy.Artifact{})
 	assert.Error(t, err)
 	assert.Contains(t, fmt.Sprint(err), "unsupported cpu_evidence format")
 }

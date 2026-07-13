@@ -78,7 +78,11 @@ func TestVerifyV3LiveFixture(t *testing.T) {
 	require.NoError(t, err)
 	assert.NotEmpty(t, platformRef.Digest)
 
-	evidence, err := VerifyCPUEvidenceV3(doc, reportData, loadEndorsementArtifact(t))
+	quote, err := AuthenticateQuoteV3(doc)
+	require.NoError(t, err)
+	evidence, err := VerifyCPUEvidenceV3(doc,
+		ExpectedValues{ReportData: reportData, CodeMeasurement: quote.Measurement},
+		loadEndorsementArtifact(t))
 	require.NoError(t, err)
 	assert.Equal(t, policy.PlatformSEVSNP, evidence.Platform)
 	assert.Equal(t, "amd-genoa-prod", evidence.PolicyName)

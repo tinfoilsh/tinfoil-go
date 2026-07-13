@@ -9,6 +9,7 @@ import (
 
 	sevabi "github.com/google/go-sev-guest/abi"
 	"github.com/google/go-sev-guest/kds"
+	"github.com/google/go-sev-guest/proto/sevsnp"
 	sevvalidate "github.com/google/go-sev-guest/validate"
 	tdxpb "github.com/google/go-tdx-guest/proto/tdx"
 	tdxvalidate "github.com/google/go-tdx-guest/validate"
@@ -66,33 +67,89 @@ func (p *SEVSNPPolicy) SEVOptions(productLine string) (*sevvalidate.Options, err
 	}, nil
 }
 
-// ValidateTDXQuote enforces the complete TDX policy against a quote:
-// go-tdx-guest validation options plus the checks not expressible in those
-// options (MR_SEAM membership, the collateral's tcbEvaluationDataNumber, and
-// MRTD/RTMR0 platform measurement matching). It is the only policy
-// enforcement entry point so that no subset of the policy can be applied.
-//
-// The quote's signature chain must already have been verified (go-tdx-guest
-// verify.TdxQuote); tcbEvaluationDataNumber must come from the verified
-// collateral (QE Identity / TCB Info) used during that verification.
-func (a *Artifact) ValidateTDXQuote(p *TDXPolicy, quote *tdxpb.QuoteV4, tcbEvaluationDataNumber int) error {
+// SEVExpectations is the fully translated SEV-SNP expected state, resolved
+// at policy assembly so that validation performs no translation.
+type SEVExpectations struct {
+	opts *sevvalidate.Options
+}
+
+// AssembleSEV translates the policy block into the complete expected state
+// for the given product line.
+func (p *SEVSNPPolicy) AssembleSEV(productLine string) (*SEVExpectations, error) {
+	opts, err := p.SEVOptions(productLine)
+	if err != nil {
+		return nil, err
+	}
+	return &SEVExpectations{opts: opts}, nil
+}
+
+// Validate compares a signature-verified attestation against the assembled
+// expected state. It is the only SEV policy enforcement entry point so that
+// no subset of the policy can be applied.
+func (e *SEVExpectations) Validate(attestation *sevsnp.Attestation) error {
+	return sevvalidate.SnpAttestation(attestation, e.opts)
+}
+
+// TDXExpectations is the fully translated TDX expected state, resolved at
+// policy assembly so that validation performs no translation and no
+// artifact lookups.
+type TDXExpectations struct {
+	opts                           *tdxvalidate.Options
+	minimumTCBEvaluationDataNumber int
+	acceptedMRSeams                [][]byte
+	allowedPlatformMeasurements    []PlatformMeasurement
+}
+
+// AssembleTDX translates the policy block into the complete expected state:
+// go-tdx-guest validation options plus the values those options cannot
+// express (accepted MR_SEAMs, the collateral tcbEvaluationDataNumber floor,
+// and the allowed MRTD/RTMR0 platform measurements resolved from the
+// artifact).
+func (a *Artifact) AssembleTDX(p *TDXPolicy) (*TDXExpectations, error) {
 	opts, err := p.tdxOptions()
 	if err != nil {
-		return err
+		return nil, err
 	}
+	seams := make([][]byte, 0, len(p.AcceptedMRSeams))
+	for _, accepted := range p.AcceptedMRSeams {
+		want, err := hex.DecodeString(accepted)
+		if err != nil {
+			return nil, fmt.Errorf("policy accepted_mr_seams entry is not hex: %w", err)
+		}
+		seams = append(seams, want)
+	}
+	allowed := make([]PlatformMeasurement, 0, len(p.PlatformMeasurements))
+	for _, ref := range p.PlatformMeasurements {
+		allowed = append(allowed, a.Measurements[ref])
+	}
+	return &TDXExpectations{
+		opts:                           opts,
+		minimumTCBEvaluationDataNumber: p.MinimumTCBEvaluationDataNumber,
+		acceptedMRSeams:                seams,
+		allowedPlatformMeasurements:    allowed,
+	}, nil
+}
+
+// Validate compares a signature-verified quote against the assembled
+// expected state. tcbEvaluationDataNumber must come from the verified
+// collateral (QE Identity / TCB Info) used during quote verification. It is
+// the only TDX policy enforcement entry point so that no subset of the
+// policy can be applied.
+func (e *TDXExpectations) Validate(quote *tdxpb.QuoteV4, tcbEvaluationDataNumber int) error {
 	// tdxvalidate.TdxQuote runs abi.CheckQuoteV4 first, which guarantees the
 	// TD quote body exists with 48-byte MRTD and exactly 4 48-byte RTMRs.
-	if err := tdxvalidate.TdxQuote(quote, opts); err != nil {
+	if err := tdxvalidate.TdxQuote(quote, e.opts); err != nil {
 		return err
 	}
-	if err := p.checkTCBEvaluationDataNumber(tcbEvaluationDataNumber); err != nil {
-		return err
+	if tcbEvaluationDataNumber < e.minimumTCBEvaluationDataNumber {
+		return fmt.Errorf("tcbEvaluationDataNumber %d is below the policy minimum %d",
+			tcbEvaluationDataNumber, e.minimumTCBEvaluationDataNumber)
 	}
 	body := quote.GetTdQuoteBody()
-	if err := p.checkMRSeam(body.GetMrSeam()); err != nil {
+	if err := e.checkMRSeam(body.GetMrSeam()); err != nil {
 		return err
 	}
-	return a.checkPlatformMeasurement(p,
+	return e.checkPlatformMeasurement(
 		hex.EncodeToString(body.GetMrTd()),
 		hex.EncodeToString(body.GetRtmrs()[0]))
 }
@@ -143,24 +200,10 @@ func (p *TDXPolicy) tdxOptions() (*tdxvalidate.Options, error) {
 	return opts, nil
 }
 
-// checkTCBEvaluationDataNumber verifies that collateral (QE Identity or TCB
-// Info) meets the policy's minimum tcbEvaluationDataNumber.
-func (p *TDXPolicy) checkTCBEvaluationDataNumber(n int) error {
-	if n < p.MinimumTCBEvaluationDataNumber {
-		return fmt.Errorf("tcbEvaluationDataNumber %d is below the policy minimum %d",
-			n, p.MinimumTCBEvaluationDataNumber)
-	}
-	return nil
-}
-
-// checkMRSeam verifies membership of the quote's MR_SEAM in the policy's
+// checkMRSeam verifies membership of the quote's MR_SEAM in the assembled
 // accepted set.
-func (p *TDXPolicy) checkMRSeam(mrSeam []byte) error {
-	for _, accepted := range p.AcceptedMRSeams {
-		want, err := hex.DecodeString(accepted)
-		if err != nil {
-			return fmt.Errorf("policy accepted_mr_seams entry is not hex: %w", err)
-		}
+func (e *TDXExpectations) checkMRSeam(mrSeam []byte) error {
+	for _, want := range e.acceptedMRSeams {
 		if bytes.Equal(mrSeam, want) {
 			return nil
 		}
@@ -169,10 +212,9 @@ func (p *TDXPolicy) checkMRSeam(mrSeam []byte) error {
 }
 
 // checkPlatformMeasurement verifies the quote's MRTD/RTMR0 against the
-// platform measurements the policy allows, resolved through the artifact.
-func (a *Artifact) checkPlatformMeasurement(p *TDXPolicy, mrtdHex, rtmr0Hex string) error {
-	for _, ref := range p.PlatformMeasurements {
-		m := a.Measurements[ref]
+// assembled allowed platform measurements.
+func (e *TDXExpectations) checkPlatformMeasurement(mrtdHex, rtmr0Hex string) error {
+	for _, m := range e.allowedPlatformMeasurements {
 		if m.MRTD == mrtdHex && m.RTMR0 == rtmr0Hex {
 			return nil
 		}

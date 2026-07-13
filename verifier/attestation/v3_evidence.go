@@ -7,7 +7,6 @@ import (
 
 	"github.com/google/go-sev-guest/kds"
 	"github.com/google/go-sev-guest/proto/sevsnp"
-	"github.com/google/go-sev-guest/validate"
 	tdxpb "github.com/google/go-tdx-guest/proto/tdx"
 
 	"github.com/tinfoilsh/tinfoil-go/verifier/policy"
@@ -53,20 +52,19 @@ type AuthenticatedQuote struct {
 
 // ExpectedValues carries the expected quote state resolved from sources
 // other than the platform-endorsements artifact: the envelope and verified
-// code provenance.
+// code provenance. Both are required.
 type ExpectedValues struct {
 	// ReportData is the expected REPORT_DATA from the envelope.
 	ReportData [64]byte
 	// CodeMeasurement is the expected launch measurement from verified code
-	// provenance. When nil, the launch-measurement comparison is skipped and
-	// the caller is responsible for it.
+	// provenance.
 	CodeMeasurement *Measurement
 }
 
-// AssembledPolicy is the complete expected state of a quote, resolved from
-// verified reference values before validation runs. It is bound to the
-// authenticated quote it was assembled for: validation rejects any other
-// quote.
+// AssembledPolicy is the complete expected state of a quote — every value
+// validation compares against, fully resolved from verified reference
+// values before validation runs. It is bound to the authenticated quote it
+// was assembled for: validation rejects any other quote.
 type AssembledPolicy struct {
 	// PolicyName is the matched appraisal policy name.
 	PolicyName string
@@ -75,8 +73,8 @@ type AssembledPolicy struct {
 
 	platform         string
 	platformIdentity string
-	artifact         *policy.Artifact
-	machine          *policy.Policy
+	sev              *policy.SEVExpectations
+	tdx              *policy.TDXExpectations
 }
 
 // AuthenticateQuoteV3 authenticates a v3 document's CPU quote: the
@@ -98,26 +96,41 @@ func AuthenticateQuoteV3(doc *DocumentV3) (*AuthenticatedQuote, error) {
 
 // AssemblePolicyV3 resolves the complete expected state of an authenticated
 // quote: the machines-map lookup keyed by the authenticated platform
-// identity (a machine absent from the map is not endorsed), plus the
-// expected values from the envelope and code provenance.
+// identity (a machine absent from the map is not endorsed), the machine
+// policy fully translated into platform expectations, plus the expected
+// values from the envelope and code provenance. Assembly fails when any
+// required value cannot be resolved; nothing is deferred to a later check.
 func AssemblePolicyV3(endorsements *policy.Artifact, expected ExpectedValues, quote *AuthenticatedQuote) (*AssembledPolicy, error) {
+	if expected.CodeMeasurement == nil {
+		return nil, fmt.Errorf("assembling policy: expected code measurement is required")
+	}
 	name, machinePolicy, err := endorsements.PolicyFor(quote.PlatformIdentity, quote.Platform)
 	if err != nil {
 		return nil, err
 	}
-	return &AssembledPolicy{
+	assembled := &AssembledPolicy{
 		PolicyName:       name,
 		Expected:         expected,
 		platform:         quote.Platform,
 		platformIdentity: quote.PlatformIdentity,
-		artifact:         endorsements,
-		machine:          machinePolicy,
-	}, nil
+	}
+	switch quote.Platform {
+	case policy.PlatformSEVSNP:
+		assembled.sev, err = machinePolicy.SEVSNP.AssembleSEV(kds.ProductLine(quote.sev.GetProduct()))
+	case policy.PlatformTDX:
+		assembled.tdx, err = endorsements.AssembleTDX(machinePolicy.TDX)
+	default:
+		return nil, fmt.Errorf("unsupported platform %q", quote.Platform)
+	}
+	if err != nil {
+		return nil, err
+	}
+	return assembled, nil
 }
 
 // ValidateQuoteV3 compares an authenticated quote against an assembled
-// policy: REPORT_DATA equality, the platform policy block, and (when
-// present) the expected launch measurement. It performs no lookups and no
+// policy: REPORT_DATA equality, the platform expectations, and the expected
+// launch measurement. It performs no lookups, no translation, and no
 // recomputation.
 func ValidateQuoteV3(quote *AuthenticatedQuote, assembled *AssembledPolicy) error {
 	if quote.Platform != assembled.platform || quote.PlatformIdentity != assembled.platformIdentity {
@@ -129,39 +142,28 @@ func ValidateQuoteV3(quote *AuthenticatedQuote, assembled *AssembledPolicy) erro
 
 	switch quote.Platform {
 	case policy.PlatformSEVSNP:
-		productLine := kds.ProductLine(quote.sev.GetProduct())
-		valOpts, err := assembled.machine.SEVSNP.SEVOptions(productLine)
-		if err != nil {
-			return err
-		}
-		if err := validate.SnpAttestation(quote.sev, valOpts); err != nil {
+		if err := assembled.sev.Validate(quote.sev); err != nil {
 			return err
 		}
 	case policy.PlatformTDX:
-		if err := assembled.artifact.ValidateTDXQuote(assembled.machine.TDX, quote.tdx, quote.tdxTCBEvaluationDataNumber); err != nil {
+		if err := assembled.tdx.Validate(quote.tdx, quote.tdxTCBEvaluationDataNumber); err != nil {
 			return err
 		}
 	default:
 		return fmt.Errorf("unsupported platform %q", quote.Platform)
 	}
 
-	if assembled.Expected.CodeMeasurement != nil {
-		if err := assembled.Expected.CodeMeasurement.Equals(quote.Measurement); err != nil {
-			return err
-		}
-	}
-	return nil
+	return assembled.Expected.CodeMeasurement.Equals(quote.Measurement)
 }
 
 // VerifyCPUEvidenceV3 composes AuthenticateQuoteV3, AssemblePolicyV3, and
-// ValidateQuoteV3 without a launch-measurement expectation; callers must
-// compare the returned Measurement against verified code provenance.
-func VerifyCPUEvidenceV3(doc *DocumentV3, expectedReportData [64]byte, endorsements *policy.Artifact) (*EvidenceV3, error) {
+// ValidateQuoteV3.
+func VerifyCPUEvidenceV3(doc *DocumentV3, expected ExpectedValues, endorsements *policy.Artifact) (*EvidenceV3, error) {
 	quote, err := AuthenticateQuoteV3(doc)
 	if err != nil {
 		return nil, err
 	}
-	assembled, err := AssemblePolicyV3(endorsements, ExpectedValues{ReportData: expectedReportData}, quote)
+	assembled, err := AssemblePolicyV3(endorsements, expected, quote)
 	if err != nil {
 		return nil, err
 	}

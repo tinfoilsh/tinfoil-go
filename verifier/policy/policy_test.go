@@ -133,19 +133,18 @@ func TestTDXOptionsAndChecks(t *testing.T) {
 	assert.Equal(t, make([]byte, 48), opts.TdQuoteBodyOptions.MrConfigID)
 	assert.Equal(t, mustHex(t, "0000001000000000"), opts.TdQuoteBodyOptions.TdAttributes)
 
+	e, err := a.AssembleTDX(p.TDX)
+	require.NoError(t, err)
+
 	require.NotEmpty(t, p.TDX.AcceptedMRSeams)
-	require.NoError(t, p.TDX.checkMRSeam(mustHex(t, p.TDX.AcceptedMRSeams[0])))
-	assert.ErrorContains(t, p.TDX.checkMRSeam(make([]byte, 48)), "not in the policy's accepted set")
+	require.NoError(t, e.checkMRSeam(mustHex(t, p.TDX.AcceptedMRSeams[0])))
+	assert.ErrorContains(t, e.checkMRSeam(make([]byte, 48)), "not in the policy's accepted set")
 
 	ref := p.TDX.PlatformMeasurements[0]
 	m := a.Measurements[ref]
-	require.NoError(t, a.checkPlatformMeasurement(p.TDX, m.MRTD, m.RTMR0))
-	assert.ErrorContains(t, a.checkPlatformMeasurement(p.TDX, strings.Repeat("ff", 48), m.RTMR0),
+	require.NoError(t, e.checkPlatformMeasurement(m.MRTD, m.RTMR0))
+	assert.ErrorContains(t, e.checkPlatformMeasurement(strings.Repeat("ff", 48), m.RTMR0),
 		"do not match any allowed configuration")
-
-	require.NoError(t, p.TDX.checkTCBEvaluationDataNumber(p.TDX.MinimumTCBEvaluationDataNumber))
-	assert.ErrorContains(t, p.TDX.checkTCBEvaluationDataNumber(p.TDX.MinimumTCBEvaluationDataNumber-1),
-		"below the policy minimum")
 }
 
 // TestValidateTDXQuote exercises the single composed enforcement entry point
@@ -178,25 +177,31 @@ func TestValidateTDXQuote(t *testing.T) {
 		},
 	}
 
-	require.NoError(t, a.ValidateTDXQuote(matching, quote, 5))
+	assemble := func(a *Artifact, p *TDXPolicy) *TDXExpectations {
+		e, err := a.AssembleTDX(p)
+		require.NoError(t, err)
+		return e
+	}
+
+	require.NoError(t, assemble(a, matching).Validate(quote, 5))
 
 	badSeam := *matching
 	badSeam.AcceptedMRSeams = []string{strings.Repeat("00", 48)}
-	assert.ErrorContains(t, a.ValidateTDXQuote(&badSeam, quote, 5), "not in the policy's accepted set")
+	assert.ErrorContains(t, assemble(a, &badSeam).Validate(quote, 5), "not in the policy's accepted set")
 
-	assert.ErrorContains(t, a.ValidateTDXQuote(matching, quote, 4), "below the policy minimum")
+	assert.ErrorContains(t, assemble(a, matching).Validate(quote, 4), "below the policy minimum")
 
 	badMeasurements := &Artifact{
 		Measurements: map[string]PlatformMeasurement{
 			"sample": {MRTD: strings.Repeat("ff", 48), RTMR0: strings.Repeat("ff", 48)},
 		},
 	}
-	assert.ErrorContains(t, badMeasurements.ValidateTDXQuote(matching, quote, 5),
+	assert.ErrorContains(t, assemble(badMeasurements, matching).Validate(quote, 5),
 		"do not match any allowed configuration")
 
 	badOpts := *matching
 	badOpts.TDAttributes = strings.Repeat("42", 8)
-	assert.Error(t, a.ValidateTDXQuote(&badOpts, quote, 5))
+	assert.Error(t, assemble(a, &badOpts).Validate(quote, 5))
 }
 
 func TestSEVIdentity(t *testing.T) {

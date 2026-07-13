@@ -45,17 +45,21 @@ func TestVerifyV3LiveFixtureTDX(t *testing.T) {
 	require.Equal(t, TDXQuoteV1Format, doc.CPUEvidence.Format)
 	artifact := loadEndorsementArtifact(t)
 
-	// The dev shape must be rejected by the endorsed platform measurements.
-	_, err := VerifyCPUEvidenceV3(doc, reportData, artifact)
+	quote, err := AuthenticateQuoteV3(doc)
 	if err != nil && strings.Contains(err.Error(), "expired") {
 		t.Skipf("captured Intel PCS collateral has expired: %v", err)
 	}
+	require.NoError(t, err)
+	expected := ExpectedValues{ReportData: reportData, CodeMeasurement: quote.Measurement}
+
+	// The dev shape must be rejected by the endorsed platform measurements.
+	_, err = VerifyCPUEvidenceV3(doc, expected, artifact)
 	require.Error(t, err)
 	assert.ErrorContains(t, err, "platform measurements")
 
 	// Allow the observed shape and verify the rest of the chain.
 	require.NoError(t, allowObservedShape(doc, artifact))
-	evidence, err := VerifyCPUEvidenceV3(doc, reportData, artifact)
+	evidence, err := VerifyCPUEvidenceV3(doc, expected, artifact)
 	require.NoError(t, err)
 	assert.Equal(t, policy.PlatformTDX, evidence.Platform)
 	assert.Equal(t, tdxFixturePolicy(t), evidence.PolicyName)
