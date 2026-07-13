@@ -53,7 +53,7 @@ func TestVerifySevReportWithEndorsements(t *testing.T) {
 	artifact, err := policy.ParseArtifact(artifactBytes)
 	require.NoError(t, err)
 
-	report, policyName, err := verifySevReportWithEndorsements(fresh.CPU.Report, false, vcekDER, artifact)
+	report, policyName, err := verifySevReportWithEndorsements(fresh.CPU.Report, vcekDER, artifact)
 	require.NoError(t, err)
 	assert.Equal(t, "amd-genoa-prod", policyName)
 	assert.NotEmpty(t, report.Measurement)
@@ -62,7 +62,7 @@ func TestVerifySevReportWithEndorsements(t *testing.T) {
 	// this machine.
 	unendorsed := *artifact
 	unendorsed.Machines = map[string]string{}
-	_, _, err = verifySevReportWithEndorsements(fresh.CPU.Report, false, vcekDER, &unendorsed)
+	_, _, err = verifySevReportWithEndorsements(fresh.CPU.Report, vcekDER, &unendorsed)
 	assert.ErrorContains(t, err, "not endorsed")
 }
 
