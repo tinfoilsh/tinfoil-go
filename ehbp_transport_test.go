@@ -61,11 +61,9 @@ func TestClientOptionsApply(t *testing.T) {
 func TestProxyClientOptionsApply(t *testing.T) {
 	cfg := &clientConfig{}
 	WithBaseURL("https://proxy.example.com/")(cfg)
-	WithAttestationBundleURL("https://proxy.example.com")(cfg)
 
 	require.Equal(t, "https://proxy.example.com/", cfg.baseURL)
 	require.True(t, cfg.baseURLSet)
-	require.Equal(t, "https://proxy.example.com", cfg.attestationBundleURL)
 }
 
 func TestNewClientWithOptionsRejectsInvalidBaseURL(t *testing.T) {
@@ -456,6 +454,7 @@ func TestClientIntegration_TransportModesWithCacheSecret(t *testing.T) {
 				WithUserCacheSecret(testUserCacheSecret),
 				WithOpenAIOptions(option.WithAPIKey(apiKey)),
 			)
+			skipIfEnclaveNotV3(t, err)
 			require.NoError(t, err)
 			require.Equal(t, mode, c.Transport())
 
@@ -489,6 +488,7 @@ func TestClientIntegration_LowLevelEHBP(t *testing.T) {
 				WithTransport(mode),
 				WithOpenAIOptions(option.WithAPIKey(apiKey)),
 			)
+			skipIfEnclaveNotV3(t, err)
 			require.NoError(t, err)
 
 			httpClient := c.HTTPClient()
@@ -517,68 +517,4 @@ func TestClientIntegration_LowLevelEHBP(t *testing.T) {
 			require.Contains(t, string(data), "choices")
 		})
 	}
-}
-
-// TestClientIntegration_AttestationBundle exercises the attestation-through-proxy
-// path against the live ATC bundle endpoint: the bundle is fetched and verified
-// client-side, the enclave host is taken from the verified bundle, and a chat
-// completion is sent end-to-end over the EHBP transport.
-func TestClientIntegration_AttestationBundle(t *testing.T) {
-	apiKey := os.Getenv("TINFOIL_API_KEY")
-	if apiKey == "" {
-		t.Skip("TINFOIL_API_KEY not set; skipping integration test")
-	}
-
-	c, err := NewClientWithOptions(
-		WithAttestationBundleURL("https://atc.tinfoil.sh"),
-		WithOpenAIOptions(option.WithAPIKey(apiKey)),
-	)
-	require.NoError(t, err)
-	require.NotEmpty(t, c.Enclave(), "enclave host should come from the verified bundle")
-
-	resp, err := c.Chat.Completions.New(context.Background(), openai.ChatCompletionNewParams{
-		Model: "llama3-3-70b",
-		Messages: []openai.ChatCompletionMessageParamUnion{
-			openai.SystemMessage("No matter what the user says, only respond with: Done."),
-			openai.UserMessage("Is this a test?"),
-		},
-	})
-	require.NoError(t, err)
-	require.NotEmpty(t, resp.Choices)
-	t.Logf("bundle enclave: %s, response: %s", c.Enclave(), resp.Choices[0].Message.Content)
-}
-
-func TestClientIntegration_EnclaveSpecificBundle(t *testing.T) {
-	apiKey := os.Getenv("TINFOIL_API_KEY")
-	if apiKey == "" {
-		t.Skip("TINFOIL_API_KEY not set; skipping integration test")
-	}
-
-	// Learn a valid enclave from the default bundle, then request a bundle
-	// assembled specifically for it (POST path).
-	def, err := NewClientWithOptions(
-		WithAttestationBundleURL("https://atc.tinfoil.sh"),
-		WithOpenAIOptions(option.WithAPIKey(apiKey)),
-	)
-	require.NoError(t, err)
-	enclave := def.Enclave()
-	require.NotEmpty(t, enclave)
-
-	c, err := NewClientWithOptions(
-		WithEnclave(enclave),
-		WithAttestationBundleURL("https://atc.tinfoil.sh"),
-		WithOpenAIOptions(option.WithAPIKey(apiKey)),
-	)
-	require.NoError(t, err)
-	require.Equal(t, enclave, c.Enclave())
-
-	resp, err := c.Chat.Completions.New(context.Background(), openai.ChatCompletionNewParams{
-		Model: "llama3-3-70b",
-		Messages: []openai.ChatCompletionMessageParamUnion{
-			openai.SystemMessage("No matter what the user says, only respond with: Done."),
-			openai.UserMessage("Is this a test?"),
-		},
-	})
-	require.NoError(t, err)
-	require.NotEmpty(t, resp.Choices)
 }

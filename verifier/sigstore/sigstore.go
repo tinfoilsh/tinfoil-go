@@ -293,68 +293,6 @@ func measurementFromResult(result *verify.VerificationResult, err error) (*attes
 	}
 }
 
-// FetchHardwareMeasurements fetches the MRTD and RTMR0 from a given hardware repo
-func (c *Client) FetchHardwareMeasurements(repo, digest string) ([]*attestation.HardwareMeasurement, error) {
-	sigstoreBundle, err := github.FetchAttestationBundle(repo, digest)
-	if err != nil {
-		return nil, err
-	}
-
-	bundle, err := c.VerifyBundle(sigstoreBundle, repo, digest)
-	if err != nil {
-		return nil, err
-	}
-
-	predicate := bundle.Statement.Predicate
-	predicateType := bundle.Statement.PredicateType
-
-	if attestation.PredicateType(predicateType) != attestation.HardwareMeasurementsV1 {
-		return nil, fmt.Errorf("unexpected predicate type: %s", predicateType)
-	}
-
-	var measurements []*attestation.HardwareMeasurement
-	for k, v := range predicate.Fields {
-		structValue := v.GetStructValue()
-		if structValue == nil {
-			return nil, fmt.Errorf("invalid hardware measurement")
-		}
-
-		fields := structValue.Fields
-
-		for _, field := range []string{"mrtd", "rtmr0"} {
-			v, ok := fields[field]
-			if !ok {
-				return nil, fmt.Errorf("invalid hardware measurement: no %s", field)
-			}
-			if v == nil {
-				return nil, fmt.Errorf("invalid hardware measurement: %s is nil", field)
-			}
-		}
-
-		measurements = append(measurements, &attestation.HardwareMeasurement{
-			ID:    fmt.Sprintf("%s@%s", k, digest),
-			MRTD:  fields["mrtd"].GetStringValue(),
-			RTMR0: fields["rtmr0"].GetStringValue(),
-		})
-	}
-	return measurements, nil
-}
-
-// VerifyAttestation verifies the attested measurements of an enclave image
-// against a trusted root (Sigstore) and returns the measurement payload contained in the DSSE.
-// Deprecated: Use client.VerifyAttestation instead.
-func VerifyAttestation(
-	trustRootJSON, bundleJSON []byte,
-	repo, hexDigest string,
-) (*attestation.Measurement, error) {
-	trustRoot, err := root.NewTrustedRootFromJSON(trustRootJSON)
-	if err != nil {
-		return nil, fmt.Errorf("parsing trust root: %w", err)
-	}
-	client := &Client{trustRoot: trustRoot}
-	return client.VerifyAttestation(bundleJSON, repo, hexDigest)
-}
-
 // VerifyPlatformEndorsements verifies a Sigstore bundle for the
 // platform-endorsements artifact against the publisher identity and returns
 // the parsed, validated artifact.
@@ -388,15 +326,4 @@ func (c *Client) LatestPlatformEndorsements() (*policy.Artifact, error) {
 		return nil, fmt.Errorf("fetching platform endorsements bundle: %w", err)
 	}
 	return c.VerifyPlatformEndorsements(bundleJSON, digest)
-}
-
-// LatestHardwareMeasurements fetches the latest hardware measurements from GitHub+Sigstore
-func (c *Client) LatestHardwareMeasurements() ([]*attestation.HardwareMeasurement, error) {
-	const repo = "tinfoilsh/hardware-measurements"
-	digest, err := github.FetchLatestDigest(repo)
-	if err != nil {
-		return nil, err
-	}
-
-	return c.FetchHardwareMeasurements(repo, digest)
 }

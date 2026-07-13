@@ -3,7 +3,6 @@ package attestation
 import (
 	_ "embed"
 	"encoding/base64"
-	"encoding/hex"
 	"fmt"
 	"net/url"
 	"strings"
@@ -65,20 +64,13 @@ func sevProductFromReport(report *sevsnp.Report) *sevsnp.SevProduct {
 }
 
 // verifySevSignature decodes a report, derives its product, and verifies the
-// report signature under the AMD roots (VCEK provided or fetched from KDS).
-// It performs no policy validation; callers must validate the returned
-// attestation before trusting any report field.
-func verifySevSignature(attestationDoc string, isCompressed bool, vcekDER []byte) (*sevsnp.Attestation, error) {
+// report signature under the AMD roots using the provided VCEK. It performs
+// no policy validation; callers must validate the returned attestation
+// before trusting any report field.
+func verifySevSignature(attestationDoc string, vcekDER []byte) (*sevsnp.Attestation, error) {
 	attDocBytes, err := base64.StdEncoding.DecodeString(attestationDoc)
 	if err != nil {
 		return nil, err
-	}
-
-	if isCompressed {
-		attDocBytes, err = gzipDecompress(attDocBytes)
-		if err != nil {
-			return nil, err
-		}
 	}
 
 	parsedReport, err := abi.ReportToProto(attDocBytes)
@@ -90,22 +82,12 @@ func verifySevSignature(attestationDoc string, isCompressed bool, vcekDER []byte
 	opts.Getter = &getter{}
 	opts.Product = sevProductFromReport(parsedReport)
 
-	var attestation *sevsnp.Attestation
-	if vcekDER != nil {
-		// Use pre-provided VCEK certificate
-		attestation = &sevsnp.Attestation{
-			Report: parsedReport,
-			CertificateChain: &sevsnp.CertificateChain{
-				VcekCert: vcekDER,
-			},
-			Product: opts.Product,
-		}
-	} else {
-		// Fetch VCEK from AMD KDS
-		attestation, err = verify.GetAttestationFromReport(parsedReport, opts)
-		if err != nil {
-			return nil, fmt.Errorf("could not recreate attestation from report: %w", err)
-		}
+	attestation := &sevsnp.Attestation{
+		Report: parsedReport,
+		CertificateChain: &sevsnp.CertificateChain{
+			VcekCert: vcekDER,
+		},
+		Product: opts.Product,
 	}
 
 	if err := verify.SnpAttestation(attestation, opts); err != nil {
@@ -124,8 +106,8 @@ func verifySevSignature(attestationDoc string, isCompressed bool, vcekDER []byte
 // here — it attests the workload, not the platform, and is not part of the
 // endorsement policy. Callers MUST compare it against the expected code
 // measurement, exactly as with verifySevReport.
-func verifySevReportWithEndorsements(attestationDoc string, isCompressed bool, vcekDER []byte, endorsements *policy.Artifact) (*sevsnp.Report, string, error) {
-	attestation, err := verifySevSignature(attestationDoc, isCompressed, vcekDER)
+func verifySevReportWithEndorsements(attestationDoc string, vcekDER []byte, endorsements *policy.Artifact) (*sevsnp.Report, string, error) {
+	attestation, err := verifySevSignature(attestationDoc, vcekDER)
 	if err != nil {
 		return nil, "", err
 	}
@@ -150,78 +132,4 @@ func verifySevReportWithEndorsements(attestationDoc string, isCompressed bool, v
 	}
 
 	return report, policyName, nil
-}
-
-func verifySevReport(attestationDoc string, isCompressed bool, vcekDER []byte) (*sevsnp.Report, error) {
-	attestation, err := verifySevSignature(attestationDoc, isCompressed, vcekDER)
-	if err != nil {
-		return nil, err
-	}
-
-	mintcb := kds.TCBParts{
-		BlSpl:    0x7,
-		TeeSpl:   0x0,
-		SnpSpl:   0xe,
-		UcodeSpl: 0x48,
-	}
-
-	valOpts := &validate.Options{
-		GuestPolicy: abi.SnpPolicy{
-			SMT:          true,
-			MigrateMA:    false,
-			Debug:        false,
-			SingleSocket: false,
-		},
-		MinimumGuestSvn: 0,
-		// ReportData // For now does not contain a nonce (content )
-		// HostData
-		// ImageID
-		// FamilyID
-		// ReportID
-		// ReportIDMA
-		// Measurement // Is verified in latter steps
-		// ChipID
-		MinimumBuild:              21,
-		MinimumVersion:            uint16((1 << 8) | 55), // 1.55
-		MinimumTCB:                mintcb,
-		MinimumLaunchTCB:          mintcb,
-		PermitProvisionalFirmware: false,
-		PlatformInfo: &abi.SnpPlatformInfo{
-			SMTEnabled:                  true,
-			TSMEEnabled:                 true,
-			ECCEnabled:                  false,
-			RAPLDisabled:                false,
-			CiphertextHidingDRAMEnabled: false,
-			AliasCheckComplete:          false,
-		},
-		RequireAuthorKey: false,
-		VMPL:             nil,
-		RequireIDBlock:   false,
-		// TrustedAuthorKey
-		// TrustedAuthorKeyHashes
-		// TrustedIDKeys
-		// TrustedIDKeyHashes
-		// CertTableOptions
-	}
-
-	if err := validate.SnpAttestation(attestation, valOpts); err != nil {
-		return nil, err
-	}
-
-	return attestation.GetReport(), nil
-}
-
-func verifySevAttestationV2WithVCEK(attestationDoc string, vcekDER []byte) (*Verification, error) {
-	report, err := verifySevReport(attestationDoc, true, vcekDER)
-	if err != nil {
-		return nil, err
-	}
-
-	measurement := &Measurement{
-		Type: SevGuestV2,
-		Registers: []string{
-			hex.EncodeToString(report.Measurement),
-		},
-	}
-	return newVerificationV2(measurement, report.ReportData), nil
 }

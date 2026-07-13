@@ -1,24 +1,15 @@
 package attestation
 
 import (
-	"bytes"
-	"compress/gzip"
 	"crypto/ecdsa"
 	"crypto/sha256"
 	"crypto/tls"
 	"crypto/x509"
-	"encoding/base64"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
-	"net/url"
-	"os"
 	"slices"
 	"strings"
-
-	"github.com/tinfoilsh/tinfoil-go/verifier/util"
 )
 
 const RTMR3_ZERO = "000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"
@@ -30,8 +21,7 @@ const (
 	SevGuestV2 PredicateType = "https://tinfoil.sh/predicate/sev-snp-guest/v2"
 	TdxGuestV2 PredicateType = "https://tinfoil.sh/predicate/tdx-guest/v2"
 
-	SnpTdxMultiPlatformV1  PredicateType = "https://tinfoil.sh/predicate/snp-tdx-multiplatform/v1"
-	HardwareMeasurementsV1 PredicateType = "https://tinfoil.sh/predicate/hardware-measurements/v1"
+	SnpTdxMultiPlatformV1 PredicateType = "https://tinfoil.sh/predicate/snp-tdx-multiplatform/v1"
 
 	attestationEndpoint = "/.well-known/tinfoil-attestation"
 )
@@ -93,14 +83,6 @@ type Verification struct {
 	Measurement    *Measurement `json:"measurement"`
 	TLSPublicKeyFP string       `json:"tls_public_key,omitempty"`
 	HPKEPublicKey  string       `json:"hpke_public_key,omitempty"`
-}
-
-func newVerificationV2(measurement *Measurement, keys []byte) *Verification {
-	return &Verification{
-		Measurement:    measurement,
-		TLSPublicKeyFP: hex.EncodeToString(keys[:32]),
-		HPKEPublicKey:  hex.EncodeToString(keys[32:]),
-	}
 }
 
 func (m *Measurement) EqualsDisplay(other *Measurement) (string, error) {
@@ -221,74 +203,6 @@ func (m *Measurement) String() string {
 	return out.String()
 }
 
-// Document represents an attestation document
-type Document struct {
-	Format PredicateType `json:"format"`
-	Body   string        `json:"body"`
-}
-
-// Bundle represents a complete attestation bundle for single-request verification
-type Bundle struct {
-	Domain                   string          `json:"domain"`
-	EnclaveAttestationReport *Document       `json:"enclaveAttestationReport"`
-	Digest                   string          `json:"digest"`
-	ReleaseTag               string          `json:"releaseTag,omitempty"`
-	SigstoreBundle           json.RawMessage `json:"sigstoreBundle"`
-	VCEK                     string          `json:"vcek"`
-	EnclaveCert              string          `json:"enclaveCert"`
-}
-
-// NewDocument creates a new attestation document from a given format and body
-func NewDocument(format PredicateType, body []byte) (*Document, error) {
-	// Compress attestation body
-	var b bytes.Buffer
-	gz := gzip.NewWriter(&b)
-	if _, err := gz.Write(body); err != nil {
-		return nil, fmt.Errorf("failed to write data: %v", err)
-	}
-	if err := gz.Close(); err != nil {
-		return nil, fmt.Errorf("closing reader: %v", err)
-	}
-
-	return &Document{
-		Format: format,
-		Body:   base64.StdEncoding.EncodeToString(b.Bytes()),
-	}, nil
-}
-
-// Hash returns the SHA-256 hash of the attestation document
-func (d *Document) Hash() string {
-	all := string(d.Format) + d.Body
-	return fmt.Sprintf("%x", sha256.Sum256([]byte(all)))
-}
-
-// Verify checks the attestation document against its trust root and returns the inner measurements
-func (d *Document) Verify() (*Verification, error) {
-	return d.VerifyWithVCEK(nil)
-}
-
-// VerifyWithVCEK checks the attestation document using an optional pre-provided VCEK certificate
-func (d *Document) VerifyWithVCEK(vcekDER []byte) (*Verification, error) {
-	switch d.Format {
-	case SevGuestV2:
-		return verifySevAttestationV2WithVCEK(d.Body, vcekDER)
-	case TdxGuestV2:
-		return verifyTdxAttestationV2(d.Body)
-	default:
-		return nil, fmt.Errorf("unsupported attestation format: %s", d.Format)
-	}
-}
-
-// VerifyAttestationJSON verifies an attestation document in JSON format and returns the inner measurements
-func VerifyAttestationJSON(j []byte) (*Verification, error) {
-	var doc Document
-	if err := json.Unmarshal(j, &doc); err != nil {
-		return nil, err
-	}
-
-	return doc.Verify()
-}
-
 // KeyFP returns the fingerprint of a given ECDSA public key
 func KeyFP(publicKey *ecdsa.PublicKey) string {
 	bytes, _ := x509.MarshalPKIXPublicKey(publicKey)
@@ -313,115 +227,4 @@ func ConnectionCertFP(c tls.ConnectionState) (string, error) {
 	}
 	cert := c.PeerCertificates[0]
 	return CertPubkeyFP(cert)
-}
-
-// Fetch retrieves the attestation document from a given enclave hostname
-func Fetch(host string) (*Document, error) {
-	var u url.URL
-	u.Host = host
-	u.Scheme = "https"
-	u.Path = attestationEndpoint
-
-	resp, _, err := util.Get(u.String())
-	if err != nil {
-		return nil, err
-	}
-
-	var doc Document
-	if err := json.Unmarshal(resp, &doc); err != nil {
-		return nil, err
-	}
-	return &doc, nil
-}
-
-const defaultAttestationBundleURL = "https://atc.tinfoil.sh"
-
-// FetchBundle retrieves a complete attestation bundle from the default endpoint
-func FetchBundle() (*Bundle, error) {
-	return FetchBundleFrom(defaultAttestationBundleURL)
-}
-
-type bundleRequest struct {
-	EnclaveURL string `json:"enclaveUrl,omitempty"`
-	Repo       string `json:"repo,omitempty"`
-}
-
-// FetchBundleFrom retrieves the default attestation bundle from a custom base URL.
-func FetchBundleFrom(attestationBundleURL string) (*Bundle, error) {
-	return FetchBundleFor(attestationBundleURL, "", "")
-}
-
-// FetchBundleFor retrieves an attestation bundle from a custom base URL. When an
-// enclave URL or a code repository is supplied, it asks the bundle service to
-// assemble a bundle for that specific enclave/repo (via POST) instead of
-// returning the default router bundle (GET).
-func FetchBundleFor(attestationBundleURL, enclaveURL, repo string) (*Bundle, error) {
-	// The bundle is the entire trust root for verification; fetching it over a
-	// plaintext connection would let an attacker substitute it (MITM).
-	u, err := url.Parse(attestationBundleURL)
-	if err != nil {
-		return nil, fmt.Errorf("invalid attestation bundle URL %q: %v", attestationBundleURL, err)
-	}
-	if u.Scheme != "https" {
-		return nil, fmt.Errorf("attestation bundle URL must use https; got %q", attestationBundleURL)
-	}
-
-	bundleURL := attestationBundleURL + "/attestation"
-
-	var resp []byte
-	if enclaveURL != "" || repo != "" {
-		reqBody, marshalErr := json.Marshal(bundleRequest{EnclaveURL: enclaveURL, Repo: repo})
-		if marshalErr != nil {
-			return nil, fmt.Errorf("failed to encode bundle request: %v", marshalErr)
-		}
-		resp, _, err = util.Post(bundleURL, "application/json", reqBody)
-	} else {
-		resp, _, err = util.Get(bundleURL)
-	}
-	if err != nil {
-		return nil, fmt.Errorf("failed to fetch bundle: %v", err)
-	}
-
-	var bundle Bundle
-	if err := json.Unmarshal(resp, &bundle); err != nil {
-		return nil, fmt.Errorf("failed to parse bundle: %v", err)
-	}
-	return &bundle, nil
-}
-
-// TLSPublicKey returns the TLS public key of a given host
-func TLSPublicKey(host string, insecure bool) (string, error) {
-	conn, err := tls.Dial("tcp", host+":443", &tls.Config{
-		InsecureSkipVerify: insecure,
-	})
-	if err != nil {
-		return "", err
-	}
-	defer conn.Close()
-	return ConnectionCertFP(conn.ConnectionState())
-}
-
-// FromFile reads an attestation document from a file
-func FromFile(path string) (*Document, error) {
-	f, err := os.Open(path)
-	if err != nil {
-		return nil, err
-	}
-	defer f.Close()
-
-	var doc Document
-	if err := json.NewDecoder(f).Decode(&doc); err != nil {
-		return nil, err
-	}
-	return &doc, nil
-}
-
-func gzipDecompress(data []byte) ([]byte, error) {
-	gz, err := gzip.NewReader(bytes.NewReader(data))
-	if err != nil {
-		return nil, err
-	}
-	defer gz.Close()
-
-	return io.ReadAll(gz)
 }
