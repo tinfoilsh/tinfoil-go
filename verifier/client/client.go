@@ -8,12 +8,8 @@ import (
 	"net/http"
 
 	"github.com/tinfoilsh/tinfoil-go/verifier/measurement"
-	"github.com/tinfoilsh/tinfoil-go/verifier/provenance"
 	"github.com/tinfoilsh/tinfoil-go/verifier/util"
 )
-
-//go:embed trusted_root.json
-var embeddedTrustedRoot []byte
 
 // GroundTruth represents the "known good" state of the enclave
 type GroundTruth struct {
@@ -31,8 +27,7 @@ type GroundTruth struct {
 type SecureClient struct {
 	enclave, repo string
 
-	groundTruth    *GroundTruth
-	sigstoreClient *provenance.Client
+	groundTruth *GroundTruth
 }
 
 var (
@@ -109,26 +104,6 @@ func (s *SecureClient) GroundTruthJSON() (string, error) {
 		return "", err
 	}
 	return string(encoded), nil
-}
-
-func (s *SecureClient) getSigstoreClient() (*provenance.Client, error) {
-	if s.sigstoreClient == nil {
-		var err error
-		s.sigstoreClient, err = getSigstoreClient(nil)
-		if err != nil {
-			return nil, fmt.Errorf("failed to create sigstore client: %v", err)
-		}
-	}
-	return s.sigstoreClient, nil
-}
-
-// Verify attests the enclave with the v3 single-request flow and stores the
-// resulting ground truth in the client.
-func (s *SecureClient) Verify() (*GroundTruth, error) {
-	if _, err := s.VerifyV3(); err != nil {
-		return nil, err
-	}
-	return s.groundTruth, nil
 }
 
 // HTTPClient returns an HTTP client that only accepts TLS connections to the verified enclave
@@ -224,31 +199,10 @@ func parseHeadersJSON(headersJSON string) (map[string]string, error) {
 }
 
 // VerifyJSON verifies an enclave against a repo and returns the verification data as a JSON string
-func VerifyJSON(enclave, repo string, sigstoreTrustedRootJSON []byte) (string, error) {
-	sigstoreClient, err := getSigstoreClient(sigstoreTrustedRootJSON)
-	if err != nil {
-		return "", fmt.Errorf("failed to create sigstore client: %v", err)
-	}
-
-	client := &SecureClient{
-		enclave:        enclave,
-		repo:           repo,
-		sigstoreClient: sigstoreClient,
-	}
-	_, err = client.Verify()
-	if err != nil {
+func VerifyJSON(enclave, repo string) (string, error) {
+	client := NewSecureClient(enclave, repo)
+	if _, err := client.Verify(); err != nil {
 		return "", err
 	}
 	return client.GroundTruthJSON()
-}
-
-// getSigstoreClient builds a provenance client from the given trusted root,
-// or from the embedded copy when nil. Sigstore verification never fetches
-// its trust root over the network.
-func getSigstoreClient(sigstoreTrustedRootJSON []byte) (*provenance.Client, error) {
-	trustedRootJSON := sigstoreTrustedRootJSON
-	if len(trustedRootJSON) == 0 {
-		trustedRootJSON = embeddedTrustedRoot
-	}
-	return provenance.NewClientFromJSON(trustedRootJSON)
 }

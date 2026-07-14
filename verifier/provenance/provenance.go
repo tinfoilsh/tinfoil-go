@@ -5,10 +5,12 @@
 package provenance
 
 import (
+	_ "embed"
 	"encoding/hex"
 	"fmt"
 	"regexp"
 	"strings"
+	"sync"
 
 	protobundle "github.com/sigstore/protobuf-specs/gen/pb-go/bundle/v1"
 	"github.com/sigstore/sigstore-go/pkg/bundle"
@@ -43,8 +45,46 @@ type Client struct {
 	trustRoot *root.TrustedRoot
 }
 
-// NewClientFromJSON builds a client from a Sigstore trusted-root document
-// (conventionally the SDK's embedded copy, refreshed by the rootfetch tool).
+//go:embed trusted_root.json
+var embeddedTrustedRoot []byte
+
+// defaultClient is built once from the embedded trusted root. Verification
+// never fetches trust material over the network; the embedded copy is
+// refreshed by the rootfetch tool.
+var (
+	defaultClient     *Client
+	defaultClientErr  error
+	defaultClientOnce sync.Once
+)
+
+func getDefaultClient() (*Client, error) {
+	defaultClientOnce.Do(func() {
+		defaultClient, defaultClientErr = NewClientFromJSON(embeddedTrustedRoot)
+	})
+	return defaultClient, defaultClientErr
+}
+
+// VerifyCode verifies a code-provenance bundle with the embedded trust root.
+func VerifyCode(bundleJSON []byte, repo, hexDigest string) (*Code, error) {
+	c, err := getDefaultClient()
+	if err != nil {
+		return nil, err
+	}
+	return c.VerifyCode(bundleJSON, repo, hexDigest)
+}
+
+// VerifyPlatformEndorsements verifies a platform-endorsements bundle with
+// the embedded trust root.
+func VerifyPlatformEndorsements(bundleJSON []byte, hexDigest string) (*policy.Artifact, error) {
+	c, err := getDefaultClient()
+	if err != nil {
+		return nil, err
+	}
+	return c.VerifyPlatformEndorsements(bundleJSON, hexDigest)
+}
+
+// NewClientFromJSON builds a client from a Sigstore trusted-root document;
+// verification normally uses the embedded copy via the package functions.
 func NewClientFromJSON(trustRootJSON []byte) (*Client, error) {
 	trustRoot, err := root.NewTrustedRootFromJSON(trustRootJSON)
 	if err != nil {

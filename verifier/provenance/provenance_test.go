@@ -1,8 +1,6 @@
 package provenance
 
 import (
-	"os"
-	"path/filepath"
 	"regexp"
 	"strings"
 	"testing"
@@ -88,9 +86,7 @@ func TestVerifyCode(t *testing.T) {
 // as production verification does.
 func testClient(t *testing.T) *Client {
 	t.Helper()
-	trustRootJSON, err := os.ReadFile(filepath.Join("..", "client", "trusted_root.json"))
-	require.NoError(t, err)
-	client, err := NewClientFromJSON(trustRootJSON)
+	client, err := getDefaultClient()
 	require.NoError(t, err)
 	return client
 }

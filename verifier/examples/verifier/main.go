@@ -19,16 +19,9 @@ func main() {
 
 	log.With("enclave", *enclave, "repo", *repo).Info("Verifying enclave")
 	c := client.NewSecureClient(*enclave, *repo)
-	verified, err := c.VerifyV3()
-	if err != nil {
+	if _, err := c.VerifyV3(); err != nil {
 		log.Fatalf("verification failed: %v", err)
 	}
-
-	log.With(
-		"platform", verified.Platform,
-		"policy", verified.PolicyName,
-		"code_digest", verified.CodeDigest,
-	).Info("Verified remote attestation")
 
 	groundTruth, err := c.GroundTruthJSON()
 	if err != nil {

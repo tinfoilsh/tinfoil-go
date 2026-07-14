@@ -10,27 +10,20 @@ import (
 	"github.com/tinfoilsh/tinfoil-go/verifier/quote"
 )
 
-// VerifiedDocumentV3 is the set of verified facts a v3 attestation document
-// proves.
+// VerifiedDocumentV3 is what a verified v3 document proves. The operative
+// output is CryptoMaterial — the endorsed keys a caller may bind a channel
+// to; it is the only field that authorizes an action. The remaining fields
+// feed the client's ground truth.
 type VerifiedDocumentV3 struct {
-	// Platform is "sev-snp" or "tdx".
-	Platform string `json:"platform"`
-	// PlatformIdentity is the endorsed machine identifier (lowercase hex).
-	PlatformIdentity string `json:"platform_identity"`
-	// PolicyName is the matched appraisal policy in the platform-endorsements artifact.
-	PolicyName string `json:"policy_name"`
-	// PlatformMeasurementName names the endorsed TDX platform configuration
-	// the quote resolved to; empty for SEV-SNP.
-	PlatformMeasurementName string `json:"platform_measurement_name,omitempty"`
-	// CodeDigest is the verified code artifact digest from the sigstore-code entry.
-	CodeDigest string `json:"code_digest"`
-	// CodeMeasurement is the verified code measurement; EnclaveMeasurement
-	// carries the quote's authenticated registers, which validation proved
-	// match it.
-	CodeMeasurement    *measurement.Measurement `json:"code_measurement"`
-	EnclaveMeasurement *measurement.Measurement `json:"enclave_measurement"`
+	// CodeDigest names the verified code artifact; CodeMeasurement is the
+	// expected measurement applied from it.
+	CodeDigest      string
+	CodeMeasurement *measurement.Measurement
+	// EnclaveMeasurement carries the quote's authenticated registers,
+	// proven to match the expectations.
+	EnclaveMeasurement *measurement.Measurement
 	// CryptoMaterial holds the endorsed key items (hash-bound into the quote).
-	CryptoMaterial []envelope.CryptoMaterialItem `json:"crypto_material"`
+	CryptoMaterial []envelope.CryptoMaterialItem
 }
 
 // TLSPublicKeyFP returns the endorsed TLS key fingerprint (the id=tls
@@ -75,44 +68,39 @@ func (v *VerifiedDocumentV3) cryptoMaterialData(id, format string) (string, erro
 // signing identity); the repo named inside the document is not trusted.
 // Channel binding (TLS fingerprint / HPKE key) is the caller's
 // responsibility, using the returned endorsed crypto material.
-func VerifyDocumentV3(sigstoreClient *provenance.Client, docBytes, nonce []byte, repo string) (*VerifiedDocumentV3, error) {
+func VerifyDocumentV3(docBytes, nonce []byte, repo string) (*VerifiedDocumentV3, error) {
 	doc, expectedReportData, err := envelope.Verify(docBytes, nonce)
 	if err != nil {
 		return nil, fmt.Errorf("envelope: %w", err)
 	}
 
-	code, codeDigest, endorsements, err := verifyReferenceValues(sigstoreClient, doc, repo)
+	code, codeDigest, endorsements, err := verifyReferenceValues(doc, repo)
 	if err != nil {
 		return nil, fmt.Errorf("reference values: %w", err)
 	}
 
-	assembled, authenticated, err := quote.Verify(doc, endorsements, code.Measurement, code.Shape, expectedReportData)
+	_, authenticated, err := quote.Verify(doc, endorsements, code.Measurement, code.Shape, expectedReportData)
 	if err != nil {
 		return nil, fmt.Errorf("cpu evidence: %w", err)
 	}
 
 	return &VerifiedDocumentV3{
-		Platform:                authenticated.Platform,
-		PlatformIdentity:        authenticated.Identity,
-		PolicyName:              assembled.PolicyName,
-		PlatformMeasurementName: assembled.PlatformMeasurementName,
-		CodeDigest:              codeDigest,
-		CodeMeasurement:         code.Measurement,
-		EnclaveMeasurement:      authenticated.Measurement,
-		CryptoMaterial:          doc.CryptoMaterialItems(),
+		CodeDigest:         codeDigest,
+		CodeMeasurement:    code.Measurement,
+		EnclaveMeasurement: authenticated.Measurement,
+		CryptoMaterial:     doc.CryptoMaterialItems(),
 	}, nil
 }
 
 // verifyReferenceValues verifies the document's sigstore-code and
-// sigstore-platform collateral entries, returning the verified code
-// provenance, the code artifact digest, and the platform-endorsements
-// artifact. Both entries are required.
-func verifyReferenceValues(sigstoreClient *provenance.Client, doc *envelope.Document, repo string) (*provenance.Code, string, *policy.Artifact, error) {
+// sigstore-platform collateral entries (both required), returning the
+// verified code provenance, its digest, and the policy artifact.
+func verifyReferenceValues(doc *envelope.Document, repo string) (*provenance.Code, string, *policy.Artifact, error) {
 	codeRef, err := doc.ReferenceValuesCollateral(envelope.CollateralSigstoreCodeV1Format)
 	if err != nil {
 		return nil, "", nil, err
 	}
-	code, err := sigstoreClient.VerifyCode(codeRef.SigstoreBundle, repo, codeRef.Digest)
+	code, err := provenance.VerifyCode(codeRef.SigstoreBundle, repo, codeRef.Digest)
 	if err != nil {
 		return nil, "", nil, fmt.Errorf("verifying code measurement: %w", err)
 	}
@@ -121,7 +109,7 @@ func verifyReferenceValues(sigstoreClient *provenance.Client, doc *envelope.Docu
 	if err != nil {
 		return nil, "", nil, err
 	}
-	endorsements, err := sigstoreClient.VerifyPlatformEndorsements(platformRef.SigstoreBundle, platformRef.Digest)
+	endorsements, err := provenance.VerifyPlatformEndorsements(platformRef.SigstoreBundle, platformRef.Digest)
 	if err != nil {
 		return nil, "", nil, fmt.Errorf("verifying platform endorsements: %w", err)
 	}
@@ -138,11 +126,6 @@ func verifyReferenceValues(sigstoreClient *provenance.Client, doc *envelope.Docu
 // The enclave fetch is the only network request: all collateral travels in
 // the document and Sigstore verification uses the embedded trust root.
 func (s *SecureClient) VerifyV3() (*VerifiedDocumentV3, error) {
-	sigstoreClient, err := s.getSigstoreClient()
-	if err != nil {
-		return nil, err
-	}
-
 	nonce, err := envelope.RandomNonce()
 	if err != nil {
 		return nil, err
@@ -152,7 +135,7 @@ func (s *SecureClient) VerifyV3() (*VerifiedDocumentV3, error) {
 		return nil, fmt.Errorf("fetching attestation document: %w", err)
 	}
 
-	verified, err := VerifyDocumentV3(sigstoreClient, docBytes, nonce, s.repo)
+	verified, err := VerifyDocumentV3(docBytes, nonce, s.repo)
 	if err != nil {
 		return nil, err
 	}
@@ -203,4 +186,13 @@ func (s *SecureClient) VerifyV3() (*VerifiedDocumentV3, error) {
 		EnclaveFingerprint:  enclaveFingerprint,
 	}
 	return verified, nil
+}
+
+// Verify attests the enclave with the v3 single-request flow and stores the
+// resulting ground truth in the client.
+func (s *SecureClient) Verify() (*GroundTruth, error) {
+	if _, err := s.VerifyV3(); err != nil {
+		return nil, err
+	}
+	return s.groundTruth, nil
 }
