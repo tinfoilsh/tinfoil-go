@@ -11,8 +11,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/tinfoilsh/tinfoil-go/verifier/policy"
 	"github.com/tinfoilsh/tinfoil-go/verifier/envelope"
+	"github.com/tinfoilsh/tinfoil-go/verifier/policy"
 )
 
 // loadLiveFixture reads a captured v3 document and its nonce, and verifies

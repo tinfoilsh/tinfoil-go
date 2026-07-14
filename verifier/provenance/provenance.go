@@ -20,8 +20,8 @@ import (
 	in_toto "github.com/in-toto/attestation/go/v1"
 	"google.golang.org/protobuf/types/known/structpb"
 
-	"github.com/tinfoilsh/tinfoil-go/verifier/policy"
 	"github.com/tinfoilsh/tinfoil-go/verifier/measurement"
+	"github.com/tinfoilsh/tinfoil-go/verifier/policy"
 )
 
 const (

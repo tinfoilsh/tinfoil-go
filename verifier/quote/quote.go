@@ -18,9 +18,9 @@ import (
 	"encoding/hex"
 	"fmt"
 
-	"github.com/tinfoilsh/tinfoil-go/verifier/policy"
 	"github.com/tinfoilsh/tinfoil-go/verifier/envelope"
 	"github.com/tinfoilsh/tinfoil-go/verifier/measurement"
+	"github.com/tinfoilsh/tinfoil-go/verifier/policy"
 	"github.com/tinfoilsh/tinfoil-go/verifier/quote/sev"
 	"github.com/tinfoilsh/tinfoil-go/verifier/quote/tdx"
 )
