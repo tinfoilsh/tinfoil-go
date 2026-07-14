@@ -97,6 +97,9 @@ func (e *Expectations) checkSigner(report *sevsnp.Report) error {
 	if !bytes.Equal(report.GetIdKeyDigest(), make([]byte, len(report.GetIdKeyDigest()))) {
 		return fmt.Errorf("report carries an ID block; ID-block launches are unsupported")
 	}
+	if !bytes.Equal(report.GetAuthorKeyDigest(), make([]byte, len(report.GetAuthorKeyDigest()))) {
+		return fmt.Errorf("report carries an author key digest; ID-block launches are unsupported")
+	}
 	return nil
 }
 
