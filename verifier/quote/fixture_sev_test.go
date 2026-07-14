@@ -47,10 +47,11 @@ func loadLiveFixture(t *testing.T, dir string) (*envelope.Document, [64]byte, []
 
 // TestVerifyLiveFixtureSEV runs envelope and CPU-evidence verification
 // against a v3 document captured from real SEV-SNP Genoa hardware over the
-// single-request flow (evidence + collateral in one response). Everything
-// here is offline: the VCEK comes from the document's own collateral and the
-// endorsement artifact from the policy package's testdata. Skips when
-// the workspace fixture directory is not present.
+// single-request flow (evidence + collateral in one response). The VCEK
+// comes from the document's own collateral and the endorsement artifact
+// from the policy package's testdata; only the AMD CRL is fetched live
+// (captured fixtures predate the amd-crl entry). Skips when the workspace
+// fixture directory is not present or with -short.
 func TestVerifyLiveFixtureSEV(t *testing.T) {
 	if testing.Short() {
 		t.Skip("fetches the AMD CRL live; skipped with -short")

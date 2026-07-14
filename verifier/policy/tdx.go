@@ -22,6 +22,16 @@ type TDXPolicy struct {
 // Validate rejects a block with any absent or malformed required member.
 func (p *TDXPolicy) Validate() error {
 	switch {
+	case p.QEVendorID == "":
+		return fmt.Errorf("qe_vendor_id is required")
+	case p.MinimumTEETCBSVN == "":
+		return fmt.Errorf("minimum_tee_tcb_svn is required")
+	case p.MRSeam == "":
+		return fmt.Errorf("mr_seam is required")
+	case p.TDAttributes == "":
+		return fmt.Errorf("td_attributes is required")
+	case p.XFAM == "":
+		return fmt.Errorf("xfam is required")
 	case p.MinimumQESVN == nil:
 		return fmt.Errorf("minimum_qe_svn is required")
 	case p.MinimumPCESVN == nil:

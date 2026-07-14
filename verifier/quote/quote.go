@@ -23,6 +23,9 @@ import (
 	"github.com/tinfoilsh/tinfoil-go/verifier/quote/tdx"
 )
 
+// registerSize is the byte length of every measurement register.
+const registerSize = 48
+
 // Authenticated is a signature-verified quote, not yet compared against
 // any expected value.
 type Authenticated struct {
@@ -182,7 +185,7 @@ func tdxCodeRegisters(m *measurement.Measurement) (code tdx.CodeRegisters, err e
 		if len(m.Registers) != 3 {
 			return code, fmt.Errorf("multiplatform code measurement carries %d registers, want 3", len(m.Registers))
 		}
-		code.RTMR3 = make([]byte, 48)
+		code.RTMR3 = make([]byte, registerSize)
 		if code.RTMR1, err = decodeRegister(m.Registers[1]); err != nil {
 			return code, err
 		}
@@ -212,8 +215,8 @@ func decodeRegister(hexValue string) ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("code measurement register is not hex: %w", err)
 	}
-	if len(b) != 48 {
-		return nil, fmt.Errorf("code measurement register must be 48 bytes, got %d", len(b))
+	if len(b) != registerSize {
+		return nil, fmt.Errorf("code measurement register must be %d bytes, got %d", registerSize, len(b))
 	}
 	return b, nil
 }

@@ -25,19 +25,30 @@ type SEVSNPPolicy struct {
 	MinimumCurrentMitigationVector *uint64     `json:"minimum_current_mitigation_vector"`
 }
 
-// Validate rejects a block with any absent required member.
+// Validate rejects a block with any absent required member or an
+// unsupported setting.
 func (p *SEVSNPPolicy) Validate() error {
 	switch {
 	case p.MinimumBuild == nil:
 		return fmt.Errorf("minimum_build is required")
+	case p.MinimumAPIVersion == "":
+		return fmt.Errorf("minimum_api_version is required")
 	case p.MinimumGuestSVN == nil:
 		return fmt.Errorf("minimum_guest_svn is required")
 	case p.VMPL == nil:
 		return fmt.Errorf("vmpl is required")
+	case p.HostData == "":
+		return fmt.Errorf("host_data is required")
+	case p.ImageID == "":
+		return fmt.Errorf("image_id is required")
+	case p.FamilyID == "":
+		return fmt.Errorf("family_id is required")
 	case p.MinimumLaunchMitigationVector == nil:
 		return fmt.Errorf("minimum_launch_mitigation_vector is required")
 	case p.MinimumCurrentMitigationVector == nil:
 		return fmt.Errorf("minimum_current_mitigation_vector is required")
+	case p.RequireAuthorKey || p.RequireIDBlock:
+		return fmt.Errorf("require_author_key and require_id_block are not supported (no trusted key material is modeled)")
 	}
 	if err := p.MinimumTCB.validate(); err != nil {
 		return fmt.Errorf("minimum_tcb: %w", err)

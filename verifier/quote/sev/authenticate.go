@@ -4,6 +4,7 @@
 package sev
 
 import (
+	"crypto/x509"
 	_ "embed"
 	"encoding/base64"
 	"encoding/hex"
@@ -21,7 +22,7 @@ import (
 	"github.com/tinfoilsh/tinfoil-go/verifier/measurement"
 )
 
-//go:generate sh -xc "curl -o genoa_cert_chain.pem https://kdsintf.amd.com/vcek/v1/Genoa/cert_chain"
+//go:generate sh -xc "curl -fo genoa_cert_chain.pem https://kdsintf.amd.com/vcek/v1/Genoa/cert_chain"
 //go:embed genoa_cert_chain.pem
 var vcekGenoaCertChain []byte
 
@@ -107,6 +108,16 @@ func Authenticate(doc *envelope.Document) (*Quote, error) {
 	}
 	if len(crlDER) == 0 {
 		return nil, fmt.Errorf("amd-crl collateral entry %q carries an empty CRL", crlEntry.ID)
+	}
+	// The library verifies the CRL's signature but not its validity window,
+	// so a stale pre-revocation CRL would otherwise pass.
+	parsedCRL, err := x509.ParseRevocationList(crlDER)
+	if err != nil {
+		return nil, fmt.Errorf("parsing amd-crl collateral: %w", err)
+	}
+	if now := time.Now(); now.Before(parsedCRL.ThisUpdate) || now.After(parsedCRL.NextUpdate) {
+		return nil, fmt.Errorf("amd-crl collateral is outside its validity window (this_update %s, next_update %s)",
+			parsedCRL.ThisUpdate.Format(time.RFC3339), parsedCRL.NextUpdate.Format(time.RFC3339))
 	}
 
 	att, err := verifySignature(doc.CPUEvidence.ReportBase64, vcekDER, crlDER)

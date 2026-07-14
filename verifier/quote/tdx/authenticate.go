@@ -40,9 +40,6 @@ type Quote struct {
 	quote *tdxpb.QuoteV4
 }
 
-// Proto returns the verified quote for policy assembly.
-func (q *Quote) Proto() *tdxpb.QuoteV4 { return q.quote }
-
 // Authenticate verifies the quote's signature chain up to the pinned Intel
 // SGX root, replaying the document's captured PCS collateral — no network
 // fetches. Callers must assemble a policy and validate before trusting the
@@ -228,7 +225,7 @@ func (r *tcbEvaluationRecorder) minimum() (int, error) {
 	return *r.tcbInfo, nil
 }
 
-//go:generate sh -xc "curl -o sgx_root_ca.pem https://certificates.trustedservices.intel.com/Intel_SGX_Provisioning_Certification_RootCA.pem"
+//go:generate sh -xc "curl -fo sgx_root_ca.pem https://certificates.trustedservices.intel.com/Intel_SGX_Provisioning_Certification_RootCA.pem"
 
 //go:embed sgx_root_ca.pem
 var sgxRootCACertPEM []byte

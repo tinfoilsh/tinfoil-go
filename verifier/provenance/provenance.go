@@ -8,6 +8,7 @@ import (
 	_ "embed"
 	"encoding/hex"
 	"fmt"
+	"math"
 	"regexp"
 	"strings"
 	"sync"
@@ -276,7 +277,11 @@ func shapeFromPredicate(fields map[string]*structpb.Value) (*policy.Shape, error
 		if !ok {
 			return nil, fmt.Errorf("vm_shape is missing %q", name)
 		}
-		*dst = int(f.GetNumberValue())
+		nv, ok := f.GetKind().(*structpb.Value_NumberValue)
+		if !ok || nv.NumberValue < 0 || nv.NumberValue != math.Trunc(nv.NumberValue) {
+			return nil, fmt.Errorf("vm_shape member %q is not a non-negative integer", name)
+		}
+		*dst = int(nv.NumberValue)
 	}
 	return shape, nil
 }

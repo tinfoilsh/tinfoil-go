@@ -57,8 +57,6 @@ func TestOptionsPinnedFields(t *testing.T) {
 		HostData:          strings.Repeat("ab", 32),
 		ImageID:           strings.Repeat("cd", 16),
 		FamilyID:          strings.Repeat("ef", 16),
-		RequireAuthorKey:  true,
-		RequireIDBlock:    true,
 		GuestPolicy:       policy.GuestPolicy{SMT: true, PageSwapDisable: true},
 
 		MinimumLaunchMitigationVector:  ptr(uint64(3)),
@@ -69,8 +67,8 @@ func TestOptionsPinnedFields(t *testing.T) {
 	assert.Len(t, opts.HostData, 32)
 	assert.Len(t, opts.ImageID, 16)
 	assert.Len(t, opts.FamilyID, 16)
-	assert.True(t, opts.RequireAuthorKey)
-	assert.True(t, opts.RequireIDBlock)
+	assert.False(t, opts.RequireAuthorKey)
+	assert.False(t, opts.RequireIDBlock)
 	assert.True(t, opts.GuestPolicy.PageSwapDisable)
 	assert.Equal(t, uint64(3), opts.MinimumLaunchMitigationVector)
 	assert.Equal(t, uint64(1), opts.MinimumCurrentMitigationVector)
@@ -82,6 +80,12 @@ func TestOptionsPinnedFields(t *testing.T) {
 	p.HostData = ""
 	_, err = options(&p, ProductGenoa)
 	assert.ErrorContains(t, err, "host_data")
+
+	// ID-block trust material is not modeled: requiring it must reject.
+	p.HostData = strings.Repeat("ab", 32)
+	p.RequireIDBlock = true
+	_, err = options(&p, ProductGenoa)
+	assert.ErrorContains(t, err, "not supported")
 }
 
 // options must reject any non-Genoa product line.
