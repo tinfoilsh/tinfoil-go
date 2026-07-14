@@ -189,7 +189,7 @@ func TestDirectClientStreamingChat(t *testing.T) {
 }
 
 func TestHTTPClient(t *testing.T) {
-	t.Setenv(userCacheSecretEnv, "test-secret")
+	t.Setenv(UserCacheSecretEnv, "test-secret")
 	client, err := NewClient()
 	require.NoError(t, err)
 

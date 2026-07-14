@@ -140,7 +140,7 @@ func NewClientWithOptions(opts ...ClientOption) (*Client, error) {
 	}
 
 	return createClientFromSecureClient(secureClient, cfg.transport, cfg.baseURL,
-		resolveUserCacheSecret(cfg.userCacheSecret, cfg.userCacheSecretSet), cfg.openaiOpts...)
+		ResolveUserCacheSecret(cfg.userCacheSecret, cfg.userCacheSecretSet), cfg.openaiOpts...)
 }
 
 // secureHTTPClient builds an *http.Client for the requested transport mode.
