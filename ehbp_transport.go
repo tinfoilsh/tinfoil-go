@@ -154,10 +154,17 @@ func newSecureClientFromConfig(cfg *clientConfig) (*client.SecureClient, error) 
 		if err != nil {
 			return nil, fmt.Errorf("failed to create secure client: %w", err)
 		}
-		return secureClient, nil
+		return secureClientForRepo(secureClient, cfg.repo), nil
 	default:
 		return client.NewSecureClient(cfg.enclave, cfg.repo), nil
 	}
+}
+
+func secureClientForRepo(secureClient *client.SecureClient, repo string) *client.SecureClient {
+	if repo == defaultConfigRepo {
+		return secureClient
+	}
+	return client.NewSecureClient(secureClient.Enclave(), repo)
 }
 
 // secureHTTPClient builds an *http.Client for the requested transport mode.

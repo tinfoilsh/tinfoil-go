@@ -17,6 +17,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	ehbpidentity "github.com/tinfoilsh/encrypted-http-body-protocol/identity"
+	"github.com/tinfoilsh/tinfoil-go/verifier/client"
 )
 
 // roundTripFunc adapts a function to an http.RoundTripper.
@@ -68,6 +69,17 @@ func TestProxyClientOptionsApply(t *testing.T) {
 	require.Equal(t, "https://proxy.example.com/", cfg.baseURL)
 	require.True(t, cfg.baseURLSet)
 	require.Equal(t, "https://proxy.example.com", cfg.attestationBundleURL)
+}
+
+func TestSecureClientForRepo(t *testing.T) {
+	selected := client.NewSecureClient("router.example.com", defaultConfigRepo)
+
+	require.Same(t, selected, secureClientForRepo(selected, defaultConfigRepo))
+
+	custom := secureClientForRepo(selected, "org/custom-router")
+	require.NotSame(t, selected, custom)
+	require.Equal(t, selected.Enclave(), custom.Enclave())
+	require.Equal(t, "org/custom-router", custom.Repo())
 }
 
 func TestNewClientWithOptionsRejectsInvalidBaseURL(t *testing.T) {

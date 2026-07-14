@@ -6,7 +6,11 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"net"
 	"net/http"
+	"net/url"
+	"strings"
+	"sync"
 
 	"github.com/tinfoilsh/tinfoil-go/verifier/attestation"
 	"github.com/tinfoilsh/tinfoil-go/verifier/github"
@@ -36,6 +40,8 @@ type GroundTruth struct {
 }
 
 type SecureClient struct {
+	mu sync.RWMutex
+
 	enclave, repo string
 
 	// When set, Verify fetches a pre-assembled attestation bundle from
@@ -116,11 +122,15 @@ func NewDefaultClient() (*SecureClient, error) {
 
 // Enclave returns the enclave URL
 func (s *SecureClient) Enclave() string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 	return s.enclave
 }
 
 // Repo returns the repository URL
 func (s *SecureClient) Repo() string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 	return s.repo
 }
 
@@ -128,16 +138,22 @@ func (s *SecureClient) Repo() string {
 // pre-assembled attestation bundle from {url}/attestation instead of attesting
 // the enclave directly. Pass an empty string to restore direct attestation.
 func (s *SecureClient) SetAttestationBundleURL(url string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.attestationBundleURL = url
 }
 
 // GroundTruth returns the last verified enclave state
 func (s *SecureClient) GroundTruth() *GroundTruth {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 	return s.groundTruth
 }
 
 // GroundTruthJSON returns the ground truth as a JSON string
 func (s *SecureClient) GroundTruthJSON() (string, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 	encoded, err := json.Marshal(s.groundTruth)
 	if err != nil {
 		return "", err
@@ -158,6 +174,12 @@ func (s *SecureClient) getSigstoreClient() (*sigstore.Client, error) {
 
 // Verify fetches the latest verification information from GitHub and Sigstore and stores the ground truth results in the client
 func (s *SecureClient) Verify() (*GroundTruth, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.verify()
+}
+
+func (s *SecureClient) verify() (*GroundTruth, error) {
 	// When an attestation bundle URL is configured, attest from the bundle so
 	// the enclave does not need to be reached directly (proxy-friendly).
 	if s.attestationBundleURL != "" {
@@ -181,7 +203,7 @@ func (s *SecureClient) Verify() (*GroundTruth, error) {
 		if err != nil {
 			return nil, fmt.Errorf("fetchBundle: failed to fetch attestation bundle: %v", err)
 		}
-		return s.VerifyFromBundle(bundle)
+		return s.verifyFromBundle(bundle)
 	}
 
 	var codeMeasurement = s.codeMeasurement
@@ -272,6 +294,12 @@ func (s *SecureClient) Verify() (*GroundTruth, error) {
 
 // VerifyFromBundle verifies using a pre-fetched attestation bundle (single-request verification)
 func (s *SecureClient) VerifyFromBundle(bundle *attestation.Bundle) (*GroundTruth, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.verifyFromBundle(bundle)
+}
+
+func (s *SecureClient) verifyFromBundle(bundle *attestation.Bundle) (*GroundTruth, error) {
 	sigstoreClient, err := s.getSigstoreClient()
 	if err != nil {
 		return nil, fmt.Errorf("verifyCode: failed to create sigstore client: %v", err)
@@ -319,10 +347,15 @@ func (s *SecureClient) VerifyFromBundle(bundle *attestation.Bundle) (*GroundTrut
 	if err != nil {
 		return nil, fmt.Errorf("verifyCertificate: %v", err)
 	}
+	if s.enclave != "" && !sameEnclaveHost(s.enclave, bundle.Domain) {
+		return nil, fmt.Errorf("attestation bundle changed enclave host from %q to %q", s.enclave, bundle.Domain)
+	}
 
-	s.enclave = bundle.Domain
+	if s.enclave == "" {
+		s.enclave = bundle.Domain
+	}
 	s.groundTruth = &GroundTruth{
-		EnclaveHost:        bundle.Domain,
+		EnclaveHost:        s.enclave,
 		TLSPublicKey:       enclaveVerification.TLSPublicKeyFP,
 		HPKEPublicKey:      enclaveVerification.HPKEPublicKey,
 		Digest:             bundle.Digest,
@@ -334,10 +367,34 @@ func (s *SecureClient) VerifyFromBundle(bundle *attestation.Bundle) (*GroundTrut
 	return s.groundTruth, nil
 }
 
+func sameEnclaveHost(left, right string) bool {
+	leftHost, leftPort, leftOK := normalizeEnclaveHost(left)
+	rightHost, rightPort, rightOK := normalizeEnclaveHost(right)
+	return leftOK && rightOK && leftHost == rightHost && leftPort == rightPort
+}
+
+func normalizeEnclaveHost(raw string) (string, string, bool) {
+	parsed, err := url.Parse("https://" + raw)
+	if err != nil || parsed.Hostname() == "" || parsed.User != nil || parsed.Path != "" || parsed.RawQuery != "" || parsed.Fragment != "" {
+		return "", "", false
+	}
+	host := strings.TrimSuffix(strings.ToLower(parsed.Hostname()), ".")
+	if net.ParseIP(host) == nil && strings.Contains(host, ":") {
+		return "", "", false
+	}
+	port := parsed.Port()
+	if port == "" {
+		port = "443"
+	}
+	return host, port, true
+}
+
 // HTTPClient returns an HTTP client that only accepts TLS connections to the verified enclave
 func (s *SecureClient) HTTPClient() (*http.Client, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if s.groundTruth == nil {
-		_, err := s.Verify()
+		_, err := s.verify()
 		if err != nil {
 			return nil, fmt.Errorf("failed to verify enclave: %v", err)
 		}
@@ -357,7 +414,7 @@ func (s *SecureClient) makeRequest(req *http.Request) (*Response, error) {
 	// If URL doesn't start with anything, assume it's a relative path and set the base URL
 	if req.URL.Host == "" {
 		req.URL.Scheme = "https"
-		req.URL.Host = s.enclave
+		req.URL.Host = s.Enclave()
 	}
 
 	// Request headers may carry the API key, so never send them over a plaintext
