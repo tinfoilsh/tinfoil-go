@@ -7,8 +7,11 @@ import "fmt"
 // members are pointers so parsing can tell an absent member from a
 // meaningful zero — Validate rejects any absent member.
 type SEVSNPPolicy struct {
-	MinimumBuild                   *uint8      `json:"minimum_build"`
+	MinimumBuild *uint8 `json:"minimum_build"`
+	// MinimumAPIVersion floors the firmware version; MinimumABIVersion
+	// floors the guest policy's ABI version (both maj.min).
 	MinimumAPIVersion              string      `json:"minimum_api_version"`
+	MinimumABIVersion              string      `json:"minimum_abi_version"`
 	MinimumGuestSVN                *uint32     `json:"minimum_guest_svn"`
 	MinimumTCB                     TCB         `json:"minimum_tcb"`
 	MinimumLaunchTCB               TCB         `json:"minimum_launch_tcb"`
@@ -33,6 +36,8 @@ func (p *SEVSNPPolicy) Validate() error {
 		return fmt.Errorf("minimum_build is required")
 	case p.MinimumAPIVersion == "":
 		return fmt.Errorf("minimum_api_version is required")
+	case p.MinimumABIVersion == "":
+		return fmt.Errorf("minimum_abi_version is required")
 	case p.MinimumGuestSVN == nil:
 		return fmt.Errorf("minimum_guest_svn is required")
 	case p.VMPL == nil:

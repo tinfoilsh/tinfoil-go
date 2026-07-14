@@ -215,7 +215,8 @@
         "family_id": "00000000000000000000000000000000",
         "vmpl": 0,
         "minimum_launch_mitigation_vector": 0,
-        "minimum_current_mitigation_vector": 0
+        "minimum_current_mitigation_vector": 0,
+        "minimum_abi_version": "0.0"
       }
     },
     "amd-genoa-prod": {
@@ -256,7 +257,8 @@
         "family_id": "00000000000000000000000000000000",
         "vmpl": 0,
         "minimum_launch_mitigation_vector": 0,
-        "minimum_current_mitigation_vector": 0
+        "minimum_current_mitigation_vector": 0,
+        "minimum_abi_version": "0.0"
       }
     },
     "amd-turin-prod": {
@@ -298,7 +300,8 @@
         "family_id": "00000000000000000000000000000000",
         "vmpl": 0,
         "minimum_launch_mitigation_vector": 0,
-        "minimum_current_mitigation_vector": 0
+        "minimum_current_mitigation_vector": 0,
+        "minimum_abi_version": "0.0"
       }
     },
     "tdx-b200-prod": {

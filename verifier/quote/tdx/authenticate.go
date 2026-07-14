@@ -139,7 +139,7 @@ func newPCSReplayGetter(responses []envelope.PCSResponse) (*pcsReplayGetter, err
 		if err != nil {
 			return nil, err
 		}
-		m[key] = &responses[i]
+		m[strings.ToLower(key)] = &responses[i]
 	}
 	return &pcsReplayGetter{responses: m}, nil
 }
@@ -149,6 +149,7 @@ func (g *pcsReplayGetter) Get(requestURL string) (map[string][]string, []byte, e
 	if err != nil {
 		return nil, nil, err
 	}
+	key = strings.ToLower(key)
 	resp, ok := g.responses[key]
 	if !ok {
 		return nil, nil, fmt.Errorf("intel-pcs collateral has no captured response for %s", requestURL)
@@ -156,6 +157,15 @@ func (g *pcsReplayGetter) Get(requestURL string) (map[string][]string, []byte, e
 	body, err := base64.StdEncoding.DecodeString(resp.BodyBase64)
 	if err != nil {
 		return nil, nil, fmt.Errorf("decoding captured PCS response body for %s: %w", requestURL, err)
+	}
+	// The library checks CRL NextUpdate but not ThisUpdate, so a
+	// future-dated capture would otherwise pass.
+	if strings.Contains(key, "crl") {
+		if crl, err := x509.ParseRevocationList(body); err == nil {
+			if now := time.Now(); now.Before(crl.ThisUpdate) || now.After(crl.NextUpdate) {
+				return nil, nil, fmt.Errorf("captured CRL for %s is outside its validity window", requestURL)
+			}
+		}
 	}
 	// Header keys are matched verbatim by go-tdx-guest (canonical MIME form),
 	// so normalize whatever casing the capture used.
@@ -192,22 +202,20 @@ func (r *tcbEvaluationRecorder) Get(requestURL string) (map[string][]string, []b
 	case strings.HasSuffix(u.Path, "/tcb"):
 		var resp struct {
 			TcbInfo struct {
-				TcbEvaluationDataNumber int `json:"tcbEvaluationDataNumber"`
+				TcbEvaluationDataNumber *int `json:"tcbEvaluationDataNumber"`
 			} `json:"tcbInfo"`
 		}
-		if json.Unmarshal(body, &resp) == nil {
-			n := resp.TcbInfo.TcbEvaluationDataNumber
-			r.tcbInfo = &n
+		if json.Unmarshal(body, &resp) == nil && resp.TcbInfo.TcbEvaluationDataNumber != nil {
+			r.tcbInfo = resp.TcbInfo.TcbEvaluationDataNumber
 		}
 	case strings.HasSuffix(u.Path, "/qe/identity"):
 		var resp struct {
 			EnclaveIdentity struct {
-				TcbEvaluationDataNumber int `json:"tcbEvaluationDataNumber"`
+				TcbEvaluationDataNumber *int `json:"tcbEvaluationDataNumber"`
 			} `json:"enclaveIdentity"`
 		}
-		if json.Unmarshal(body, &resp) == nil {
-			n := resp.EnclaveIdentity.TcbEvaluationDataNumber
-			r.qeIdentity = &n
+		if json.Unmarshal(body, &resp) == nil && resp.EnclaveIdentity.TcbEvaluationDataNumber != nil {
+			r.qeIdentity = resp.EnclaveIdentity.TcbEvaluationDataNumber
 		}
 	}
 	return headers, body, nil

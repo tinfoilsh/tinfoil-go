@@ -313,10 +313,11 @@ func loadDotEnv() {
 		if line == "" || strings.HasPrefix(line, "#") {
 			continue
 		}
+		line = strings.TrimPrefix(line, "export ")
 		key, value, found := strings.Cut(line, "=")
 		if !found {
 			continue
 		}
-		os.Setenv(strings.TrimSpace(key), strings.Trim(strings.TrimSpace(value), `"`))
+		os.Setenv(strings.TrimSpace(key), strings.Trim(strings.TrimSpace(value), `"'`))
 	}
 }

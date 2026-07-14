@@ -50,6 +50,7 @@ func TestOptionsPinnedFields(t *testing.T) {
 	p := policy.SEVSNPPolicy{
 		MinimumBuild:      ptr(uint8(21)),
 		MinimumAPIVersion: "1.55",
+		MinimumABIVersion: "0.31",
 		MinimumGuestSVN:   ptr(uint32(0)),
 		MinimumTCB:        testTCB(),
 		MinimumLaunchTCB:  testTCB(),

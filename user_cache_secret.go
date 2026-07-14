@@ -6,7 +6,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
 	"io/fs"
 	"net/http"
@@ -117,7 +116,7 @@ func newUserCacheSecret() string {
 var ephemeralUserCacheSecret = sync.OnceValue(func() string {
 	secret := newUserCacheSecret()
 	if secret != "" {
-		slog.Warn(fmt.Sprintf("tinfoil: could not persist the user cache secret; using an in-memory secret, so prompt-cache continuity resets when this process exits (set %s or WithUserCacheSecret to pin one)", userCacheSecretEnv))
+		slog.Warn("tinfoil: could not persist the user cache secret; using an in-memory secret, so prompt-cache continuity resets when this process exits (pin one via the env var or WithUserCacheSecret)", "env", userCacheSecretEnv)
 	}
 	return secret
 })

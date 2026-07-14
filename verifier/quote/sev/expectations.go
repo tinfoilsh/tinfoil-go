@@ -64,7 +64,8 @@ func (e *Expectations) Validate(q *Quote) error {
 		return fmt.Errorf("parsing report guest policy: %w", err)
 	}
 	wantPolicy := e.wantGuestPolicy
-	// ABI major/minor are version floors covered by the options, not bits.
+	// ABI major/minor are a version floor (minimum_abi_version), enforced
+	// by the library's guest-policy comparison, not exact bits.
 	wantPolicy.ABIMajor = gotPolicy.ABIMajor
 	wantPolicy.ABIMinor = gotPolicy.ABIMinor
 	if gotPolicy != wantPolicy {
@@ -105,7 +106,6 @@ func (q *Quote) ProductLine() string {
 	return kds.ProductLine(q.attestation.GetProduct())
 }
 
-// expectedGuestPolicy returns the guest policy bits the report must carry.
 func expectedGuestPolicy(p *policy.SEVSNPPolicy) sevabi.SnpPolicy {
 	return sevabi.SnpPolicy{
 		Debug:                p.GuestPolicy.Debug,
@@ -120,7 +120,6 @@ func expectedGuestPolicy(p *policy.SEVSNPPolicy) sevabi.SnpPolicy {
 	}
 }
 
-// expectedPlatformInfo returns the PLATFORM_INFO the report must carry.
 func expectedPlatformInfo(p *policy.SEVSNPPolicy) sevabi.SnpPlatformInfo {
 	return sevabi.SnpPlatformInfo{
 		SMTEnabled:                  p.PlatformInfo.SMTEnabled,
@@ -144,7 +143,11 @@ func options(p *policy.SEVSNPPolicy, productLine string) (*sevvalidate.Options, 
 	if err := p.Validate(); err != nil {
 		return nil, err
 	}
-	version, err := parseAPIVersion(p.MinimumAPIVersion)
+	version, err := parseVersion("minimum_api_version", p.MinimumAPIVersion)
+	if err != nil {
+		return nil, err
+	}
+	abiMajor, abiMinor, err := parseVersionParts("minimum_abi_version", p.MinimumABIVersion)
 	if err != nil {
 		return nil, err
 	}
@@ -166,9 +169,14 @@ func options(p *policy.SEVSNPPolicy, productLine string) (*sevvalidate.Options, 
 		return nil, err
 	}
 
+	// The ABI floor rides in the guest policy: the library compares it as
+	// a minimum version, unlike the other bits.
+	guestPolicy := expectedGuestPolicy(p)
+	guestPolicy.ABIMajor = abiMajor
+	guestPolicy.ABIMinor = abiMinor
 	platformInfo := expectedPlatformInfo(p)
 	return &sevvalidate.Options{
-		GuestPolicy:                    expectedGuestPolicy(p),
+		GuestPolicy:                    guestPolicy,
 		MinimumGuestSvn:                *p.MinimumGuestSVN,
 		MinimumBuild:                   *p.MinimumBuild,
 		MinimumVersion:                 version,
@@ -185,7 +193,6 @@ func options(p *policy.SEVSNPPolicy, productLine string) (*sevvalidate.Options, 
 	}, nil
 }
 
-// tcbParts dereferences a validated TCB block into library parts.
 func tcbParts(t policy.TCB) kds.TCBParts {
 	return kds.TCBParts{
 		BlSpl:    *t.BlSpl,
@@ -195,18 +202,26 @@ func tcbParts(t policy.TCB) kds.TCBParts {
 	}
 }
 
-func parseAPIVersion(v string) (uint16, error) {
+func parseVersion(name, v string) (uint16, error) {
+	maj, min, err := parseVersionParts(name, v)
+	if err != nil {
+		return 0, err
+	}
+	return uint16(maj)<<8 | uint16(min), nil
+}
+
+func parseVersionParts(name, v string) (uint8, uint8, error) {
 	major, minor, found := strings.Cut(v, ".")
 	if !found {
-		return 0, fmt.Errorf("minimum_api_version %q is not maj.min", v)
+		return 0, 0, fmt.Errorf("%s %q is not maj.min", name, v)
 	}
 	maj, err := strconv.ParseUint(major, 10, 8)
 	if err != nil {
-		return 0, fmt.Errorf("minimum_api_version major: %w", err)
+		return 0, 0, fmt.Errorf("%s major: %w", name, err)
 	}
 	min, err := strconv.ParseUint(minor, 10, 8)
 	if err != nil {
-		return 0, fmt.Errorf("minimum_api_version minor: %w", err)
+		return 0, 0, fmt.Errorf("%s minor: %w", name, err)
 	}
-	return uint16(maj<<8 | min), nil
+	return uint8(maj), uint8(min), nil
 }

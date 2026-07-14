@@ -251,11 +251,11 @@ func (c *Client) AuthenticateCode(bundleJSON []byte, repo, hexDigest string) (*C
 	}
 	m, err := measurementFromStatement(result.Statement)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("code predicate: %w", err)
 	}
 	shape, err := shapeFromPredicate(result.Statement.Predicate.GetFields())
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("code predicate: %w", err)
 	}
 	return &Code{Measurement: m, Shape: shape}, nil
 }

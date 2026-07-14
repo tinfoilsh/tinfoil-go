@@ -29,18 +29,19 @@ import (
 //go:embed genoa_cert_chain.pem
 var askArkGenoaPEM []byte
 
-// trustedRoots is the pinned AMD trust anchor (Genoa ASK+ARK), built from
-// the repo-owned copy rather than the library's embedded default so the
-// anchor only changes when the file is deliberately regenerated.
-var trustedRoots map[string][]*trust.AMDRootCerts
-
-func init() {
+// trustedRoots builds the pinned AMD trust anchor (Genoa ASK+ARK) from the
+// repo-owned copy rather than the library's embedded default, so the
+// anchor only changes when the file is deliberately regenerated. A fresh
+// instance is built per authentication: the library caches the CRL it
+// fetched on this object, and document-supplied collateral must never
+// affect other verifications.
+func trustedRoots() (map[string][]*trust.AMDRootCerts, error) {
 	genoa := new(trust.AMDRootCerts)
 	if err := genoa.FromKDSCertBytes(askArkGenoaPEM); err != nil {
-		panic("parsing embedded AMD Genoa root certificates: " + err.Error())
+		return nil, fmt.Errorf("parsing embedded AMD Genoa root certificates: %w", err)
 	}
 	genoa.ProductLine = "Genoa"
-	trustedRoots = map[string][]*trust.AMDRootCerts{"Genoa": {genoa}}
+	return map[string][]*trust.AMDRootCerts{"Genoa": {genoa}}, nil
 }
 
 // offlineGetter serves the library's fetches from pre-provided material:
@@ -201,13 +202,17 @@ func verifySignature(reportBase64 string, vcekDER, askDER, arkDER, crlDER []byte
 	if err != nil {
 		return nil, err
 	}
+	roots, err := trustedRoots()
+	if err != nil {
+		return nil, err
+	}
 	// All options explicit. Fetching stays enabled because it is how the
 	// library asks for the CRL; the offline getter answers from local
 	// material only.
 	opts := &verify.Options{
 		Getter:           &offlineGetter{crlDER: crlDER},
 		CheckRevocations: true,
-		TrustedRoots:     trustedRoots,
+		TrustedRoots:     roots,
 		Product:          product,
 		Now:              time.Now(),
 	}
