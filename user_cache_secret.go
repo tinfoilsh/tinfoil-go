@@ -16,7 +16,7 @@ import (
 	"sync"
 	"unicode/utf8"
 
-	log "github.com/sirupsen/logrus"
+	"log/slog"
 )
 
 // user_cache_secret provisions the per-user prompt-cache secret defined by the
@@ -97,7 +97,7 @@ func resolveUserCacheSecret(explicit string, explicitSet bool) string {
 func newUserCacheSecret() string {
 	var b [32]byte
 	if _, err := rand.Read(b[:]); err != nil {
-		log.WithError(err).Warn("tinfoil: could not generate a user cache secret; client-secret cache isolation is unavailable")
+		slog.Warn("tinfoil: could not generate a user cache secret; requests stay in the tenant-wide cache namespace", "error", err)
 		return ""
 	}
 	return hex.EncodeToString(b[:])

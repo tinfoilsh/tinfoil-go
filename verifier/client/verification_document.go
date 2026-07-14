@@ -5,7 +5,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/tinfoilsh/tinfoil-go/verifier/attestation"
+	"github.com/tinfoilsh/tinfoil-go/verifier/measurement"
 )
 
 const (
@@ -41,7 +41,7 @@ type VerificationSteps struct {
 
 // DocumentEnclaveMeasurement contains the observed measurement and attested keys.
 type DocumentEnclaveMeasurement struct {
-	Measurement             *attestation.Measurement `json:"measurement"`
+	Measurement             *measurement.Measurement `json:"measurement"`
 	TLSPublicKeyFingerprint string                   `json:"tlsPublicKeyFingerprint,omitempty"`
 	HPKEPublicKey           string                   `json:"hpkePublicKey,omitempty"`
 }
@@ -53,11 +53,11 @@ type VerificationDocument struct {
 	EnclaveHost            string                           `json:"enclaveHost"`
 	ReleaseTag             string                           `json:"releaseTag,omitempty"`
 	ReleaseDigest          string                           `json:"releaseDigest"`
-	CodeMeasurement        *attestation.Measurement         `json:"codeMeasurement"`
+	CodeMeasurement        *measurement.Measurement         `json:"codeMeasurement"`
 	EnclaveMeasurement     DocumentEnclaveMeasurement       `json:"enclaveMeasurement"`
 	TLSPublicKey           string                           `json:"tlsPublicKey"`
 	HPKEPublicKey          string                           `json:"hpkePublicKey"`
-	HardwareMeasurement    *attestation.HardwareMeasurement `json:"hardwareMeasurement,omitempty"`
+	HardwareMeasurement    *measurement.HardwareMeasurement `json:"hardwareMeasurement,omitempty"`
 	CodeFingerprint        string                           `json:"codeFingerprint"`
 	EnclaveFingerprint     string                           `json:"enclaveFingerprint"`
 	SelectedRouterEndpoint string                           `json:"selectedRouterEndpoint"`
@@ -114,9 +114,6 @@ func newVerificationDocument(groundTruth *GroundTruth) *VerificationDocument {
 	verifyCode := successfulStep()
 	if groundTruth.DigestFetched {
 		fetchDigest = successfulStep()
-	}
-	if groundTruth.Digest == pinnedNoDigest {
-		verifyCode = skippedStep()
 	}
 	return &VerificationDocument{
 		SchemaVersion:   verificationDocumentSchemaVersion,
@@ -179,12 +176,12 @@ func (document *VerificationDocument) Clone() *VerificationDocument {
 	return cloneVerificationDocument(document)
 }
 
-func cloneMeasurement(measurement *attestation.Measurement) *attestation.Measurement {
-	if measurement == nil {
+func cloneMeasurement(value *measurement.Measurement) *measurement.Measurement {
+	if value == nil {
 		return nil
 	}
-	cloned := *measurement
-	cloned.Registers = append([]string(nil), measurement.Registers...)
+	cloned := *value
+	cloned.Registers = append([]string(nil), value.Registers...)
 	return &cloned
 }
 

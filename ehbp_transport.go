@@ -8,8 +8,9 @@ import (
 	"strings"
 	"sync"
 
+	"log/slog"
+
 	"github.com/openai/openai-go/v3/option"
-	log "github.com/sirupsen/logrus"
 	ehbpclient "github.com/tinfoilsh/encrypted-http-body-protocol/client"
 	ehbpidentity "github.com/tinfoilsh/encrypted-http-body-protocol/identity"
 	"github.com/tinfoilsh/tinfoil-go/verifier/client"
@@ -500,7 +501,7 @@ func (t *ehbpReVerifyingTransport) reverifyOnce(seenGeneration uint64) (http.Rou
 	t.generation++
 	t.mu.Unlock()
 
-	log.Info("HPKE key rotation detected, re-verified attestation successfully")
+	slog.Info("tinfoil: HPKE key rotation detected, re-verified attestation")
 	return newTransport, nil
 }
 

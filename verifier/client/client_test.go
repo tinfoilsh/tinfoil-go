@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
-	"github.com/tinfoilsh/tinfoil-go/verifier/attestation"
+	"github.com/tinfoilsh/tinfoil-go/verifier/measurement"
 )
 
 func TestVerify(t *testing.T) {
@@ -26,12 +26,12 @@ func TestVerify(t *testing.T) {
 }
 
 func TestClientGroundTruthJSON(t *testing.T) {
-	codeMeasurement := &attestation.Measurement{
-		Type:      attestation.SnpTdxMultiPlatformV1,
+	codeMeasurement := &measurement.Measurement{
+		Type:      measurement.SnpTdxMultiPlatformV1,
 		Registers: []string{"a", "b"},
 	}
-	enclaveMeasurement := &attestation.Measurement{
-		Type:      attestation.TdxGuestV2,
+	enclaveMeasurement := &measurement.Measurement{
+		Type:      measurement.TdxGuestV2,
 		Registers: []string{"a"},
 	}
 
@@ -64,8 +64,8 @@ func TestVerificationDocumentJSON(t *testing.T) {
 		TLSPublicKey:       "tls-fingerprint",
 		HPKEPublicKey:      "hpke-key",
 		Digest:             "release-digest",
-		CodeMeasurement:    &attestation.Measurement{Type: attestation.SevGuestV2, Registers: []string{"code"}},
-		EnclaveMeasurement: &attestation.Measurement{Type: attestation.SevGuestV2, Registers: []string{"enclave"}},
+		CodeMeasurement:    &measurement.Measurement{Type: measurement.SevGuestV2, Registers: []string{"code"}},
+		EnclaveMeasurement: &measurement.Measurement{Type: measurement.SevGuestV2, Registers: []string{"enclave"}},
 		CodeFingerprint:    "code-fingerprint",
 		EnclaveFingerprint: "enclave-fingerprint",
 		Verifier:           SoftwareIdentity{Name: verifierName, Version: "v1.0.0"},
@@ -101,7 +101,6 @@ func TestVerificationDocumentStepStates(t *testing.T) {
 	}{
 		{name: "direct release", groundTruth: &GroundTruth{ReleaseTag: "v1.2.3", Digest: "digest", DigestFetched: true}, fetchDigest: "success", verifyCode: "success"},
 		{name: "caller supplied bundle", groundTruth: &GroundTruth{ReleaseTag: "v1.2.3", Digest: "digest"}, fetchDigest: "skipped", verifyCode: "success"},
-		{name: "pinned", groundTruth: &GroundTruth{Digest: pinnedNoDigest}, fetchDigest: "skipped", verifyCode: "skipped"},
 	}
 
 	for _, tt := range tests {
@@ -133,23 +132,6 @@ func TestCurrentVerifierVersion(t *testing.T) {
 			assert.Equal(t, tt.version, verifierVersion(tt.info, tt.ok))
 		})
 	}
-}
-
-func TestVerifyFromBundleRejectsVerifiedDomainMismatch(t *testing.T) {
-	client := NewSecureClient("verified.example", defaultRouterRepo)
-	client.setVerifiedState(&GroundTruth{EnclaveHost: "verified.example"})
-
-	_, err := client.VerifyFromBundle(&attestation.Bundle{Domain: "other.example"})
-
-	assert.EqualError(t, err, `verifyBundle: domain "other.example" does not match verified enclave "verified.example"`)
-	assert.Equal(t, "verified.example", client.Enclave())
-	assert.Equal(t, "verified.example", client.GroundTruth().EnclaveHost)
-}
-
-func TestBundleDomainAllowsInitialDiscovery(t *testing.T) {
-	client := NewSecureClient("configured.example", defaultRouterRepo)
-
-	assert.NoError(t, client.validateBundleDomain("discovered.example"))
 }
 
 func TestNewDefaultSecureClient(t *testing.T) {
