@@ -3,7 +3,7 @@ package client
 import (
 	"fmt"
 
-	"github.com/tinfoilsh/tinfoil-go/verifier/endorsement"
+	"github.com/tinfoilsh/tinfoil-go/verifier/policy"
 	"github.com/tinfoilsh/tinfoil-go/verifier/envelope"
 	"github.com/tinfoilsh/tinfoil-go/verifier/measurement"
 	"github.com/tinfoilsh/tinfoil-go/verifier/provenance"
@@ -115,7 +115,7 @@ func VerifyDocumentV3(sigstoreClient *provenance.Client, docBytes, nonce []byte,
 // sigstore-platform collateral entries, returning the verified code
 // provenance, the code artifact digest, and the platform-endorsements
 // artifact. Both entries are required.
-func verifyReferenceValues(sigstoreClient *provenance.Client, doc *envelope.Document, repo string) (*provenance.Code, string, *endorsement.Artifact, error) {
+func verifyReferenceValues(sigstoreClient *provenance.Client, doc *envelope.Document, repo string) (*provenance.Code, string, *policy.Artifact, error) {
 	codeRef, err := doc.ReferenceValuesCollateral(envelope.CollateralSigstoreCodeV1Format)
 	if err != nil {
 		return nil, "", nil, err

@@ -10,7 +10,7 @@ import (
 	"github.com/google/go-sev-guest/kds"
 	sevvalidate "github.com/google/go-sev-guest/validate"
 
-	"github.com/tinfoilsh/tinfoil-go/verifier/endorsement"
+	"github.com/tinfoilsh/tinfoil-go/verifier/policy"
 )
 
 // ProductGenoa is the only AMD product line currently supported by the
@@ -33,7 +33,7 @@ type Expectations struct {
 // field, the expected launch measurement from code provenance, and the
 // expected REPORT_DATA from the envelope. Only Genoa (family 19h) is
 // supported.
-func Assemble(p *endorsement.SEVSNPPolicy, productLine string, launchDigest []byte, reportData [64]byte) (*Expectations, error) {
+func Assemble(p *policy.SEVSNPPolicy, productLine string, launchDigest []byte, reportData [64]byte) (*Expectations, error) {
 	opts, err := options(p, productLine)
 	if err != nil {
 		return nil, err
@@ -90,7 +90,7 @@ func (q *Quote) ProductLine() string {
 }
 
 // expectedGuestPolicy returns the guest policy bits the report must carry.
-func expectedGuestPolicy(p *endorsement.SEVSNPPolicy) sevabi.SnpPolicy {
+func expectedGuestPolicy(p *policy.SEVSNPPolicy) sevabi.SnpPolicy {
 	return sevabi.SnpPolicy{
 		Debug:                p.GuestPolicy.Debug,
 		SMT:                  p.GuestPolicy.SMT,
@@ -105,7 +105,7 @@ func expectedGuestPolicy(p *endorsement.SEVSNPPolicy) sevabi.SnpPolicy {
 }
 
 // expectedPlatformInfo returns the PLATFORM_INFO the report must carry.
-func expectedPlatformInfo(p *endorsement.SEVSNPPolicy) sevabi.SnpPlatformInfo {
+func expectedPlatformInfo(p *policy.SEVSNPPolicy) sevabi.SnpPlatformInfo {
 	return sevabi.SnpPlatformInfo{
 		SMTEnabled:                  p.PlatformInfo.SMTEnabled,
 		TSMEEnabled:                 p.PlatformInfo.TSMEEnabled,
@@ -121,7 +121,7 @@ func expectedPlatformInfo(p *endorsement.SEVSNPPolicy) sevabi.SnpPlatformInfo {
 // for the given product line. The library treats GuestPolicy and
 // PlatformInfo as maximum-acceptable masks; strict equality on both is
 // enforced by the companion checks composed in Validate.
-func options(p *endorsement.SEVSNPPolicy, productLine string) (*sevvalidate.Options, error) {
+func options(p *policy.SEVSNPPolicy, productLine string) (*sevvalidate.Options, error) {
 	if productLine != ProductGenoa {
 		return nil, fmt.Errorf("unsupported SEV product line %q (only %s is supported)", productLine, ProductGenoa)
 	}

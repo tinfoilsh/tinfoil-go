@@ -13,17 +13,17 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/tinfoilsh/tinfoil-go/verifier/endorsement"
+	"github.com/tinfoilsh/tinfoil-go/verifier/policy"
 )
 
 // Real production identifier (public by design in the endorsement artifact).
 const inf7PPID = "3b064a0f58d5dd3688780aeb40e0b5d2"
 
-func loadFixture(t *testing.T) *endorsement.Artifact {
+func loadFixture(t *testing.T) *policy.Artifact {
 	t.Helper()
-	data, err := os.ReadFile(filepath.Join("..", "..", "endorsement", "testdata", "platform-endorsements.json"))
+	data, err := os.ReadFile(filepath.Join("..", "..", "policy", "testdata", "platform-endorsements.json"))
 	require.NoError(t, err)
-	a, err := endorsement.Parse(data)
+	a, err := policy.Parse(data)
 	require.NoError(t, err)
 	return a
 }
@@ -37,7 +37,7 @@ func mustHex(t *testing.T, s string) []byte {
 
 func TestOptions(t *testing.T) {
 	a := loadFixture(t)
-	_, p, err := a.PolicyFor(inf7PPID, endorsement.PlatformTDX)
+	_, p, err := a.PolicyFor(inf7PPID, policy.PlatformTDX)
 	require.NoError(t, err)
 
 	opts, err := options(p.TDX)
@@ -70,7 +70,7 @@ func TestValidate(t *testing.T) {
 	}
 	quote := &Quote{quote: proto, TCBEvaluationDataNumber: 5}
 
-	matching := &endorsement.TDXPolicy{
+	matching := &policy.TDXPolicy{
 		QEVendorID:                     hex.EncodeToString(proto.GetHeader().GetQeVendorId()),
 		MinimumTEETCBSVN:               hex.EncodeToString(body.GetTeeTcbSvn()),
 		MRSeam:                         hex.EncodeToString(body.GetMrSeam()),
@@ -79,8 +79,8 @@ func TestValidate(t *testing.T) {
 		MinimumTCBEvaluationDataNumber: 5,
 		PlatformMeasurements:           []string{"sample"},
 	}
-	a := &endorsement.Artifact{
-		Measurements: map[string]endorsement.PlatformMeasurement{
+	a := &policy.Artifact{
+		Measurements: map[string]policy.PlatformMeasurement{
 			"sample": {
 				MRTD:  hex.EncodeToString(body.GetMrTd()),
 				RTMR0: hex.EncodeToString(body.GetRtmrs()[0]),
@@ -88,7 +88,7 @@ func TestValidate(t *testing.T) {
 		},
 	}
 
-	assemble := func(a *endorsement.Artifact, p *endorsement.TDXPolicy) *Expectations {
+	assemble := func(a *policy.Artifact, p *policy.TDXPolicy) *Expectations {
 		e, name, err := Assemble(a, p, nil, quote, code, reportData)
 		require.NoError(t, err)
 		assert.Equal(t, "sample", name)
@@ -108,8 +108,8 @@ func TestValidate(t *testing.T) {
 
 	// A quote whose MRTD/RTMR0 resolve no endorsed measurement fails at
 	// assembly, before any validation runs.
-	badMeasurements := &endorsement.Artifact{
-		Measurements: map[string]endorsement.PlatformMeasurement{
+	badMeasurements := &policy.Artifact{
+		Measurements: map[string]policy.PlatformMeasurement{
 			"sample": {MRTD: strings.Repeat("ff", 48), RTMR0: strings.Repeat("ff", 48)},
 		},
 	}

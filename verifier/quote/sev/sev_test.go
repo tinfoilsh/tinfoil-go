@@ -10,7 +10,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/tinfoilsh/tinfoil-go/verifier/endorsement"
+	"github.com/tinfoilsh/tinfoil-go/verifier/policy"
 )
 
 const (
@@ -19,18 +19,18 @@ const (
 	box2TurinID = "6bb1229b7692b7100000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"
 )
 
-func loadFixture(t *testing.T) *endorsement.Artifact {
+func loadFixture(t *testing.T) *policy.Artifact {
 	t.Helper()
-	data, err := os.ReadFile(filepath.Join("..", "..", "endorsement", "testdata", "platform-endorsements.json"))
+	data, err := os.ReadFile(filepath.Join("..", "..", "policy", "testdata", "platform-endorsements.json"))
 	require.NoError(t, err)
-	a, err := endorsement.Parse(data)
+	a, err := policy.Parse(data)
 	require.NoError(t, err)
 	return a
 }
 
 func TestOptionsGenoa(t *testing.T) {
 	a := loadFixture(t)
-	_, p, err := a.PolicyFor(box3GenoaID, endorsement.PlatformSEVSNP)
+	_, p, err := a.PolicyFor(box3GenoaID, policy.PlatformSEVSNP)
 	require.NoError(t, err)
 
 	opts, err := options(p.SEVSNP, ProductGenoa)
@@ -49,13 +49,13 @@ func TestOptionsGenoa(t *testing.T) {
 func TestOptionsPinnedFields(t *testing.T) {
 	hostData := strings.Repeat("ab", 32)
 	imageID := strings.Repeat("cd", 16)
-	p := endorsement.SEVSNPPolicy{
+	p := policy.SEVSNPPolicy{
 		MinimumAPIVersion: "1.55",
 		HostData:          &hostData,
 		ImageID:           &imageID,
 		RequireAuthorKey:  true,
 		RequireIDBlock:    true,
-		GuestPolicy:       endorsement.GuestPolicy{SMT: true, PageSwapDisable: true},
+		GuestPolicy:       policy.GuestPolicy{SMT: true, PageSwapDisable: true},
 
 		MinimumLaunchMitigationVector:  3,
 		MinimumCurrentMitigationVector: 1,
@@ -80,7 +80,7 @@ func TestOptionsPinnedFields(t *testing.T) {
 // options must reject any non-Genoa product line.
 func TestOptionsRejectsNonGenoa(t *testing.T) {
 	a := loadFixture(t)
-	_, p, err := a.PolicyFor(box2TurinID, endorsement.PlatformSEVSNP)
+	_, p, err := a.PolicyFor(box2TurinID, policy.PlatformSEVSNP)
 	require.NoError(t, err)
 
 	_, err = options(p.SEVSNP, "Turin")

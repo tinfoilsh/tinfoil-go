@@ -18,7 +18,7 @@ import (
 	"encoding/hex"
 	"fmt"
 
-	"github.com/tinfoilsh/tinfoil-go/verifier/endorsement"
+	"github.com/tinfoilsh/tinfoil-go/verifier/policy"
 	"github.com/tinfoilsh/tinfoil-go/verifier/envelope"
 	"github.com/tinfoilsh/tinfoil-go/verifier/measurement"
 	"github.com/tinfoilsh/tinfoil-go/verifier/quote/sev"
@@ -29,7 +29,7 @@ import (
 // the pinned vendor root. Nothing in it has been compared against expected
 // values yet: that is the assembled policy's job.
 type Authenticated struct {
-	// Platform is endorsement.PlatformSEVSNP or endorsement.PlatformTDX.
+	// Platform is policy.PlatformSEVSNP or policy.PlatformTDX.
 	Platform string
 	// Identity is the machine identifier from authenticated bytes
 	// (SEV CHIP_ID / TDX PPID from the PCK leaf), lowercase hex.
@@ -52,7 +52,7 @@ type Expected struct {
 	CodeMeasurement *measurement.Measurement
 	// Shape is the VM shape the code artifact declares; nil when the
 	// artifact predates the vm_shape declaration.
-	Shape *endorsement.Shape
+	Shape *policy.Shape
 }
 
 // AssembledPolicy is the complete expected state of a quote — every value
@@ -85,7 +85,7 @@ func Authenticate(doc *envelope.Document) (*Authenticated, error) {
 			return nil, err
 		}
 		return &Authenticated{
-			Platform:    endorsement.PlatformSEVSNP,
+			Platform:    policy.PlatformSEVSNP,
 			Identity:    q.Identity,
 			Measurement: q.Measurement,
 			sev:         q,
@@ -96,7 +96,7 @@ func Authenticate(doc *envelope.Document) (*Authenticated, error) {
 			return nil, err
 		}
 		return &Authenticated{
-			Platform:    endorsement.PlatformTDX,
+			Platform:    policy.PlatformTDX,
 			Identity:    q.Identity,
 			Measurement: q.Measurement,
 			tdx:         q,
@@ -114,7 +114,7 @@ func Authenticate(doc *envelope.Document) (*Authenticated, error) {
 // envelope, and for TDX the platform measurement resolved under the
 // required VM shape. Assembly fails when any required value cannot be
 // resolved; nothing is deferred to a later check.
-func Assemble(endorsements *endorsement.Artifact, expected Expected, q *Authenticated) (*AssembledPolicy, error) {
+func Assemble(endorsements *policy.Artifact, expected Expected, q *Authenticated) (*AssembledPolicy, error) {
 	if expected.CodeMeasurement == nil {
 		return nil, fmt.Errorf("assembling policy: expected code measurement is required")
 	}
@@ -127,13 +127,13 @@ func Assemble(endorsements *endorsement.Artifact, expected Expected, q *Authenti
 		quote:      q,
 	}
 	switch q.Platform {
-	case endorsement.PlatformSEVSNP:
+	case policy.PlatformSEVSNP:
 		var digest []byte
 		digest, err = sevLaunchDigest(expected.CodeMeasurement)
 		if err == nil {
 			assembled.sev, err = sev.Assemble(machinePolicy.SEVSNP, q.sev.ProductLine(), digest, expected.ReportData)
 		}
-	case endorsement.PlatformTDX:
+	case policy.PlatformTDX:
 		var code tdx.CodeRegisters
 		code, err = tdxCodeRegisters(expected.CodeMeasurement)
 		if err == nil {
@@ -154,9 +154,9 @@ func Assemble(endorsements *endorsement.Artifact, expected Expected, q *Authenti
 // translation, and no recomputation.
 func (p *AssembledPolicy) Validate() error {
 	switch p.quote.Platform {
-	case endorsement.PlatformSEVSNP:
+	case policy.PlatformSEVSNP:
 		return p.sev.Validate(p.quote.sev)
-	case endorsement.PlatformTDX:
+	case policy.PlatformTDX:
 		return p.tdx.Validate(p.quote.tdx)
 	default:
 		return fmt.Errorf("unsupported platform %q", p.quote.Platform)
@@ -164,7 +164,7 @@ func (p *AssembledPolicy) Validate() error {
 }
 
 // Verify composes Authenticate, Assemble, and Validate.
-func Verify(doc *envelope.Document, expected Expected, endorsements *endorsement.Artifact) (*AssembledPolicy, *Authenticated, error) {
+func Verify(doc *envelope.Document, expected Expected, endorsements *policy.Artifact) (*AssembledPolicy, *Authenticated, error) {
 	q, err := Authenticate(doc)
 	if err != nil {
 		return nil, nil, err

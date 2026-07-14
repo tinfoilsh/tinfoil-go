@@ -6,7 +6,7 @@ import (
 
 	tdxvalidate "github.com/google/go-tdx-guest/validate"
 
-	"github.com/tinfoilsh/tinfoil-go/verifier/endorsement"
+	"github.com/tinfoilsh/tinfoil-go/verifier/policy"
 )
 
 // CodeRegisters are the expected workload registers from code provenance.
@@ -33,7 +33,7 @@ type Expectations struct {
 // outside the endorsed set fails assembly; every register comparison then
 // happens inside the library. The returned name identifies the resolved
 // measurements-map entry.
-func Assemble(a *endorsement.Artifact, p *endorsement.TDXPolicy, required *endorsement.Shape, q *Quote, code CodeRegisters, reportData [64]byte) (*Expectations, string, error) {
+func Assemble(a *policy.Artifact, p *policy.TDXPolicy, required *policy.Shape, q *Quote, code CodeRegisters, reportData [64]byte) (*Expectations, string, error) {
 	opts, err := options(p)
 	if err != nil {
 		return nil, "", err
@@ -86,7 +86,7 @@ func (e *Expectations) Validate(q *Quote) error {
 // options translates the policy block into go-tdx-guest validation options.
 // The tcbEvaluationDataNumber floor is not expressible in the library
 // options and is enforced by the companion check composed in Validate.
-func options(p *endorsement.TDXPolicy) (*tdxvalidate.Options, error) {
+func options(p *policy.TDXPolicy) (*tdxvalidate.Options, error) {
 	qeVendor, err := hexField("qe_vendor_id", p.QEVendorID, 16)
 	if err != nil {
 		return nil, err

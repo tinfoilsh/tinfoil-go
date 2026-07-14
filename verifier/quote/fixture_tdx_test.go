@@ -15,7 +15,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/tinfoilsh/tinfoil-go/verifier/endorsement"
+	"github.com/tinfoilsh/tinfoil-go/verifier/policy"
 	"github.com/tinfoilsh/tinfoil-go/verifier/envelope"
 	"github.com/tinfoilsh/tinfoil-go/verifier/measurement"
 )
@@ -63,7 +63,7 @@ func TestVerifyLiveFixtureTDX(t *testing.T) {
 	require.NoError(t, allowObservedShape(doc, artifact))
 	assembled, verified, err := Verify(doc, expected, artifact)
 	require.NoError(t, err)
-	assert.Equal(t, endorsement.PlatformTDX, verified.Platform)
+	assert.Equal(t, policy.PlatformTDX, verified.Platform)
 	assert.Equal(t, tdxFixturePolicy(t), assembled.PolicyName)
 	assert.Equal(t, "dev-shape", assembled.PlatformMeasurementName)
 	require.NotNil(t, verified.Measurement)
@@ -73,7 +73,7 @@ func TestVerifyLiveFixtureTDX(t *testing.T) {
 
 // allowObservedShape adds the quote's own MRTD/RTMR0 to every TDX policy as
 // an allowed platform configuration (test only).
-func allowObservedShape(doc *envelope.Document, artifact *endorsement.Artifact) error {
+func allowObservedShape(doc *envelope.Document, artifact *policy.Artifact) error {
 	raw, err := base64.StdEncoding.DecodeString(doc.CPUEvidence.ReportBase64)
 	if err != nil {
 		return err
@@ -87,7 +87,7 @@ func allowObservedShape(doc *envelope.Document, artifact *endorsement.Artifact) 
 		return fmt.Errorf("unsupported TDX quote version (want v4)")
 	}
 	body := quote.GetTdQuoteBody()
-	artifact.Measurements["dev-shape"] = endorsement.PlatformMeasurement{
+	artifact.Measurements["dev-shape"] = policy.PlatformMeasurement{
 		MRTD:  hex.EncodeToString(body.GetMrTd()),
 		RTMR0: hex.EncodeToString(body.GetRtmrs()[0]),
 	}

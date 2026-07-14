@@ -1,4 +1,4 @@
-package endorsement
+package policy
 
 import (
 	"os"

@@ -1,7 +1,10 @@
-// Package endorsement defines the schema of the Sigstore-signed
-// platform-endorsements artifact (predicate
+// Package policy defines the appraisal-policy language: the schema of the
+// Sigstore-signed platform-endorsements artifact (predicate
 // https://tinfoil.sh/predicate/platform-endorsements/v1) and the
-// authenticated lookups over it.
+// authenticated lookups over it. The artifact's wire name predates the
+// RATS vocabulary: its contents are reference values and appraisal
+// policies, not RATS endorsements (those are the hardware-vendor
+// collateral entries).
 //
 // The artifact maps hardware identifiers to named policies:
 //   - AMD SEV-SNP machines are keyed by the 64-byte CHIP_ID report field
@@ -12,7 +15,7 @@
 // Parsing is fail-closed: unknown JSON fields, malformed identifiers,
 // dangling policy references, or platform mismatches are errors. A policy
 // that cannot be fully enforced must never be partially applied.
-package endorsement
+package policy
 
 import (
 	"fmt"
@@ -53,129 +56,12 @@ type PlatformMeasurement struct {
 	Stack *Stack `json:"stack,omitempty"`
 }
 
-// Shape is the canonical VM shape descriptor: the launch dimensions that
-// determine a platform measurement. Disks counts every attached disk
-// (root, config, external config, one per model). GPUs is nil when the
-// dimension is unknown for a measured slug; a code artifact always
-// declares it.
-type Shape struct {
-	CPUs     int  `json:"cpus"`
-	MemoryMB int  `json:"memory_mb"`
-	GPUs     *int `json:"gpus,omitempty"`
-	Disks    int  `json:"disks"`
-}
-
-// Satisfies reports whether a measured slug shape satisfies the shape a
-// code artifact requires. GPUs is compared only when the slug declares it.
-func (s *Shape) Satisfies(required *Shape) bool {
-	if s.CPUs != required.CPUs || s.MemoryMB != required.MemoryMB || s.Disks != required.Disks {
-		return false
-	}
-	if s.GPUs != nil && required.GPUs != nil && *s.GPUs != *required.GPUs {
-		return false
-	}
-	return true
-}
-
-// Stack identifies the host software that produced a measurement.
-type Stack struct {
-	QEMU string `json:"qemu,omitempty"`
-	OVMF string `json:"ovmf,omitempty"`
-}
-
 // Policy is a named appraisal policy. Exactly one platform block is set,
 // matching Platform.
 type Policy struct {
 	Platform string        `json:"platform"`
 	SEVSNP   *SEVSNPPolicy `json:"sev_snp,omitempty"`
 	TDX      *TDXPolicy    `json:"tdx,omitempty"`
-}
-
-// SEVSNPPolicy is the standard SEV-SNP policy block. Optional expected-value
-// fields (host_data, image_id, family_id) are unchecked when absent.
-type SEVSNPPolicy struct {
-	MinimumBuild              uint8       `json:"minimum_build"`
-	MinimumAPIVersion         string      `json:"minimum_api_version"`
-	MinimumGuestSVN           uint32      `json:"minimum_guest_svn"`
-	MinimumTCB                TCB         `json:"minimum_tcb"`
-	MinimumLaunchTCB          TCB         `json:"minimum_launch_tcb"`
-	GuestPolicy               GuestPolicy `json:"guest_policy"`
-	PlatformInfo              SNPPlatform `json:"platform_info"`
-	PermitProvisionalFirmware bool        `json:"permit_provisional_firmware"`
-	VMPL                      *int        `json:"vmpl"`
-
-	// HostData pins the report HOST_DATA field (32 bytes, lowercase hex).
-	HostData *string `json:"host_data,omitempty"`
-	// ImageID pins the report IMAGE_ID field (16 bytes, lowercase hex).
-	ImageID *string `json:"image_id,omitempty"`
-	// FamilyID pins the report FAMILY_ID field (16 bytes, lowercase hex).
-	FamilyID *string `json:"family_id,omitempty"`
-	// RequireAuthorKey requires AUTHOR_KEY_EN=1 (implies RequireIDBlock).
-	RequireAuthorKey bool `json:"require_author_key,omitempty"`
-	// RequireIDBlock requires a trusted ID block signature chain.
-	RequireIDBlock bool `json:"require_id_block,omitempty"`
-	// MinimumLaunchMitigationVector and MinimumCurrentMitigationVector are
-	// the mitigation bits that must be present in the report.
-	MinimumLaunchMitigationVector  uint64 `json:"minimum_launch_mitigation_vector,omitempty"`
-	MinimumCurrentMitigationVector uint64 `json:"minimum_current_mitigation_vector,omitempty"`
-}
-
-// TCB holds AMD security patch levels. FmcSpl applies to family 1Ah (Turin)
-// parts only, which are not yet supported for verification.
-type TCB struct {
-	FmcSpl   *uint8 `json:"fmc_spl,omitempty"`
-	BlSpl    uint8  `json:"bl_spl"`
-	TeeSpl   uint8  `json:"tee_spl"`
-	SnpSpl   uint8  `json:"snp_spl"`
-	UcodeSpl uint8  `json:"ucode_spl"`
-}
-
-// GuestPolicy mirrors the SNP guest policy bits enforced at verification.
-// All bits are compared: a bit absent from the policy JSON is false and the
-// report must have it clear.
-type GuestPolicy struct {
-	Debug        bool `json:"debug"`
-	SMT          bool `json:"smt"`
-	MigrateMA    bool `json:"migrate_ma"`
-	SingleSocket bool `json:"single_socket"`
-	CXLAllowed   bool `json:"cxl_allowed,omitempty"`
-	MemAES256XTS bool `json:"mem_aes256_xts,omitempty"`
-	RAPLDis      bool `json:"rapl_dis,omitempty"`
-	// CiphertextHidingDRAM here is the guest-policy bit, distinct from the
-	// PLATFORM_INFO field of the same name.
-	CiphertextHidingDRAM bool `json:"ciphertext_hiding_dram,omitempty"`
-	PageSwapDisable      bool `json:"page_swap_disable,omitempty"`
-}
-
-// SNPPlatform mirrors the SNP PLATFORM_INFO expectations. All fields are
-// compared by strict equality against the report, so machines with
-// different host configurations need distinct policies.
-type SNPPlatform struct {
-	SMTEnabled           bool `json:"smt_enabled"`
-	TSMEEnabled          bool `json:"tsme_enabled"`
-	ECCEnabled           bool `json:"ecc_enabled"`
-	RAPLDisabled         bool `json:"rapl_disabled"`
-	CiphertextHidingDRAM bool `json:"ciphertext_hiding_dram"`
-	AliasCheckComplete   bool `json:"alias_check_complete,omitempty"`
-	TIOEnabled           bool `json:"tio_enabled,omitempty"`
-}
-
-// TDXPolicy is the standard Intel TDX policy block. PlatformMeasurements
-// names the measurements-map entries the machine is endorsed to run; the
-// quote's own MRTD/RTMR0 select exactly one of them at policy assembly.
-type TDXPolicy struct {
-	QEVendorID                     string   `json:"qe_vendor_id"`
-	MinimumQESVN                   uint16   `json:"minimum_qe_svn"`
-	MinimumPCESVN                  uint16   `json:"minimum_pce_svn"`
-	MinimumTEETCBSVN               string   `json:"minimum_tee_tcb_svn"`
-	MRSeam                         string   `json:"mr_seam"`
-	TDAttributes                   string   `json:"td_attributes"`
-	XFAM                           string   `json:"xfam"`
-	MRConfigIDZero                 bool     `json:"mr_config_id_zero"`
-	MROwnerZero                    bool     `json:"mr_owner_zero"`
-	MROwnerConfigZero              bool     `json:"mr_owner_config_zero"`
-	MinimumTCBEvaluationDataNumber int      `json:"minimum_tcb_evaluation_data_number"`
-	PlatformMeasurements           []string `json:"platform_measurements"`
 }
 
 // Parse strictly decodes and validates a platform-endorsements

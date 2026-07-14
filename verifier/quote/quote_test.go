@@ -13,7 +13,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/tinfoilsh/tinfoil-go/verifier/endorsement"
+	"github.com/tinfoilsh/tinfoil-go/verifier/policy"
 	"github.com/tinfoilsh/tinfoil-go/verifier/envelope"
 	"github.com/tinfoilsh/tinfoil-go/verifier/measurement"
 	"github.com/tinfoilsh/tinfoil-go/verifier/util"
@@ -83,11 +83,11 @@ func loadSEVFixture(t *testing.T) (*envelope.Document, [64]byte) {
 	}, reportData
 }
 
-func loadEndorsementArtifact(t *testing.T) *endorsement.Artifact {
+func loadEndorsementArtifact(t *testing.T) *policy.Artifact {
 	t.Helper()
-	artifactBytes, err := os.ReadFile(filepath.Join("..", "endorsement", "testdata", "platform-endorsements.json"))
+	artifactBytes, err := os.ReadFile(filepath.Join("..", "policy", "testdata", "platform-endorsements.json"))
 	require.NoError(t, err)
-	artifact, err := endorsement.Parse(artifactBytes)
+	artifact, err := policy.Parse(artifactBytes)
 	require.NoError(t, err)
 	return artifact
 }
@@ -108,7 +108,7 @@ func TestVerifySEV(t *testing.T) {
 
 	assembled, verified, err := Verify(doc, expected, artifact)
 	require.NoError(t, err)
-	assert.Equal(t, endorsement.PlatformSEVSNP, verified.Platform)
+	assert.Equal(t, policy.PlatformSEVSNP, verified.Platform)
 	assert.Equal(t, "amd-genoa-prod", assembled.PolicyName)
 	assert.NotEmpty(t, verified.Identity)
 	require.NotNil(t, verified.Measurement)
@@ -177,7 +177,7 @@ func TestVerifySEVWithCRL(t *testing.T) {
 
 	_, verified, err := Verify(doc, expected, artifact)
 	require.NoError(t, err)
-	assert.Equal(t, endorsement.PlatformSEVSNP, verified.Platform)
+	assert.Equal(t, policy.PlatformSEVSNP, verified.Platform)
 
 	// A CRL that does not parse must reject rather than being skipped.
 	badCRL, err := json.Marshal(envelope.AMDCRLCollateral{
@@ -193,7 +193,7 @@ func TestVerifyUnknownFormat(t *testing.T) {
 	doc := &envelope.Document{
 		CPUEvidence: envelope.CPUEvidence{Format: "https://tinfoil.sh/format/unknown/v1"},
 	}
-	_, _, err := Verify(doc, Expected{}, &endorsement.Artifact{})
+	_, _, err := Verify(doc, Expected{}, &policy.Artifact{})
 	assert.Error(t, err)
 	assert.Contains(t, fmt.Sprint(err), "unsupported cpu_evidence format")
 }

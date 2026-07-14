@@ -11,7 +11,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/tinfoilsh/tinfoil-go/verifier/endorsement"
+	"github.com/tinfoilsh/tinfoil-go/verifier/policy"
 	"github.com/tinfoilsh/tinfoil-go/verifier/envelope"
 )
 
@@ -49,7 +49,7 @@ func loadLiveFixture(t *testing.T, dir string) (*envelope.Document, [64]byte, []
 // against a v3 document captured from real SEV-SNP Genoa hardware over the
 // single-request flow (evidence + collateral in one response). Everything
 // here is offline: the VCEK comes from the document's own collateral and the
-// endorsement artifact from the endorsement package's testdata. Skips when
+// endorsement artifact from the policy package's testdata. Skips when
 // the workspace fixture directory is not present.
 func TestVerifyLiveFixtureSEV(t *testing.T) {
 	doc, reportData, _ := loadLiveFixture(t, "box3-genoa-v3")
@@ -76,6 +76,6 @@ func TestVerifyLiveFixtureSEV(t *testing.T) {
 		Expected{ReportData: reportData, CodeMeasurement: q.Measurement},
 		loadEndorsementArtifact(t))
 	require.NoError(t, err)
-	assert.Equal(t, endorsement.PlatformSEVSNP, verified.Platform)
+	assert.Equal(t, policy.PlatformSEVSNP, verified.Platform)
 	assert.Equal(t, "amd-genoa-dev", assembled.PolicyName)
 }

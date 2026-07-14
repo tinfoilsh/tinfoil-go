@@ -20,7 +20,7 @@ import (
 	in_toto "github.com/in-toto/attestation/go/v1"
 	"google.golang.org/protobuf/types/known/structpb"
 
-	"github.com/tinfoilsh/tinfoil-go/verifier/endorsement"
+	"github.com/tinfoilsh/tinfoil-go/verifier/policy"
 	"github.com/tinfoilsh/tinfoil-go/verifier/measurement"
 )
 
@@ -194,7 +194,7 @@ type Code struct {
 	Measurement *measurement.Measurement
 	// Shape is the VM shape the artifact declares; nil when the predicate
 	// carries no vm_shape field.
-	Shape *endorsement.Shape
+	Shape *policy.Shape
 }
 
 // VerifyCode verifies a code-provenance bundle against the repo's signing
@@ -217,7 +217,7 @@ func (c *Client) VerifyCode(bundleJSON []byte, repo, hexDigest string) (*Code, e
 }
 
 // shapeFromPredicate parses the optional vm_shape predicate member.
-func shapeFromPredicate(fields map[string]*structpb.Value) (*endorsement.Shape, error) {
+func shapeFromPredicate(fields map[string]*structpb.Value) (*policy.Shape, error) {
 	v, ok := fields["vm_shape"]
 	if !ok {
 		return nil, nil
@@ -226,7 +226,7 @@ func shapeFromPredicate(fields map[string]*structpb.Value) (*endorsement.Shape, 
 	if s == nil {
 		return nil, fmt.Errorf("vm_shape is not an object")
 	}
-	shape := &endorsement.Shape{GPUs: new(int)}
+	shape := &policy.Shape{GPUs: new(int)}
 	for name, dst := range map[string]*int{
 		"cpus":      &shape.CPUs,
 		"memory_mb": &shape.MemoryMB,
@@ -295,13 +295,13 @@ func measurementFromStatement(statement *in_toto.Statement) (*measurement.Measur
 // VerifyPlatformEndorsements verifies a Sigstore bundle for the
 // platform-endorsements artifact against the publisher identity and returns
 // the parsed, validated artifact.
-func (c *Client) VerifyPlatformEndorsements(bundleJSON []byte, hexDigest string) (*endorsement.Artifact, error) {
+func (c *Client) VerifyPlatformEndorsements(bundleJSON []byte, hexDigest string) (*policy.Artifact, error) {
 	result, err := c.verifyBundleWithIdentity(bundleJSON, platformEndorsementsIdentity, hexDigest)
 	if err != nil {
 		return nil, fmt.Errorf("verifying platform endorsements bundle: %w", err)
 	}
 
-	if result.Statement.PredicateType != endorsement.ArtifactFormat {
+	if result.Statement.PredicateType != policy.ArtifactFormat {
 		return nil, fmt.Errorf("unexpected predicate type: %s", result.Statement.PredicateType)
 	}
 
@@ -309,5 +309,5 @@ func (c *Client) VerifyPlatformEndorsements(bundleJSON []byte, hexDigest string)
 	if err != nil {
 		return nil, fmt.Errorf("encoding platform endorsements predicate: %w", err)
 	}
-	return endorsement.Parse(predicateJSON)
+	return policy.Parse(predicateJSON)
 }
