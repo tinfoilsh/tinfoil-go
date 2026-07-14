@@ -2,6 +2,7 @@ package sev
 
 import (
 	"bytes"
+	"encoding/hex"
 	"fmt"
 	"strconv"
 	"strings"
@@ -29,19 +30,24 @@ type Expectations struct {
 }
 
 // Assemble translates a policy block into the complete expected state for
-// a quote: validation options carrying every policy field, the expected
-// launch measurement, and the expected REPORT_DATA. Only Genoa is
-// supported.
-func Assemble(p *policy.SEVSNPPolicy, productLine string, launchDigest []byte, reportData [64]byte) (*Expectations, error) {
-	opts, err := options(p, productLine)
+// the quote: validation options carrying every policy field, the expected
+// launch measurement, the expected REPORT_DATA, and the endorsed CHIP_ID
+// the policy was selected by. Only Genoa is supported.
+func Assemble(p *policy.SEVSNPPolicy, q *Quote, launchDigest []byte, reportData [64]byte) (*Expectations, error) {
+	opts, err := options(p, q.ProductLine())
 	if err != nil {
 		return nil, err
 	}
 	if len(launchDigest) != 48 {
 		return nil, fmt.Errorf("expected launch digest must be 48 bytes, got %d", len(launchDigest))
 	}
+	chipID, err := hex.DecodeString(q.Identity)
+	if err != nil {
+		return nil, fmt.Errorf("decoding platform identity: %w", err)
+	}
 	opts.Measurement = launchDigest
 	opts.ReportData = reportData[:]
+	opts.ChipID = chipID
 	return &Expectations{
 		opts:             opts,
 		wantGuestPolicy:  expectedGuestPolicy(p),

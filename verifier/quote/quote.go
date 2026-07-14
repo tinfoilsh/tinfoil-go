@@ -114,7 +114,7 @@ func Assemble(endorsements *policy.Artifact, code *measurement.Measurement, shap
 		var digest []byte
 		digest, err = sevLaunchDigest(code)
 		if err == nil {
-			assembled.sev, err = sev.Assemble(machinePolicy.SEVSNP, q.sev.ProductLine(), digest, reportData)
+			assembled.sev, err = sev.Assemble(machinePolicy.SEVSNP, q.sev, digest, reportData)
 		}
 	case policy.PlatformTDX:
 		var registers tdx.CodeRegisters
