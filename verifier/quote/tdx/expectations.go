@@ -107,11 +107,13 @@ func options(p *policy.TDXPolicy) (*tdxvalidate.Options, error) {
 
 	// MR_CONFIG_ID, MR_OWNER, and MR_OWNER_CONFIG are unconditionally
 	// pinned to zero: Tinfoil launches never populate them.
+	// The QE and PCE security versions are enforced by quote verification
+	// against Intel's signed QE Identity and TCB Info collateral; the
+	// library's header minimums compare reserved header bytes (pinned to
+	// zero at authentication) and are left unset.
 	return &tdxvalidate.Options{
 		HeaderOptions: tdxvalidate.HeaderOptions{
-			MinimumQeSvn:  *p.MinimumQESVN,
-			MinimumPceSvn: *p.MinimumPCESVN,
-			QeVendorID:    qeVendor,
+			QeVendorID: qeVendor,
 		},
 		TdQuoteBodyOptions: tdxvalidate.TdQuoteBodyOptions{
 			MinimumTeeTcbSvn: teeTcbSvn,

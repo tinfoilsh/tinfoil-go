@@ -4,6 +4,7 @@
 package tdx
 
 import (
+	"bytes"
 	"crypto/x509"
 	_ "embed"
 	"encoding/base64"
@@ -56,6 +57,20 @@ func Authenticate(doc *envelope.Document) (*Quote, error) {
 	quote, ok := parsed.(*tdxpb.QuoteV4)
 	if !ok {
 		return nil, fmt.Errorf("unsupported TDX quote version (want v4)")
+	}
+	// The library parses but never constrains these: header bytes 8-11 are
+	// reserved in quote v4 (exposed as QeSvn/PceSvn), and bytes past the
+	// signed data are kept as ExtraBytes. Reserved bytes must be zero;
+	// trailing bytes may only be the zero padding of the fixed-size buffer
+	// the quote was read from — anything non-zero is unsigned content.
+	header := quote.GetHeader()
+	if !bytes.Equal(header.GetQeSvn(), []byte{0, 0}) || !bytes.Equal(header.GetPceSvn(), []byte{0, 0}) {
+		return nil, fmt.Errorf("TDX quote header carries non-zero reserved bytes")
+	}
+	for _, b := range quote.GetExtraBytes() {
+		if b != 0 {
+			return nil, fmt.Errorf("TDX quote carries non-zero bytes after the signed data")
+		}
 	}
 
 	// The recorder observes the tcbEvaluationDataNumber of the collateral

@@ -9,8 +9,6 @@ import "fmt"
 // meaningful zero — Validate rejects any absent member.
 type TDXPolicy struct {
 	QEVendorID                     string   `json:"qe_vendor_id"`
-	MinimumQESVN                   *uint16  `json:"minimum_qe_svn"`
-	MinimumPCESVN                  *uint16  `json:"minimum_pce_svn"`
 	MinimumTEETCBSVN               string   `json:"minimum_tee_tcb_svn"`
 	MRSeam                         string   `json:"mr_seam"`
 	TDAttributes                   string   `json:"td_attributes"`
@@ -32,10 +30,6 @@ func (p *TDXPolicy) Validate() error {
 		return fmt.Errorf("td_attributes is required")
 	case p.XFAM == "":
 		return fmt.Errorf("xfam is required")
-	case p.MinimumQESVN == nil:
-		return fmt.Errorf("minimum_qe_svn is required")
-	case p.MinimumPCESVN == nil:
-		return fmt.Errorf("minimum_pce_svn is required")
 	case p.MinimumTCBEvaluationDataNumber == nil:
 		return fmt.Errorf("minimum_tcb_evaluation_data_number is required")
 	case *p.MinimumTCBEvaluationDataNumber < 0:

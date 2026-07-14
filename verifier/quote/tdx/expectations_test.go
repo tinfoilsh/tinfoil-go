@@ -74,8 +74,6 @@ func TestValidate(t *testing.T) {
 	minTCBEval := 5
 	matching := &policy.TDXPolicy{
 		QEVendorID:                     hex.EncodeToString(proto.GetHeader().GetQeVendorId()),
-		MinimumQESVN:                   new(uint16),
-		MinimumPCESVN:                  new(uint16),
 		MinimumTEETCBSVN:               hex.EncodeToString(body.GetTeeTcbSvn()),
 		MRSeam:                         hex.EncodeToString(body.GetMrSeam()),
 		TDAttributes:                   hex.EncodeToString(body.GetTdAttributes()),

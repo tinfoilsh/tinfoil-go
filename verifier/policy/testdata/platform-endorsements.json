@@ -307,8 +307,6 @@
     "tdx-b200-prod": {
       "platform": "tdx",
       "tdx": {
-        "minimum_pce_svn": 0,
-        "minimum_qe_svn": 0,
         "minimum_tcb_evaluation_data_number": 19,
         "minimum_tee_tcb_svn": "03010200000000000000000000000000",
         "mr_seam": "476a2997c62bccc78370913d0a80b956e3721b24272bc66c4d6307ced4be2865c40e26afac75f12df3425b03eb59ea7c",
@@ -324,8 +322,6 @@
     "tdx-b300-prod": {
       "platform": "tdx",
       "tdx": {
-        "minimum_pce_svn": 0,
-        "minimum_qe_svn": 0,
         "minimum_tcb_evaluation_data_number": 19,
         "minimum_tee_tcb_svn": "03010200000000000000000000000000",
         "mr_seam": "476a2997c62bccc78370913d0a80b956e3721b24272bc66c4d6307ced4be2865c40e26afac75f12df3425b03eb59ea7c",
@@ -341,8 +337,6 @@
     "tdx-h200-prod": {
       "platform": "tdx",
       "tdx": {
-        "minimum_pce_svn": 0,
-        "minimum_qe_svn": 0,
         "minimum_tcb_evaluation_data_number": 19,
         "minimum_tee_tcb_svn": "03010200000000000000000000000000",
         "mr_seam": "7bf063280e94fb051f5dd7b1fc59ce9aac42bb961df8d44b709c9b0ff87a7b4df648657ba6d1189589feab1d5a3c9a9d",
