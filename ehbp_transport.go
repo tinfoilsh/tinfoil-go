@@ -101,6 +101,21 @@ func WithOpenAIOptions(opts ...option.RequestOption) ClientOption {
 // functional options. By default it selects a router automatically, verifies
 // against the default config repository, and uses the EHBP transport.
 func NewClientWithOptions(opts ...ClientOption) (*Client, error) {
+	cfg, err := newClientConfig(opts)
+	if err != nil {
+		return nil, err
+	}
+	secureClient, err := newSecureClientFromConfig(cfg)
+	if err != nil {
+		return nil, err
+	}
+	return createClientFromSecureClient(secureClient, cfg.transport, cfg.baseURL,
+		ResolveUserCacheSecret(cfg.userCacheSecret, cfg.userCacheSecretSet), cfg.openaiOpts...)
+}
+
+// newClientConfig applies the options over the defaults and validates the
+// resulting configuration.
+func newClientConfig(opts []ClientOption) (*clientConfig, error) {
 	cfg := &clientConfig{
 		repo:      defaultConfigRepo,
 		transport: defaultTransportMode,
@@ -121,26 +136,28 @@ func NewClientWithOptions(opts ...ClientOption) (*Client, error) {
 			return nil, fmt.Errorf("invalid base URL: %w", err)
 		}
 	}
+	return cfg, nil
+}
 
-	var secureClient *client.SecureClient
+// newSecureClientFromConfig builds the secure client for the configured
+// enclave, selecting a router automatically when none is pinned.
+func newSecureClientFromConfig(cfg *clientConfig) (*client.SecureClient, error) {
 	switch {
 	case cfg.attestationBundleURL != "":
 		// The verified bundle supplies the enclave host, so the router lookup
 		// in NewDefaultClient is unnecessary even when no enclave is set.
-		secureClient = client.NewSecureClient(cfg.enclave, cfg.repo)
+		secureClient := client.NewSecureClient(cfg.enclave, cfg.repo)
 		secureClient.SetAttestationBundleURL(cfg.attestationBundleURL)
+		return secureClient, nil
 	case cfg.enclave == "":
-		var err error
-		secureClient, err = client.NewDefaultClient()
+		secureClient, err := client.NewDefaultClient()
 		if err != nil {
 			return nil, fmt.Errorf("failed to create secure client: %w", err)
 		}
+		return secureClient, nil
 	default:
-		secureClient = client.NewSecureClient(cfg.enclave, cfg.repo)
+		return client.NewSecureClient(cfg.enclave, cfg.repo), nil
 	}
-
-	return createClientFromSecureClient(secureClient, cfg.transport, cfg.baseURL,
-		ResolveUserCacheSecret(cfg.userCacheSecret, cfg.userCacheSecretSet), cfg.openaiOpts...)
 }
 
 // secureHTTPClient builds an *http.Client for the requested transport mode.
@@ -150,6 +167,35 @@ func NewClientWithOptions(opts ...ClientOption) (*Client, error) {
 // them in transit, but sending them to another origin would disclose them to
 // that endpoint. Requests to any other origin are therefore refused.
 func secureHTTPClient(secureClient *client.SecureClient, mode TransportMode, baseURL, userCacheSecret string) (*http.Client, error) {
+	httpClient, err := sealingHTTPClient(secureClient, mode, baseURL)
+	if err != nil {
+		return nil, err
+	}
+
+	// The cache-secret layer sits above the sealing transport, so the field it
+	// injects is encrypted with the rest of the body (EHBP) or sent over the
+	// pinned connection (TLS).
+	transport := httpClient.Transport
+	if userCacheSecret != "" {
+		transport = &userCacheSecretTransport{
+			secret:    userCacheSecret,
+			transport: transport,
+		}
+	}
+
+	guarded, err := NewHostBoundTransport(secureClient.Enclave(), baseURL, transport)
+	if err != nil {
+		return nil, err
+	}
+	httpClient.Transport = guarded
+	return httpClient, nil
+}
+
+// sealingHTTPClient builds the HTTP client for the requested transport mode:
+// pinned TLS or EHBP, both re-verifying attestation automatically when the
+// enclave rotates its keys. The returned client carries no cache-secret or
+// origin-binding layers.
+func sealingHTTPClient(secureClient *client.SecureClient, mode TransportMode, baseURL string) (*http.Client, error) {
 	var (
 		httpClient *http.Client
 		err        error
@@ -170,28 +216,25 @@ func secureHTTPClient(secureClient *client.SecureClient, mode TransportMode, bas
 			return nil, err
 		}
 	}
+	return httpClient, nil
+}
 
-	// The cache-secret layer sits above the sealing transport, so the field it
-	// injects is encrypted with the rest of the body (EHBP) or sent over the
-	// pinned connection (TLS).
-	transport := httpClient.Transport
-	if userCacheSecret != "" {
-		transport = &userCacheSecretTransport{
-			secret:    userCacheSecret,
-			transport: transport,
-		}
-	}
-
-	origins, err := allowedOrigins(secureClient.Enclave(), baseURL)
+// NewHostBoundTransport wraps rt so requests may only target the verified
+// enclave's HTTPS origin and, when baseURL is non-empty, the base URL's
+// origin. Requests to any other origin are refused before credentials or
+// request bodies are sent. Consumers composing their own stack on top of a
+// VerifiedTransport should place layers that mutate requests inside this
+// guard.
+func NewHostBoundTransport(enclave, baseURL string, rt http.RoundTripper) (http.RoundTripper, error) {
+	origins, err := allowedOrigins(enclave, baseURL)
 	if err != nil {
 		return nil, fmt.Errorf("failed to determine allowed request origins: %w", err)
 	}
-	httpClient.Transport = &hostBoundRoundTripper{
+	return &hostBoundRoundTripper{
 		allowedOrigins: origins,
-		enclave:        secureClient.Enclave(),
-		transport:      transport,
-	}
-	return httpClient, nil
+		enclave:        enclave,
+		transport:      rt,
+	}, nil
 }
 
 // allowedOrigins returns the set of origins a secured request may target: the
