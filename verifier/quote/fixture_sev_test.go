@@ -52,6 +52,9 @@ func loadLiveFixture(t *testing.T, dir string) (*envelope.Document, [64]byte, []
 // endorsement artifact from the policy package's testdata. Skips when
 // the workspace fixture directory is not present.
 func TestVerifyLiveFixtureSEV(t *testing.T) {
+	if testing.Short() {
+		t.Skip("fetches the AMD CRL live; skipped with -short")
+	}
 	doc, reportData, _ := loadLiveFixture(t, "box3-genoa-v3")
 
 	// The endorsed key material must be present and well-formed.
@@ -70,11 +73,10 @@ func TestVerifyLiveFixtureSEV(t *testing.T) {
 	require.NoError(t, err)
 	assert.NotEmpty(t, platformRef.Digest)
 
+	appendLiveCRL(t, doc)
 	q, err := Authenticate(doc)
 	require.NoError(t, err)
-	assembled, verified, err := Verify(doc,
-		Expected{ReportData: reportData, CodeMeasurement: q.Measurement},
-		loadEndorsementArtifact(t))
+	assembled, verified, err := Verify(doc, loadEndorsementArtifact(t), q.Measurement, testShape, reportData)
 	require.NoError(t, err)
 	assert.Equal(t, policy.PlatformSEVSNP, verified.Platform)
 	assert.Equal(t, "amd-genoa-dev", assembled.PolicyName)

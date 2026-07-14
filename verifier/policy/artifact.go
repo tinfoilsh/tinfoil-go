@@ -1,20 +1,11 @@
-// Package policy defines the appraisal-policy language: the schema of the
-// Sigstore-signed platform-endorsements artifact (predicate
-// https://tinfoil.sh/predicate/platform-endorsements/v1) and the
-// authenticated lookups over it. The artifact's wire name predates the
-// RATS vocabulary: its contents are reference values and appraisal
-// policies, not RATS endorsements (those are the hardware-vendor
-// collateral entries).
+// Package policy defines what a verified quote is appraised against: which
+// machines are endorsed, which platform configurations they may run, and
+// the policy each must satisfy. Inputs must come from a verified
+// reference-values source; the package itself performs no cryptography.
 //
-// The artifact maps hardware identifiers to named policies:
-//   - AMD SEV-SNP machines are keyed by the 64-byte CHIP_ID report field
-//     (128 lowercase hex chars; Turin hardware IDs are zero-padded)
-//   - Intel TDX machines are keyed by the 16-byte PPID (32 lowercase hex
-//     chars) carried in the PCK leaf certificate of every quote
-//
-// Parsing is fail-closed: unknown JSON fields, malformed identifiers,
-// dangling policy references, or platform mismatches are errors. A policy
-// that cannot be fully enforced must never be partially applied.
+// Parsing is fail-closed: unknown members, malformed identifiers, dangling
+// references, or platform mismatches are errors. A policy that cannot be
+// fully enforced is never partially applied.
 package policy
 
 import (
@@ -24,7 +15,7 @@ import (
 	"github.com/tinfoilsh/tinfoil-go/verifier/internal/strictjson"
 )
 
-// ArtifactFormat is the required format URI of the platform-endorsements artifact.
+// ArtifactFormat is the required format URI of the artifact.
 const ArtifactFormat = "https://tinfoil.sh/predicate/platform-endorsements/v1"
 
 const (
@@ -39,20 +30,26 @@ const (
 
 var lowerHexRE = regexp.MustCompile(`^[0-9a-f]+$`)
 
-// Artifact is the parsed platform-endorsements document.
+// Artifact is the parsed policy document: named platform measurements,
+// named policies, and the machines map keying both by hardware identity.
 type Artifact struct {
 	Format       string                         `json:"format"`
 	Measurements map[string]PlatformMeasurement `json:"measurements"`
-	Machines     map[string]string              `json:"machines"`
-	Policies     map[string]Policy              `json:"policies"`
+	// Machines maps a machine's hardware identifier to its policy name.
+	// SEV-SNP machines are keyed by the 64-byte CHIP_ID (128 lowercase hex
+	// chars), TDX machines by the 16-byte PPID (32 lowercase hex chars).
+	Machines map[string]string `json:"machines"`
+	Policies map[string]Policy `json:"policies"`
 }
 
-// PlatformMeasurement is one TDX platform configuration's expected registers,
-// optionally annotated with the VM shape and host stack it was measured for.
+// PlatformMeasurement is one TDX platform configuration's expected
+// registers, annotated with the VM shape it was measured for and,
+// optionally, the host stack that produced it.
 type PlatformMeasurement struct {
 	MRTD  string `json:"mrtd"`
 	RTMR0 string `json:"rtmr0"`
-	Shape *Shape `json:"shape,omitempty"`
+	Shape *Shape `json:"shape"`
+	// Stack is informational and never checked.
 	Stack *Stack `json:"stack,omitempty"`
 }
 
@@ -64,13 +61,13 @@ type Policy struct {
 	TDX      *TDXPolicy    `json:"tdx,omitempty"`
 }
 
-// Parse strictly decodes and validates a platform-endorsements
-// artifact. Unknown members anywhere in the document are rejected
-// case-sensitively, as are duplicate member names.
+// Parse strictly decodes and validates a policy artifact. Unknown members
+// anywhere in the document are rejected case-sensitively, as are duplicate
+// member names.
 func Parse(data []byte) (*Artifact, error) {
 	var a Artifact
 	if err := strictjson.Unmarshal(data, &a); err != nil {
-		return nil, fmt.Errorf("parsing platform-endorsements artifact: %w", err)
+		return nil, fmt.Errorf("parsing policy artifact: %w", err)
 	}
 	if a.Format != ArtifactFormat {
 		return nil, fmt.Errorf("unsupported artifact format %q", a.Format)
@@ -88,12 +85,15 @@ func (a *Artifact) validate() error {
 			if p.SEVSNP == nil || p.TDX != nil {
 				return fmt.Errorf("policy %q: platform sev-snp requires exactly the sev_snp block", name)
 			}
+			if err := p.SEVSNP.Validate(); err != nil {
+				return fmt.Errorf("policy %q: %w", name, err)
+			}
 		case PlatformTDX:
 			if p.TDX == nil || p.SEVSNP != nil {
 				return fmt.Errorf("policy %q: platform tdx requires exactly the tdx block", name)
 			}
-			if p.TDX.MinimumTCBEvaluationDataNumber < 0 {
-				return fmt.Errorf("policy %q: minimum_tcb_evaluation_data_number must not be negative", name)
+			if err := p.TDX.Validate(); err != nil {
+				return fmt.Errorf("policy %q: %w", name, err)
 			}
 			for _, ref := range p.TDX.PlatformMeasurements {
 				if _, ok := a.Measurements[ref]; !ok {
@@ -102,6 +102,12 @@ func (a *Artifact) validate() error {
 			}
 		default:
 			return fmt.Errorf("policy %q: unsupported platform %q", name, p.Platform)
+		}
+	}
+
+	for name, m := range a.Measurements {
+		if m.Shape == nil {
+			return fmt.Errorf("measurement %q: shape is required", name)
 		}
 	}
 
@@ -154,15 +160,18 @@ func truncID(id string) string {
 
 // ResolvePlatformMeasurement selects the single measurements-map entry the
 // policy allows whose MRTD/RTMR0 equal the quote's authenticated values,
-// returning its name. When required is non-nil, only entries measured for
-// that VM shape are candidates, so a quote from a machine-endorsed but
-// wrong-shaped VM resolves nothing. The measurement inputs must come from a
-// verified quote.
+// returning its name. Only entries measured for the required VM shape are
+// candidates, so a quote from a machine-endorsed but wrong-shaped VM
+// resolves nothing. The measurement inputs must come from a verified
+// quote.
 func (a *Artifact) ResolvePlatformMeasurement(p *TDXPolicy, required *Shape, mrtdHex, rtmr0Hex string) (string, *PlatformMeasurement, error) {
+	if required == nil {
+		return "", nil, fmt.Errorf("required VM shape is missing")
+	}
 	anyShapeMatch := false
 	for _, ref := range p.PlatformMeasurements {
 		m := a.Measurements[ref]
-		if required != nil && (m.Shape == nil || !m.Shape.Satisfies(required)) {
+		if m.Shape == nil || !m.Shape.Satisfies(required) {
 			continue
 		}
 		anyShapeMatch = true
@@ -170,7 +179,7 @@ func (a *Artifact) ResolvePlatformMeasurement(p *TDXPolicy, required *Shape, mrt
 			return ref, &m, nil
 		}
 	}
-	if required != nil && !anyShapeMatch {
+	if !anyShapeMatch {
 		return "", nil, fmt.Errorf("no endorsed platform measurement matches the required VM shape %+v", *required)
 	}
 	return "", nil, fmt.Errorf("platform measurements (mrtd %s...) do not match any allowed configuration", truncID(mrtdHex))

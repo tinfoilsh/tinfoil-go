@@ -69,14 +69,18 @@ func TestValidate(t *testing.T) {
 		RTMR3: body.GetRtmrs()[3],
 	}
 	quote := &Quote{quote: proto, TCBEvaluationDataNumber: 5}
+	shape := &policy.Shape{CPUs: 8, MemoryMB: 65536, Disks: 4}
 
+	minTCBEval := 5
 	matching := &policy.TDXPolicy{
 		QEVendorID:                     hex.EncodeToString(proto.GetHeader().GetQeVendorId()),
+		MinimumQESVN:                   new(uint16),
+		MinimumPCESVN:                  new(uint16),
 		MinimumTEETCBSVN:               hex.EncodeToString(body.GetTeeTcbSvn()),
 		MRSeam:                         hex.EncodeToString(body.GetMrSeam()),
 		TDAttributes:                   hex.EncodeToString(body.GetTdAttributes()),
 		XFAM:                           hex.EncodeToString(body.GetXfam()),
-		MinimumTCBEvaluationDataNumber: 5,
+		MinimumTCBEvaluationDataNumber: &minTCBEval,
 		PlatformMeasurements:           []string{"sample"},
 	}
 	a := &policy.Artifact{
@@ -84,12 +88,13 @@ func TestValidate(t *testing.T) {
 			"sample": {
 				MRTD:  hex.EncodeToString(body.GetMrTd()),
 				RTMR0: hex.EncodeToString(body.GetRtmrs()[0]),
+				Shape: shape,
 			},
 		},
 	}
 
 	assemble := func(a *policy.Artifact, p *policy.TDXPolicy) *Expectations {
-		e, name, err := Assemble(a, p, nil, quote, code, reportData)
+		e, name, err := Assemble(a, p, shape, quote, code, reportData)
 		require.NoError(t, err)
 		assert.Equal(t, "sample", name)
 		return e
@@ -110,10 +115,10 @@ func TestValidate(t *testing.T) {
 	// assembly, before any validation runs.
 	badMeasurements := &policy.Artifact{
 		Measurements: map[string]policy.PlatformMeasurement{
-			"sample": {MRTD: strings.Repeat("ff", 48), RTMR0: strings.Repeat("ff", 48)},
+			"sample": {MRTD: strings.Repeat("ff", 48), RTMR0: strings.Repeat("ff", 48), Shape: shape},
 		},
 	}
-	_, _, err = Assemble(badMeasurements, matching, nil, quote, code, reportData)
+	_, _, err = Assemble(badMeasurements, matching, shape, quote, code, reportData)
 	assert.ErrorContains(t, err, "do not match any allowed configuration")
 
 	badOpts := *matching
@@ -123,15 +128,13 @@ func TestValidate(t *testing.T) {
 	// A workload register differing from code provenance must reject.
 	badCode := code
 	badCode.RTMR1 = make([]byte, 48)
-	_, _, err = Assemble(a, matching, nil, quote, badCode, reportData)
-	require.NoError(t, err)
-	e, _, err := Assemble(a, matching, nil, quote, badCode, reportData)
+	e, _, err := Assemble(a, matching, shape, quote, badCode, reportData)
 	require.NoError(t, err)
 	assert.Error(t, e.Validate(quote))
 
 	// A REPORT_DATA differing from the envelope's expectation must reject.
 	var badReportData [64]byte
-	e, _, err = Assemble(a, matching, nil, quote, code, badReportData)
+	e, _, err = Assemble(a, matching, shape, quote, code, badReportData)
 	require.NoError(t, err)
 	assert.Error(t, e.Validate(quote))
 }

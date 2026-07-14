@@ -63,17 +63,13 @@ func (v *VerifiedDocumentV3) cryptoMaterialData(id, format string) (string, erro
 //
 //  1. Envelope: format, nonce equality, endorsed-section hash recomputation,
 //     REPORT_DATA recomputation.
-//  2. Reference values: the sigstore-code and sigstore-platform collateral
-//     entries are verified against the Sigstore trust root and the pinned
-//     Tinfoil workflow identities, recovering the code measurement (with
-//     its declared VM shape) and the platform-endorsements artifact. Both
-//     entries are required.
-//  3. CPU quote: authenticate the signature chain against the pinned vendor
-//     roots, assemble the complete expected state from the verified
-//     reference values, and validate the quote against it in a single call
-//     — REPORT_DATA binding, platform identity endorsement, the endorsed
-//     appraisal policy, and the code measurement are all part of the
-//     assembled state.
+//  2. Reference values: the sigstore-code and sigstore-platform entries
+//     (both required) are verified against the pinned signing identities,
+//     recovering the code measurement, its declared VM shape, and the
+//     policy artifact.
+//  3. CPU quote: authenticate against the pinned vendor roots, assemble
+//     the complete policy from the verified reference values, validate in
+//     one call.
 //
 // repo is the code repository the caller trusts (pins the sigstore-code
 // signing identity); the repo named inside the document is not trusted.
@@ -90,11 +86,7 @@ func VerifyDocumentV3(sigstoreClient *provenance.Client, docBytes, nonce []byte,
 		return nil, fmt.Errorf("reference values: %w", err)
 	}
 
-	assembled, authenticated, err := quote.Verify(doc, quote.Expected{
-		ReportData:      expectedReportData,
-		CodeMeasurement: code.Measurement,
-		Shape:           code.Shape,
-	}, endorsements)
+	assembled, authenticated, err := quote.Verify(doc, endorsements, code.Measurement, code.Shape, expectedReportData)
 	if err != nil {
 		return nil, fmt.Errorf("cpu evidence: %w", err)
 	}

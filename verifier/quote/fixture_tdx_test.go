@@ -52,16 +52,17 @@ func TestVerifyLiveFixtureTDX(t *testing.T) {
 		t.Skipf("captured Intel PCS collateral has expired: %v", err)
 	}
 	require.NoError(t, err)
-	expected := Expected{ReportData: reportData, CodeMeasurement: q.Measurement}
+	devShape := &policy.Shape{CPUs: 2, MemoryMB: 2048, Disks: 2}
 
-	// The dev shape must be rejected by the endorsed platform measurements.
-	_, _, err = Verify(doc, expected, artifact)
+	// The dev configuration must be rejected by the endorsed platform
+	// measurements: no endorsed entry matches its shape.
+	_, _, err = Verify(doc, artifact, q.Measurement, devShape, reportData)
 	require.Error(t, err)
-	assert.ErrorContains(t, err, "platform measurements")
+	assert.ErrorContains(t, err, "VM shape")
 
 	// Allow the observed shape and verify the rest of the chain.
-	require.NoError(t, allowObservedShape(doc, artifact))
-	assembled, verified, err := Verify(doc, expected, artifact)
+	require.NoError(t, allowObservedShape(doc, artifact, devShape))
+	assembled, verified, err := Verify(doc, artifact, q.Measurement, devShape, reportData)
 	require.NoError(t, err)
 	assert.Equal(t, policy.PlatformTDX, verified.Platform)
 	assert.Equal(t, tdxFixturePolicy(t), assembled.PolicyName)
@@ -71,9 +72,9 @@ func TestVerifyLiveFixtureTDX(t *testing.T) {
 	assert.Len(t, verified.Measurement.Registers, 5)
 }
 
-// allowObservedShape adds the quote's own MRTD/RTMR0 to every TDX policy as
-// an allowed platform configuration (test only).
-func allowObservedShape(doc *envelope.Document, artifact *policy.Artifact) error {
+// allowObservedShape adds the quote's own MRTD/RTMR0, measured for shape,
+// to every TDX policy as an allowed platform configuration (test only).
+func allowObservedShape(doc *envelope.Document, artifact *policy.Artifact, shape *policy.Shape) error {
 	raw, err := base64.StdEncoding.DecodeString(doc.CPUEvidence.ReportBase64)
 	if err != nil {
 		return err
@@ -90,6 +91,7 @@ func allowObservedShape(doc *envelope.Document, artifact *policy.Artifact) error
 	artifact.Measurements["dev-shape"] = policy.PlatformMeasurement{
 		MRTD:  hex.EncodeToString(body.GetMrTd()),
 		RTMR0: hex.EncodeToString(body.GetRtmrs()[0]),
+		Shape: shape,
 	}
 	for name, p := range artifact.Policies {
 		if p.TDX != nil {

@@ -100,10 +100,9 @@ func TestResolvePlatformMeasurementShapeFilter(t *testing.T) {
 	}
 	p := &TDXPolicy{PlatformMeasurements: []string{"one-disk", "two-disk", "no-gpus", "legacy"}}
 
-	// Unfiltered lookup resolves any allowed entry.
-	name, _, err := a.ResolvePlatformMeasurement(p, nil, "ee", "ff")
-	require.NoError(t, err)
-	assert.Equal(t, "legacy", name)
+	// The required shape is not optional.
+	_, _, err := a.ResolvePlatformMeasurement(p, nil, "ee", "ff")
+	assert.ErrorContains(t, err, "required VM shape is missing")
 
 	// The shape filter restricts candidates before the measurement lookup.
 	name, m, err := a.ResolvePlatformMeasurement(p, &shapeA, "aa", "bb")

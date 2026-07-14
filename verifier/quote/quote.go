@@ -1,17 +1,15 @@
-// Package quote verifies a v3 document's CPU evidence in three phases with
-// an explicit trust state between each:
+// Package quote verifies a v3 document's CPU evidence in three phases:
 //
 //  1. Authenticate: verify the quote's signature chain up to the pinned
-//     vendor root, using only endorsement collateral carried in the
-//     document. The result is authenticated but not yet appraised.
-//  2. Assemble: resolve the complete expected state of the quote from
-//     verified reference values — the endorsed machine policy, the platform
-//     measurement selection, the expected launch registers from code
-//     provenance, and the expected REPORT_DATA from the envelope. Nothing
-//     is deferred to a later check.
-//  3. Validate: compare the quote against the assembled policy in a single
-//     call. Every register comparison happens inside the vendor library's
-//     validation options.
+//     vendor root, from document-carried collateral only. Authenticated,
+//     not yet appraised.
+//  2. Assemble: resolve the complete policy — every value the quote must
+//     attest, as one object. Entries differ only in which verified source
+//     resolves them (policy artifact, code provenance, envelope); that
+//     distinction ends here. Assembly fails if any entry cannot be
+//     resolved.
+//  3. Validate: one comparison of the quote against the assembled policy,
+//     inside the vendor library's validation options.
 package quote
 
 import (
@@ -25,14 +23,13 @@ import (
 	"github.com/tinfoilsh/tinfoil-go/verifier/quote/tdx"
 )
 
-// Authenticated holds a quote whose signature chain has been verified up to
-// the pinned vendor root. Nothing in it has been compared against expected
-// values yet: that is the assembled policy's job.
+// Authenticated is a signature-verified quote, not yet compared against
+// any expected value.
 type Authenticated struct {
 	// Platform is policy.PlatformSEVSNP or policy.PlatformTDX.
 	Platform string
 	// Identity is the machine identifier from authenticated bytes
-	// (SEV CHIP_ID / TDX PPID from the PCK leaf), lowercase hex.
+	// (SEV CHIP_ID / TDX PPID), lowercase hex.
 	Identity string
 	// Measurement is the launch measurement (SEV) or MRTD+RTMRs (TDX).
 	Measurement *measurement.Measurement
@@ -41,29 +38,14 @@ type Authenticated struct {
 	tdx *tdx.Quote
 }
 
-// Expected carries the expected quote state resolved from sources other
-// than the platform-endorsements artifact: the envelope and verified code
-// provenance.
-type Expected struct {
-	// ReportData is the expected REPORT_DATA recomputed from the envelope.
-	ReportData [64]byte
-	// CodeMeasurement is the expected launch measurement from verified code
-	// provenance. Required.
-	CodeMeasurement *measurement.Measurement
-	// Shape is the VM shape the code artifact declares; nil when the
-	// artifact predates the vm_shape declaration.
-	Shape *policy.Shape
-}
-
-// AssembledPolicy is the complete expected state of a quote — every value
-// validation compares against, fully resolved from verified reference
-// values before validation runs. It captures the authenticated quote it was
-// assembled for, so it cannot be applied to any other quote.
+// AssembledPolicy is the complete expected state of a quote, fully
+// resolved before validation runs. It captures the quote it was assembled
+// for, so it cannot be applied to any other quote.
 type AssembledPolicy struct {
-	// PolicyName is the matched appraisal policy name.
+	// PolicyName is the matched policy name.
 	PolicyName string
-	// PlatformMeasurementName names the endorsed TDX platform configuration
-	// the quote resolved to; empty for SEV-SNP.
+	// PlatformMeasurementName is the resolved TDX platform configuration;
+	// empty for SEV-SNP.
 	PlatformMeasurementName string
 
 	quote *Authenticated
@@ -71,12 +53,10 @@ type AssembledPolicy struct {
 	tdx   *tdx.Expectations
 }
 
-// Authenticate verifies a v3 document's CPU quote: the signature chain up
-// to the pinned vendor root, using the endorsement collateral (VCEK / Intel
-// PCS captures) carried in the document itself — authentication is
-// single-request and performs no network fetches. It makes no
-// reference-value comparison; callers must assemble a policy and validate
-// before trusting the platform.
+// Authenticate verifies the quote's signature chain up to the pinned
+// vendor root, from the document's own endorsement collateral — no network
+// fetches. Callers must assemble a policy and validate before trusting the
+// platform.
 func Authenticate(doc *envelope.Document) (*Authenticated, error) {
 	switch doc.CPUEvidence.Format {
 	case envelope.SEVSNPReportV1Format:
@@ -106,17 +86,17 @@ func Authenticate(doc *envelope.Document) (*Authenticated, error) {
 	}
 }
 
-// Assemble resolves the complete expected state of an authenticated quote:
-// the machines-map lookup keyed by the authenticated platform identity (a
-// machine absent from the map is not endorsed), the machine policy fully
-// translated into vendor library validation options — carrying the expected
-// launch registers from code provenance, the expected REPORT_DATA from the
-// envelope, and for TDX the platform measurement resolved under the
-// required VM shape. Assembly fails when any required value cannot be
-// resolved; nothing is deferred to a later check.
-func Assemble(endorsements *policy.Artifact, expected Expected, q *Authenticated) (*AssembledPolicy, error) {
-	if expected.CodeMeasurement == nil {
+// Assemble resolves the complete policy for an authenticated quote from
+// its three verified sources: the policy artifact (machine lookup by
+// authenticated identity; for TDX, the platform measurement resolved under
+// the required VM shape), the code measurement, and the envelope's
+// REPORT_DATA. A machine absent from the artifact is not endorsed.
+func Assemble(endorsements *policy.Artifact, code *measurement.Measurement, shape *policy.Shape, reportData [64]byte, q *Authenticated) (*AssembledPolicy, error) {
+	if code == nil {
 		return nil, fmt.Errorf("assembling policy: expected code measurement is required")
+	}
+	if shape == nil {
+		return nil, fmt.Errorf("assembling policy: the code artifact's VM shape is required")
 	}
 	name, machinePolicy, err := endorsements.PolicyFor(q.Identity, q.Platform)
 	if err != nil {
@@ -129,16 +109,16 @@ func Assemble(endorsements *policy.Artifact, expected Expected, q *Authenticated
 	switch q.Platform {
 	case policy.PlatformSEVSNP:
 		var digest []byte
-		digest, err = sevLaunchDigest(expected.CodeMeasurement)
+		digest, err = sevLaunchDigest(code)
 		if err == nil {
-			assembled.sev, err = sev.Assemble(machinePolicy.SEVSNP, q.sev.ProductLine(), digest, expected.ReportData)
+			assembled.sev, err = sev.Assemble(machinePolicy.SEVSNP, q.sev.ProductLine(), digest, reportData)
 		}
 	case policy.PlatformTDX:
-		var code tdx.CodeRegisters
-		code, err = tdxCodeRegisters(expected.CodeMeasurement)
+		var registers tdx.CodeRegisters
+		registers, err = tdxCodeRegisters(code)
 		if err == nil {
 			assembled.tdx, assembled.PlatformMeasurementName, err = tdx.Assemble(
-				endorsements, machinePolicy.TDX, expected.Shape, q.tdx, code, expected.ReportData)
+				endorsements, machinePolicy.TDX, shape, q.tdx, registers, reportData)
 		}
 	default:
 		return nil, fmt.Errorf("unsupported platform %q", q.Platform)
@@ -149,9 +129,8 @@ func Assemble(endorsements *policy.Artifact, expected Expected, q *Authenticated
 	return assembled, nil
 }
 
-// Validate compares the captured authenticated quote against the assembled
-// policy in a single vendor library call. It performs no lookups, no
-// translation, and no recomputation.
+// Validate compares the captured quote against the assembled policy in a
+// single vendor library call: no lookups, no translation.
 func (p *AssembledPolicy) Validate() error {
 	switch p.quote.Platform {
 	case policy.PlatformSEVSNP:
@@ -164,12 +143,12 @@ func (p *AssembledPolicy) Validate() error {
 }
 
 // Verify composes Authenticate, Assemble, and Validate.
-func Verify(doc *envelope.Document, expected Expected, endorsements *policy.Artifact) (*AssembledPolicy, *Authenticated, error) {
+func Verify(doc *envelope.Document, endorsements *policy.Artifact, code *measurement.Measurement, shape *policy.Shape, reportData [64]byte) (*AssembledPolicy, *Authenticated, error) {
 	q, err := Authenticate(doc)
 	if err != nil {
 		return nil, nil, err
 	}
-	assembled, err := Assemble(endorsements, expected, q)
+	assembled, err := Assemble(endorsements, code, shape, reportData, q)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -193,8 +172,8 @@ func sevLaunchDigest(m *measurement.Measurement) ([]byte, error) {
 	}
 }
 
-// tdxCodeRegisters maps the expected code measurement onto the TDX workload
-// registers, decoding the predicate's positional register layout.
+// tdxCodeRegisters maps the expected code measurement onto the TDX
+// workload registers.
 func tdxCodeRegisters(m *measurement.Measurement) (code tdx.CodeRegisters, err error) {
 	switch m.Type {
 	case measurement.SnpTdxMultiPlatformV1:

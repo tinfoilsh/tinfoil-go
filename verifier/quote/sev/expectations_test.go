@@ -47,32 +47,39 @@ func TestOptionsGenoa(t *testing.T) {
 }
 
 func TestOptionsPinnedFields(t *testing.T) {
-	hostData := strings.Repeat("ab", 32)
-	imageID := strings.Repeat("cd", 16)
 	p := policy.SEVSNPPolicy{
+		MinimumBuild:      ptr(uint8(21)),
 		MinimumAPIVersion: "1.55",
-		HostData:          &hostData,
-		ImageID:           &imageID,
+		MinimumGuestSVN:   ptr(uint32(0)),
+		MinimumTCB:        testTCB(),
+		MinimumLaunchTCB:  testTCB(),
+		VMPL:              ptr(0),
+		HostData:          strings.Repeat("ab", 32),
+		ImageID:           strings.Repeat("cd", 16),
+		FamilyID:          strings.Repeat("ef", 16),
 		RequireAuthorKey:  true,
 		RequireIDBlock:    true,
 		GuestPolicy:       policy.GuestPolicy{SMT: true, PageSwapDisable: true},
 
-		MinimumLaunchMitigationVector:  3,
-		MinimumCurrentMitigationVector: 1,
+		MinimumLaunchMitigationVector:  ptr(uint64(3)),
+		MinimumCurrentMitigationVector: ptr(uint64(1)),
 	}
 	opts, err := options(&p, ProductGenoa)
 	require.NoError(t, err)
 	assert.Len(t, opts.HostData, 32)
 	assert.Len(t, opts.ImageID, 16)
-	assert.Nil(t, opts.FamilyID)
+	assert.Len(t, opts.FamilyID, 16)
 	assert.True(t, opts.RequireAuthorKey)
 	assert.True(t, opts.RequireIDBlock)
 	assert.True(t, opts.GuestPolicy.PageSwapDisable)
 	assert.Equal(t, uint64(3), opts.MinimumLaunchMitigationVector)
 	assert.Equal(t, uint64(1), opts.MinimumCurrentMitigationVector)
 
-	short := "abcd"
-	p.HostData = &short
+	// The pinned fields are required: absent or malformed values reject.
+	p.HostData = "abcd"
+	_, err = options(&p, ProductGenoa)
+	assert.ErrorContains(t, err, "host_data")
+	p.HostData = ""
 	_, err = options(&p, ProductGenoa)
 	assert.ErrorContains(t, err, "host_data")
 }
@@ -99,4 +106,11 @@ func TestIdentity(t *testing.T) {
 
 	_, err = Identity([]byte{1, 2, 3})
 	assert.ErrorContains(t, err, "must be 64 bytes")
+}
+
+func ptr[T any](v T) *T { return &v }
+
+func testTCB() policy.TCB {
+	zero := uint8(0)
+	return policy.TCB{BlSpl: &zero, TeeSpl: &zero, SnpSpl: &zero, UcodeSpl: &zero}
 }

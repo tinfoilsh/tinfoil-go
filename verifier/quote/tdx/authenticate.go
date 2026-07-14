@@ -1,9 +1,15 @@
+// Package tdx authenticates Intel TDX quotes against the pinned Intel SGX
+// root, replaying the document's own captured PCS collateral, and assembles
+// complete go-tdx-guest validation options from an endorsed policy.
 package tdx
 
 import (
+	"crypto/x509"
+	_ "embed"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"encoding/pem"
 	"fmt"
 	"net/textproto"
 	"net/url"
@@ -20,9 +26,8 @@ import (
 	"github.com/tinfoilsh/tinfoil-go/verifier/measurement"
 )
 
-// Quote is an authenticated TDX quote: the signature chain up to the pinned
-// Intel SGX root has been verified against the document's own captured PCS
-// collateral. Nothing in it has been compared against expected values yet.
+// Quote is a signature-verified TDX quote, not yet compared against any
+// expected value.
 type Quote struct {
 	// Identity is the machines-map lookup key (PPID, lowercase hex).
 	Identity string
@@ -38,11 +43,10 @@ type Quote struct {
 // Proto returns the verified quote for policy assembly.
 func (q *Quote) Proto() *tdxpb.QuoteV4 { return q.quote }
 
-// Authenticate verifies a v3 document's TDX quote: the signature chain up
-// to the pinned Intel SGX root, replaying the Intel PCS collateral captured
-// in the document itself — single-request, no network fetches. It makes no
-// reference-value comparison; callers must assemble a policy and validate
-// before trusting the platform.
+// Authenticate verifies the quote's signature chain up to the pinned Intel
+// SGX root, replaying the document's captured PCS collateral — no network
+// fetches. Callers must assemble a policy and validate before trusting the
+// platform.
 func Authenticate(doc *envelope.Document) (*Quote, error) {
 	rawQuote, err := base64.StdEncoding.DecodeString(doc.CPUEvidence.ReportBase64)
 	if err != nil {
@@ -57,9 +61,8 @@ func Authenticate(doc *envelope.Document) (*Quote, error) {
 		return nil, fmt.Errorf("unsupported TDX quote version (want v4)")
 	}
 
-	// The recorder observes the tcbEvaluationDataNumber of the TCB Info and
-	// QE Identity actually used so the policy floor is enforced on verified
-	// collateral.
+	// The recorder observes the tcbEvaluationDataNumber of the collateral
+	// actually used, so the policy floor is enforced on verified bytes.
 	entry, ok := doc.EndorsementCollateral(envelope.CollateralIntelPCSV1Format, envelope.SubjectCPU)
 	if !ok {
 		return nil, fmt.Errorf("document carries no intel-pcs endorsement collateral for the cpu")
@@ -223,4 +226,21 @@ func (r *tcbEvaluationRecorder) minimum() (int, error) {
 		return *r.qeIdentity, nil
 	}
 	return *r.tcbInfo, nil
+}
+
+//go:generate sh -xc "curl -o sgx_root_ca.pem https://certificates.trustedservices.intel.com/Intel_SGX_Provisioning_Certification_RootCA.pem"
+
+//go:embed sgx_root_ca.pem
+var sgxRootCACertPEM []byte
+
+var intelRootCertPool *x509.CertPool
+
+func init() {
+	root, _ := pem.Decode(sgxRootCACertPEM)
+	cert, err := x509.ParseCertificate(root.Bytes)
+	if err != nil {
+		panic("failed to parse Intel root certificate: " + err.Error())
+	}
+	intelRootCertPool = x509.NewCertPool()
+	intelRootCertPool.AddCert(cert)
 }

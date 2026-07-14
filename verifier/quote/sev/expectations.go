@@ -1,6 +1,7 @@
 package sev
 
 import (
+	"bytes"
 	"encoding/hex"
 	"fmt"
 	"strconv"
@@ -8,6 +9,7 @@ import (
 
 	sevabi "github.com/google/go-sev-guest/abi"
 	"github.com/google/go-sev-guest/kds"
+	"github.com/google/go-sev-guest/proto/sevsnp"
 	sevvalidate "github.com/google/go-sev-guest/validate"
 
 	"github.com/tinfoilsh/tinfoil-go/verifier/policy"
@@ -18,20 +20,20 @@ import (
 const ProductGenoa = "Genoa"
 
 // Expectations is the fully translated SEV-SNP expected state, resolved at
-// policy assembly so that validation performs no translation and no
-// artifact lookups.
+// assembly so that validation performs no translation and no lookups. The
+// want* fields are compared by strict equality — the library options only
+// bound the first two and cannot require signer absence.
 type Expectations struct {
-	opts *sevvalidate.Options
-	// wantGuestPolicy and wantPlatformInfo are compared by strict equality:
-	// the library only bounds them.
+	opts             *sevvalidate.Options
 	wantGuestPolicy  sevabi.SnpPolicy
 	wantPlatformInfo sevabi.SnpPlatformInfo
+	wantAuthorKey    bool
+	wantIDBlock      bool
 }
 
-// Assemble translates an endorsed policy block into the complete expected
-// state for a quote: go-sev-guest validation options carrying every policy
-// field, the expected launch measurement from code provenance, and the
-// expected REPORT_DATA from the envelope. Only Genoa (family 19h) is
+// Assemble translates a policy block into the complete expected state for
+// a quote: validation options carrying every policy field, the expected
+// launch measurement, and the expected REPORT_DATA. Only Genoa is
 // supported.
 func Assemble(p *policy.SEVSNPPolicy, productLine string, launchDigest []byte, reportData [64]byte) (*Expectations, error) {
 	opts, err := options(p, productLine)
@@ -47,14 +49,15 @@ func Assemble(p *policy.SEVSNPPolicy, productLine string, launchDigest []byte, r
 		opts:             opts,
 		wantGuestPolicy:  expectedGuestPolicy(p),
 		wantPlatformInfo: expectedPlatformInfo(p),
+		wantAuthorKey:    p.RequireAuthorKey,
+		wantIDBlock:      p.RequireIDBlock,
 	}, nil
 }
 
-// Validate compares a signature-verified quote against the assembled
-// expected state: the library validation options plus strict equality on
-// the guest policy bits and PLATFORM_INFO, which the library only treats as
-// maximum-acceptable masks. It is the only SEV policy enforcement entry
-// point so that no subset of the policy can be applied.
+// Validate compares a quote against the assembled expected state: the
+// library validation options plus the strict-equality companions. It is
+// the only SEV enforcement entry point, so no subset of the policy can be
+// applied.
 func (e *Expectations) Validate(q *Quote) error {
 	if err := sevvalidate.SnpAttestation(q.attestation, e.opts); err != nil {
 		return err
@@ -79,6 +82,24 @@ func (e *Expectations) Validate(q *Quote) error {
 	}
 	if gotInfo != e.wantPlatformInfo {
 		return fmt.Errorf("report PLATFORM_INFO %+v does not equal the endorsed policy %+v", gotInfo, e.wantPlatformInfo)
+	}
+
+	return e.checkSigner(report)
+}
+
+// checkSigner requires the author key and ID block to be present exactly
+// when the policy says so.
+func (e *Expectations) checkSigner(report *sevsnp.Report) error {
+	signer, err := sevabi.ParseSignerInfo(report.GetSignerInfo())
+	if err != nil {
+		return fmt.Errorf("parsing report SIGNER_INFO: %w", err)
+	}
+	if signer.AuthorKeyEn != e.wantAuthorKey {
+		return fmt.Errorf("report AUTHOR_KEY_EN %t does not equal the endorsed policy %t", signer.AuthorKeyEn, e.wantAuthorKey)
+	}
+	idBlockPresent := !bytes.Equal(report.GetIdKeyDigest(), make([]byte, len(report.GetIdKeyDigest())))
+	if idBlockPresent != e.wantIDBlock {
+		return fmt.Errorf("report ID-block presence %t does not equal the endorsed policy %t", idBlockPresent, e.wantIDBlock)
 	}
 	return nil
 }
@@ -125,6 +146,9 @@ func options(p *policy.SEVSNPPolicy, productLine string) (*sevvalidate.Options, 
 	if productLine != ProductGenoa {
 		return nil, fmt.Errorf("unsupported SEV product line %q (only %s is supported)", productLine, ProductGenoa)
 	}
+	if err := p.Validate(); err != nil {
+		return nil, err
+	}
 	version, err := parseAPIVersion(p.MinimumAPIVersion)
 	if err != nil {
 		return nil, err
@@ -132,58 +156,50 @@ func options(p *policy.SEVSNPPolicy, productLine string) (*sevvalidate.Options, 
 	if p.MinimumTCB.FmcSpl != nil || p.MinimumLaunchTCB.FmcSpl != nil {
 		return nil, fmt.Errorf("fmc_spl is not valid for product line %s", productLine)
 	}
-	hostData, err := optionalHexField("host_data", p.HostData, 32)
+	// Snapshot so the assembled expectations do not alias the policy.
+	vmpl := *p.VMPL
+	hostData, err := hexField("host_data", p.HostData, 32)
 	if err != nil {
 		return nil, err
 	}
-	imageID, err := optionalHexField("image_id", p.ImageID, 16)
+	imageID, err := hexField("image_id", p.ImageID, 16)
 	if err != nil {
 		return nil, err
 	}
-	familyID, err := optionalHexField("family_id", p.FamilyID, 16)
+	familyID, err := hexField("family_id", p.FamilyID, 16)
 	if err != nil {
 		return nil, err
 	}
 
 	platformInfo := expectedPlatformInfo(p)
 	return &sevvalidate.Options{
-		GuestPolicy:               expectedGuestPolicy(p),
-		MinimumGuestSvn:           p.MinimumGuestSVN,
-		MinimumBuild:              p.MinimumBuild,
-		MinimumVersion:            version,
-		PermitProvisionalFirmware: p.PermitProvisionalFirmware,
-		PlatformInfo:              &platformInfo,
-		MinimumTCB: kds.TCBParts{
-			BlSpl:    p.MinimumTCB.BlSpl,
-			TeeSpl:   p.MinimumTCB.TeeSpl,
-			SnpSpl:   p.MinimumTCB.SnpSpl,
-			UcodeSpl: p.MinimumTCB.UcodeSpl,
-		},
-		MinimumLaunchTCB: kds.TCBParts{
-			BlSpl:    p.MinimumLaunchTCB.BlSpl,
-			TeeSpl:   p.MinimumLaunchTCB.TeeSpl,
-			SnpSpl:   p.MinimumLaunchTCB.SnpSpl,
-			UcodeSpl: p.MinimumLaunchTCB.UcodeSpl,
-		},
-		VMPL:                           cloneIntPtr(p.VMPL),
+		GuestPolicy:                    expectedGuestPolicy(p),
+		MinimumGuestSvn:                *p.MinimumGuestSVN,
+		MinimumBuild:                   *p.MinimumBuild,
+		MinimumVersion:                 version,
+		PermitProvisionalFirmware:      p.PermitProvisionalFirmware,
+		PlatformInfo:                   &platformInfo,
+		MinimumTCB:                     tcbParts(p.MinimumTCB),
+		MinimumLaunchTCB:               tcbParts(p.MinimumLaunchTCB),
+		VMPL:                           &vmpl,
 		HostData:                       hostData,
 		ImageID:                        imageID,
 		FamilyID:                       familyID,
 		RequireAuthorKey:               p.RequireAuthorKey,
 		RequireIDBlock:                 p.RequireIDBlock,
-		MinimumLaunchMitigationVector:  p.MinimumLaunchMitigationVector,
-		MinimumCurrentMitigationVector: p.MinimumCurrentMitigationVector,
+		MinimumLaunchMitigationVector:  *p.MinimumLaunchMitigationVector,
+		MinimumCurrentMitigationVector: *p.MinimumCurrentMitigationVector,
 	}, nil
 }
 
-// cloneIntPtr copies an optional int so assembled expectations do not alias
-// the policy struct they were translated from.
-func cloneIntPtr(v *int) *int {
-	if v == nil {
-		return nil
+// tcbParts dereferences a validated TCB block into library parts.
+func tcbParts(t policy.TCB) kds.TCBParts {
+	return kds.TCBParts{
+		BlSpl:    *t.BlSpl,
+		TeeSpl:   *t.TeeSpl,
+		SnpSpl:   *t.SnpSpl,
+		UcodeSpl: *t.UcodeSpl,
 	}
-	c := *v
-	return &c
 }
 
 func parseAPIVersion(v string) (uint16, error) {
@@ -200,15 +216,6 @@ func parseAPIVersion(v string) (uint16, error) {
 		return 0, fmt.Errorf("minimum_api_version minor: %w", err)
 	}
 	return uint16(maj<<8 | min), nil
-}
-
-// optionalHexField decodes an optional pinned hex field; nil stays nil
-// (unchecked by the validation library).
-func optionalHexField(name string, value *string, wantLen int) ([]byte, error) {
-	if value == nil {
-		return nil, nil
-	}
-	return hexField(name, *value, wantLen)
 }
 
 func hexField(name, value string, wantLen int) ([]byte, error) {

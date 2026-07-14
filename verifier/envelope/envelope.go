@@ -281,12 +281,10 @@ func RandomNonce() ([]byte, error) {
 	return nonce, nil
 }
 
-// Parse strictly parses a v3 attestation document from its
-// transmitted bytes. Unknown members anywhere in the fixed schema are
-// rejected (case-sensitively), duplicate object member names are rejected
-// everywhere, all hex is validated lowercase, base64 must be canonical, and
-// duplicate item ids within an endorsed section or the collateral array are
-// rejected. The endorsed sections are retained as raw bytes for hashing.
+// Parse strictly parses a v3 document: unknown members reject
+// (case-sensitively), duplicate member names reject everywhere, hex must
+// be lowercase, base64 canonical, and item ids unique. The endorsed
+// sections are retained as raw bytes for hashing.
 func Parse(docBytes []byte) (*Document, error) {
 	var doc Document
 	if err := strictjson.Unmarshal(docBytes, &doc); err != nil {
@@ -436,16 +434,12 @@ func (d *Document) CryptoMaterialItem(id string) (*CryptoMaterialItem, bool) {
 	return nil, false
 }
 
-// Verify parses a v3 document from its transmitted bytes and
-// performs the challenge and hash-binding checks: the nonce matches the
-// verifier's expected nonce, the endorsed-section hashes recomputed over the
-// base64-decoded section bytes match cpu_evidence.endorsed, and REPORT_DATA
-// recomputed from them matches challenge.report_data. It returns the parsed
-// document and the expected REPORT_DATA the CPU quote must bind.
-//
-// This authenticates nothing by itself: callers must verify the CPU evidence
-// (which proves the hardware bound this REPORT_DATA) before trusting any
-// part of the document.
+// Verify parses a v3 document and checks the challenge bindings: nonce
+// equality, endorsed-section hash recomputation, and REPORT_DATA
+// recomputation. It returns the document and the expected REPORT_DATA the
+// CPU quote must bind. This authenticates nothing by itself: nothing in
+// the document is trusted until the quote proves the hardware bound that
+// REPORT_DATA.
 func Verify(docBytes []byte, expectedNonce []byte) (*Document, [64]byte, error) {
 	var zero [64]byte
 	if len(expectedNonce) != NonceSize {

@@ -9,29 +9,27 @@ import (
 	"github.com/tinfoilsh/tinfoil-go/verifier/policy"
 )
 
-// CodeRegisters are the expected workload registers from code provenance.
-// RTMR0 is a platform register and comes from the endorsed platform
-// measurements instead.
+// CodeRegisters are the expected workload registers from code provenance;
+// RTMR0 is a platform register and comes from the policy artifact instead.
 type CodeRegisters struct {
 	RTMR1 []byte
 	RTMR2 []byte
 	RTMR3 []byte
 }
 
-// Expectations is the fully translated TDX expected state: complete
-// go-tdx-guest validation options plus the collateral floor, which is not a
-// quote field. Validation performs no translation and no artifact lookups.
+// Expectations is the fully translated TDX expected state, resolved at
+// assembly so that validation performs no translation and no lookups. The
+// collateral floor is separate because it is not a quote field.
 type Expectations struct {
 	opts                           *tdxvalidate.Options
 	minimumTCBEvaluationDataNumber int
 }
 
-// Assemble translates an endorsed policy block into the complete expected
-// state for a quote. The endorsed platform measurement set is resolved to a
-// single MRTD/RTMR0 by selection with the quote's authenticated registers —
-// restricted to the required VM shape when one is declared — so a quote
-// outside the endorsed set fails assembly; every register comparison then
-// happens inside the library. The returned name identifies the resolved
+// Assemble translates a policy block into the complete expected state for
+// a quote. The endorsed measurement set is resolved to a single MRTD/RTMR0
+// by the quote's authenticated registers under the required VM shape, so a
+// quote outside the endorsed set fails assembly; every register comparison
+// then happens inside the library. The returned name is the resolved
 // measurements-map entry.
 func Assemble(a *policy.Artifact, p *policy.TDXPolicy, required *policy.Shape, q *Quote, code CodeRegisters, reportData [64]byte) (*Expectations, string, error) {
 	opts, err := options(p)
@@ -63,15 +61,13 @@ func Assemble(a *policy.Artifact, p *policy.TDXPolicy, required *policy.Shape, q
 
 	return &Expectations{
 		opts:                           opts,
-		minimumTCBEvaluationDataNumber: p.MinimumTCBEvaluationDataNumber,
+		minimumTCBEvaluationDataNumber: *p.MinimumTCBEvaluationDataNumber,
 	}, name, nil
 }
 
-// Validate compares a signature-verified quote against the assembled
-// expected state: the library validation options plus the collateral
-// tcbEvaluationDataNumber floor, which is not a quote field. It is the only
-// TDX policy enforcement entry point so that no subset of the policy can be
-// applied.
+// Validate compares a quote against the assembled expected state: the
+// library validation options plus the collateral floor. It is the only TDX
+// enforcement entry point, so no subset of the policy can be applied.
 func (e *Expectations) Validate(q *Quote) error {
 	if err := tdxvalidate.TdxQuote(q.quote, e.opts); err != nil {
 		return err
@@ -83,10 +79,11 @@ func (e *Expectations) Validate(q *Quote) error {
 	return nil
 }
 
-// options translates the policy block into go-tdx-guest validation options.
-// The tcbEvaluationDataNumber floor is not expressible in the library
-// options and is enforced by the companion check composed in Validate.
+// options translates the policy block into library validation options.
 func options(p *policy.TDXPolicy) (*tdxvalidate.Options, error) {
+	if err := p.Validate(); err != nil {
+		return nil, err
+	}
 	qeVendor, err := hexField("qe_vendor_id", p.QEVendorID, 16)
 	if err != nil {
 		return nil, err
@@ -108,10 +105,12 @@ func options(p *policy.TDXPolicy) (*tdxvalidate.Options, error) {
 		return nil, err
 	}
 
-	opts := &tdxvalidate.Options{
+	// MR_CONFIG_ID, MR_OWNER, and MR_OWNER_CONFIG are unconditionally
+	// pinned to zero: Tinfoil launches never populate them.
+	return &tdxvalidate.Options{
 		HeaderOptions: tdxvalidate.HeaderOptions{
-			MinimumQeSvn:  p.MinimumQESVN,
-			MinimumPceSvn: p.MinimumPCESVN,
+			MinimumQeSvn:  *p.MinimumQESVN,
+			MinimumPceSvn: *p.MinimumPCESVN,
 			QeVendorID:    qeVendor,
 		},
 		TdQuoteBodyOptions: tdxvalidate.TdQuoteBodyOptions{
@@ -119,18 +118,11 @@ func options(p *policy.TDXPolicy) (*tdxvalidate.Options, error) {
 			MrSeam:           mrSeam,
 			TdAttributes:     tdAttributes,
 			Xfam:             xfam,
+			MrConfigID:       make([]byte, 48),
+			MrOwner:          make([]byte, 48),
+			MrOwnerConfig:    make([]byte, 48),
 		},
-	}
-	if p.MRConfigIDZero {
-		opts.TdQuoteBodyOptions.MrConfigID = make([]byte, 48)
-	}
-	if p.MROwnerZero {
-		opts.TdQuoteBodyOptions.MrOwner = make([]byte, 48)
-	}
-	if p.MROwnerConfigZero {
-		opts.TdQuoteBodyOptions.MrOwnerConfig = make([]byte, 48)
-	}
-	return opts, nil
+	}, nil
 }
 
 func hexField(name, value string, wantLen int) ([]byte, error) {

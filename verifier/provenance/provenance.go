@@ -68,7 +68,7 @@ func signingIdentity(repo string) (string, error) {
 		"/\\.github/workflows/[^/@]+@refs/tags/[^@]+$", nil
 }
 
-func (c *Client) VerifyBundle(bundleJSON []byte, repo, hexDigest string) (*verify.VerificationResult, error) {
+func (c *Client) verifyBundle(bundleJSON []byte, repo, hexDigest string) (*verify.VerificationResult, error) {
 	sanRegex, err := signingIdentity(repo)
 	if err != nil {
 		return nil, err
@@ -192,16 +192,15 @@ func enforceSubject0Digest(result *verify.VerificationResult, expectedDigest str
 type Code struct {
 	// Measurement is the attested launch measurement.
 	Measurement *measurement.Measurement
-	// Shape is the VM shape the artifact declares; nil when the predicate
-	// carries no vm_shape field.
+	// Shape is the VM shape the artifact declares.
 	Shape *policy.Shape
 }
 
 // VerifyCode verifies a code-provenance bundle against the repo's signing
 // identity and the expected artifact digest, and returns the verified code
-// measurement plus the VM shape the artifact declares.
+// measurement plus the VM shape the artifact declares (required).
 func (c *Client) VerifyCode(bundleJSON []byte, repo, hexDigest string) (*Code, error) {
-	result, err := c.VerifyBundle(bundleJSON, repo, hexDigest)
+	result, err := c.verifyBundle(bundleJSON, repo, hexDigest)
 	if err != nil {
 		return nil, fmt.Errorf("verifying bundle: %w", err)
 	}
@@ -216,11 +215,11 @@ func (c *Client) VerifyCode(bundleJSON []byte, repo, hexDigest string) (*Code, e
 	return &Code{Measurement: m, Shape: shape}, nil
 }
 
-// shapeFromPredicate parses the optional vm_shape predicate member.
+// shapeFromPredicate parses the required vm_shape predicate member.
 func shapeFromPredicate(fields map[string]*structpb.Value) (*policy.Shape, error) {
 	v, ok := fields["vm_shape"]
 	if !ok {
-		return nil, nil
+		return nil, fmt.Errorf("code predicate declares no vm_shape")
 	}
 	s := v.GetStructValue()
 	if s == nil {
