@@ -39,7 +39,7 @@ func TestWithUserCacheSecretOption(t *testing.T) {
 	cfg = &clientConfig{}
 	WithUserCacheSecret("")(cfg)
 	require.Empty(t, cfg.userCacheSecret)
-	require.True(t, cfg.userCacheSecretSet, "an explicit empty secret must still count as set (it disables provisioning)")
+	require.False(t, cfg.userCacheSecretSet, "an explicit empty secret must be treated as unset")
 }
 
 func TestResolveUserCacheSecretPrecedence(t *testing.T) {
@@ -51,9 +51,9 @@ func TestResolveUserCacheSecretPrecedence(t *testing.T) {
 		require.Equal(t, "explicit", resolveUserCacheSecret("explicit", true))
 	})
 
-	t.Run("explicit empty disables even with environment set", func(t *testing.T) {
+	t.Run("explicit empty falls through to environment", func(t *testing.T) {
 		t.Setenv(userCacheSecretEnv, "from-env")
-		require.Empty(t, resolveUserCacheSecret("", true))
+		require.Equal(t, "from-env", resolveUserCacheSecret("", true))
 	})
 
 	t.Run("environment beats generation and touches no file", func(t *testing.T) {
@@ -63,11 +63,11 @@ func TestResolveUserCacheSecretPrecedence(t *testing.T) {
 		require.True(t, os.IsNotExist(err), "an environment-provided secret must not create the secret file")
 	})
 
-	t.Run("environment set but empty disables generation", func(t *testing.T) {
+	t.Run("environment set but empty falls through to generation", func(t *testing.T) {
 		t.Setenv(userCacheSecretEnv, "")
-		require.Empty(t, resolveUserCacheSecret("", false))
-		_, err := os.Stat(filepath.Join(home, userCacheSecretDirName))
-		require.True(t, os.IsNotExist(err), "a disabled secret must not create the secret file")
+		require.Len(t, resolveUserCacheSecret("", false), 64)
+		_, err := os.Stat(filepath.Join(home, userCacheSecretDirName, userCacheSecretFileName))
+		require.NoError(t, err)
 	})
 }
 
@@ -371,7 +371,7 @@ func TestUserCacheSecretTransportSkipsIneligibleRequests(t *testing.T) {
 		require.Equal(t, http.StatusOK, resp.StatusCode)
 	})
 
-	t.Run("empty secret disables injection", func(t *testing.T) {
+	t.Run("missing resolved secret skips injection", func(t *testing.T) {
 		var got []byte
 		transport := captureTransport("", &got, nil)
 		const raw = `{"model":"m"}`
@@ -398,13 +398,13 @@ func TestUserCacheSecretTransportLeavesStreamingBodyUntouched(t *testing.T) {
 	require.Equal(t, raw, string(got))
 }
 
-func TestUserCacheSecretTransportNeverClobbers(t *testing.T) {
+func TestUserCacheSecretTransportNeverClobbersNonEmptyOrNonStringValues(t *testing.T) {
 	cases := []struct {
 		name string
 		raw  string
 	}{
 		{"explicit per-request secret", `{"model":"m","user_cache_secret":"end-user-7"}`},
-		{"explicit empty opt-out", `{"model":"m","user_cache_secret":""}`},
+		{"non-string per-request value", `{"model":"m","user_cache_secret":null}`},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -415,6 +415,44 @@ func TestUserCacheSecretTransportNeverClobbers(t *testing.T) {
 			require.Equal(t, tc.raw, string(got), "a body that already carries the field must pass through byte-identical")
 		})
 	}
+}
+
+func TestUserCacheSecretTransportReplacesEmptyPerRequestSecret(t *testing.T) {
+	for _, raw := range []string{
+		`{"model":"m","seed":9007199254740993,"user_cache_secret":""}`,
+		`{"model":"m","user_cache_secre\u0074":""}`,
+	} {
+		t.Run(raw, func(t *testing.T) {
+			var got []byte
+			var sent *http.Request
+			transport := captureTransport("client-level", &got, &sent)
+			_, err := transport.RoundTrip(postJSONRequest(t, "https://enclave.example.com/v1/chat/completions", raw))
+			require.NoError(t, err)
+
+			var body map[string]any
+			decoder := json.NewDecoder(bytes.NewReader(got))
+			decoder.UseNumber()
+			require.NoError(t, decoder.Decode(&body))
+			require.Equal(t, "client-level", body[userCacheSecretField])
+			if seed, ok := body["seed"]; ok {
+				require.Equal(t, json.Number("9007199254740993"), seed)
+			}
+			replay, err := sent.GetBody()
+			require.NoError(t, err)
+			replayed, err := io.ReadAll(replay)
+			require.NoError(t, err)
+			require.Equal(t, got, replayed)
+		})
+	}
+}
+
+func TestUserCacheSecretTransportLeavesDuplicateFieldsUntouched(t *testing.T) {
+	const raw = `{"user_cache_secret":"","user_cache_secret":""}`
+	var got []byte
+	transport := captureTransport("client-level", &got, nil)
+	_, err := transport.RoundTrip(postJSONRequest(t, "https://enclave.example.com/v1/chat/completions", raw))
+	require.NoError(t, err)
+	require.Equal(t, raw, string(got))
 }
 
 func TestUserCacheSecretTransportNonObjectBodies(t *testing.T) {
@@ -517,4 +555,10 @@ func TestUserCacheSecretThroughOpenAIClient(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "end-user-7", received[userCacheSecretField],
 		"a per-request field must win over the client-level secret")
+
+	_, err = oai.Chat.Completions.New(context.Background(), params,
+		option.WithJSONSet(userCacheSecretField, ""))
+	require.NoError(t, err)
+	require.Equal(t, "client-level", received[userCacheSecretField],
+		"an empty per-request field must be replaced with the client-level secret")
 }
