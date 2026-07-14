@@ -85,13 +85,20 @@ func WithUserCacheSecret(secret string) ClientOption {
 	}
 }
 
-// ResolveUserCacheSecret resolves the client-level secret: the explicit option
-// wins, then the environment, then the persisted (or generated) secret. An
-// empty result means injection is disabled.
-func ResolveUserCacheSecret(explicit string, explicitSet bool) string {
+// resolveUserCacheSecret applies an explicit client option before the default
+// resolution chain.
+func resolveUserCacheSecret(explicit string, explicitSet bool) string {
 	if explicitSet {
 		return explicit
 	}
+	return DefaultUserCacheSecret()
+}
+
+// DefaultUserCacheSecret resolves the environment-provided or persisted
+// machine-level secret. If neither exists, it generates and persists a secret.
+// An environment variable that is present but empty disables generation and
+// injection.
+func DefaultUserCacheSecret() string {
 	if env, ok := os.LookupEnv(UserCacheSecretEnv); ok {
 		return env
 	}

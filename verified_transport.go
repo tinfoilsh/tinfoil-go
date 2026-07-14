@@ -40,7 +40,7 @@ func newVerifiedTransport(secureClient *client.SecureClient, mode TransportMode,
 	if err != nil {
 		return nil, err
 	}
-	transport, err := NewHostBoundTransport(secureClient.Enclave(), baseURL, httpClient.Transport)
+	transport, err := newHostBoundTransport(secureClient.Enclave(), baseURL, httpClient.Transport)
 	if err != nil {
 		return nil, err
 	}

@@ -42,30 +42,30 @@ func TestWithUserCacheSecretOption(t *testing.T) {
 	require.True(t, cfg.userCacheSecretSet, "an explicit empty secret must still count as set (it disables provisioning)")
 }
 
-func TestResolveUserCacheSecretPrecedence(t *testing.T) {
+func TestUserCacheSecretResolutionPrecedence(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 
 	t.Run("explicit option beats environment", func(t *testing.T) {
 		t.Setenv(UserCacheSecretEnv, "from-env")
-		require.Equal(t, "explicit", ResolveUserCacheSecret("explicit", true))
+		require.Equal(t, "explicit", resolveUserCacheSecret("explicit", true))
 	})
 
 	t.Run("explicit empty disables even with environment set", func(t *testing.T) {
 		t.Setenv(UserCacheSecretEnv, "from-env")
-		require.Empty(t, ResolveUserCacheSecret("", true))
+		require.Empty(t, resolveUserCacheSecret("", true))
 	})
 
 	t.Run("environment beats generation and touches no file", func(t *testing.T) {
 		t.Setenv(UserCacheSecretEnv, "from-env")
-		require.Equal(t, "from-env", ResolveUserCacheSecret("", false))
+		require.Equal(t, "from-env", DefaultUserCacheSecret())
 		_, err := os.Stat(filepath.Join(home, userCacheSecretDirName))
 		require.True(t, os.IsNotExist(err), "an environment-provided secret must not create the secret file")
 	})
 
 	t.Run("environment set but empty disables generation", func(t *testing.T) {
 		t.Setenv(UserCacheSecretEnv, "")
-		require.Empty(t, ResolveUserCacheSecret("", false))
+		require.Empty(t, DefaultUserCacheSecret())
 		_, err := os.Stat(filepath.Join(home, userCacheSecretDirName))
 		require.True(t, os.IsNotExist(err), "a disabled secret must not create the secret file")
 	})
@@ -76,7 +76,7 @@ func TestUserCacheSecretGenerateAndPersist(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 
-	first := ResolveUserCacheSecret("", false)
+	first := DefaultUserCacheSecret()
 	require.Len(t, first, 64, "expected a hex-encoded 256-bit secret")
 
 	path := filepath.Join(home, userCacheSecretDirName, userCacheSecretFileName)
@@ -86,7 +86,7 @@ func TestUserCacheSecretGenerateAndPersist(t *testing.T) {
 
 	// A second resolution (a new client, or another SDK on the same machine)
 	// must reuse the persisted secret, not mint a new namespace.
-	require.Equal(t, first, ResolveUserCacheSecret("", false))
+	require.Equal(t, first, DefaultUserCacheSecret())
 }
 
 func TestUserCacheSecretAdoptsExistingFile(t *testing.T) {
@@ -99,7 +99,7 @@ func TestUserCacheSecretAdoptsExistingFile(t *testing.T) {
 	// Trailing newline: the file may be hand-edited or written by another SDK.
 	require.NoError(t, os.WriteFile(filepath.Join(dir, userCacheSecretFileName), []byte("shared-secret\n"), 0o600))
 
-	require.Equal(t, "shared-secret", ResolveUserCacheSecret("", false))
+	require.Equal(t, "shared-secret", DefaultUserCacheSecret())
 }
 
 func TestUserCacheSecretRejectsInvalidUTF8WithoutRewriting(t *testing.T) {
@@ -113,9 +113,9 @@ func TestUserCacheSecretRejectsInvalidUTF8WithoutRewriting(t *testing.T) {
 	require.NoError(t, os.MkdirAll(dir, 0o700))
 	require.NoError(t, os.WriteFile(path, corrupted, 0o600))
 
-	first := ResolveUserCacheSecret("", false)
+	first := DefaultUserCacheSecret()
 	require.Len(t, first, 64)
-	require.Equal(t, first, ResolveUserCacheSecret("", false))
+	require.Equal(t, first, DefaultUserCacheSecret())
 	persisted, err := os.ReadFile(path)
 	require.NoError(t, err)
 	require.Equal(t, corrupted, persisted)
@@ -136,7 +136,7 @@ func TestUserCacheSecretAcceptsPermissiveExistingPermissions(t *testing.T) {
 	require.NoError(t, os.Chmod(dir, 0o777))
 	require.NoError(t, os.Chmod(path, 0o666))
 
-	require.Equal(t, "shared-secret", ResolveUserCacheSecret("", false))
+	require.Equal(t, "shared-secret", DefaultUserCacheSecret())
 	requireFileMode(t, dir, 0o777)
 	requireFileMode(t, path, 0o666)
 }
@@ -151,9 +151,9 @@ func TestUserCacheSecretLeavesBlankFileUntouched(t *testing.T) {
 	require.NoError(t, os.MkdirAll(dir, 0o700))
 	require.NoError(t, os.WriteFile(path, []byte("  \n"), 0o600))
 
-	first := ResolveUserCacheSecret("", false)
+	first := DefaultUserCacheSecret()
 	require.Len(t, first, 64)
-	require.Equal(t, first, ResolveUserCacheSecret("", false))
+	require.Equal(t, first, DefaultUserCacheSecret())
 	written, err := os.ReadFile(path)
 	require.NoError(t, err)
 	require.Equal(t, []byte("  \n"), written)
@@ -184,7 +184,7 @@ func TestUserCacheSecretSubprocess(t *testing.T) {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(2)
 	}
-	fmt.Println(ResolveUserCacheSecret("", false))
+	fmt.Println(DefaultUserCacheSecret())
 	os.Exit(0)
 }
 
@@ -269,9 +269,9 @@ func TestUserCacheSecretFallsBackWithoutHome(t *testing.T) {
 	unsetUserCacheSecretEnv(t)
 	t.Setenv("HOME", "")
 
-	first := ResolveUserCacheSecret("", false)
+	first := DefaultUserCacheSecret()
 	require.NotEmpty(t, first, "no home directory must still yield a process-lifetime secret")
-	require.Equal(t, first, ResolveUserCacheSecret("", false), "the in-memory fallback must be stable within the process")
+	require.Equal(t, first, DefaultUserCacheSecret(), "the in-memory fallback must be stable within the process")
 }
 
 func TestUserCacheSecretFallsBackWhenHomeNotADirectory(t *testing.T) {
@@ -280,7 +280,7 @@ func TestUserCacheSecretFallsBackWhenHomeNotADirectory(t *testing.T) {
 	require.NoError(t, os.WriteFile(homeFile, []byte("x"), 0o600))
 	t.Setenv("HOME", homeFile)
 
-	require.NotEmpty(t, ResolveUserCacheSecret("", false))
+	require.NotEmpty(t, DefaultUserCacheSecret())
 }
 
 // captureTransport returns a userCacheSecretTransport whose inner round

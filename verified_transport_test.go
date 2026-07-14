@@ -24,9 +24,9 @@ func (s *stubRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) 
 	}, nil
 }
 
-func TestNewHostBoundTransportBindsOrigins(t *testing.T) {
+func TestHostBoundTransportBindsOrigins(t *testing.T) {
 	stub := &stubRoundTripper{}
-	guarded, err := NewHostBoundTransport("enclave.example.com", "http://localhost:8080", stub)
+	guarded, err := newHostBoundTransport("enclave.example.com", "http://localhost:8080", stub)
 	require.NoError(t, err)
 
 	do := func(url string) error {
@@ -48,13 +48,13 @@ func TestNewHostBoundTransportBindsOrigins(t *testing.T) {
 	require.Nil(t, stub.req, "the wrapped transport must not see the refused request")
 }
 
-func TestNewHostBoundTransportRejectsInvalidBaseURL(t *testing.T) {
-	_, err := NewHostBoundTransport("enclave.example.com", "ftp://proxy.example", &stubRoundTripper{})
+func TestHostBoundTransportRejectsInvalidBaseURL(t *testing.T) {
+	_, err := newHostBoundTransport("enclave.example.com", "ftp://proxy.example", &stubRoundTripper{})
 	require.Error(t, err)
 }
 
-func TestNewHostBoundTransportRejectsNilTransport(t *testing.T) {
-	_, err := NewHostBoundTransport("enclave.example.com", "", nil)
+func TestHostBoundTransportRejectsNilTransport(t *testing.T) {
+	_, err := newHostBoundTransport("enclave.example.com", "", nil)
 	require.EqualError(t, err, "transport is required")
 }
 

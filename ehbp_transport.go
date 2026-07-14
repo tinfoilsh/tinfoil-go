@@ -110,7 +110,7 @@ func NewClientWithOptions(opts ...ClientOption) (*Client, error) {
 		return nil, err
 	}
 	return createClientFromSecureClient(secureClient, cfg.transport, cfg.baseURL,
-		ResolveUserCacheSecret(cfg.userCacheSecret, cfg.userCacheSecretSet), cfg.openaiOpts...)
+		resolveUserCacheSecret(cfg.userCacheSecret, cfg.userCacheSecretSet), cfg.openaiOpts...)
 }
 
 // newClientConfig applies the options over the defaults and validates the
@@ -183,7 +183,7 @@ func secureHTTPClient(secureClient *client.SecureClient, mode TransportMode, bas
 		}
 	}
 
-	guarded, err := NewHostBoundTransport(secureClient.Enclave(), baseURL, transport)
+	guarded, err := newHostBoundTransport(secureClient.Enclave(), baseURL, transport)
 	if err != nil {
 		return nil, err
 	}
@@ -219,13 +219,11 @@ func sealingHTTPClient(secureClient *client.SecureClient, mode TransportMode, ba
 	return httpClient, nil
 }
 
-// NewHostBoundTransport wraps rt so requests may only target the verified
+// newHostBoundTransport wraps rt so requests may only target the verified
 // enclave's HTTPS origin and, when baseURL is non-empty, the base URL's
 // origin. Requests to any other origin are refused before credentials or
-// request bodies are sent. Consumers composing their own stack on top of a
-// VerifiedTransport should place layers that mutate requests inside this
-// guard.
-func NewHostBoundTransport(enclave, baseURL string, rt http.RoundTripper) (http.RoundTripper, error) {
+// request bodies are sent.
+func newHostBoundTransport(enclave, baseURL string, rt http.RoundTripper) (http.RoundTripper, error) {
 	if rt == nil {
 		return nil, fmt.Errorf("transport is required")
 	}

@@ -160,7 +160,7 @@ func TestEHBPTransportDoesNotFollowRedirects(t *testing.T) {
 
 	transport, err := buildEHBPTransport(serverIdentity.MarshalPublicKeyHex())
 	require.NoError(t, err)
-	guarded, err := NewHostBoundTransport("", source.URL, transport)
+	guarded, err := newHostBoundTransport("", source.URL, transport)
 	require.NoError(t, err)
 
 	req, err := http.NewRequest(http.MethodPost, source.URL, strings.NewReader("cache-secret-and-prompt"))
