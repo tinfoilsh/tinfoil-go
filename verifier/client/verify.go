@@ -54,14 +54,14 @@ func (v *VerifiedDocumentV3) cryptoMaterialData(id, format string) (string, erro
 // VerifyDocumentV3 verifies a v3 attestation document from its transmitted
 // bytes:
 //
-//  1. Envelope: format, nonce equality, endorsed-section hash recomputation,
-//     REPORT_DATA recomputation.
-//  2. Reference values: the sigstore-code and sigstore-platform entries
-//     (both required) are verified against the pinned signing identities,
-//     recovering the code measurement, its declared VM shape, and the
-//     policy artifact.
-//  3. CPU quote: authenticate against the pinned vendor roots, assemble
-//     the complete policy from the verified reference values, validate in
+//  1. Check the envelope: format, nonce equality, endorsed-section hash
+//     recomputation, REPORT_DATA recomputation (no authentication).
+//  2. Authenticate the reference values: the sigstore-code and
+//     sigstore-platform entries (both required) against the pinned signing
+//     identities, recovering the code measurement, its declared VM shape,
+//     and the policy artifact.
+//  3. Verify the CPU quote: authenticate against the pinned vendor roots,
+//     assemble the complete policy from the reference values, validate in
 //     one call.
 //
 // repo is the code repository the caller trusts (pins the sigstore-code
@@ -69,12 +69,12 @@ func (v *VerifiedDocumentV3) cryptoMaterialData(id, format string) (string, erro
 // Channel binding (TLS fingerprint / HPKE key) is the caller's
 // responsibility, using the returned endorsed crypto material.
 func VerifyDocumentV3(docBytes, nonce []byte, repo string) (*VerifiedDocumentV3, error) {
-	doc, expectedReportData, err := envelope.Verify(docBytes, nonce)
+	doc, expectedReportData, err := envelope.Check(docBytes, nonce)
 	if err != nil {
 		return nil, fmt.Errorf("envelope: %w", err)
 	}
 
-	code, codeDigest, endorsements, err := verifyReferenceValues(doc, repo)
+	code, codeDigest, endorsements, err := authenticateReferenceValues(doc, repo)
 	if err != nil {
 		return nil, fmt.Errorf("reference values: %w", err)
 	}
@@ -92,15 +92,15 @@ func VerifyDocumentV3(docBytes, nonce []byte, repo string) (*VerifiedDocumentV3,
 	}, nil
 }
 
-// verifyReferenceValues verifies the document's sigstore-code and
-// sigstore-platform collateral entries (both required), returning the
+// authenticateReferenceValues authenticates the document's sigstore-code
+// and sigstore-platform collateral entries (both required), returning the
 // verified code provenance, its digest, and the policy artifact.
-func verifyReferenceValues(doc *envelope.Document, repo string) (*provenance.Code, string, *policy.Artifact, error) {
+func authenticateReferenceValues(doc *envelope.Document, repo string) (*provenance.Code, string, *policy.Artifact, error) {
 	codeRef, err := doc.ReferenceValuesCollateral(envelope.CollateralSigstoreCodeV1Format)
 	if err != nil {
 		return nil, "", nil, err
 	}
-	code, err := provenance.VerifyCode(codeRef.SigstoreBundle, repo, codeRef.Digest)
+	code, err := provenance.AuthenticateCode(codeRef.SigstoreBundle, repo, codeRef.Digest)
 	if err != nil {
 		return nil, "", nil, fmt.Errorf("verifying code measurement: %w", err)
 	}
@@ -109,7 +109,7 @@ func verifyReferenceValues(doc *envelope.Document, repo string) (*provenance.Cod
 	if err != nil {
 		return nil, "", nil, err
 	}
-	endorsements, err := provenance.VerifyPlatformEndorsements(platformRef.SigstoreBundle, platformRef.Digest)
+	endorsements, err := provenance.AuthenticateEndorsements(platformRef.SigstoreBundle, platformRef.Digest)
 	if err != nil {
 		return nil, "", nil, fmt.Errorf("verifying platform endorsements: %w", err)
 	}

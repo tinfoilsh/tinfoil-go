@@ -434,13 +434,13 @@ func (d *Document) CryptoMaterialItem(id string) (*CryptoMaterialItem, bool) {
 	return nil, false
 }
 
-// Verify parses a v3 document and checks the challenge bindings: nonce
+// Check parses a v3 document and checks the challenge bindings: nonce
 // equality, endorsed-section hash recomputation, and REPORT_DATA
 // recomputation. It returns the document and the expected REPORT_DATA the
-// CPU quote must bind. This authenticates nothing by itself: nothing in
-// the document is trusted until the quote proves the hardware bound that
+// CPU quote must bind. A check is not authentication: nothing in the
+// document is trusted until the quote proves the hardware bound that
 // REPORT_DATA.
-func Verify(docBytes []byte, expectedNonce []byte) (*Document, [64]byte, error) {
+func Check(docBytes []byte, expectedNonce []byte) (*Document, [64]byte, error) {
 	var zero [64]byte
 	if len(expectedNonce) != NonceSize {
 		return nil, zero, fmt.Errorf("expected nonce must be %d bytes, got %d", NonceSize, len(expectedNonce))

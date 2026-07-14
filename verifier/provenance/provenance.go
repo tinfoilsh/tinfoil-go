@@ -65,23 +65,26 @@ func getDefaultClient() (*Client, error) {
 	return defaultClient, defaultClientErr
 }
 
-// VerifyCode verifies a code-provenance bundle with the embedded trust root.
-func VerifyCode(bundleJSON []byte, repo, hexDigest string) (*Code, error) {
+// AuthenticateCode authenticates a code-provenance bundle against the
+// embedded trust root and the repo's pinned signing identity, returning
+// the verified content.
+func AuthenticateCode(bundleJSON []byte, repo, hexDigest string) (*Code, error) {
 	c, err := getDefaultClient()
 	if err != nil {
 		return nil, err
 	}
-	return c.VerifyCode(bundleJSON, repo, hexDigest)
+	return c.AuthenticateCode(bundleJSON, repo, hexDigest)
 }
 
-// VerifyPlatformEndorsements verifies a platform-endorsements bundle with
-// the embedded trust root.
-func VerifyPlatformEndorsements(bundleJSON []byte, hexDigest string) (*policy.Artifact, error) {
+// AuthenticateEndorsements authenticates a platform-endorsements bundle
+// against the embedded trust root and the publisher's pinned signing
+// identity, returning the parsed policy artifact.
+func AuthenticateEndorsements(bundleJSON []byte, hexDigest string) (*policy.Artifact, error) {
 	c, err := getDefaultClient()
 	if err != nil {
 		return nil, err
 	}
-	return c.VerifyPlatformEndorsements(bundleJSON, hexDigest)
+	return c.AuthenticateEndorsements(bundleJSON, hexDigest)
 }
 
 // NewClientFromJSON builds a client from a Sigstore trusted-root document;
@@ -237,10 +240,11 @@ type Code struct {
 	Shape *policy.Shape
 }
 
-// VerifyCode verifies a code-provenance bundle against the repo's signing
-// identity and the expected artifact digest, and returns the verified code
-// measurement plus the VM shape the artifact declares (required).
-func (c *Client) VerifyCode(bundleJSON []byte, repo, hexDigest string) (*Code, error) {
+// AuthenticateCode authenticates a code-provenance bundle against the
+// repo's signing identity and the expected artifact digest, and returns
+// the verified code measurement plus the VM shape the artifact declares
+// (required).
+func (c *Client) AuthenticateCode(bundleJSON []byte, repo, hexDigest string) (*Code, error) {
 	result, err := c.verifyBundle(bundleJSON, repo, hexDigest)
 	if err != nil {
 		return nil, fmt.Errorf("verifying bundle: %w", err)
@@ -336,10 +340,10 @@ func measurementFromStatement(statement *in_toto.Statement) (*measurement.Measur
 	}
 }
 
-// VerifyPlatformEndorsements verifies a Sigstore bundle for the
-// platform-endorsements artifact against the publisher identity and returns
-// the parsed, validated artifact.
-func (c *Client) VerifyPlatformEndorsements(bundleJSON []byte, hexDigest string) (*policy.Artifact, error) {
+// AuthenticateEndorsements authenticates a platform-endorsements bundle
+// against the publisher identity and returns the parsed, validated
+// artifact.
+func (c *Client) AuthenticateEndorsements(bundleJSON []byte, hexDigest string) (*policy.Artifact, error) {
 	result, err := c.verifyBundleWithIdentity(bundleJSON, platformEndorsementsIdentity, hexDigest)
 	if err != nil {
 		return nil, fmt.Errorf("verifying platform endorsements bundle: %w", err)

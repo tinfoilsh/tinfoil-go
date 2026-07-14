@@ -84,7 +84,7 @@ func TestBuildAndVerify(t *testing.T) {
 	nonce := testNonce()
 	built, docBytes := buildTestDocument(t, nonce)
 
-	doc, reportData, err := Verify(docBytes, nonce)
+	doc, reportData, err := Check(docBytes, nonce)
 	require.NoError(t, err)
 	assert.Equal(t, built.Challenge.ReportData, hex.EncodeToString(reportData[:]))
 	assert.Equal(t, AttestationV3Format, doc.Format)
@@ -105,7 +105,7 @@ func TestVerifyNonceMismatch(t *testing.T) {
 
 	other := testNonce()
 	other[0] ^= 0xff
-	_, _, err := Verify(docBytes, other)
+	_, _, err := Check(docBytes, other)
 	assert.ErrorContains(t, err, "nonce")
 }
 
@@ -140,7 +140,7 @@ func TestVerifyTransportedBytes(t *testing.T) {
 	})
 	require.NotEqual(t, docBytes, tampered)
 
-	_, _, err := Verify(tampered, nonce)
+	_, _, err := Check(tampered, nonce)
 	assert.ErrorContains(t, err, "crypto_material hash")
 }
 
@@ -155,7 +155,7 @@ func TestVerifyTamperedKey(t *testing.T) {
 	})
 	require.NotEqual(t, docBytes, tampered)
 
-	_, _, err := Verify(tampered, nonce)
+	_, _, err := Check(tampered, nonce)
 	assert.ErrorContains(t, err, "crypto_material hash")
 }
 
@@ -169,7 +169,7 @@ func TestVerifyRejectsUnknownTopLevelMembers(t *testing.T) {
 	tampered, err := json.Marshal(loose)
 	require.NoError(t, err)
 
-	_, _, err = Verify(tampered, nonce)
+	_, _, err = Check(tampered, nonce)
 	assert.Error(t, err)
 }
 
@@ -180,7 +180,7 @@ func TestVerifyRejectsUnknownAlgorithm(t *testing.T) {
 	tampered := bytes.Replace(docBytes,
 		[]byte(ReportDataV1Algorithm),
 		[]byte("https://tinfoil.sh/report-data/v2"), 1)
-	_, _, err := Verify(tampered, nonce)
+	_, _, err := Check(tampered, nonce)
 	assert.ErrorContains(t, err, "report_data_algorithm")
 }
 

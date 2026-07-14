@@ -35,7 +35,7 @@ func TestSigningIdentity(t *testing.T) {
 	}
 }
 
-func TestVerifyCode(t *testing.T) {
+func TestAuthenticateCode(t *testing.T) {
 	if testing.Short() {
 		t.Skip("live external services test; skipped with -short")
 	}
@@ -46,7 +46,7 @@ func TestVerifyCode(t *testing.T) {
 	bundle, err := fetchAttestationBundle(repo, hexDigest)
 	assert.NoError(t, err)
 
-	code, err := client.VerifyCode(bundle, repo, hexDigest)
+	code, err := client.AuthenticateCode(bundle, repo, hexDigest)
 	if err != nil && strings.Contains(err.Error(), "vm_shape") {
 		t.Skipf("published code artifact predates the vm_shape declaration; update the measurement pipeline: %v", err)
 	}

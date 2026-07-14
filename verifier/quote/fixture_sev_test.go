@@ -37,7 +37,7 @@ func loadLiveFixture(t *testing.T, dir string) (*envelope.Document, [64]byte, []
 	nonce, err := hex.DecodeString(meta.Nonce)
 	require.NoError(t, err)
 
-	doc, reportData, err := envelope.Verify(docBytes, nonce)
+	doc, reportData, err := envelope.Check(docBytes, nonce)
 	if err != nil && strings.Contains(err.Error(), "report_data") {
 		t.Skipf("fixture %s predates the current report-data construction; regenerate on hardware", dir)
 	}
