@@ -4,6 +4,7 @@
 package sev
 
 import (
+	"bytes"
 	"crypto/x509"
 	_ "embed"
 	"encoding/base64"
@@ -78,6 +79,9 @@ func decodeCertChain(chainPEM string) (askDER, arkDER []byte, err error) {
 	}
 	if len(blocks) != 2 {
 		return nil, nil, fmt.Errorf("cert_chain_pem must carry exactly the ASK and ARK certificates, got %d blocks", len(blocks))
+	}
+	if len(bytes.TrimSpace(rest)) != 0 {
+		return nil, nil, fmt.Errorf("cert_chain_pem carries trailing data after the certificates")
 	}
 	return blocks[0], blocks[1], nil
 }
