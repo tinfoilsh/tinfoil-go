@@ -379,7 +379,9 @@ func normalizeEnclaveHost(raw string) (string, string, bool) {
 		return "", "", false
 	}
 	host := strings.TrimSuffix(strings.ToLower(parsed.Hostname()), ".")
-	if net.ParseIP(host) == nil && strings.Contains(host, ":") {
+	if ip := net.ParseIP(host); ip != nil {
+		host = ip.String()
+	} else if strings.Contains(host, ":") {
 		return "", "", false
 	}
 	port := parsed.Port()

@@ -2,8 +2,6 @@ package client
 
 import (
 	"encoding/json"
-	"net/http"
-	"net/http/httptest"
 	"os"
 	"strings"
 	"sync"
@@ -138,6 +136,9 @@ func TestSameEnclaveHost(t *testing.T) {
 		{"router.example.com:443", "router.example.com", true},
 		{"router.example.com:8443", "router.example.com", false},
 		{"router.example.com", "other.example.com", false},
+		{"[2001:0db8:0:0:0:0:0:1]", "[2001:db8::1]", true},
+		{"[2001:db8::1]:443", "[2001:0db8::1]", true},
+		{"[2001:db8::1]:8443", "[2001:db8::1]", false},
 	}
 	for _, test := range tests {
 		assert.Equal(t, test.same, sameEnclaveHost(test.left, test.right), "%s, %s", test.left, test.right)
@@ -145,13 +146,10 @@ func TestSameEnclaveHost(t *testing.T) {
 }
 
 func TestSecureClientSerializesVerificationState(t *testing.T) {
-	bundleServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		_, _ = w.Write([]byte(`{}`))
-	}))
-	defer bundleServer.Close()
+	const bundleURL = "https://%"
 
 	client := NewSecureClient("enclave.example.com", defaultRouterRepo)
-	client.SetAttestationBundleURL(bundleServer.URL)
+	client.SetAttestationBundleURL(bundleURL)
 
 	var wg sync.WaitGroup
 	for range 32 {
@@ -162,7 +160,7 @@ func TestSecureClientSerializesVerificationState(t *testing.T) {
 		}()
 		go func() {
 			defer wg.Done()
-			client.SetAttestationBundleURL(bundleServer.URL)
+			client.SetAttestationBundleURL(bundleURL)
 		}()
 	}
 	wg.Wait()
