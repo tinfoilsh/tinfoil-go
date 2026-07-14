@@ -39,16 +39,16 @@ import (
 // body, so the secret is only ever visible to the verified enclave.
 
 const (
-	// userCacheSecretField is the router-only request-body field. A non-empty
+	// UserCacheSecretField is the router-only request-body field. A non-empty
 	// string scopes the prompt cache to that secret; an absent or empty value
 	// leaves the request in the tenant-wide namespace.
-	userCacheSecretField = "user_cache_secret"
+	UserCacheSecretField = "user_cache_secret"
 
-	// userCacheSecretEnv provisions the secret via the environment. Setting it
+	// UserCacheSecretEnv provisions the secret via the environment. Setting it
 	// to an empty string disables generation entirely (tenant-wide caching),
 	// which is the right call for pooled multi-user deployments that would
 	// otherwise mint a fresh namespace per container.
-	userCacheSecretEnv = "TINFOIL_USER_CACHE_SECRET"
+	UserCacheSecretEnv = "TINFOIL_USER_CACHE_SECRET"
 
 	// userCacheSecretFile is the persisted-secret path under the home
 	// directory. The other Tinfoil SDKs use the same file, so one machine gets
@@ -85,14 +85,21 @@ func WithUserCacheSecret(secret string) ClientOption {
 	}
 }
 
-// resolveUserCacheSecret resolves the client-level secret: the explicit option
-// wins, then the environment, then the persisted (or generated) secret. An
-// empty result means injection is disabled.
+// resolveUserCacheSecret applies an explicit client option before the default
+// resolution chain.
 func resolveUserCacheSecret(explicit string, explicitSet bool) string {
 	if explicitSet {
 		return explicit
 	}
-	if env, ok := os.LookupEnv(userCacheSecretEnv); ok {
+	return DefaultUserCacheSecret()
+}
+
+// DefaultUserCacheSecret resolves the environment-provided or persisted
+// machine-level secret. If neither exists, it generates and persists a secret.
+// An environment variable that is present but empty disables generation and
+// injection.
+func DefaultUserCacheSecret() string {
+	if env, ok := os.LookupEnv(UserCacheSecretEnv); ok {
 		return env
 	}
 	return loadOrGenerateUserCacheSecret()
@@ -118,7 +125,7 @@ func newUserCacheSecret() string {
 var ephemeralUserCacheSecret = sync.OnceValue(func() string {
 	secret := newUserCacheSecret()
 	if secret != "" {
-		log.Warnf("tinfoil: could not persist the user cache secret; using an in-memory secret, so prompt-cache continuity resets when this process exits (set %s or WithUserCacheSecret to pin one)", userCacheSecretEnv)
+		log.Warnf("tinfoil: could not persist the user cache secret; using an in-memory secret, so prompt-cache continuity resets when this process exits (set %s or WithUserCacheSecret to pin one)", UserCacheSecretEnv)
 	}
 	return secret
 })
@@ -264,7 +271,7 @@ type userCacheSecretTransport struct {
 }
 
 func (t *userCacheSecretTransport) RoundTrip(req *http.Request) (*http.Response, error) {
-	if t.secret == "" || !userCacheSecretPathEligible(req) || req.GetBody == nil {
+	if t.secret == "" || !UserCacheSecretPathEligible(req) || req.GetBody == nil {
 		return t.transport.RoundTrip(req)
 	}
 
@@ -274,7 +281,7 @@ func (t *userCacheSecretTransport) RoundTrip(req *http.Request) (*http.Response,
 		return nil, err
 	}
 
-	newBody, changed := injectUserCacheSecret(raw, t.secret)
+	newBody, changed := InjectUserCacheSecret(raw, t.secret)
 	out := req.Clone(req.Context())
 	if !changed {
 		// Not a JSON object, or the caller set the field: forward the
@@ -294,9 +301,9 @@ func (t *userCacheSecretTransport) RoundTrip(req *http.Request) (*http.Response,
 	return t.transport.RoundTrip(out)
 }
 
-// userCacheSecretPathEligible reports whether the request can carry the field:
+// UserCacheSecretPathEligible reports whether the request can carry the field:
 // a POST with a body to one of the supported endpoints.
-func userCacheSecretPathEligible(req *http.Request) bool {
+func UserCacheSecretPathEligible(req *http.Request) bool {
 	if req.Method != http.MethodPost || req.Body == nil || req.Body == http.NoBody {
 		return false
 	}
@@ -308,12 +315,12 @@ func userCacheSecretPathEligible(req *http.Request) bool {
 	return false
 }
 
-// injectUserCacheSecret adds the field to a JSON-object body, preserving
+// InjectUserCacheSecret adds the field to a JSON-object body, preserving
 // number precision across the re-marshal (float64 round-tripping would corrupt
 // int64-range values such as seed). It reports false — forward the original
 // bytes — for non-object bodies, trailing data, or a body that already carries
 // the field.
-func injectUserCacheSecret(raw []byte, secret string) ([]byte, bool) {
+func InjectUserCacheSecret(raw []byte, secret string) ([]byte, bool) {
 	if !utf8.Valid(raw) {
 		return nil, false
 	}
@@ -323,10 +330,10 @@ func injectUserCacheSecret(raw []byte, secret string) ([]byte, bool) {
 	if err := dec.Decode(&body); err != nil || !decodeConsumedAll(dec) || body == nil {
 		return nil, false
 	}
-	if _, ok := body[userCacheSecretField]; ok {
+	if _, ok := body[UserCacheSecretField]; ok {
 		return nil, false
 	}
-	body[userCacheSecretField] = secret
+	body[UserCacheSecretField] = secret
 	newBody, err := json.Marshal(body)
 	if err != nil {
 		return nil, false

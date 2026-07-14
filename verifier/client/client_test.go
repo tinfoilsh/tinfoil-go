@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -109,6 +110,60 @@ func TestVerifyRejectsPinnedMeasurementWithBundle(t *testing.T) {
 	_, err := client.Verify()
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "cannot combine")
+}
+
+func TestVerifyFromBundleRejectsEnclaveChange(t *testing.T) {
+	bundle, err := attestation.FetchBundle()
+	assert.NoError(t, err)
+
+	client := NewSecureClient("other.example.com", defaultRouterRepo)
+	groundTruth, err := client.VerifyFromBundle(bundle)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "changed enclave host")
+	assert.Nil(t, groundTruth)
+	assert.Equal(t, "other.example.com", client.Enclave())
+	assert.Nil(t, client.GroundTruth())
+}
+
+func TestSameEnclaveHost(t *testing.T) {
+	tests := []struct {
+		left  string
+		right string
+		same  bool
+	}{
+		{"router.example.com", "ROUTER.EXAMPLE.COM", true},
+		{"router.example.com.", "router.example.com", true},
+		{"router.example.com:443", "router.example.com", true},
+		{"router.example.com:8443", "router.example.com", false},
+		{"router.example.com", "other.example.com", false},
+		{"[2001:0db8:0:0:0:0:0:1]", "[2001:db8::1]", true},
+		{"[2001:db8::1]:443", "[2001:0db8::1]", true},
+		{"[2001:db8::1]:8443", "[2001:db8::1]", false},
+	}
+	for _, test := range tests {
+		assert.Equal(t, test.same, sameEnclaveHost(test.left, test.right), "%s, %s", test.left, test.right)
+	}
+}
+
+func TestSecureClientSerializesVerificationState(t *testing.T) {
+	const bundleURL = "https://%"
+
+	client := NewSecureClient("enclave.example.com", defaultRouterRepo)
+	client.SetAttestationBundleURL(bundleURL)
+
+	var wg sync.WaitGroup
+	for range 32 {
+		wg.Add(2)
+		go func() {
+			defer wg.Done()
+			_, _ = client.Verify()
+		}()
+		go func() {
+			defer wg.Done()
+			client.SetAttestationBundleURL(bundleURL)
+		}()
+	}
+	wg.Wait()
 }
 
 func TestVerifyFromBundleJSON(t *testing.T) {

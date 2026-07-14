@@ -17,14 +17,18 @@ import (
 // reVerifyingTransport wraps an http.RoundTripper and automatically re-verifies
 // attestation on certificate errors, handling server certificate rotation.
 type reVerifyingTransport struct {
-	secureClient *client.SecureClient
-	mu           sync.RWMutex
-	transport    http.RoundTripper
+	mu         sync.RWMutex
+	transport  http.RoundTripper
+	generation uint64
+
+	reverifyMu sync.Mutex
+	reverify   func() (http.RoundTripper, error)
 }
 
 func (t *reVerifyingTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	t.mu.RLock()
 	transport := t.transport
+	generation := t.generation
 	t.mu.RUnlock()
 
 	resp, err := transport.RoundTrip(req)
@@ -32,23 +36,43 @@ func (t *reVerifyingTransport) RoundTrip(req *http.Request) (*http.Response, err
 		return resp, err
 	}
 
-	// Certificate error detected, reinitialize secure client to re-verify attestation
-	newSecureClient := client.NewSecureClient(t.secureClient.Enclave(), t.secureClient.Repo())
-	newHTTPClient, clientErr := newSecureClient.HTTPClient()
-	if clientErr != nil {
-		// Re-verification failed, connection is genuinely malicious
+	retryReq, bodyErr := resetRequestBody(req)
+	if bodyErr != nil {
 		return nil, err
 	}
 
-	// Re-verification succeeded, update transport and retry
-	log.Info("Certificate rotation detected, re-verified attestation successfully")
+	newTransport, reverifyErr := t.reverifyOnce(generation)
+	if reverifyErr != nil {
+		// Re-verification failed, connection is genuinely malicious.
+		return nil, err
+	}
+
+	return newTransport.RoundTrip(retryReq)
+}
+
+func (t *reVerifyingTransport) reverifyOnce(seenGeneration uint64) (http.RoundTripper, error) {
+	t.reverifyMu.Lock()
+	defer t.reverifyMu.Unlock()
+
+	t.mu.RLock()
+	current, currentGeneration := t.transport, t.generation
+	t.mu.RUnlock()
+	if currentGeneration != seenGeneration {
+		return current, nil
+	}
+
+	newTransport, err := t.reverify()
+	if err != nil {
+		return nil, err
+	}
 
 	t.mu.Lock()
-	t.secureClient = newSecureClient
-	t.transport = newHTTPClient.Transport
+	t.transport = newTransport
+	t.generation++
 	t.mu.Unlock()
 
-	return newHTTPClient.Transport.RoundTrip(req)
+	log.Info("Certificate rotation detected, re-verified attestation successfully")
+	return newTransport, nil
 }
 
 func isCertificateError(err error) bool {
@@ -77,7 +101,7 @@ type Client struct {
 // NewClientWithParams creates a new secure OpenAI client with explicit enclave and repo parameters
 func NewClientWithParams(enclave, repo string, openaiOpts ...option.RequestOption) (*Client, error) {
 	secureClient := client.NewSecureClient(enclave, repo)
-	return createClientFromSecureClient(secureClient, defaultTransportMode, "", resolveUserCacheSecret("", false), openaiOpts...)
+	return createClientFromSecureClient(secureClient, defaultTransportMode, "", DefaultUserCacheSecret(), openaiOpts...)
 }
 
 // NewClient creates a new secure OpenAI client using default parameters
@@ -86,7 +110,7 @@ func NewClient(openaiOpts ...option.RequestOption) (*Client, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to create secure client: %w", err)
 	}
-	return createClientFromSecureClient(secureClient, defaultTransportMode, "", resolveUserCacheSecret("", false), openaiOpts...)
+	return createClientFromSecureClient(secureClient, defaultTransportMode, "", DefaultUserCacheSecret(), openaiOpts...)
 }
 
 // createClientFromSecureClient is a helper function to create a Client from a SecureClient

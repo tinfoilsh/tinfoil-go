@@ -6,7 +6,9 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/http/httptest"
 	"os"
+	"strings"
 	"sync"
 	"testing"
 
@@ -15,6 +17,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	ehbpidentity "github.com/tinfoilsh/encrypted-http-body-protocol/identity"
+	"github.com/tinfoilsh/tinfoil-go/verifier/client"
 )
 
 // roundTripFunc adapts a function to an http.RoundTripper.
@@ -66,6 +69,17 @@ func TestProxyClientOptionsApply(t *testing.T) {
 	require.Equal(t, "https://proxy.example.com/", cfg.baseURL)
 	require.True(t, cfg.baseURLSet)
 	require.Equal(t, "https://proxy.example.com", cfg.attestationBundleURL)
+}
+
+func TestSecureClientForRepo(t *testing.T) {
+	selected := client.NewSecureClient("router.example.com", defaultConfigRepo)
+
+	require.Same(t, selected, secureClientForRepo(selected, defaultConfigRepo))
+
+	custom := secureClientForRepo(selected, "org/custom-router")
+	require.NotSame(t, selected, custom)
+	require.Equal(t, selected.Enclave(), custom.Enclave())
+	require.Equal(t, "org/custom-router", custom.Repo())
 }
 
 func TestNewClientWithOptionsRejectsInvalidBaseURL(t *testing.T) {
@@ -134,6 +148,62 @@ func TestEnclaveURLHeaderValue(t *testing.T) {
 			require.Equal(t, tt.wantVal, val)
 		})
 	}
+}
+
+func TestEHBPTransportDoesNotFollowRedirects(t *testing.T) {
+	redirected := make(chan string, 1)
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		body, err := io.ReadAll(req.Body)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		redirected <- string(body)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer target.Close()
+
+	serverIdentity, err := ehbpidentity.NewIdentity()
+	require.NoError(t, err)
+	source := httptest.NewServer(serverIdentity.Middleware()(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		http.Redirect(w, req, target.URL, http.StatusTemporaryRedirect)
+	})))
+	defer source.Close()
+
+	transport, err := buildEHBPTransport(serverIdentity.MarshalPublicKeyHex())
+	require.NoError(t, err)
+	guarded, err := newHostBoundTransport("", source.URL, transport)
+	require.NoError(t, err)
+
+	req, err := http.NewRequest(http.MethodPost, source.URL, strings.NewReader("cache-secret-and-prompt"))
+	require.NoError(t, err)
+	resp, err := guarded.RoundTrip(req)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	require.Equal(t, http.StatusTemporaryRedirect, resp.StatusCode)
+
+	select {
+	case body := <-redirected:
+		t.Fatalf("redirect leaked request body to a foreign origin: %q", body)
+	default:
+	}
+}
+
+func TestNoBodyReplayTransportClearsGetBody(t *testing.T) {
+	inner := roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		require.Nil(t, req.GetBody)
+		return newResponse(http.StatusOK, "{}"), nil
+	})
+	transport := &noBodyReplayTransport{transport: inner}
+
+	req, err := http.NewRequest(http.MethodPost, "https://enclave.example.com/v1/responses", strings.NewReader("prompt"))
+	require.NoError(t, err)
+	require.NotNil(t, req.GetBody)
+
+	resp, err := transport.RoundTrip(req)
+	require.NoError(t, err)
+	resp.Body.Close()
+	require.NotNil(t, req.GetBody, "the caller's request must remain replayable for attested key rotation")
 }
 
 func TestEnclaveURLHeaderTransportInjectsHeader(t *testing.T) {

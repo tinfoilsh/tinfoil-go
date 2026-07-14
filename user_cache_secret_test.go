@@ -26,8 +26,8 @@ import (
 // developer .env loaded by TestMain may set it) and restores it afterwards.
 func unsetUserCacheSecretEnv(t *testing.T) {
 	t.Helper()
-	t.Setenv(userCacheSecretEnv, "placeholder") // registers restoration
-	require.NoError(t, os.Unsetenv(userCacheSecretEnv))
+	t.Setenv(UserCacheSecretEnv, "placeholder") // registers restoration
+	require.NoError(t, os.Unsetenv(UserCacheSecretEnv))
 }
 
 func TestWithUserCacheSecretOption(t *testing.T) {
@@ -42,30 +42,30 @@ func TestWithUserCacheSecretOption(t *testing.T) {
 	require.True(t, cfg.userCacheSecretSet, "an explicit empty secret must still count as set (it disables provisioning)")
 }
 
-func TestResolveUserCacheSecretPrecedence(t *testing.T) {
+func TestUserCacheSecretResolutionPrecedence(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 
 	t.Run("explicit option beats environment", func(t *testing.T) {
-		t.Setenv(userCacheSecretEnv, "from-env")
+		t.Setenv(UserCacheSecretEnv, "from-env")
 		require.Equal(t, "explicit", resolveUserCacheSecret("explicit", true))
 	})
 
 	t.Run("explicit empty disables even with environment set", func(t *testing.T) {
-		t.Setenv(userCacheSecretEnv, "from-env")
+		t.Setenv(UserCacheSecretEnv, "from-env")
 		require.Empty(t, resolveUserCacheSecret("", true))
 	})
 
 	t.Run("environment beats generation and touches no file", func(t *testing.T) {
-		t.Setenv(userCacheSecretEnv, "from-env")
-		require.Equal(t, "from-env", resolveUserCacheSecret("", false))
+		t.Setenv(UserCacheSecretEnv, "from-env")
+		require.Equal(t, "from-env", DefaultUserCacheSecret())
 		_, err := os.Stat(filepath.Join(home, userCacheSecretDirName))
 		require.True(t, os.IsNotExist(err), "an environment-provided secret must not create the secret file")
 	})
 
 	t.Run("environment set but empty disables generation", func(t *testing.T) {
-		t.Setenv(userCacheSecretEnv, "")
-		require.Empty(t, resolveUserCacheSecret("", false))
+		t.Setenv(UserCacheSecretEnv, "")
+		require.Empty(t, DefaultUserCacheSecret())
 		_, err := os.Stat(filepath.Join(home, userCacheSecretDirName))
 		require.True(t, os.IsNotExist(err), "a disabled secret must not create the secret file")
 	})
@@ -76,7 +76,7 @@ func TestUserCacheSecretGenerateAndPersist(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 
-	first := resolveUserCacheSecret("", false)
+	first := DefaultUserCacheSecret()
 	require.Len(t, first, 64, "expected a hex-encoded 256-bit secret")
 
 	path := filepath.Join(home, userCacheSecretDirName, userCacheSecretFileName)
@@ -86,7 +86,7 @@ func TestUserCacheSecretGenerateAndPersist(t *testing.T) {
 
 	// A second resolution (a new client, or another SDK on the same machine)
 	// must reuse the persisted secret, not mint a new namespace.
-	require.Equal(t, first, resolveUserCacheSecret("", false))
+	require.Equal(t, first, DefaultUserCacheSecret())
 }
 
 func TestUserCacheSecretAdoptsExistingFile(t *testing.T) {
@@ -99,7 +99,7 @@ func TestUserCacheSecretAdoptsExistingFile(t *testing.T) {
 	// Trailing newline: the file may be hand-edited or written by another SDK.
 	require.NoError(t, os.WriteFile(filepath.Join(dir, userCacheSecretFileName), []byte("shared-secret\n"), 0o600))
 
-	require.Equal(t, "shared-secret", resolveUserCacheSecret("", false))
+	require.Equal(t, "shared-secret", DefaultUserCacheSecret())
 }
 
 func TestUserCacheSecretRejectsInvalidUTF8WithoutRewriting(t *testing.T) {
@@ -113,9 +113,9 @@ func TestUserCacheSecretRejectsInvalidUTF8WithoutRewriting(t *testing.T) {
 	require.NoError(t, os.MkdirAll(dir, 0o700))
 	require.NoError(t, os.WriteFile(path, corrupted, 0o600))
 
-	first := resolveUserCacheSecret("", false)
+	first := DefaultUserCacheSecret()
 	require.Len(t, first, 64)
-	require.Equal(t, first, resolveUserCacheSecret("", false))
+	require.Equal(t, first, DefaultUserCacheSecret())
 	persisted, err := os.ReadFile(path)
 	require.NoError(t, err)
 	require.Equal(t, corrupted, persisted)
@@ -136,7 +136,7 @@ func TestUserCacheSecretAcceptsPermissiveExistingPermissions(t *testing.T) {
 	require.NoError(t, os.Chmod(dir, 0o777))
 	require.NoError(t, os.Chmod(path, 0o666))
 
-	require.Equal(t, "shared-secret", resolveUserCacheSecret("", false))
+	require.Equal(t, "shared-secret", DefaultUserCacheSecret())
 	requireFileMode(t, dir, 0o777)
 	requireFileMode(t, path, 0o666)
 }
@@ -151,9 +151,9 @@ func TestUserCacheSecretLeavesBlankFileUntouched(t *testing.T) {
 	require.NoError(t, os.MkdirAll(dir, 0o700))
 	require.NoError(t, os.WriteFile(path, []byte("  \n"), 0o600))
 
-	first := resolveUserCacheSecret("", false)
+	first := DefaultUserCacheSecret()
 	require.Len(t, first, 64)
-	require.Equal(t, first, resolveUserCacheSecret("", false))
+	require.Equal(t, first, DefaultUserCacheSecret())
 	written, err := os.ReadFile(path)
 	require.NoError(t, err)
 	require.Equal(t, []byte("  \n"), written)
@@ -177,14 +177,14 @@ func TestUserCacheSecretSubprocess(t *testing.T) {
 	if os.Getenv("TINFOIL_CACHE_SECRET_HELPER") != "1" {
 		return
 	}
-	_ = os.Unsetenv(userCacheSecretEnv)
+	_ = os.Unsetenv(UserCacheSecretEnv)
 	fmt.Println("ready")
 	var release [1]byte
 	if _, err := io.ReadFull(os.Stdin, release[:]); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(2)
 	}
-	fmt.Println(resolveUserCacheSecret("", false))
+	fmt.Println(DefaultUserCacheSecret())
 	os.Exit(0)
 }
 
@@ -241,7 +241,7 @@ func userCacheSecretHelperEnv(home string) []string {
 	for _, value := range os.Environ() {
 		if strings.HasPrefix(value, "HOME=") ||
 			strings.HasPrefix(value, "USERPROFILE=") ||
-			strings.HasPrefix(value, userCacheSecretEnv+"=") ||
+			strings.HasPrefix(value, UserCacheSecretEnv+"=") ||
 			strings.HasPrefix(value, "TINFOIL_CACHE_SECRET_HELPER=") {
 			continue
 		}
@@ -269,9 +269,9 @@ func TestUserCacheSecretFallsBackWithoutHome(t *testing.T) {
 	unsetUserCacheSecretEnv(t)
 	t.Setenv("HOME", "")
 
-	first := resolveUserCacheSecret("", false)
+	first := DefaultUserCacheSecret()
 	require.NotEmpty(t, first, "no home directory must still yield a process-lifetime secret")
-	require.Equal(t, first, resolveUserCacheSecret("", false), "the in-memory fallback must be stable within the process")
+	require.Equal(t, first, DefaultUserCacheSecret(), "the in-memory fallback must be stable within the process")
 }
 
 func TestUserCacheSecretFallsBackWhenHomeNotADirectory(t *testing.T) {
@@ -280,7 +280,7 @@ func TestUserCacheSecretFallsBackWhenHomeNotADirectory(t *testing.T) {
 	require.NoError(t, os.WriteFile(homeFile, []byte("x"), 0o600))
 	t.Setenv("HOME", homeFile)
 
-	require.NotEmpty(t, resolveUserCacheSecret("", false))
+	require.NotEmpty(t, DefaultUserCacheSecret())
 }
 
 // captureTransport returns a userCacheSecretTransport whose inner round
@@ -333,7 +333,7 @@ func TestUserCacheSecretTransportInjects(t *testing.T) {
 
 			var body map[string]any
 			require.NoError(t, json.Unmarshal(got, &body))
-			require.Equal(t, "s1", body[userCacheSecretField])
+			require.Equal(t, "s1", body[UserCacheSecretField])
 
 			// Length metadata and the replayable body must describe the
 			// injected bytes: retries below this layer (EHBP key rotation)
@@ -466,7 +466,7 @@ func TestUserCacheSecretTransportAllowsTrailingWhitespace(t *testing.T) {
 
 	var body map[string]any
 	require.NoError(t, json.Unmarshal(got, &body))
-	require.Equal(t, "s1", body[userCacheSecretField])
+	require.Equal(t, "s1", body[UserCacheSecretField])
 }
 
 func TestUserCacheSecretTransportPreservesNumberPrecision(t *testing.T) {
@@ -510,11 +510,11 @@ func TestUserCacheSecretThroughOpenAIClient(t *testing.T) {
 
 	_, err := oai.Chat.Completions.New(context.Background(), params)
 	require.NoError(t, err)
-	require.Equal(t, "client-level", received[userCacheSecretField])
+	require.Equal(t, "client-level", received[UserCacheSecretField])
 
 	_, err = oai.Chat.Completions.New(context.Background(), params,
-		option.WithJSONSet(userCacheSecretField, "end-user-7"))
+		option.WithJSONSet(UserCacheSecretField, "end-user-7"))
 	require.NoError(t, err)
-	require.Equal(t, "end-user-7", received[userCacheSecretField],
+	require.Equal(t, "end-user-7", received[UserCacheSecretField],
 		"a per-request field must win over the client-level secret")
 }
