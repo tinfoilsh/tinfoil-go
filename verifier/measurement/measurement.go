@@ -5,9 +5,7 @@ package measurement
 
 import (
 	"crypto/sha256"
-	"errors"
 	"fmt"
-	"slices"
 	"strings"
 )
 
@@ -21,17 +19,6 @@ const (
 	TdxGuestV2 PredicateType = "https://tinfoil.sh/predicate/tdx-guest/v2"
 
 	SnpTdxMultiPlatformV1 PredicateType = "https://tinfoil.sh/predicate/snp-tdx-multiplatform/v1"
-)
-
-var (
-	ErrFormatMismatch              = errors.New("attestation format mismatch")
-	ErrMeasurementMismatch         = errors.New("measurement mismatch")
-	ErrRtmr1Mismatch               = errors.New("RTMR1 mismatch")
-	ErrRtmr2Mismatch               = errors.New("RTMR2 mismatch")
-	ErrRtmr3Mismatch               = errors.New("RTMR3 mismatch")
-	ErrFewRegisters                = errors.New("fewer registers than expected")
-	ErrMultiPlatformMismatch       = errors.New("multi-platform measurement mismatch")
-	ErrMultiPlatformSevSnpMismatch = errors.New("multi-platform SEV-SNP measurement mismatch")
 )
 
 type Measurement struct {
@@ -74,98 +61,6 @@ func Fingerprint(m *Measurement, hw *HardwareMeasurement, targetType PredicateTy
 	all := string(m.Type) + strings.Join(registers, "")
 	hash := sha256.Sum256([]byte(all))
 	return fmt.Sprintf("%x", hash), nil
-}
-
-func (m *Measurement) EqualsDisplay(other *Measurement) (string, error) {
-	// Base case: if both measurements are multi-platform, compare directly
-	if m.Type == SnpTdxMultiPlatformV1 && other.Type == SnpTdxMultiPlatformV1 {
-		if !slices.Equal(m.Registers, other.Registers) {
-			return "", ErrMultiPlatformMismatch
-		}
-		return "MP-MP exact match", nil
-	}
-
-	// Flip comparison order for multi-platform measurements
-	if other.Type == SnpTdxMultiPlatformV1 {
-		return other.EqualsDisplay(m)
-	}
-
-	if m.Type == SnpTdxMultiPlatformV1 {
-		var err error
-		var out strings.Builder
-
-		if len(m.Registers) < 3 {
-			return "", ErrFewRegisters
-		}
-
-		expectedSnp := m.Registers[0]
-		expectedRtmr1 := m.Registers[1]
-		expectedRtmr2 := m.Registers[2]
-		// For now, we expect all RTMR3s to be zeros
-		expectedRtmr3 := RTMR3_ZERO
-
-		switch other.Type {
-		case TdxGuestV2:
-			if len(other.Registers) < 5 {
-				return "MP-TDX unable to compare, too few TDX registers", ErrFewRegisters
-			}
-
-			actualRtmr1 := other.Registers[2] // 0 is MRTD, 1 is RTMR0
-			actualRtmr2 := other.Registers[3]
-			actualRtmr3 := other.Registers[4]
-
-			out.WriteString(fmt.Sprintf("[i] SNP   %s\n", expectedSnp))
-
-			if expectedRtmr1 != actualRtmr1 {
-				out.WriteString(fmt.Sprintf("[-] RTMR1 %s != %s\n", expectedRtmr1, actualRtmr1))
-				err = errors.Join(err, ErrRtmr1Mismatch)
-			}
-			if expectedRtmr2 != actualRtmr2 {
-				out.WriteString(fmt.Sprintf("[-] RTMR2 %s != %s\n", expectedRtmr2, actualRtmr2))
-				err = errors.Join(err, ErrRtmr2Mismatch)
-			}
-			if expectedRtmr3 != actualRtmr3 {
-				out.WriteString(fmt.Sprintf("[-] RTMR3 %s != %s\n", expectedRtmr3, actualRtmr3))
-				err = errors.Join(err, ErrRtmr3Mismatch)
-			}
-
-			if err == nil {
-				out.WriteString(fmt.Sprintf("[+] RTMR1 %s\n[+] RTMR2 %s\n[+] RTMR3 %s\n", expectedRtmr1, expectedRtmr2, expectedRtmr3))
-			}
-
-			return strings.TrimRight(out.String(), "\n"), err
-		case SevGuestV2:
-			actualSnp := other.Registers[0]
-
-			if expectedSnp != actualSnp {
-				out.WriteString(fmt.Sprintf("[-] SNP   %s != %s\n", expectedSnp, actualSnp))
-				err = ErrMultiPlatformSevSnpMismatch
-			} else {
-				out.WriteString(fmt.Sprintf("[+] SNP   %s\n", expectedSnp))
-			}
-
-			out.WriteString(fmt.Sprintf("[i] RTMR1 %s\n[i] RTMR2 %s", expectedRtmr1, expectedRtmr2))
-
-			return strings.TrimRight(out.String(), "\n"), err
-		default:
-			return "", fmt.Errorf("unsupported enclave platform for multi-platform code measurements: %s", other.Type)
-		}
-	}
-
-	if m.Type != other.Type {
-		return "", ErrFormatMismatch
-	}
-
-	if !slices.Equal(m.Registers, other.Registers) {
-		return "", ErrMeasurementMismatch
-	}
-
-	return "", nil
-}
-
-func (m *Measurement) Equals(other *Measurement) error {
-	_, err := m.EqualsDisplay(other)
-	return err
 }
 
 func (m *Measurement) String() string {

@@ -7,68 +7,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestMeasurementEquals(t *testing.T) {
-	tests := []struct {
-		name    string
-		m1      *Measurement
-		m2      *Measurement
-		wantErr error
-	}{
-
-		{
-			name:    "multi-platform to multi-platform equal",
-			wantErr: nil,
-			m1: &Measurement{
-				Type:      SnpTdxMultiPlatformV1,
-				Registers: []string{"sevsnp", "rtmr1", "rtmr2"},
-			},
-			m2: &Measurement{
-				Type:      SnpTdxMultiPlatformV1,
-				Registers: []string{"sevsnp", "rtmr1", "rtmr2"},
-			},
-		}, {
-			name:    "multi-platform to multi-platform mismatch",
-			wantErr: ErrMultiPlatformMismatch,
-			m1: &Measurement{
-				Type:      SnpTdxMultiPlatformV1,
-				Registers: []string{"sevsnp", "rtmr1", "rtmr2"},
-			},
-			m2: &Measurement{
-				Type:      SnpTdxMultiPlatformV1,
-				Registers: []string{"sevsnp_other", "rtmr1", "rtmr2"},
-			},
-		}, {
-			name:    "multi-platform SEV-SNP v2 match",
-			wantErr: nil,
-			m1: &Measurement{
-				Type:      SnpTdxMultiPlatformV1,
-				Registers: []string{"sevsnp", "rtmr1", "rtmr2"},
-			},
-			m2: &Measurement{
-				Type:      SevGuestV2,
-				Registers: []string{"sevsnp"},
-			},
-		}, {
-			name:    "multi-platform TDX v2 match",
-			wantErr: nil,
-			m1: &Measurement{
-				Type:      SnpTdxMultiPlatformV1,
-				Registers: []string{"sevsnp", "rtmr1", "rtmr2"},
-			},
-			m2: &Measurement{
-				Type:      TdxGuestV2,
-				Registers: []string{"mrtd", "rtmr0", "rtmr1", "rtmr2", RTMR3_ZERO},
-			},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			assert.ErrorIs(t, tt.m1.Equals(tt.m2), tt.wantErr)
-		})
-	}
-}
-
 func TestAttestationFingerprint(t *testing.T) {
 	routerMpMeasurement := &Measurement{
 		Type: SnpTdxMultiPlatformV1,
