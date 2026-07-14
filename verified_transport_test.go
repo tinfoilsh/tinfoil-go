@@ -53,6 +53,11 @@ func TestNewHostBoundTransportRejectsInvalidBaseURL(t *testing.T) {
 	require.Error(t, err)
 }
 
+func TestNewHostBoundTransportRejectsNilTransport(t *testing.T) {
+	_, err := NewHostBoundTransport("enclave.example.com", "", nil)
+	require.EqualError(t, err, "transport is required")
+}
+
 func TestNewVerifiedTransportRejectsInvalidConfig(t *testing.T) {
 	t.Run("invalid base URL", func(t *testing.T) {
 		_, err := NewVerifiedTransport(WithBaseURL("/v1"))
@@ -66,8 +71,8 @@ func TestNewVerifiedTransportRejectsInvalidConfig(t *testing.T) {
 }
 
 // TestNewVerifiedTransport performs real router selection and attestation,
-// mirroring TestNewClient, and pins that the returned transport is the bare
-// sealing transport with no cache-secret or origin-binding layers.
+// mirroring TestNewClient, and pins that the returned transport has an origin
+// guard directly around the bare sealing transport, with no cache-secret layer.
 func TestNewVerifiedTransport(t *testing.T) {
 	t.Setenv(UserCacheSecretEnv, "must-not-appear-in-the-stack")
 
@@ -75,6 +80,8 @@ func TestNewVerifiedTransport(t *testing.T) {
 	require.NoError(t, err)
 	require.NotEmpty(t, vt.Enclave())
 	require.NotEmpty(t, vt.Repo())
-	_, ok := vt.transport.(*ehbpReVerifyingTransport)
-	require.True(t, ok, "expected the bare EHBP sealing transport, got %T", vt.transport)
+	guarded, ok := vt.transport.(*hostBoundRoundTripper)
+	require.True(t, ok, "expected an origin guard, got %T", vt.transport)
+	_, ok = guarded.transport.(*ehbpReVerifyingTransport)
+	require.True(t, ok, "expected the bare EHBP sealing transport under the guard, got %T", guarded.transport)
 }

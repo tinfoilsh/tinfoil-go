@@ -226,6 +226,9 @@ func sealingHTTPClient(secureClient *client.SecureClient, mode TransportMode, ba
 // VerifiedTransport should place layers that mutate requests inside this
 // guard.
 func NewHostBoundTransport(enclave, baseURL string, rt http.RoundTripper) (http.RoundTripper, error) {
+	if rt == nil {
+		return nil, fmt.Errorf("transport is required")
+	}
 	origins, err := allowedOrigins(enclave, baseURL)
 	if err != nil {
 		return nil, fmt.Errorf("failed to determine allowed request origins: %w", err)
@@ -285,11 +288,26 @@ func tlsPinnedHTTPClient(secureClient *client.SecureClient) (*http.Client, error
 	}
 
 	// Wrap with re-verifying transport to handle certificate rotation
-	httpClient.Transport = &reVerifyingTransport{
-		secureClient: secureClient,
-		transport:    httpClient.Transport,
-	}
+	httpClient.Transport = newTLSReVerifyingTransport(secureClient, httpClient.Transport)
 	return httpClient, nil
+}
+
+func newTLSReVerifyingTransport(secureClient *client.SecureClient, inner http.RoundTripper) *reVerifyingTransport {
+	return &reVerifyingTransport{
+		transport: inner,
+		reverify: func() (http.RoundTripper, error) {
+			// Reuse the configured client so attestation-bundle and
+			// pinned-measurement settings remain in force during rotation.
+			if _, err := secureClient.Verify(); err != nil {
+				return nil, err
+			}
+			httpClient, err := secureClient.HTTPClient()
+			if err != nil {
+				return nil, err
+			}
+			return httpClient.Transport, nil
+		},
+	}
 }
 
 // ehbpHTTPClient returns an HTTP client whose request bodies are encrypted to
@@ -441,11 +459,33 @@ func buildEHBPTransport(hpkePublicKeyHex string) (http.RoundTripper, error) {
 		return nil, fmt.Errorf("failed to parse HPKE public key: %w", err)
 	}
 
-	transport, err := ehbpclient.NewTransportWithIdentity(serverIdentity)
+	transport, err := ehbpclient.NewTransportWithIdentity(
+		serverIdentity,
+		ehbpclient.WithHTTPClient(&http.Client{
+			CheckRedirect: func(*http.Request, []*http.Request) error {
+				return http.ErrUseLastResponse
+			},
+		}),
+	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create EHBP transport: %w", err)
 	}
-	return transport, nil
+	return &noBodyReplayTransport{transport: transport}, nil
+}
+
+// noBodyReplayTransport prevents the EHBP transport's nested http.Client from
+// replaying the caller's plaintext GetBody after EncryptRequestWithContext has
+// replaced Body with ciphertext. The outer re-verifying transport retains the
+// original request and can still replay it through fresh EHBP encryption after
+// an attested key rotation.
+type noBodyReplayTransport struct {
+	transport http.RoundTripper
+}
+
+func (t *noBodyReplayTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	out := req.Clone(req.Context())
+	out.GetBody = nil
+	return t.transport.RoundTrip(out)
 }
 
 // ehbpReVerifyingTransport wraps an EHBP round tripper and re-verifies

@@ -9,10 +9,8 @@ import (
 // VerifiedTransport is an attested sealing transport to a verified enclave:
 // pinned TLS or EHBP, re-verifying attestation automatically when the enclave
 // rotates its keys. Unlike the client returned by NewClientWithOptions it
-// carries no OpenAI client, no cache-secret layer, and no origin binding, so
-// consumers that forward their own requests (for example a local proxy) can
-// compose their own stack around it. Wrap it with NewHostBoundTransport to
-// refuse requests to any other origin.
+// carries no OpenAI client or cache-secret layer. It is bound to the verified
+// enclave and, when configured, the base URL's origin.
 type VerifiedTransport struct {
 	enclave   string
 	repo      string
@@ -42,10 +40,14 @@ func newVerifiedTransport(secureClient *client.SecureClient, mode TransportMode,
 	if err != nil {
 		return nil, err
 	}
+	transport, err := NewHostBoundTransport(secureClient.Enclave(), baseURL, httpClient.Transport)
+	if err != nil {
+		return nil, err
+	}
 	return &VerifiedTransport{
 		enclave:   secureClient.Enclave(),
 		repo:      secureClient.Repo(),
-		transport: httpClient.Transport,
+		transport: transport,
 	}, nil
 }
 

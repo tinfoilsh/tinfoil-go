@@ -6,7 +6,9 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/http/httptest"
 	"os"
+	"strings"
 	"sync"
 	"testing"
 
@@ -134,6 +136,62 @@ func TestEnclaveURLHeaderValue(t *testing.T) {
 			require.Equal(t, tt.wantVal, val)
 		})
 	}
+}
+
+func TestEHBPTransportDoesNotFollowRedirects(t *testing.T) {
+	redirected := make(chan string, 1)
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		body, err := io.ReadAll(req.Body)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		redirected <- string(body)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer target.Close()
+
+	serverIdentity, err := ehbpidentity.NewIdentity()
+	require.NoError(t, err)
+	source := httptest.NewServer(serverIdentity.Middleware()(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		http.Redirect(w, req, target.URL, http.StatusTemporaryRedirect)
+	})))
+	defer source.Close()
+
+	transport, err := buildEHBPTransport(serverIdentity.MarshalPublicKeyHex())
+	require.NoError(t, err)
+	guarded, err := NewHostBoundTransport("", source.URL, transport)
+	require.NoError(t, err)
+
+	req, err := http.NewRequest(http.MethodPost, source.URL, strings.NewReader("cache-secret-and-prompt"))
+	require.NoError(t, err)
+	resp, err := guarded.RoundTrip(req)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	require.Equal(t, http.StatusTemporaryRedirect, resp.StatusCode)
+
+	select {
+	case body := <-redirected:
+		t.Fatalf("redirect leaked request body to a foreign origin: %q", body)
+	default:
+	}
+}
+
+func TestNoBodyReplayTransportClearsGetBody(t *testing.T) {
+	inner := roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		require.Nil(t, req.GetBody)
+		return newResponse(http.StatusOK, "{}"), nil
+	})
+	transport := &noBodyReplayTransport{transport: inner}
+
+	req, err := http.NewRequest(http.MethodPost, "https://enclave.example.com/v1/responses", strings.NewReader("prompt"))
+	require.NoError(t, err)
+	require.NotNil(t, req.GetBody)
+
+	resp, err := transport.RoundTrip(req)
+	require.NoError(t, err)
+	resp.Body.Close()
+	require.NotNil(t, req.GetBody, "the caller's request must remain replayable for attested key rotation")
 }
 
 func TestEnclaveURLHeaderTransportInjectsHeader(t *testing.T) {

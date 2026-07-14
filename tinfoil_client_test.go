@@ -4,8 +4,12 @@ import (
 	"context"
 	"crypto/x509"
 	"errors"
+	"io"
+	"net/http"
 	"os"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 
 	"github.com/openai/openai-go/v3"
@@ -294,5 +298,87 @@ func TestIsCertificateError(t *testing.T) {
 			result := isCertificateError(tt.err)
 			require.Equal(t, tt.expected, result)
 		})
+	}
+}
+
+func TestTLSReverificationPreservesAttestationBundleURL(t *testing.T) {
+	secureClient := client.NewSecureClient("enclave.example.com", "org/repo")
+	secureClient.SetAttestationBundleURL("https://127.0.0.1:1")
+
+	transport := newTLSReVerifyingTransport(secureClient, roundTripFunc(func(*http.Request) (*http.Response, error) {
+		return nil, client.ErrCertMismatch
+	}))
+	_, err := transport.reverify()
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "fetchBundle",
+		"TLS re-verification must retain the configured bundle endpoint")
+}
+
+func TestTLSReverificationRunsOnceAndReplaysBodies(t *testing.T) {
+	const workers = 8
+
+	var arrived sync.WaitGroup
+	arrived.Add(workers)
+	release := make(chan struct{})
+	stale := roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		arrived.Done()
+		<-release
+		if _, err := io.ReadAll(req.Body); err != nil {
+			return nil, err
+		}
+		return nil, client.ErrCertMismatch
+	})
+
+	var reverifyCalls atomic.Int64
+	freshBodies := make(chan string, workers)
+	fresh := roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		body, err := io.ReadAll(req.Body)
+		if err != nil {
+			return nil, err
+		}
+		freshBodies <- string(body)
+		return newResponse(http.StatusOK, "{}"), nil
+	})
+
+	transport := &reVerifyingTransport{
+		transport: stale,
+		reverify: func() (http.RoundTripper, error) {
+			reverifyCalls.Add(1)
+			return fresh, nil
+		},
+	}
+
+	var requests sync.WaitGroup
+	requests.Add(workers)
+	errs := make(chan error, workers)
+	for range workers {
+		go func() {
+			defer requests.Done()
+			req, err := http.NewRequest(http.MethodPost, "https://enclave.example.com/v1/responses", strings.NewReader("prompt"))
+			if err != nil {
+				errs <- err
+				return
+			}
+			resp, err := transport.RoundTrip(req)
+			if resp != nil {
+				resp.Body.Close()
+			}
+			errs <- err
+		}()
+	}
+
+	arrived.Wait()
+	close(release)
+	requests.Wait()
+	close(errs)
+	close(freshBodies)
+
+	for err := range errs {
+		require.NoError(t, err)
+	}
+	require.Equal(t, int64(1), reverifyCalls.Load())
+	require.Equal(t, workers, len(freshBodies))
+	for body := range freshBodies {
+		require.Equal(t, "prompt", body)
 	}
 }
