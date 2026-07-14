@@ -1,13 +1,18 @@
 package tinfoil
 
 import (
+	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"testing"
@@ -97,7 +102,46 @@ func TestUserCacheSecretAdoptsExistingFile(t *testing.T) {
 	require.Equal(t, "shared-secret", resolveUserCacheSecret("", false))
 }
 
-func TestUserCacheSecretRewritesBlankFile(t *testing.T) {
+func TestUserCacheSecretRejectsInvalidUTF8WithoutRewriting(t *testing.T) {
+	unsetUserCacheSecretEnv(t)
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	dir := filepath.Join(home, userCacheSecretDirName)
+	path := filepath.Join(dir, userCacheSecretFileName)
+	corrupted := []byte{0xff, 0xfe, 'a'}
+	require.NoError(t, os.MkdirAll(dir, 0o700))
+	require.NoError(t, os.WriteFile(path, corrupted, 0o600))
+
+	first := resolveUserCacheSecret("", false)
+	require.Len(t, first, 64)
+	require.Equal(t, first, resolveUserCacheSecret("", false))
+	persisted, err := os.ReadFile(path)
+	require.NoError(t, err)
+	require.Equal(t, corrupted, persisted)
+}
+
+func TestUserCacheSecretAcceptsPermissiveExistingPermissions(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows does not expose POSIX permission bits")
+	}
+	unsetUserCacheSecretEnv(t)
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	dir := filepath.Join(home, userCacheSecretDirName)
+	path := filepath.Join(dir, userCacheSecretFileName)
+	require.NoError(t, os.MkdirAll(dir, 0o700))
+	require.NoError(t, os.WriteFile(path, []byte("shared-secret"), 0o600))
+	require.NoError(t, os.Chmod(dir, 0o777))
+	require.NoError(t, os.Chmod(path, 0o666))
+
+	require.Equal(t, "shared-secret", resolveUserCacheSecret("", false))
+	requireFileMode(t, dir, 0o777)
+	requireFileMode(t, path, 0o666)
+}
+
+func TestUserCacheSecretLeavesBlankFileUntouched(t *testing.T) {
 	unsetUserCacheSecretEnv(t)
 	home := t.TempDir()
 	t.Setenv("HOME", home)
@@ -107,12 +151,118 @@ func TestUserCacheSecretRewritesBlankFile(t *testing.T) {
 	require.NoError(t, os.MkdirAll(dir, 0o700))
 	require.NoError(t, os.WriteFile(path, []byte("  \n"), 0o600))
 
-	secret := resolveUserCacheSecret("", false)
-	require.Len(t, secret, 64)
-
+	first := resolveUserCacheSecret("", false)
+	require.Len(t, first, 64)
+	require.Equal(t, first, resolveUserCacheSecret("", false))
 	written, err := os.ReadFile(path)
 	require.NoError(t, err)
-	require.Equal(t, secret, strings.TrimSpace(string(written)), "a blank file must be replaced with the generated secret")
+	require.Equal(t, []byte("  \n"), written)
+}
+
+func TestUserCacheSecretConcurrentProcesses(t *testing.T) {
+	home := t.TempDir()
+	path := filepath.Join(home, userCacheSecretDirName, userCacheSecretFileName)
+	secrets := runUserCacheSecretContenders(t, home, userCacheSecretContenderCount)
+	for _, secret := range secrets {
+		require.Equal(t, secrets[0], secret, "all processes must adopt the elected value")
+		require.Len(t, secret, 64)
+	}
+	persisted, err := os.ReadFile(path)
+	require.NoError(t, err)
+	require.Equal(t, secrets[0], strings.TrimSpace(string(persisted)))
+	requireFileMode(t, path, 0o600)
+}
+
+func TestUserCacheSecretSubprocess(t *testing.T) {
+	if os.Getenv("TINFOIL_CACHE_SECRET_HELPER") != "1" {
+		return
+	}
+	_ = os.Unsetenv(userCacheSecretEnv)
+	fmt.Println("ready")
+	var release [1]byte
+	if _, err := io.ReadFull(os.Stdin, release[:]); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(2)
+	}
+	fmt.Println(resolveUserCacheSecret("", false))
+	os.Exit(0)
+}
+
+const userCacheSecretContenderCount = 8
+
+type userCacheSecretContender struct {
+	cmd    *exec.Cmd
+	stdin  io.WriteCloser
+	stdout *bufio.Reader
+	stderr bytes.Buffer
+}
+
+func runUserCacheSecretContenders(t *testing.T, home string, count int) []string {
+	t.Helper()
+	contenders := make([]userCacheSecretContender, count)
+	for i := range contenders {
+		cmd := exec.Command(os.Args[0], "-test.run=^TestUserCacheSecretSubprocess$")
+		cmd.Env = userCacheSecretHelperEnv(home)
+		stdin, err := cmd.StdinPipe()
+		require.NoError(t, err)
+		stdout, err := cmd.StdoutPipe()
+		require.NoError(t, err)
+		contenders[i] = userCacheSecretContender{
+			cmd:    cmd,
+			stdin:  stdin,
+			stdout: bufio.NewReader(stdout),
+		}
+		cmd.Stderr = &contenders[i].stderr
+		require.NoError(t, cmd.Start())
+		ready, err := contenders[i].stdout.ReadString('\n')
+		require.NoError(t, err)
+		require.Equal(t, "ready", strings.TrimSpace(ready))
+	}
+
+	for i := range contenders {
+		_, err := contenders[i].stdin.Write([]byte{1})
+		require.NoError(t, err)
+		require.NoError(t, contenders[i].stdin.Close())
+	}
+
+	secrets := make([]string, count)
+	for i := range contenders {
+		secret, err := contenders[i].stdout.ReadString('\n')
+		require.NoError(t, err)
+		waitErr := contenders[i].cmd.Wait()
+		require.NoError(t, waitErr, contenders[i].stderr.String())
+		secrets[i] = strings.TrimSpace(secret)
+	}
+	return secrets
+}
+
+func userCacheSecretHelperEnv(home string) []string {
+	env := make([]string, 0, len(os.Environ())+3)
+	for _, value := range os.Environ() {
+		if strings.HasPrefix(value, "HOME=") ||
+			strings.HasPrefix(value, "USERPROFILE=") ||
+			strings.HasPrefix(value, userCacheSecretEnv+"=") ||
+			strings.HasPrefix(value, "TINFOIL_CACHE_SECRET_HELPER=") {
+			continue
+		}
+		env = append(env, value)
+	}
+	return append(
+		env,
+		"HOME="+home,
+		"USERPROFILE="+home,
+		"TINFOIL_CACHE_SECRET_HELPER=1",
+	)
+}
+
+func requireFileMode(t *testing.T, path string, mode os.FileMode) {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		return
+	}
+	info, err := os.Stat(path)
+	require.NoError(t, err)
+	require.Equal(t, mode, info.Mode().Perm())
 }
 
 func TestUserCacheSecretFallsBackWithoutHome(t *testing.T) {
@@ -168,6 +318,7 @@ func TestUserCacheSecretTransportInjects(t *testing.T) {
 		"/v1/completions",
 		"/v1/responses",
 		"/api/v1/chat/completions", // proxy base URL with a path prefix
+		"/chat/completions",        // custom base URL without a /v1 root
 	}
 	for _, path := range paths {
 		t.Run(path, func(t *testing.T) {
@@ -201,12 +352,14 @@ func TestUserCacheSecretTransportInjects(t *testing.T) {
 
 func TestUserCacheSecretTransportSkipsIneligibleRequests(t *testing.T) {
 	t.Run("non-allowlisted endpoint forwards the body untouched", func(t *testing.T) {
-		var got []byte
-		transport := captureTransport("s1", &got, nil)
-		const raw = `{"model":"m","input":"text"}`
-		_, err := transport.RoundTrip(postJSONRequest(t, "https://enclave.example.com/v1/embeddings", raw))
-		require.NoError(t, err)
-		require.Equal(t, raw, string(got))
+		for _, path := range []string{"/v1/embeddings", "/embeddings"} {
+			var got []byte
+			transport := captureTransport("s1", &got, nil)
+			const raw = `{"model":"m","input":"text"}`
+			_, err := transport.RoundTrip(postJSONRequest(t, "https://enclave.example.com"+path, raw))
+			require.NoError(t, err)
+			require.Equal(t, raw, string(got))
+		}
 	})
 
 	t.Run("GET with no body is forwarded as-is", func(t *testing.T) {
@@ -226,6 +379,23 @@ func TestUserCacheSecretTransportSkipsIneligibleRequests(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, raw, string(got))
 	})
+}
+
+func TestUserCacheSecretTransportLeavesStreamingBodyUntouched(t *testing.T) {
+	const raw = `{"model":"m"}`
+	var got []byte
+	transport := captureTransport("s1", &got, nil)
+	req, err := http.NewRequest(
+		http.MethodPost,
+		"https://enclave.example.com/v1/chat/completions",
+		io.NopCloser(strings.NewReader(raw)),
+	)
+	require.NoError(t, err)
+	require.Nil(t, req.GetBody)
+
+	_, err = transport.RoundTrip(req)
+	require.NoError(t, err)
+	require.Equal(t, raw, string(got))
 }
 
 func TestUserCacheSecretTransportNeverClobbers(t *testing.T) {
@@ -268,6 +438,21 @@ func TestUserCacheSecretTransportNonObjectBodies(t *testing.T) {
 			require.Equal(t, raw, string(got), "bodies the router-side schema would reject must be forwarded untouched")
 		})
 	}
+}
+
+func TestUserCacheSecretTransportInvalidUTF8(t *testing.T) {
+	raw := []byte{'{', '"', 'x', '"', ':', '"', 0xff, '"', '}'}
+	var got []byte
+	transport := captureTransport("s1", &got, nil)
+	req, err := http.NewRequest(
+		http.MethodPost,
+		"https://enclave.example.com/v1/chat/completions",
+		bytes.NewReader(raw),
+	)
+	require.NoError(t, err)
+	_, err = transport.RoundTrip(req)
+	require.NoError(t, err)
+	require.Equal(t, raw, got, "invalid UTF-8 JSON must be forwarded byte-for-byte")
 }
 
 func TestUserCacheSecretTransportAllowsTrailingWhitespace(t *testing.T) {

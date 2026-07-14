@@ -14,6 +14,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"unicode/utf8"
 
 	log "github.com/sirupsen/logrus"
 )
@@ -57,13 +58,14 @@ const (
 )
 
 // userCacheSecretPaths are the OpenAI-compatible endpoints whose bodies carry
-// the field. Matched by suffix so a proxy base URL with a path prefix still
-// qualifies. Other endpoints (embeddings, audio, files) are excluded: their
-// engines do not prefix-cache and may reject unknown fields.
+// the field. Matched by suffix with no /v1 prefix required, so custom base
+// URLs (path-prefixed proxies or /v1-less roots) still qualify. Other
+// endpoints (embeddings, audio, files) are excluded: their engines do not
+// prefix-cache and may reject unknown fields.
 var userCacheSecretPaths = []string{
-	"/v1/chat/completions",
-	"/v1/completions",
-	"/v1/responses",
+	"/chat/completions",
+	"/completions",
+	"/responses",
 }
 
 // WithUserCacheSecret sets the user cache secret explicitly, taking precedence
@@ -133,46 +135,121 @@ func loadOrGenerateUserCacheSecret() string {
 	dir := filepath.Join(home, userCacheSecretDirName)
 	path := filepath.Join(dir, userCacheSecretFileName)
 
-	if b, err := os.ReadFile(path); err == nil {
-		if s := strings.TrimSpace(string(b)); s != "" {
-			return s
+	if err := ensureUserCacheSecretDir(dir); err != nil {
+		return ephemeralUserCacheSecret()
+	}
+	persisted, err := readUserCacheSecret(path)
+	if err == nil {
+		if persisted != "" {
+			return persisted
 		}
+		return ephemeralUserCacheSecret()
+	} else if !errors.Is(err, fs.ErrNotExist) {
+		return ephemeralUserCacheSecret()
 	}
 
 	secret := newUserCacheSecret()
 	if secret == "" {
 		return ""
 	}
-	if err := os.MkdirAll(dir, 0o700); err != nil {
+	candidate, err := writeUserCacheSecretCandidate(dir, secret)
+	if err != nil {
 		return ephemeralUserCacheSecret()
 	}
+	defer os.Remove(candidate)
 
-	// O_EXCL so a concurrent first run loses the race cleanly: the loser
-	// re-reads and adopts the winner's secret instead of splitting the
-	// machine's namespace between two values.
-	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
-	switch {
-	case err == nil:
-		_, werr := f.WriteString(secret)
-		cerr := f.Close()
-		if werr == nil && cerr == nil {
-			return secret
-		}
-	case errors.Is(err, fs.ErrExist):
-		if b, rerr := os.ReadFile(path); rerr == nil {
-			if s := strings.TrimSpace(string(b)); s != "" {
-				return s
-			}
-		}
-	default:
+	if err := os.Link(candidate, path); err == nil {
+		return secret
+	} else if !errors.Is(err, fs.ErrExist) {
 		return ephemeralUserCacheSecret()
 	}
+	persisted, err = readUserCacheSecret(path)
+	if err != nil || persisted == "" {
+		return ephemeralUserCacheSecret()
+	}
+	return persisted
+}
 
-	// The file exists but is blank or torn: rewrite it in place.
-	if err := os.WriteFile(path, []byte(secret), 0o600); err != nil {
-		return ephemeralUserCacheSecret()
+func readUserCacheSecret(path string) (string, error) {
+	b, err := readUserCacheSecretFile(path)
+	if err != nil {
+		return "", err
 	}
-	return secret
+	if !utf8.Valid(b) {
+		return "", errors.New("user cache secret is not valid UTF-8")
+	}
+	return strings.TrimSpace(string(b)), nil
+}
+
+func validateUserCacheSecretDir(path string) error {
+	info, err := os.Lstat(path)
+	if err != nil {
+		return err
+	}
+	if !info.IsDir() {
+		return errors.New("user cache secret directory is not a directory")
+	}
+	return nil
+}
+
+func ensureUserCacheSecretDir(path string) error {
+	err := validateUserCacheSecretDir(path)
+	if err == nil {
+		return nil
+	}
+	if !errors.Is(err, fs.ErrNotExist) {
+		return err
+	}
+	if err := os.MkdirAll(path, 0o700); err != nil {
+		return err
+	}
+	return validateUserCacheSecretDir(path)
+}
+
+func readUserCacheSecretFile(path string) ([]byte, error) {
+	info, err := os.Lstat(path)
+	if err != nil {
+		return nil, err
+	}
+	if !info.Mode().IsRegular() {
+		return nil, errors.New("user cache secret path is not a regular file")
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	info, err = f.Stat()
+	if err != nil {
+		return nil, err
+	}
+	if !info.Mode().IsRegular() {
+		return nil, errors.New("user cache secret path is not a regular file")
+	}
+	return io.ReadAll(f)
+}
+
+func writeUserCacheSecretCandidate(dir, secret string) (string, error) {
+	f, err := os.CreateTemp(dir, userCacheSecretFileName+".tmp-*")
+	if err != nil {
+		return "", err
+	}
+	path := f.Name()
+	ok := false
+	defer func() {
+		if !ok {
+			_ = os.Remove(path)
+		}
+	}()
+	if _, err := f.WriteString(secret); err != nil {
+		_ = f.Close()
+		return "", err
+	}
+	if err := f.Close(); err != nil {
+		return "", err
+	}
+	ok = true
+	return path, nil
 }
 
 // userCacheSecretTransport injects the client-level secret into request bodies
@@ -187,7 +264,7 @@ type userCacheSecretTransport struct {
 }
 
 func (t *userCacheSecretTransport) RoundTrip(req *http.Request) (*http.Response, error) {
-	if t.secret == "" || !userCacheSecretPathEligible(req) {
+	if t.secret == "" || !userCacheSecretPathEligible(req) || req.GetBody == nil {
 		return t.transport.RoundTrip(req)
 	}
 
@@ -237,6 +314,9 @@ func userCacheSecretPathEligible(req *http.Request) bool {
 // bytes — for non-object bodies, trailing data, or a body that already carries
 // the field.
 func injectUserCacheSecret(raw []byte, secret string) ([]byte, bool) {
+	if !utf8.Valid(raw) {
+		return nil, false
+	}
 	dec := json.NewDecoder(bytes.NewReader(raw))
 	dec.UseNumber()
 	var body map[string]any
