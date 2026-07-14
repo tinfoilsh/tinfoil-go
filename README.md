@@ -110,18 +110,14 @@ client, err := tinfoil.NewClientWithOptions(
 
 // Or provision it via the environment
 //   TINFOIL_USER_CACHE_SECRET=<secret>   use this value
-//   TINFOIL_USER_CACHE_SECRET=           (set but empty) disable: tenant-wide caching
 
 // Servers that hold many end users' conversations should scope per request;
-// a field set here always wins over the client-level secret:
+// a non-empty field set here wins over the client-level secret:
 completion, err := client.Chat.Completions.New(ctx, params,
 	option.WithJSONSet("user_cache_secret", perUserSecret))
-
-// Opt out entirely (tenant-wide caching, no file written)
-client, err = tinfoil.NewClientWithOptions(tinfoil.WithUserCacheSecret(""))
 ```
 
-If the secret cannot be persisted (no home directory, read-only filesystem), the SDK falls back to an in-memory secret and warns once: cache continuity then resets on every process restart. Containerized deployments should set `TINFOIL_USER_CACHE_SECRET` explicitly — one value per end user if requests are per-user, or empty to keep tenant-wide caching across replicas.
+Empty client or environment values are treated as unset. If the secret cannot be persisted (no home directory, read-only filesystem), the SDK falls back to an in-memory secret and warns once: cache continuity then resets on every process restart. Containerized deployments should set `TINFOIL_USER_CACHE_SECRET` to a stable non-empty value wherever cache sharing is intended.
 
 ## API Documentation
 
