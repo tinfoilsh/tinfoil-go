@@ -23,8 +23,7 @@ import (
 // secure prompt caching contract. The router derives the request's prefix-cache
 // namespace from it: requests carrying the same secret (under the same API
 // identity) share cached prompt prefixes, requests carrying different secrets
-// cannot observe each other's cache timing. The secret itself is stripped by
-// the router and never reaches the model.
+// cannot observe each other's cache timing.
 //
 // Resolution order, mirroring the other Tinfoil clients:
 //
