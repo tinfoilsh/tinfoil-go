@@ -7,13 +7,9 @@ import (
 	"fmt"
 	"net/http"
 
-	"github.com/tinfoilsh/tinfoil-go/verifier/attestation"
-	"github.com/tinfoilsh/tinfoil-go/verifier/sigstore"
+	"github.com/tinfoilsh/tinfoil-go/verifier/measurement"
 	"github.com/tinfoilsh/tinfoil-go/verifier/util"
 )
-
-//go:embed trusted_root.json
-var embeddedTrustedRoot []byte
 
 // GroundTruth represents the "known good" state of the enclave
 type GroundTruth struct {
@@ -21,9 +17,9 @@ type GroundTruth struct {
 	TLSPublicKey        string                           `json:"tls_public_key,omitempty"`
 	HPKEPublicKey       string                           `json:"hpke_public_key,omitempty"`
 	Digest              string                           `json:"digest"`
-	CodeMeasurement     *attestation.Measurement         `json:"code_measurement"`
-	EnclaveMeasurement  *attestation.Measurement         `json:"enclave_measurement"`
-	HardwareMeasurement *attestation.HardwareMeasurement `json:"hardware_measurement,omitempty"`
+	CodeMeasurement     *measurement.Measurement         `json:"code_measurement"`
+	EnclaveMeasurement  *measurement.Measurement         `json:"enclave_measurement"`
+	HardwareMeasurement *measurement.HardwareMeasurement `json:"hardware_measurement,omitempty"`
 	CodeFingerprint     string                           `json:"code_fingerprint"`
 	EnclaveFingerprint  string                           `json:"enclave_fingerprint"`
 }
@@ -31,8 +27,7 @@ type GroundTruth struct {
 type SecureClient struct {
 	enclave, repo string
 
-	groundTruth    *GroundTruth
-	sigstoreClient *sigstore.Client
+	groundTruth *GroundTruth
 }
 
 var (
@@ -109,26 +104,6 @@ func (s *SecureClient) GroundTruthJSON() (string, error) {
 		return "", err
 	}
 	return string(encoded), nil
-}
-
-func (s *SecureClient) getSigstoreClient() (*sigstore.Client, error) {
-	if s.sigstoreClient == nil {
-		var err error
-		s.sigstoreClient, err = sigstore.NewClient()
-		if err != nil {
-			return nil, fmt.Errorf("failed to create sigstore client: %v", err)
-		}
-	}
-	return s.sigstoreClient, nil
-}
-
-// Verify attests the enclave with the v3 single-request flow and stores the
-// resulting ground truth in the client.
-func (s *SecureClient) Verify() (*GroundTruth, error) {
-	if _, err := s.VerifyV3(); err != nil {
-		return nil, err
-	}
-	return s.groundTruth, nil
 }
 
 // HTTPClient returns an HTTP client that only accepts TLS connections to the verified enclave
@@ -224,38 +199,10 @@ func parseHeadersJSON(headersJSON string) (map[string]string, error) {
 }
 
 // VerifyJSON verifies an enclave against a repo and returns the verification data as a JSON string
-func VerifyJSON(enclave, repo string, sigstoreTrustedRootJSON []byte) (string, error) {
-	sigstoreClient, err := getSigstoreClient(sigstoreTrustedRootJSON)
-	if err != nil {
-		return "", fmt.Errorf("failed to create sigstore client: %v", err)
-	}
-
-	client := &SecureClient{
-		enclave:        enclave,
-		repo:           repo,
-		sigstoreClient: sigstoreClient,
-	}
-	_, err = client.Verify()
-	if err != nil {
+func VerifyJSON(enclave, repo string) (string, error) {
+	client := NewSecureClient(enclave, repo)
+	if _, err := client.Verify(); err != nil {
 		return "", err
 	}
 	return client.GroundTruthJSON()
-}
-
-func getSigstoreClient(sigstoreTrustedRootJSON []byte) (*sigstore.Client, error) {
-	var trustedRootJSON []byte
-	var err error
-
-	if len(sigstoreTrustedRootJSON) > 0 {
-		trustedRootJSON = sigstoreTrustedRootJSON
-	} else if len(embeddedTrustedRoot) > 0 {
-		trustedRootJSON = embeddedTrustedRoot
-	} else {
-		trustedRootJSON, err = sigstore.FetchTrustRoot()
-		if err != nil {
-			return nil, fmt.Errorf("failed to fetch trusted root: %v", err)
-		}
-	}
-
-	return sigstore.NewClientFromJSON(trustedRootJSON)
 }
