@@ -67,8 +67,6 @@ func TestOptionsPinnedFields(t *testing.T) {
 	assert.Len(t, opts.HostData, 32)
 	assert.Len(t, opts.ImageID, 16)
 	assert.Len(t, opts.FamilyID, 16)
-	assert.False(t, opts.RequireAuthorKey)
-	assert.False(t, opts.RequireIDBlock)
 	assert.True(t, opts.GuestPolicy.PageSwapDisable)
 	assert.Equal(t, uint64(3), opts.MinimumLaunchMitigationVector)
 	assert.Equal(t, uint64(1), opts.MinimumCurrentMitigationVector)

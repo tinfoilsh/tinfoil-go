@@ -9,6 +9,7 @@
 package policy
 
 import (
+	"encoding/hex"
 	"fmt"
 	"regexp"
 
@@ -149,6 +150,18 @@ func (a *Artifact) PolicyFor(identifierHex string, platform string) (string, *Po
 		return "", nil, fmt.Errorf("policy %q is for platform %q, evidence is %q", name, p.Platform, platform)
 	}
 	return name, &p, nil
+}
+
+// DecodeHex decodes a required hex policy value of an exact byte length.
+func DecodeHex(name, value string, wantLen int) ([]byte, error) {
+	b, err := hex.DecodeString(value)
+	if err != nil {
+		return nil, fmt.Errorf("%s is not hex: %w", name, err)
+	}
+	if len(b) != wantLen {
+		return nil, fmt.Errorf("%s must be %d bytes, got %d", name, wantLen, len(b))
+	}
+	return b, nil
 }
 
 func truncID(id string) string {

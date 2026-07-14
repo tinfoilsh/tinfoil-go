@@ -2,7 +2,6 @@ package sev
 
 import (
 	"bytes"
-	"encoding/hex"
 	"fmt"
 	"strconv"
 	"strings"
@@ -22,13 +21,11 @@ const ProductGenoa = "Genoa"
 // Expectations is the fully translated SEV-SNP expected state, resolved at
 // assembly so that validation performs no translation and no lookups. The
 // want* fields are compared by strict equality — the library options only
-// bound the first two and cannot require signer absence.
+// bound them.
 type Expectations struct {
 	opts             *sevvalidate.Options
 	wantGuestPolicy  sevabi.SnpPolicy
 	wantPlatformInfo sevabi.SnpPlatformInfo
-	wantAuthorKey    bool
-	wantIDBlock      bool
 }
 
 // Assemble translates a policy block into the complete expected state for
@@ -49,8 +46,6 @@ func Assemble(p *policy.SEVSNPPolicy, productLine string, launchDigest []byte, r
 		opts:             opts,
 		wantGuestPolicy:  expectedGuestPolicy(p),
 		wantPlatformInfo: expectedPlatformInfo(p),
-		wantAuthorKey:    p.RequireAuthorKey,
-		wantIDBlock:      p.RequireIDBlock,
 	}, nil
 }
 
@@ -87,19 +82,19 @@ func (e *Expectations) Validate(q *Quote) error {
 	return e.checkSigner(report)
 }
 
-// checkSigner requires the author key and ID block to be present exactly
-// when the policy says so.
+// checkSigner requires the report to be launched without an author key or
+// ID block: ID-block launches are unsupported (policy parsing rejects
+// require_* flags), and the library options cannot require absence.
 func (e *Expectations) checkSigner(report *sevsnp.Report) error {
 	signer, err := sevabi.ParseSignerInfo(report.GetSignerInfo())
 	if err != nil {
 		return fmt.Errorf("parsing report SIGNER_INFO: %w", err)
 	}
-	if signer.AuthorKeyEn != e.wantAuthorKey {
-		return fmt.Errorf("report AUTHOR_KEY_EN %t does not equal the endorsed policy %t", signer.AuthorKeyEn, e.wantAuthorKey)
+	if signer.AuthorKeyEn {
+		return fmt.Errorf("report carries an author key; ID-block launches are unsupported")
 	}
-	idBlockPresent := !bytes.Equal(report.GetIdKeyDigest(), make([]byte, len(report.GetIdKeyDigest())))
-	if idBlockPresent != e.wantIDBlock {
-		return fmt.Errorf("report ID-block presence %t does not equal the endorsed policy %t", idBlockPresent, e.wantIDBlock)
+	if !bytes.Equal(report.GetIdKeyDigest(), make([]byte, len(report.GetIdKeyDigest()))) {
+		return fmt.Errorf("report carries an ID block; ID-block launches are unsupported")
 	}
 	return nil
 }
@@ -158,15 +153,15 @@ func options(p *policy.SEVSNPPolicy, productLine string) (*sevvalidate.Options, 
 	}
 	// Snapshot so the assembled expectations do not alias the policy.
 	vmpl := *p.VMPL
-	hostData, err := hexField("host_data", p.HostData, 32)
+	hostData, err := policy.DecodeHex("host_data", p.HostData, 32)
 	if err != nil {
 		return nil, err
 	}
-	imageID, err := hexField("image_id", p.ImageID, 16)
+	imageID, err := policy.DecodeHex("image_id", p.ImageID, 16)
 	if err != nil {
 		return nil, err
 	}
-	familyID, err := hexField("family_id", p.FamilyID, 16)
+	familyID, err := policy.DecodeHex("family_id", p.FamilyID, 16)
 	if err != nil {
 		return nil, err
 	}
@@ -185,8 +180,6 @@ func options(p *policy.SEVSNPPolicy, productLine string) (*sevvalidate.Options, 
 		HostData:                       hostData,
 		ImageID:                        imageID,
 		FamilyID:                       familyID,
-		RequireAuthorKey:               p.RequireAuthorKey,
-		RequireIDBlock:                 p.RequireIDBlock,
 		MinimumLaunchMitigationVector:  *p.MinimumLaunchMitigationVector,
 		MinimumCurrentMitigationVector: *p.MinimumCurrentMitigationVector,
 	}, nil
@@ -216,15 +209,4 @@ func parseAPIVersion(v string) (uint16, error) {
 		return 0, fmt.Errorf("minimum_api_version minor: %w", err)
 	}
 	return uint16(maj<<8 | min), nil
-}
-
-func hexField(name, value string, wantLen int) ([]byte, error) {
-	b, err := hex.DecodeString(value)
-	if err != nil {
-		return nil, fmt.Errorf("%s is not hex: %w", name, err)
-	}
-	if len(b) != wantLen {
-		return nil, fmt.Errorf("%s must be %d bytes, got %d", name, wantLen, len(b))
-	}
-	return b, nil
 }

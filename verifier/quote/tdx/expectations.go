@@ -84,23 +84,23 @@ func options(p *policy.TDXPolicy) (*tdxvalidate.Options, error) {
 	if err := p.Validate(); err != nil {
 		return nil, err
 	}
-	qeVendor, err := hexField("qe_vendor_id", p.QEVendorID, 16)
+	qeVendor, err := policy.DecodeHex("qe_vendor_id", p.QEVendorID, 16)
 	if err != nil {
 		return nil, err
 	}
-	teeTcbSvn, err := hexField("minimum_tee_tcb_svn", p.MinimumTEETCBSVN, 16)
+	teeTcbSvn, err := policy.DecodeHex("minimum_tee_tcb_svn", p.MinimumTEETCBSVN, 16)
 	if err != nil {
 		return nil, err
 	}
-	mrSeam, err := hexField("mr_seam", p.MRSeam, 48)
+	mrSeam, err := policy.DecodeHex("mr_seam", p.MRSeam, 48)
 	if err != nil {
 		return nil, err
 	}
-	tdAttributes, err := hexField("td_attributes", p.TDAttributes, 8)
+	tdAttributes, err := policy.DecodeHex("td_attributes", p.TDAttributes, 8)
 	if err != nil {
 		return nil, err
 	}
-	xfam, err := hexField("xfam", p.XFAM, 8)
+	xfam, err := policy.DecodeHex("xfam", p.XFAM, 8)
 	if err != nil {
 		return nil, err
 	}
@@ -123,15 +123,4 @@ func options(p *policy.TDXPolicy) (*tdxvalidate.Options, error) {
 			MrOwnerConfig:    make([]byte, 48),
 		},
 	}, nil
-}
-
-func hexField(name, value string, wantLen int) ([]byte, error) {
-	b, err := hex.DecodeString(value)
-	if err != nil {
-		return nil, fmt.Errorf("%s is not hex: %w", name, err)
-	}
-	if len(b) != wantLen {
-		return nil, fmt.Errorf("%s must be %d bytes, got %d", name, wantLen, len(b))
-	}
-	return b, nil
 }

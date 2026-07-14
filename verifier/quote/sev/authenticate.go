@@ -8,6 +8,7 @@ import (
 	_ "embed"
 	"encoding/base64"
 	"encoding/hex"
+	"encoding/pem"
 	"fmt"
 	"net/url"
 	"strings"
@@ -16,6 +17,7 @@ import (
 	"github.com/google/go-sev-guest/abi"
 	"github.com/google/go-sev-guest/proto/sevsnp"
 	"github.com/google/go-sev-guest/verify"
+	"github.com/google/go-sev-guest/verify/trust"
 
 	"github.com/tinfoilsh/tinfoil-go/verifier/envelope"
 	"github.com/tinfoilsh/tinfoil-go/verifier/internal/strictjson"
@@ -24,11 +26,24 @@ import (
 
 //go:generate sh -xc "curl -fo genoa_cert_chain.pem https://kdsintf.amd.com/vcek/v1/Genoa/cert_chain"
 //go:embed genoa_cert_chain.pem
-var vcekGenoaCertChain []byte
+var askArkGenoaPEM []byte
+
+// trustedRoots is the pinned AMD trust anchor (Genoa ASK+ARK), built from
+// the repo-owned copy rather than the library's embedded default so the
+// anchor only changes when the file is deliberately regenerated.
+var trustedRoots map[string][]*trust.AMDRootCerts
+
+func init() {
+	genoa := new(trust.AMDRootCerts)
+	if err := genoa.FromKDSCertBytes(askArkGenoaPEM); err != nil {
+		panic("parsing embedded AMD Genoa root certificates: " + err.Error())
+	}
+	genoa.ProductLine = "Genoa"
+	trustedRoots = map[string][]*trust.AMDRootCerts{"Genoa": {genoa}}
+}
 
 // offlineGetter serves the library's fetches from pre-provided material:
-// the document-carried CRL and the embedded cert chain. Everything else
-// fails — no network.
+// the document-carried CRL. Everything else fails — no network.
 type offlineGetter struct {
 	crlDER []byte
 }
@@ -38,13 +53,33 @@ func (g *offlineGetter) Get(targetURL string) ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse URL: %w", err)
 	}
-	switch {
-	case strings.HasSuffix(u.Path, "/crl"):
+	if strings.HasSuffix(u.Path, "/crl") {
 		return g.crlDER, nil
-	case u.Path == "/vcek/v1/Genoa/cert_chain":
-		return vcekGenoaCertChain, nil
 	}
 	return nil, fmt.Errorf("offline verification cannot fetch %s", targetURL)
+}
+
+// decodeCertChain decodes the document-carried ASK+ARK PEM chain (the AMD
+// KDS cert_chain format). The chain is untrusted transport: the library
+// verifies it against its pinned AMD root certificates.
+func decodeCertChain(chainPEM string) (askDER, arkDER []byte, err error) {
+	rest := []byte(chainPEM)
+	var blocks [][]byte
+	for {
+		var block *pem.Block
+		block, rest = pem.Decode(rest)
+		if block == nil {
+			break
+		}
+		if block.Type != "CERTIFICATE" {
+			return nil, nil, fmt.Errorf("cert_chain_pem carries a %q block, want CERTIFICATE", block.Type)
+		}
+		blocks = append(blocks, block.Bytes)
+	}
+	if len(blocks) != 2 {
+		return nil, nil, fmt.Errorf("cert_chain_pem must carry exactly the ASK and ARK certificates, got %d blocks", len(blocks))
+	}
+	return blocks[0], blocks[1], nil
 }
 
 // productFromReport derives the SEV product from the report's CPUID
@@ -93,7 +128,10 @@ func Authenticate(doc *envelope.Document) (*Quote, error) {
 	if len(vcekDER) == 0 {
 		return nil, fmt.Errorf("amd-vcek collateral entry %q carries an empty VCEK", entry.ID)
 	}
-
+	askDER, arkDER, err := decodeCertChain(data.CertChainPEM)
+	if err != nil {
+		return nil, fmt.Errorf("amd-vcek collateral entry %q: %w", entry.ID, err)
+	}
 	crlEntry, ok := doc.EndorsementCollateral(envelope.CollateralAMDCRLV1Format, envelope.SubjectCPU)
 	if !ok {
 		return nil, fmt.Errorf("document carries no amd-crl endorsement collateral for the cpu")
@@ -120,7 +158,7 @@ func Authenticate(doc *envelope.Document) (*Quote, error) {
 			parsedCRL.ThisUpdate.Format(time.RFC3339), parsedCRL.NextUpdate.Format(time.RFC3339))
 	}
 
-	att, err := verifySignature(doc.CPUEvidence.ReportBase64, vcekDER, crlDER)
+	att, err := verifySignature(doc.CPUEvidence.ReportBase64, vcekDER, askDER, arkDER, crlDER)
 	if err != nil {
 		return nil, err
 	}
@@ -142,9 +180,9 @@ func Authenticate(doc *envelope.Document) (*Quote, error) {
 }
 
 // verifySignature verifies the report signature under the AMD roots with
-// the provided VCEK, checking its revocation against the provided CRL. No
-// policy validation.
-func verifySignature(reportBase64 string, vcekDER, crlDER []byte) (*sevsnp.Attestation, error) {
+// the provided VCEK and ASK/ARK chain, checking VCEK revocation against
+// the provided CRL. No policy validation.
+func verifySignature(reportBase64 string, vcekDER, askDER, arkDER, crlDER []byte) (*sevsnp.Attestation, error) {
 	reportBytes, err := base64.StdEncoding.DecodeString(reportBase64)
 	if err != nil {
 		return nil, err
@@ -160,13 +198,12 @@ func verifySignature(reportBase64 string, vcekDER, crlDER []byte) (*sevsnp.Attes
 		return nil, err
 	}
 	// All options explicit. Fetching stays enabled because it is how the
-	// library asks for the ASK/ARK chain and CRL; the offline getter
-	// answers from local material only. TrustedRoots nil pins the
-	// library's embedded AMD root certificates.
+	// library asks for the CRL; the offline getter answers from local
+	// material only.
 	opts := &verify.Options{
 		Getter:           &offlineGetter{crlDER: crlDER},
 		CheckRevocations: true,
-		TrustedRoots:     nil,
+		TrustedRoots:     trustedRoots,
 		Product:          product,
 		Now:              time.Now(),
 	}
@@ -175,6 +212,8 @@ func verifySignature(reportBase64 string, vcekDER, crlDER []byte) (*sevsnp.Attes
 		Report: parsedReport,
 		CertificateChain: &sevsnp.CertificateChain{
 			VcekCert: vcekDER,
+			AskCert:  askDER,
+			ArkCert:  arkDER,
 		},
 		Product: opts.Product,
 	}

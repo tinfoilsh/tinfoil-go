@@ -234,6 +234,9 @@ var intelRootCertPool *x509.CertPool
 
 func init() {
 	root, _ := pem.Decode(sgxRootCACertPEM)
+	if root == nil {
+		panic("embedded Intel root certificate is not valid PEM")
+	}
 	cert, err := x509.ParseCertificate(root.Bytes)
 	if err != nil {
 		panic("failed to parse Intel root certificate: " + err.Error())

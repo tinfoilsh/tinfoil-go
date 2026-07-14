@@ -37,6 +37,8 @@ func (p *SEVSNPPolicy) Validate() error {
 		return fmt.Errorf("minimum_guest_svn is required")
 	case p.VMPL == nil:
 		return fmt.Errorf("vmpl is required")
+	case *p.VMPL < 0 || *p.VMPL > 3:
+		return fmt.Errorf("vmpl must be between 0 and 3")
 	case p.HostData == "":
 		return fmt.Errorf("host_data is required")
 	case p.ImageID == "":
