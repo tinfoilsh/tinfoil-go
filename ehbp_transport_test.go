@@ -441,7 +441,9 @@ func TestResetRequestBodyNoBody(t *testing.T) {
 
 // TestClientIntegration_TransportModes exercises NewClientWithOptions against a
 // live enclave for both transport modes.
-func TestClientIntegration_TransportModes(t *testing.T) {
+func TestClientIntegration_TransportModesWithCacheSecret(t *testing.T) {
+	const testUserCacheSecret = "go-live-integration-cache-secret"
+
 	apiKey := os.Getenv("TINFOIL_API_KEY")
 	if apiKey == "" {
 		t.Skip("TINFOIL_API_KEY not set; skipping integration test")
@@ -451,6 +453,7 @@ func TestClientIntegration_TransportModes(t *testing.T) {
 		t.Run(string(mode), func(t *testing.T) {
 			c, err := NewClientWithOptions(
 				WithTransport(mode),
+				WithUserCacheSecret(testUserCacheSecret),
 				WithOpenAIOptions(option.WithAPIKey(apiKey)),
 			)
 			require.NoError(t, err)
