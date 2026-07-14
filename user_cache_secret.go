@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"io/fs"
 	"net/http"
@@ -15,7 +16,7 @@ import (
 	"strings"
 	"sync"
 
-	log "github.com/sirupsen/logrus"
+	"log/slog"
 )
 
 // user_cache_secret provisions the per-user prompt-cache secret defined by the
@@ -102,7 +103,7 @@ func newUserCacheSecret() string {
 	if _, err := rand.Read(b[:]); err != nil {
 		// Never fall back to a weak secret: no secret means tenant-wide
 		// caching, which is safe.
-		log.WithError(err).Warn("tinfoil: could not generate a user cache secret; requests stay in the tenant-wide cache namespace")
+		slog.Warn("tinfoil: could not generate a user cache secret; requests stay in the tenant-wide cache namespace", "error", err)
 		return ""
 	}
 	return hex.EncodeToString(b[:])
@@ -116,7 +117,7 @@ func newUserCacheSecret() string {
 var ephemeralUserCacheSecret = sync.OnceValue(func() string {
 	secret := newUserCacheSecret()
 	if secret != "" {
-		log.Warnf("tinfoil: could not persist the user cache secret; using an in-memory secret, so prompt-cache continuity resets when this process exits (set %s or WithUserCacheSecret to pin one)", userCacheSecretEnv)
+		slog.Warn(fmt.Sprintf("tinfoil: could not persist the user cache secret; using an in-memory secret, so prompt-cache continuity resets when this process exits (set %s or WithUserCacheSecret to pin one)", userCacheSecretEnv))
 	}
 	return secret
 })

@@ -2,8 +2,8 @@ package main
 
 import (
 	"flag"
-
-	"github.com/charmbracelet/log"
+	"log/slog"
+	"os"
 
 	"github.com/tinfoilsh/tinfoil-go/verifier/client"
 )
@@ -14,18 +14,19 @@ var (
 )
 
 func main() {
-	log.SetReportTimestamp(false)
 	flag.Parse()
 
-	log.With("enclave", *enclave, "repo", *repo).Info("Verifying enclave")
+	slog.Info("verifying enclave", "enclave", *enclave, "repo", *repo)
 	c := client.NewSecureClient(*enclave, *repo)
 	if _, err := c.VerifyV3(); err != nil {
-		log.Fatalf("verification failed: %v", err)
+		slog.Error("verification failed", "error", err)
+		os.Exit(1)
 	}
 
 	groundTruth, err := c.GroundTruthJSON()
 	if err != nil {
-		log.Fatalf("failed to encode ground truth: %v", err)
+		slog.Error("failed to encode ground truth", "error", err)
+		os.Exit(1)
 	}
-	log.Info(groundTruth)
+	slog.Info(groundTruth)
 }

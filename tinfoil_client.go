@@ -8,9 +8,10 @@ import (
 	"net/http"
 	"sync"
 
+	"log/slog"
+
 	"github.com/openai/openai-go/v3"
 	"github.com/openai/openai-go/v3/option"
-	log "github.com/sirupsen/logrus"
 	"github.com/tinfoilsh/tinfoil-go/verifier/client"
 )
 
@@ -41,7 +42,7 @@ func (t *reVerifyingTransport) RoundTrip(req *http.Request) (*http.Response, err
 	}
 
 	// Re-verification succeeded, update transport and retry
-	log.Info("Certificate rotation detected, re-verified attestation successfully")
+	slog.Info("tinfoil: certificate rotation detected, re-verified attestation")
 
 	t.mu.Lock()
 	t.secureClient = newSecureClient

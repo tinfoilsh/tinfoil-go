@@ -11,14 +11,13 @@ import (
 	"github.com/openai/openai-go/v3"
 	"github.com/openai/openai-go/v3/option"
 	"github.com/stretchr/testify/require"
-	"github.com/subosito/gotenv"
 	"github.com/tinfoilsh/tinfoil-go/verifier/client"
 )
 
 // Load .env before running tests so TINFOIL_API_KEY is available locally
 func TestMain(m *testing.M) {
-	// Ignore error: if .env is missing, we just proceed
-	_ = gotenv.Load()
+	// Load .env if present so integration tests pick up local credentials.
+	loadDotEnv()
 	os.Exit(m.Run())
 }
 
@@ -300,5 +299,24 @@ func TestIsCertificateError(t *testing.T) {
 			result := isCertificateError(tt.err)
 			require.Equal(t, tt.expected, result)
 		})
+	}
+}
+
+// loadDotEnv sets environment variables from a .env file when one exists.
+func loadDotEnv() {
+	data, err := os.ReadFile(".env")
+	if err != nil {
+		return
+	}
+	for _, line := range strings.Split(string(data), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		key, value, found := strings.Cut(line, "=")
+		if !found {
+			continue
+		}
+		os.Setenv(strings.TrimSpace(key), strings.Trim(strings.TrimSpace(value), `"`))
 	}
 }
