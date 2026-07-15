@@ -23,8 +23,7 @@ import (
 // secure prompt caching contract. The router derives the request's prefix-cache
 // namespace from it: requests carrying the same secret (under the same API
 // identity) share cached prompt prefixes, requests carrying different secrets
-// cannot observe each other's cache timing. The secret itself is stripped by
-// the router and never reaches the model.
+// cannot observe each other's cache timing.
 //
 // Resolution order, mirroring the other Tinfoil clients:
 //
@@ -32,7 +31,7 @@ import (
 //  2. WithUserCacheSecret,
 //  3. the TINFOIL_USER_CACHE_SECRET environment variable,
 //  4. a generated secret persisted at ~/.tinfoil/user_cache_secret (0600),
-//     shared with the other Tinfoil SDKs on the same machine.
+//     shared with other Tinfoil SDKs using the same home directory.
 //
 // Injection happens in the transport, before the EHBP transport seals the
 // body, so the secret is only ever visible to the verified enclave.
@@ -66,7 +65,8 @@ var userCacheSecretPaths = []string{
 // WithUserCacheSecret sets the user cache secret explicitly, taking precedence
 // over the environment variable and the generated secret. Use one stable value
 // per end user: a server holding many end users' conversations should instead
-// set the field per request, which always wins over the client-level secret:
+// set a non-empty string field on every request, which wins over the
+// client-level secret:
 //
 //	client.Chat.Completions.New(ctx, params,
 //		option.WithJSONSet("user_cache_secret", perUserSecret))
