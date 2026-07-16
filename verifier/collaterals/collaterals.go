@@ -23,9 +23,9 @@ const FormatV2 = "https://tinfoil.sh/predicate/attestation-collaterals/v2"
 // AMD KDS parameters (SEV-SNP) or the Intel PCS URLs (TDX) from it, so the
 // enclave does no report parsing.
 type Request struct {
-	// Repo optionally overrides the code repository whose Sigstore bundle is
-	// returned; the service default applies when empty.
-	Repo string `json:"repo,omitempty"`
+	// Repo is the code repository whose Sigstore bundle is returned.
+	// Required: the service never guesses a repo.
+	Repo string `json:"repo"`
 	// Tag optionally pins a code release; latest when empty.
 	Tag string `json:"tag,omitempty"`
 	// Platform is attestation's platform label: "sev-snp" or "tdx".

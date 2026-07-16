@@ -2,7 +2,6 @@ package provenance
 
 import (
 	"regexp"
-	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -41,24 +40,28 @@ func TestAuthenticateCode(t *testing.T) {
 	}
 	client := testClient(t)
 
-	const repo = "tinfoilsh/confidential-deepseek-r1-0528"
-	const hexDigest = "7e76d5a6d81f19ecdc1f3c18c8f0cf5b89d22ea107a05a1ae23ce46e79270f26"
+	// confidential-debug v0.0.52: the first release measured with the
+	// vm_shape-declaring pipeline.
+	const repo = "tinfoilsh/confidential-debug"
+	const hexDigest = "910ee7535b0d3e4918e59972994977c2ab6c3e093081885c357a9088d6492402"
 	bundle, err := fetchAttestationBundle(repo, hexDigest)
 	assert.NoError(t, err)
 
 	code, err := client.AuthenticateCode(bundle, repo, hexDigest)
-	if err != nil && strings.Contains(err.Error(), "vm_shape") {
-		t.Skipf("published code artifact predates the vm_shape declaration; update the measurement pipeline: %v", err)
-	}
 	require.NoError(t, err)
 	m := code.Measurement
 	assert.Equal(t, m.Type, measurement.SnpTdxMultiPlatformV1)
 	assert.Equal(t, m.Registers, []string{
-		"442df00d945bdd2849e6df4eb28c757e9e94428787268b452eacb3f86bbc38528d6712e2c41b6953f1a96d2493d5f9b6", // SEV-SNP
-		"10a05f3fba7d66babcc8a8143451443a564963ced77c7fa126f004857753f87c318720e29e9ed2f46c8753b44b01004d", // RTRM1
-		"fc744ecc4550ec0ea6c25deaa777bd2ed6e5feda35ac1e88a2c2b6e62584a8ad47a93526638de3b97fe45cd67cb5339f", // RTRM2
+		"e64db4b8914b7317017cd6761f4b60c41d80865ae6e3153a4827ac2a77fe4214bcf724b4525b4b906cfc871e51a5ba7f", // SEV-SNP
+		"46658ae5655794d3ea0130e2d425aa002f224c7a47c1eb1792f656d79f808aac6006ce84d71ee24d97c3eea42c867e51", // RTMR1
+		"3aa09dae28537d875c10b95b4c07317a6ca442cdb5385a8779ed26b3c67be303055c9efdadef2494a9249932e91cb8e7", // RTMR2
 	})
-
+	require.NotNil(t, code.Shape)
+	assert.Equal(t, 4, code.Shape.CPUs)
+	assert.Equal(t, 4096, code.Shape.MemoryMB)
+	assert.Equal(t, 3, code.Shape.Disks)
+	require.NotNil(t, code.Shape.GPUs)
+	assert.Equal(t, 0, *code.Shape.GPUs)
 }
 
 // testClient builds a client from the SDK's embedded trusted root, exactly
