@@ -1,7 +1,6 @@
 package provenance
 
 import (
-	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -29,9 +28,6 @@ func TestLatestPlatformEndorsements(t *testing.T) {
 	require.NoError(t, err)
 
 	artifact, err := client.AuthenticateEndorsements(bundleJSON, digest)
-	if err != nil && strings.Contains(err.Error(), "accepted_mr_seams") {
-		t.Skipf("published artifact predates the mr_seam policy schema; release the updated artifact: %v", err)
-	}
 	require.NoError(t, err)
 
 	assert.NotEmpty(t, artifact.Machines)
