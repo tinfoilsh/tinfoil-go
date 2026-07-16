@@ -148,6 +148,9 @@ func verifySevReportWithEndorsements(attestationDoc string, isCompressed bool, v
 	if err := validate.SnpAttestation(attestation, valOpts); err != nil {
 		return nil, "", err
 	}
+	if err := enforceRequiredPlatformInfo(report, valOpts.PlatformInfo); err != nil {
+		return nil, "", err
+	}
 
 	return report, policyName, nil
 }
@@ -207,8 +210,38 @@ func verifySevReport(attestationDoc string, isCompressed bool, vcekDER []byte) (
 	if err := validate.SnpAttestation(attestation, valOpts); err != nil {
 		return nil, err
 	}
+	if err := enforceRequiredPlatformInfo(attestation.GetReport(), valOpts.PlatformInfo); err != nil {
+		return nil, err
+	}
 
 	return attestation.GetReport(), nil
+}
+
+// enforceRequiredPlatformInfo asserts that PLATFORM_INFO feature bits which
+// go-sev-guest validates with allowlist ("unauthorized ... enabled") rather than
+// require semantics are actually present when the policy requires them.
+//
+// As of go-sev-guest v0.15.0, validate.validatePlatformInfo applies allowlist/max
+// semantics uniformly to PLATFORM_INFO features (reject only if a feature is
+// reported but not allowed). That is correct for SMT — where an
+// enabled-but-not-allowed feature is the hazard — but wrong for TSME, which the
+// SPEC requires (reject if required but not reported, §3.7.2 #10). Under
+// allowlist semantics, Options.PlatformInfo.TSMEEnabled=true only permits TSME;
+// it never rejects a report with TSME OFF, so an unencrypted-memory platform
+// passes SnpAttestation. Tinfoil requires TSME (matching tinfoil-python/-rs/-js),
+// so assert it explicitly here.
+func enforceRequiredPlatformInfo(report *sevsnp.Report, required *abi.SnpPlatformInfo) error {
+	if required == nil {
+		return nil
+	}
+	info, err := abi.ParseSnpPlatformInfo(report.GetPlatformInfo())
+	if err != nil {
+		return fmt.Errorf("could not parse SNP PLATFORM_INFO: %w", err)
+	}
+	if required.TSMEEnabled && !info.TSMEEnabled {
+		return fmt.Errorf("platform policy violation: TSME (transparent SME) required but not enabled")
+	}
+	return nil
 }
 
 func verifySevAttestationV2(attestationDoc string) (*Verification, error) {
