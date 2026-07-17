@@ -193,6 +193,13 @@ func verifySevReport(attestationDoc string, isCompressed bool, vcekDER []byte) (
 			RAPLDisabled:                false,
 			CiphertextHidingDRAMEnabled: false,
 			AliasCheckComplete:          false,
+			// Permit SEV-TIO. go-sev-guest validates TIO with allowlist
+			// semantics (reject if reported but not allowed), but SPEC §3.7.2 #10
+			// treats tio_enabled as require-semantics, so a TIO-enabled platform
+			// must be accepted when TIO isn't specifically required. Marking it
+			// allowed here makes go accept tio-on (matching tinfoil-python/-rs/-js);
+			// tio-off is unaffected. See conformance fixture 275.
+			TIOEnabled: true,
 		},
 		RequireAuthorKey: false,
 		VMPL:             nil,
