@@ -148,6 +148,9 @@ func verifySevReportWithEndorsements(attestationDoc string, isCompressed bool, v
 	if err := validate.SnpAttestation(attestation, valOpts); err != nil {
 		return nil, "", err
 	}
+	if err := enforceGuestPolicyAllowlist(report, valOpts.GuestPolicy); err != nil {
+		return nil, "", err
+	}
 
 	return report, policyName, nil
 }
@@ -207,8 +210,33 @@ func verifySevReport(attestationDoc string, isCompressed bool, vcekDER []byte) (
 	if err := validate.SnpAttestation(attestation, valOpts); err != nil {
 		return nil, err
 	}
+	if err := enforceGuestPolicyAllowlist(attestation.GetReport(), valOpts.GuestPolicy); err != nil {
+		return nil, err
+	}
 
 	return attestation.GetReport(), nil
+}
+
+// enforceGuestPolicyAllowlist covers guest-policy bits that go-sev-guest's
+// validate.validatePolicy checks with require ("required but not set") rather
+// than the allowlist ("reported but not allowed") semantics the SPEC mandates.
+//
+// As of go-sev-guest v0.15.0 this affects MEM_AES256_XTS: validatePolicy uses
+// `required.MemAES256XTS && !policy.MemAES256XTS`, so a report that ENABLES
+// AES-256-XTS memory encryption is never rejected, even when the expected policy
+// does not allow it. SPEC §3.7.2 #1 requires rejecting a report that enables
+// mem_aes256_xts when not allowed (the §3.7.1 default does not allow it),
+// matching tinfoil-python/-rs/-js. (CXL, by contrast, go-sev-guest already
+// checks with allowlist semantics.)
+func enforceGuestPolicyAllowlist(report *sevsnp.Report, allowed abi.SnpPolicy) error {
+	policy, err := abi.ParseSnpPolicy(report.GetPolicy())
+	if err != nil {
+		return fmt.Errorf("could not parse SNP guest policy: %w", err)
+	}
+	if policy.MemAES256XTS && !allowed.MemAES256XTS {
+		return fmt.Errorf("guest policy violation: mem_aes256_xts (AES-256-XTS memory encryption) enabled but not allowed")
+	}
+	return nil
 }
 
 func verifySevAttestationV2(attestationDoc string) (*Verification, error) {
