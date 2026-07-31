@@ -14,7 +14,7 @@ require (
 	github.com/stretchr/testify v1.11.1
 	github.com/subosito/gotenv v1.6.0
 	github.com/theupdateframework/go-tuf/v2 v2.4.2
-	github.com/tinfoilsh/encrypted-http-body-protocol v0.3.0
+	github.com/tinfoilsh/encrypted-http-body-protocol v0.3.2
 	google.golang.org/protobuf v1.36.11
 )
 
