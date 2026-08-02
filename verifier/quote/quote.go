@@ -56,14 +56,21 @@ type AssembledPolicy struct {
 	tdx   *tdx.Expectations
 }
 
-// Authenticate verifies the quote's signature chain up to the pinned
-// vendor root, from the document's own endorsement collateral — no network
-// fetches. Callers must assemble a policy and validate before trusting the
-// platform.
-func Authenticate(doc *envelope.Document) (*Authenticated, error) {
+// Trust-root-varying steps of the shared verification flow. Production passes
+// the embedded-root functions; conformance passes root-injecting ones.
+type (
+	sevAuthFunc func(*envelope.Document) (*sev.Quote, error)
+	tdxAuthFunc func(*envelope.Document) (*tdx.Quote, error)
+	authFunc    func(*envelope.Document) (*Authenticated, error)
+)
+
+// authenticate dispatches on the cpu_evidence format, calling sevAuth or
+// tdxAuth for the signature-verification step. Production and conformance
+// share this body, differing only in the roots those functions use.
+func authenticate(doc *envelope.Document, sevAuth sevAuthFunc, tdxAuth tdxAuthFunc) (*Authenticated, error) {
 	switch doc.CPUEvidence.Format {
 	case envelope.SEVSNPReportV1Format:
-		q, err := sev.Authenticate(doc)
+		q, err := sevAuth(doc)
 		if err != nil {
 			return nil, err
 		}
@@ -74,7 +81,7 @@ func Authenticate(doc *envelope.Document) (*Authenticated, error) {
 			sev:         q,
 		}, nil
 	case envelope.TDXQuoteV1Format:
-		q, err := tdx.Authenticate(doc)
+		q, err := tdxAuth(doc)
 		if err != nil {
 			return nil, err
 		}
@@ -87,6 +94,13 @@ func Authenticate(doc *envelope.Document) (*Authenticated, error) {
 	default:
 		return nil, fmt.Errorf("unsupported cpu_evidence format %q", doc.CPUEvidence.Format)
 	}
+}
+
+// Authenticate verifies the quote's signature chain up to the pinned vendor
+// root, from the document's own endorsement collateral — no network fetches.
+// Callers must assemble a policy and validate before trusting the platform.
+func Authenticate(doc *envelope.Document) (*Authenticated, error) {
+	return authenticate(doc, sev.Authenticate, tdx.Authenticate)
 }
 
 // Assemble resolves the complete policy for an authenticated quote from
@@ -145,9 +159,10 @@ func (p *AssembledPolicy) Validate() error {
 	}
 }
 
-// Verify composes Authenticate, Assemble, and Validate.
-func Verify(doc *envelope.Document, endorsements *policy.Artifact, code *measurement.Measurement, shape *policy.Shape, reportData [64]byte) (*AssembledPolicy, *Authenticated, error) {
-	q, err := Authenticate(doc)
+// verify composes authentication (via auth), Assemble, and Validate.
+// Production and conformance share this body.
+func verify(doc *envelope.Document, endorsements *policy.Artifact, code *measurement.Measurement, shape *policy.Shape, reportData [64]byte, auth authFunc) (*AssembledPolicy, *Authenticated, error) {
+	q, err := auth(doc)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -159,6 +174,12 @@ func Verify(doc *envelope.Document, endorsements *policy.Artifact, code *measure
 		return nil, nil, err
 	}
 	return assembled, q, nil
+}
+
+// Verify composes Authenticate, Assemble, and Validate against the embedded
+// pinned vendor roots.
+func Verify(doc *envelope.Document, endorsements *policy.Artifact, code *measurement.Measurement, shape *policy.Shape, reportData [64]byte) (*AssembledPolicy, *Authenticated, error) {
+	return verify(doc, endorsements, code, shape, reportData, Authenticate)
 }
 
 // sevLaunchDigest maps the expected code measurement onto the SEV launch

@@ -41,11 +41,11 @@ type Quote struct {
 	quote *tdxpb.QuoteV4
 }
 
-// Authenticate verifies the quote's signature chain up to the pinned Intel
-// SGX root, replaying the document's captured PCS collateral — no network
-// fetches. Callers must assemble a policy and validate before trusting the
-// platform.
-func Authenticate(doc *envelope.Document) (*Quote, error) {
+// authenticateWithRoot verifies the quote signature chain to the Intel SGX
+// root, replaying the document's PCS collateral — no network fetches.
+// intelSGXRootPEM is the Intel root (nil → embedded). Callers must assemble
+// and validate before trusting the platform.
+func authenticateWithRoot(doc *envelope.Document, intelSGXRootPEM []byte) (*Quote, error) {
 	rawQuote, err := base64.StdEncoding.DecodeString(doc.CPUEvidence.ReportBase64)
 	if err != nil {
 		return nil, fmt.Errorf("decoding TDX quote: %w", err)
@@ -89,12 +89,20 @@ func Authenticate(doc *envelope.Document) (*Quote, error) {
 	}
 	recorder := &tcbEvaluationRecorder{inner: inner}
 
+	roots := intelRootCertPool
+	if intelSGXRootPEM != nil {
+		roots = x509.NewCertPool()
+		if !roots.AppendCertsFromPEM(intelSGXRootPEM) {
+			return nil, fmt.Errorf("intel SGX root PEM carried no certificates")
+		}
+	}
+
 	// All options explicit: collateral replayed from the document, chain
-	// pinned to the embedded Intel root, revocation checking on, validity
-	// evaluated at the current time.
+	// pinned to the Intel root, revocation checking on, validity evaluated
+	// at the current time.
 	opts := &tdxverify.Options{
 		Getter:           recorder,
-		TrustedRoots:     intelRootCertPool,
+		TrustedRoots:     roots,
 		GetCollateral:    true,
 		CheckRevocations: true,
 		Now:              time.Now(),
@@ -126,6 +134,11 @@ func Authenticate(doc *envelope.Document) (*Quote, error) {
 		TCBEvaluationDataNumber: tcbEvaluationDataNumber,
 		quote:                   quote,
 	}, nil
+}
+
+// Authenticate verifies against the embedded pinned Intel SGX root.
+func Authenticate(doc *envelope.Document) (*Quote, error) {
+	return authenticateWithRoot(doc, nil)
 }
 
 // pcsCollateralKey canonicalizes an Intel PCS URL for replay lookup: the

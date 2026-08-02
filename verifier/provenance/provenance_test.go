@@ -66,7 +66,7 @@ func TestAuthenticateCode(t *testing.T) {
 
 // testClient builds a client from the SDK's embedded trusted root, exactly
 // as production verification does.
-func testClient(t *testing.T) *Client {
+func testClient(t *testing.T) *client {
 	t.Helper()
 	client, err := getDefaultClient()
 	require.NoError(t, err)

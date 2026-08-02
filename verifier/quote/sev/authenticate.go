@@ -29,16 +29,17 @@ import (
 //go:embed genoa_cert_chain.pem
 var askArkGenoaPEM []byte
 
-// trustedRoots builds the pinned AMD trust anchor (Genoa ASK+ARK) from the
-// repo-owned copy rather than the library's embedded default, so the
-// anchor only changes when the file is deliberately regenerated. A fresh
-// instance is built per authentication: the library caches the CRL it
-// fetched on this object, and document-supplied collateral must never
-// affect other verifications.
-func trustedRoots() (map[string][]*trust.AMDRootCerts, error) {
+// trustedRoots builds the pinned AMD trust anchor (Genoa ASK+ARK); a nil
+// amdRootCAPEM uses the embedded copy. A fresh instance is built per
+// authentication: the library caches the CRL it fetched on this object, and
+// document-supplied collateral must never affect other verifications.
+func trustedRoots(amdRootCAPEM []byte) (map[string][]*trust.AMDRootCerts, error) {
+	if amdRootCAPEM == nil {
+		amdRootCAPEM = askArkGenoaPEM
+	}
 	genoa := new(trust.AMDRootCerts)
-	if err := genoa.FromKDSCertBytes(askArkGenoaPEM); err != nil {
-		return nil, fmt.Errorf("parsing embedded AMD Genoa root certificates: %w", err)
+	if err := genoa.FromKDSCertBytes(amdRootCAPEM); err != nil {
+		return nil, fmt.Errorf("parsing AMD Genoa root certificates: %w", err)
 	}
 	genoa.ProductLine = "Genoa"
 	return map[string][]*trust.AMDRootCerts{"Genoa": {genoa}}, nil
@@ -112,11 +113,11 @@ type Quote struct {
 // Attestation returns the verified attestation for policy assembly.
 func (q *Quote) Attestation() *sevsnp.Attestation { return q.attestation }
 
-// Authenticate verifies the report's signature chain up to the pinned AMD
-// root and its VCEK against the document-carried CRL — no network fetches.
-// Callers must assemble a policy and validate before trusting the
-// platform.
-func Authenticate(doc *envelope.Document) (*Quote, error) {
+// authenticateWithRoot verifies the report signature chain to the AMD root and
+// the VCEK against the document CRL — no network fetches. amdRootCAPEM is the
+// ASK+ARK chain (nil → embedded Genoa). Callers must assemble and validate
+// before trusting the platform.
+func authenticateWithRoot(doc *envelope.Document, amdRootCAPEM []byte) (*Quote, error) {
 	entry, ok := doc.EndorsementCollateral(envelope.CollateralAMDVCEKV1Format, envelope.SubjectCPU)
 	if !ok {
 		return nil, fmt.Errorf("document carries no amd-vcek endorsement collateral for the cpu")
@@ -163,7 +164,7 @@ func Authenticate(doc *envelope.Document) (*Quote, error) {
 			parsedCRL.ThisUpdate.Format(time.RFC3339), parsedCRL.NextUpdate.Format(time.RFC3339))
 	}
 
-	att, err := verifySignature(doc.CPUEvidence.ReportBase64, vcekDER, askDER, arkDER, crlDER)
+	att, err := verifySignature(doc.CPUEvidence.ReportBase64, vcekDER, askDER, arkDER, crlDER, amdRootCAPEM)
 	if err != nil {
 		return nil, err
 	}
@@ -184,10 +185,15 @@ func Authenticate(doc *envelope.Document) (*Quote, error) {
 	}, nil
 }
 
+// Authenticate verifies against the embedded pinned AMD Genoa root.
+func Authenticate(doc *envelope.Document) (*Quote, error) {
+	return authenticateWithRoot(doc, nil)
+}
+
 // verifySignature verifies the report signature under the AMD roots with
 // the provided VCEK and ASK/ARK chain, checking VCEK revocation against
 // the provided CRL. No policy validation.
-func verifySignature(reportBase64 string, vcekDER, askDER, arkDER, crlDER []byte) (*sevsnp.Attestation, error) {
+func verifySignature(reportBase64 string, vcekDER, askDER, arkDER, crlDER, amdRootCAPEM []byte) (*sevsnp.Attestation, error) {
 	reportBytes, err := base64.StdEncoding.DecodeString(reportBase64)
 	if err != nil {
 		return nil, err
@@ -202,7 +208,7 @@ func verifySignature(reportBase64 string, vcekDER, askDER, arkDER, crlDER []byte
 	if err != nil {
 		return nil, err
 	}
-	roots, err := trustedRoots()
+	roots, err := trustedRoots(amdRootCAPEM)
 	if err != nil {
 		return nil, err
 	}

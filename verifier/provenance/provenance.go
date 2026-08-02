@@ -42,7 +42,7 @@ const (
 		"/\\.github/workflows/build\\.yml@refs/tags/v[0-9][^@]*$"
 )
 
-type Client struct {
+type client struct {
 	trustRoot *root.TrustedRoot
 }
 
@@ -53,48 +53,70 @@ var embeddedTrustedRoot []byte
 // never fetches trust material over the network; the embedded copy is
 // refreshed by the rootfetch tool.
 var (
-	defaultClient     *Client
+	defaultClient     *client
 	defaultClientErr  error
 	defaultClientOnce sync.Once
 )
 
-func getDefaultClient() (*Client, error) {
+func getDefaultClient() (*client, error) {
 	defaultClientOnce.Do(func() {
-		defaultClient, defaultClientErr = NewClientFromJSON(embeddedTrustedRoot)
+		defaultClient, defaultClientErr = newClientFromJSON(embeddedTrustedRoot)
 	})
 	return defaultClient, defaultClientErr
 }
 
-// AuthenticateCode authenticates a code-provenance bundle against the
-// embedded trust root and the repo's pinned signing identity, returning
-// the verified content.
+// withClient resolves the trust root (nil → embedded) and runs fn against the
+// resulting client.
+func withClient[T any](trustRootJSON []byte, fn func(*client) (T, error)) (T, error) {
+	c, err := clientForRoot(trustRootJSON)
+	if err != nil {
+		var zero T
+		return zero, err
+	}
+	return fn(c)
+}
+
+// clientForRoot builds a client from trustRootJSON, or the embedded-root
+// default when nil.
+func clientForRoot(trustRootJSON []byte) (*client, error) {
+	if trustRootJSON == nil {
+		return getDefaultClient()
+	}
+	return newClientFromJSON(trustRootJSON)
+}
+
+func authenticateCodeWithRoot(bundleJSON []byte, repo, hexDigest string, trustRootJSON []byte) (*Code, error) {
+	return withClient(trustRootJSON, func(c *client) (*Code, error) {
+		return c.AuthenticateCode(bundleJSON, repo, hexDigest)
+	})
+}
+
+// AuthenticateCode authenticates a code-provenance bundle against the embedded
+// trust root and the repo's pinned signing identity.
 func AuthenticateCode(bundleJSON []byte, repo, hexDigest string) (*Code, error) {
-	c, err := getDefaultClient()
-	if err != nil {
-		return nil, err
-	}
-	return c.AuthenticateCode(bundleJSON, repo, hexDigest)
+	return authenticateCodeWithRoot(bundleJSON, repo, hexDigest, nil)
 }
 
-// AuthenticateEndorsements authenticates a platform-endorsements bundle
-// against the embedded trust root and the publisher's pinned signing
-// identity, returning the parsed policy artifact.
+func authenticateEndorsementsWithRoot(bundleJSON []byte, hexDigest string, trustRootJSON []byte) (*policy.Artifact, error) {
+	return withClient(trustRootJSON, func(c *client) (*policy.Artifact, error) {
+		return c.AuthenticateEndorsements(bundleJSON, hexDigest)
+	})
+}
+
+// AuthenticateEndorsements authenticates a platform-endorsements bundle against
+// the embedded trust root and the publisher's pinned signing identity.
 func AuthenticateEndorsements(bundleJSON []byte, hexDigest string) (*policy.Artifact, error) {
-	c, err := getDefaultClient()
-	if err != nil {
-		return nil, err
-	}
-	return c.AuthenticateEndorsements(bundleJSON, hexDigest)
+	return authenticateEndorsementsWithRoot(bundleJSON, hexDigest, nil)
 }
 
-// NewClientFromJSON builds a client from a Sigstore trusted-root document;
+// newClientFromJSON builds a client from a Sigstore trusted-root document;
 // verification normally uses the embedded copy via the package functions.
-func NewClientFromJSON(trustRootJSON []byte) (*Client, error) {
+func newClientFromJSON(trustRootJSON []byte) (*client, error) {
 	trustRoot, err := root.NewTrustedRootFromJSON(trustRootJSON)
 	if err != nil {
 		return nil, fmt.Errorf("parsing trust root: %w", err)
 	}
-	return &Client{trustRoot: trustRoot}, nil
+	return &client{trustRoot: trustRoot}, nil
 }
 
 // repoNameRE matches a GitHub "owner/name" repository slug.
@@ -112,7 +134,7 @@ func signingIdentity(repo string) (string, error) {
 		"/\\.github/workflows/[^/@]+@refs/tags/[^@]+$", nil
 }
 
-func (c *Client) verifyBundle(bundleJSON []byte, repo, hexDigest string) (*verify.VerificationResult, error) {
+func (c *client) verifyBundle(bundleJSON []byte, repo, hexDigest string) (*verify.VerificationResult, error) {
 	sanRegex, err := signingIdentity(repo)
 	if err != nil {
 		return nil, err
@@ -122,7 +144,7 @@ func (c *Client) verifyBundle(bundleJSON []byte, repo, hexDigest string) (*verif
 
 // verifyBundleWithIdentity verifies a Sigstore bundle against an explicit
 // signing certificate SAN regex.
-func (c *Client) verifyBundleWithIdentity(bundleJSON []byte, sanRegex, hexDigest string) (*verify.VerificationResult, error) {
+func (c *client) verifyBundleWithIdentity(bundleJSON []byte, sanRegex, hexDigest string) (*verify.VerificationResult, error) {
 	if c.trustRoot == nil {
 		return nil, fmt.Errorf("trust root is not set")
 	}
@@ -244,7 +266,7 @@ type Code struct {
 // repo's signing identity and the expected artifact digest, and returns
 // the verified code measurement plus the VM shape the artifact declares
 // (required).
-func (c *Client) AuthenticateCode(bundleJSON []byte, repo, hexDigest string) (*Code, error) {
+func (c *client) AuthenticateCode(bundleJSON []byte, repo, hexDigest string) (*Code, error) {
 	result, err := c.verifyBundle(bundleJSON, repo, hexDigest)
 	if err != nil {
 		return nil, fmt.Errorf("verifying bundle: %w", err)
@@ -343,7 +365,7 @@ func measurementFromStatement(statement *in_toto.Statement) (*measurement.Measur
 // AuthenticateEndorsements authenticates a platform-endorsements bundle
 // against the publisher identity and returns the parsed, validated
 // artifact.
-func (c *Client) AuthenticateEndorsements(bundleJSON []byte, hexDigest string) (*policy.Artifact, error) {
+func (c *client) AuthenticateEndorsements(bundleJSON []byte, hexDigest string) (*policy.Artifact, error) {
 	result, err := c.verifyBundleWithIdentity(bundleJSON, platformEndorsementsIdentity, hexDigest)
 	if err != nil {
 		return nil, fmt.Errorf("verifying platform endorsements bundle: %w", err)
