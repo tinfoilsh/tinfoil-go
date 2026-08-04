@@ -232,6 +232,7 @@ type Bundle struct {
 	Domain                   string          `json:"domain"`
 	EnclaveAttestationReport *Document       `json:"enclaveAttestationReport"`
 	Digest                   string          `json:"digest"`
+	ReleaseTag               string          `json:"releaseTag,omitempty"`
 	SigstoreBundle           json.RawMessage `json:"sigstoreBundle"`
 	VCEK                     string          `json:"vcek"`
 	EnclaveCert              string          `json:"enclaveCert"`

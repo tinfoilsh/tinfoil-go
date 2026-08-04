@@ -3,6 +3,7 @@ package sigstore
 import (
 	"encoding/hex"
 	"fmt"
+	"regexp"
 	"strings"
 
 	protobundle "github.com/sigstore/protobuf-specs/gen/pb-go/bundle/v1"
@@ -78,6 +79,11 @@ func (c *Client) VerifyBundle(bundleJSON []byte, repo, hexDigest string) (*verif
 	// TODO: Can we pin this to latest without fetching the latest release?
 	sanRegex := "^https://github.com/" + repo + "/.github/workflows/.*@refs/tags/*"
 	return c.verifyBundleWithIdentity(bundleJSON, sanRegex, hexDigest)
+}
+
+func releaseIdentity(repo, tag string) string {
+	return "^https://github\\.com/" + regexp.QuoteMeta(repo) +
+		"/\\.github/workflows/.*@refs/tags/" + regexp.QuoteMeta(tag) + "$"
 }
 
 // verifyBundleWithIdentity verifies a Sigstore bundle against an explicit
@@ -187,6 +193,19 @@ func (c *Client) VerifyAttestation(
 	repo, hexDigest string,
 ) (*attestation.Measurement, error) {
 	result, err := c.VerifyBundle(bundleJSON, repo, hexDigest)
+	return measurementFromResult(result, err)
+}
+
+// VerifyAttestationForRelease verifies an attestation signed for an exact release tag.
+func (c *Client) VerifyAttestationForRelease(
+	bundleJSON []byte,
+	repo, tag, hexDigest string,
+) (*attestation.Measurement, error) {
+	result, err := c.verifyBundleWithIdentity(bundleJSON, releaseIdentity(repo, tag), hexDigest)
+	return measurementFromResult(result, err)
+}
+
+func measurementFromResult(result *verify.VerificationResult, err error) (*attestation.Measurement, error) {
 	if err != nil {
 		return nil, fmt.Errorf("verifying bundle: %w", err)
 	}

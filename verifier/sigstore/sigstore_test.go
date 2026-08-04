@@ -1,12 +1,22 @@
 package sigstore
 
 import (
+	"regexp"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/tinfoilsh/tinfoil-go/verifier/attestation"
 	"github.com/tinfoilsh/tinfoil-go/verifier/github"
 )
+
+func TestReleaseIdentityMatchesExactTag(t *testing.T) {
+	identity := regexp.MustCompile(releaseIdentity("owner/repo.name", "v1.2.3+build"))
+
+	assert.True(t, identity.MatchString("https://github.com/owner/repo.name/.github/workflows/build.yml@refs/tags/v1.2.3+build"))
+	assert.False(t, identity.MatchString("https://github.com/owner/repo.name/.github/workflows/build.yml@refs/tags/v1.2.4"))
+	assert.False(t, identity.MatchString("https://github.com/owner/repoXname/.github/workflows/build.yml@refs/tags/v1.2.3+build"))
+	assert.False(t, identity.MatchString("https://github.com/owner/repo.name/.github/workflows/build.yml@refs/tags/v1.2.3+build/extra"))
+}
 
 func TestFetchHardwarePlatformMeasurements(t *testing.T) {
 	if testing.Short() {

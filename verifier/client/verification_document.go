@@ -1,6 +1,8 @@
 package client
 
 import (
+	"runtime/debug"
+	"strings"
 	"time"
 
 	"github.com/tinfoilsh/tinfoil-go/verifier/attestation"
@@ -9,7 +11,8 @@ import (
 const (
 	verificationDocumentSchemaVersion = 1
 	verifierName                      = "tinfoil-go"
-	// Version is the verifier package version reported in verification documents.
+	verifierModulePath                = "github.com/tinfoilsh/tinfoil-go"
+	// Version is the Tinfoil Go SDK release version.
 	Version = "0.15.0"
 )
 
@@ -65,7 +68,37 @@ type VerificationDocument struct {
 }
 
 func currentVerifierIdentity() SoftwareIdentity {
-	return SoftwareIdentity{Name: verifierName, Version: Version}
+	return SoftwareIdentity{Name: verifierName, Version: currentVerifierVersion()}
+}
+
+func currentVerifierVersion() string {
+	return verifierVersion(debug.ReadBuildInfo())
+}
+
+func verifierVersion(info *debug.BuildInfo, ok bool) string {
+	if !ok {
+		return "unknown"
+	}
+	if info.Main.Path == verifierModulePath {
+		return buildModuleVersion(&info.Main)
+	}
+	for _, dependency := range info.Deps {
+		if dependency.Path == verifierModulePath {
+			return buildModuleVersion(dependency)
+		}
+	}
+	return "unknown"
+}
+
+func buildModuleVersion(module *debug.Module) string {
+	if module.Replace != nil {
+		module = module.Replace
+	}
+	version := strings.TrimPrefix(module.Version, "v")
+	if version == "" || version == "(devel)" {
+		return "devel"
+	}
+	return version
 }
 
 func successfulStep() VerificationStepState {
@@ -77,10 +110,12 @@ func skippedStep() VerificationStepState {
 }
 
 func newVerificationDocument(groundTruth *GroundTruth) *VerificationDocument {
-	fetchDigest := successfulStep()
+	fetchDigest := skippedStep()
 	verifyCode := successfulStep()
+	if groundTruth.DigestFetched {
+		fetchDigest = successfulStep()
+	}
 	if groundTruth.Digest == pinnedNoDigest {
-		fetchDigest = skippedStep()
 		verifyCode = skippedStep()
 	}
 	return &VerificationDocument{
@@ -117,6 +152,9 @@ func newVerificationDocument(groundTruth *GroundTruth) *VerificationDocument {
 func (s *SecureClient) setVerifiedState(groundTruth *GroundTruth) {
 	clonedGroundTruth := cloneGroundTruth(groundTruth)
 	s.stateMu.Lock()
+	if clonedGroundTruth.EnclaveHost != "" {
+		s.enclave = clonedGroundTruth.EnclaveHost
+	}
 	s.groundTruth = clonedGroundTruth
 	s.verificationDocument = newVerificationDocument(clonedGroundTruth)
 	s.stateMu.Unlock()

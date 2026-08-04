@@ -39,6 +39,7 @@ type GroundTruth struct {
 	EnclaveFingerprint  string                           `json:"enclave_fingerprint"`
 	Verifier            SoftwareIdentity                 `json:"verifier"`
 	VerifiedAt          string                           `json:"verified_at"`
+	DigestFetched       bool                             `json:"-"`
 }
 
 type SecureClient struct {
@@ -128,6 +129,8 @@ func NewDefaultClient() (*SecureClient, error) {
 
 // Enclave returns the enclave URL
 func (s *SecureClient) Enclave() string {
+	s.stateMu.RLock()
+	defer s.stateMu.RUnlock()
 	return s.enclave
 }
 
@@ -240,7 +243,7 @@ func (s *SecureClient) Verify() (*GroundTruth, error) {
 			return nil, fmt.Errorf("verifyCode: failed to fetch attestation bundle: %v", err)
 		}
 
-		codeMeasurement, err = sigstoreClient.VerifyAttestation(sigstoreBundle, s.repo, digest)
+		codeMeasurement, err = sigstoreClient.VerifyAttestationForRelease(sigstoreBundle, s.repo, releaseTag, digest)
 		if err != nil {
 			return nil, fmt.Errorf("verifyCode: failed to verify attested measurements: %v", err)
 		}
@@ -307,6 +310,7 @@ func (s *SecureClient) Verify() (*GroundTruth, error) {
 		EnclaveFingerprint:  enclaveFingerprint,
 		Verifier:            currentVerifierIdentity(),
 		VerifiedAt:          verificationTime().UTC().Format(time.RFC3339Nano),
+		DigestFetched:       s.codeMeasurement == nil,
 	}
 	s.setVerifiedState(groundTruth)
 	return groundTruth, nil
@@ -320,12 +324,23 @@ func (s *SecureClient) VerifyFromBundle(bundle *attestation.Bundle) (*GroundTrut
 }
 
 func (s *SecureClient) verifyFromBundle(bundle *attestation.Bundle) (*GroundTruth, error) {
+	if err := s.validateBundleDomain(bundle.Domain); err != nil {
+		return nil, err
+	}
+
 	sigstoreClient, err := s.getSigstoreClient()
 	if err != nil {
 		return nil, fmt.Errorf("verifyCode: failed to create sigstore client: %v", err)
 	}
 
-	codeMeasurement, err := sigstoreClient.VerifyAttestation(bundle.SigstoreBundle, s.repo, bundle.Digest)
+	var codeMeasurement *attestation.Measurement
+	if bundle.ReleaseTag != "" {
+		codeMeasurement, err = sigstoreClient.VerifyAttestationForRelease(
+			bundle.SigstoreBundle, s.repo, bundle.ReleaseTag, bundle.Digest,
+		)
+	} else {
+		codeMeasurement, err = sigstoreClient.VerifyAttestation(bundle.SigstoreBundle, s.repo, bundle.Digest)
+	}
 	if err != nil {
 		return nil, fmt.Errorf("verifyCode: failed to verify attested measurements: %v", err)
 	}
@@ -368,10 +383,10 @@ func (s *SecureClient) verifyFromBundle(bundle *attestation.Bundle) (*GroundTrut
 		return nil, fmt.Errorf("verifyCertificate: %v", err)
 	}
 
-	s.enclave = bundle.Domain
 	groundTruth := &GroundTruth{
 		ConfigRepo:         s.repo,
 		EnclaveHost:        bundle.Domain,
+		ReleaseTag:         bundle.ReleaseTag,
 		TLSPublicKey:       enclaveVerification.TLSPublicKeyFP,
 		HPKEPublicKey:      enclaveVerification.HPKEPublicKey,
 		Digest:             bundle.Digest,
@@ -384,6 +399,13 @@ func (s *SecureClient) verifyFromBundle(bundle *attestation.Bundle) (*GroundTrut
 	}
 	s.setVerifiedState(groundTruth)
 	return groundTruth, nil
+}
+
+func (s *SecureClient) validateBundleDomain(domain string) error {
+	if groundTruth := s.GroundTruth(); groundTruth != nil && domain != groundTruth.EnclaveHost {
+		return fmt.Errorf("verifyBundle: domain %q does not match verified enclave %q", domain, groundTruth.EnclaveHost)
+	}
+	return nil
 }
 
 // HTTPClient returns an HTTP client that only accepts TLS connections to the verified enclave
