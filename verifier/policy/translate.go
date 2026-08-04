@@ -31,25 +31,54 @@ func (p *SEVSNPPolicy) SEVOptions(productLine string) (*sevvalidate.Options, err
 	if p.MinimumTCB.FmcSpl != nil || p.MinimumLaunchTCB.FmcSpl != nil {
 		return nil, fmt.Errorf("fmc_spl is not valid for product line %s", productLine)
 	}
+	familyID, err := optionalHexField("family_id", p.FamilyID, 16)
+	if err != nil {
+		return nil, err
+	}
+	hostData, err := optionalHexField("host_data", p.HostData, 32)
+	if err != nil {
+		return nil, err
+	}
+	imageID, err := optionalHexField("image_id", p.ImageID, 16)
+	if err != nil {
+		return nil, err
+	}
+	var abiMajor, abiMinor uint8
+	if p.MinimumABIVersion != "" {
+		abiVersion, err := parseAPIVersion(p.MinimumABIVersion)
+		if err != nil {
+			return nil, fmt.Errorf("minimum ABI version: %w", err)
+		}
+		abiMajor = uint8(abiVersion >> 8)
+		abiMinor = uint8(abiVersion)
+	}
 
 	return &sevvalidate.Options{
 		GuestPolicy: sevabi.SnpPolicy{
+			ABIMajor:     abiMajor,
+			ABIMinor:     abiMinor,
 			Debug:        p.GuestPolicy.Debug,
 			SMT:          p.GuestPolicy.SMT,
 			MigrateMA:    p.GuestPolicy.MigrateMA,
 			SingleSocket: p.GuestPolicy.SingleSocket,
 		},
+		FamilyID:                  familyID,
+		HostData:                  hostData,
+		ImageID:                   imageID,
 		MinimumGuestSvn:           p.MinimumGuestSVN,
 		MinimumBuild:              p.MinimumBuild,
 		MinimumVersion:            version,
 		PermitProvisionalFirmware: p.PermitProvisionalFirmware,
 		PlatformInfo: &sevabi.SnpPlatformInfo{
+			AliasCheckComplete:          p.PlatformInfo.AliasCheckComplete,
 			SMTEnabled:                  p.PlatformInfo.SMTEnabled,
 			TSMEEnabled:                 p.PlatformInfo.TSMEEnabled,
 			ECCEnabled:                  p.PlatformInfo.ECCEnabled,
 			RAPLDisabled:                p.PlatformInfo.RAPLDisabled,
 			CiphertextHidingDRAMEnabled: p.PlatformInfo.CiphertextHidingDRAM,
 		},
+		MinimumCurrentMitigationVector: p.MinimumCurrentMitigationVector,
+		MinimumLaunchMitigationVector:  p.MinimumLaunchMitigationVector,
 		MinimumTCB: kds.TCBParts{
 			BlSpl:    p.MinimumTCB.BlSpl,
 			TeeSpl:   p.MinimumTCB.TeeSpl,
@@ -205,4 +234,11 @@ func hexField(name, value string, wantLen int) ([]byte, error) {
 		return nil, fmt.Errorf("%s must be %d bytes, got %d", name, wantLen, len(b))
 	}
 	return b, nil
+}
+
+func optionalHexField(name, value string, wantLen int) ([]byte, error) {
+	if value == "" {
+		return nil, nil
+	}
+	return hexField(name, value, wantLen)
 }
