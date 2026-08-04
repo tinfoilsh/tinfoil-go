@@ -23,14 +23,14 @@ const (
 
 	// platformEndorsementsRepo publishes the platform-endorsements artifact.
 	platformEndorsementsRepo = "tinfoilsh/platform-endorsements"
+)
 
-	// platformEndorsementsIdentity is the only signing certificate identity
-	// accepted for the platform-endorsements artifact: the tag-triggered
-	// build workflow of the publisher repo. Dots are escaped and the pattern
-	// is anchored at both ends so no other workflow path, ref type, or
-	// trailing SAN content can match.
-	platformEndorsementsIdentity = "^https://github\\.com/" + platformEndorsementsRepo +
-		"/\\.github/workflows/build\\.yml@refs/tags/v[0-9][^@]*$"
+// platformEndorsementsIdentity is the only signing certificate identity
+// accepted for the platform-endorsements artifact.
+var platformEndorsementsIdentity = githubActionsIdentity(
+	platformEndorsementsRepo,
+	"build\\.yml",
+	"refs/tags/v[0-9][^@]*",
 )
 
 type Client struct {
@@ -77,13 +77,17 @@ func FetchTrustRoot() ([]byte, error) {
 
 func (c *Client) VerifyBundle(bundleJSON []byte, repo, hexDigest string) (*verify.VerificationResult, error) {
 	// TODO: Can we pin this to latest without fetching the latest release?
-	sanRegex := "^https://github.com/" + repo + "/.github/workflows/.*@refs/tags/*"
+	sanRegex := githubActionsIdentity(repo, "[^@]+", "refs/tags/.+")
 	return c.verifyBundleWithIdentity(bundleJSON, sanRegex, hexDigest)
 }
 
 func releaseIdentity(repo, tag string) string {
+	return githubActionsIdentity(repo, "[^@]+", "refs/tags/"+regexp.QuoteMeta(tag))
+}
+
+func githubActionsIdentity(repo, workflowPattern, refPattern string) string {
 	return "^https://github\\.com/" + regexp.QuoteMeta(repo) +
-		"/\\.github/workflows/.*@refs/tags/" + regexp.QuoteMeta(tag) + "$"
+		"/\\.github/workflows/" + workflowPattern + "@" + refPattern + "$"
 }
 
 // verifyBundleWithIdentity verifies a Sigstore bundle against an explicit
