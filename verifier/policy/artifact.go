@@ -46,8 +46,16 @@ type Artifact struct {
 
 // PlatformMeasurement is one TDX platform configuration's expected registers.
 type PlatformMeasurement struct {
-	MRTD  string `json:"mrtd"`
-	RTMR0 string `json:"rtmr0"`
+	MRTD  string        `json:"mrtd"`
+	RTMR0 string        `json:"rtmr0"`
+	Shape *MachineShape `json:"shape,omitempty"`
+}
+
+// MachineShape describes the VM resources bound to a platform measurement.
+type MachineShape struct {
+	CPUs     uint32 `json:"cpus"`
+	Disks    uint32 `json:"disks"`
+	MemoryMB uint32 `json:"memory_mb"`
 }
 
 // Policy is a named appraisal policy. Exactly one platform block is set,
@@ -60,15 +68,21 @@ type Policy struct {
 
 // SEVSNPPolicy is the standard SEV-SNP policy block.
 type SEVSNPPolicy struct {
-	MinimumBuild              uint8       `json:"minimum_build"`
-	MinimumAPIVersion         string      `json:"minimum_api_version"`
-	MinimumGuestSVN           uint32      `json:"minimum_guest_svn"`
-	MinimumTCB                TCB         `json:"minimum_tcb"`
-	MinimumLaunchTCB          TCB         `json:"minimum_launch_tcb"`
-	GuestPolicy               GuestPolicy `json:"guest_policy"`
-	PlatformInfo              SNPPlatform `json:"platform_info"`
-	PermitProvisionalFirmware bool        `json:"permit_provisional_firmware"`
-	VMPL                      *int        `json:"vmpl"`
+	FamilyID                       string      `json:"family_id"`
+	HostData                       string      `json:"host_data"`
+	ImageID                        string      `json:"image_id"`
+	MinimumABIVersion              string      `json:"minimum_abi_version"`
+	MinimumBuild                   uint8       `json:"minimum_build"`
+	MinimumAPIVersion              string      `json:"minimum_api_version"`
+	MinimumCurrentMitigationVector uint64      `json:"minimum_current_mitigation_vector"`
+	MinimumGuestSVN                uint32      `json:"minimum_guest_svn"`
+	MinimumLaunchMitigationVector  uint64      `json:"minimum_launch_mitigation_vector"`
+	MinimumTCB                     TCB         `json:"minimum_tcb"`
+	MinimumLaunchTCB               TCB         `json:"minimum_launch_tcb"`
+	GuestPolicy                    GuestPolicy `json:"guest_policy"`
+	PlatformInfo                   SNPPlatform `json:"platform_info"`
+	PermitProvisionalFirmware      bool        `json:"permit_provisional_firmware"`
+	VMPL                           *int        `json:"vmpl"`
 }
 
 // TCB holds AMD security patch levels. FmcSpl applies to family 1Ah (Turin)
@@ -91,6 +105,7 @@ type GuestPolicy struct {
 
 // SNPPlatform mirrors the SNP PLATFORM_INFO expectations.
 type SNPPlatform struct {
+	AliasCheckComplete   bool `json:"alias_check_complete"`
 	SMTEnabled           bool `json:"smt_enabled"`
 	TSMEEnabled          bool `json:"tsme_enabled"`
 	ECCEnabled           bool `json:"ecc_enabled"`
@@ -105,6 +120,7 @@ type TDXPolicy struct {
 	MinimumPCESVN                  uint16   `json:"minimum_pce_svn"`
 	MinimumTEETCBSVN               string   `json:"minimum_tee_tcb_svn"`
 	AcceptedMRSeams                []string `json:"accepted_mr_seams"`
+	MRSeam                         string   `json:"mr_seam"`
 	TDAttributes                   string   `json:"td_attributes"`
 	XFAM                           string   `json:"xfam"`
 	MRConfigIDZero                 bool     `json:"mr_config_id_zero"`
@@ -130,6 +146,16 @@ func ParseArtifact(data []byte) (*Artifact, error) {
 	}
 	if a.Format != ArtifactFormat {
 		return nil, fmt.Errorf("unsupported artifact format %q", a.Format)
+	}
+	for name, endorsementPolicy := range a.Policies {
+		if endorsementPolicy.TDX == nil || endorsementPolicy.TDX.MRSeam == "" {
+			continue
+		}
+		if len(endorsementPolicy.TDX.AcceptedMRSeams) != 0 {
+			return nil, fmt.Errorf("policy %q: mr_seam and accepted_mr_seams are mutually exclusive", name)
+		}
+		endorsementPolicy.TDX.AcceptedMRSeams = []string{endorsementPolicy.TDX.MRSeam}
+		a.Policies[name] = endorsementPolicy
 	}
 	if err := a.validate(); err != nil {
 		return nil, err

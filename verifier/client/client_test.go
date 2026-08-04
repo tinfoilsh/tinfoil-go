@@ -3,8 +3,10 @@ package client
 import (
 	"encoding/json"
 	"os"
+	"runtime/debug"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/tinfoilsh/tinfoil-go/verifier/attestation"
@@ -52,6 +54,103 @@ func TestClientGroundTruthJSON(t *testing.T) {
 	assert.Equal(t, gt, &gt2)
 }
 
+func TestVerificationDocumentJSON(t *testing.T) {
+	verifiedAt := time.Date(2026, time.August, 4, 12, 30, 0, 0, time.UTC).Format(time.RFC3339Nano)
+	groundTruth := &GroundTruth{
+		ConfigRepo:         "tinfoilsh/confidential-model-router",
+		EnclaveHost:        "router.example",
+		ReleaseTag:         "v1.2.3",
+		TLSPublicKey:       "tls-fingerprint",
+		HPKEPublicKey:      "hpke-key",
+		Digest:             "release-digest",
+		CodeMeasurement:    &attestation.Measurement{Type: attestation.SevGuestV2, Registers: []string{"code"}},
+		EnclaveMeasurement: &attestation.Measurement{Type: attestation.SevGuestV2, Registers: []string{"enclave"}},
+		CodeFingerprint:    "code-fingerprint",
+		EnclaveFingerprint: "enclave-fingerprint",
+		Verifier:           SoftwareIdentity{Name: verifierName, Version: "v1.0.0"},
+		VerifiedAt:         verifiedAt,
+	}
+	client := &SecureClient{
+		groundTruth:          groundTruth,
+		verificationDocument: newVerificationDocument(groundTruth),
+	}
+
+	encoded, err := client.VerificationDocumentJSON()
+	assert.NoError(t, err)
+
+	var document VerificationDocument
+	assert.NoError(t, json.Unmarshal([]byte(encoded), &document))
+	assert.Equal(t, verificationDocumentSchemaVersion, document.SchemaVersion)
+	assert.Equal(t, "tinfoilsh/confidential-model-router", document.ConfigRepo)
+	assert.Equal(t, "v1.2.3", document.ReleaseTag)
+	assert.Equal(t, "release-digest", document.ReleaseDigest)
+	assert.Equal(t, verifierName, document.Verifier.Name)
+	assert.Equal(t, "v1.0.0", document.Verifier.Version)
+	assert.Equal(t, verifiedAt, document.VerifiedAt)
+	assert.Equal(t, "tls-fingerprint", document.EnclaveMeasurement.TLSPublicKeyFingerprint)
+	assert.True(t, document.SecurityVerified)
+}
+
+func TestVerificationDocumentStepStates(t *testing.T) {
+	tests := []struct {
+		name        string
+		groundTruth *GroundTruth
+		fetchDigest string
+		verifyCode  string
+	}{
+		{name: "direct release", groundTruth: &GroundTruth{ReleaseTag: "v1.2.3", Digest: "digest", DigestFetched: true}, fetchDigest: "success", verifyCode: "success"},
+		{name: "caller supplied bundle", groundTruth: &GroundTruth{ReleaseTag: "v1.2.3", Digest: "digest"}, fetchDigest: "skipped", verifyCode: "success"},
+		{name: "pinned", groundTruth: &GroundTruth{Digest: pinnedNoDigest}, fetchDigest: "skipped", verifyCode: "skipped"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			document := newVerificationDocument(tt.groundTruth)
+			assert.Equal(t, tt.fetchDigest, document.Steps.FetchDigest.Status)
+			assert.Equal(t, tt.verifyCode, document.Steps.VerifyCode.Status)
+		})
+	}
+}
+
+func TestCurrentVerifierVersion(t *testing.T) {
+	tests := []struct {
+		name    string
+		info    *debug.BuildInfo
+		ok      bool
+		version string
+	}{
+		{name: "released main module", info: &debug.BuildInfo{Main: debug.Module{Path: verifierModulePath, Version: "v1.2.3"}}, ok: true, version: "1.2.3"},
+		{name: "released dependency", info: &debug.BuildInfo{Main: debug.Module{Path: "example.com/app"}, Deps: []*debug.Module{{Path: verifierModulePath, Version: "v2.3.4"}}}, ok: true, version: "2.3.4"},
+		{name: "local replacement", info: &debug.BuildInfo{Main: debug.Module{Path: "example.com/app"}, Deps: []*debug.Module{{Path: verifierModulePath, Version: "v1.2.3", Replace: &debug.Module{Path: "../tinfoil-go"}}}}, ok: true, version: "devel"},
+		{name: "development build", info: &debug.BuildInfo{Main: debug.Module{Path: verifierModulePath, Version: "(devel)"}}, ok: true, version: "devel"},
+		{name: "missing build info", ok: false, version: "unknown"},
+		{name: "module absent", info: &debug.BuildInfo{Main: debug.Module{Path: "example.com/app"}}, ok: true, version: "unknown"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.version, verifierVersion(tt.info, tt.ok))
+		})
+	}
+}
+
+func TestVerifyFromBundleRejectsVerifiedDomainMismatch(t *testing.T) {
+	client := NewSecureClient("verified.example", defaultRouterRepo)
+	client.setVerifiedState(&GroundTruth{EnclaveHost: "verified.example"})
+
+	_, err := client.VerifyFromBundle(&attestation.Bundle{Domain: "other.example"})
+
+	assert.EqualError(t, err, `verifyBundle: domain "other.example" does not match verified enclave "verified.example"`)
+	assert.Equal(t, "verified.example", client.Enclave())
+	assert.Equal(t, "verified.example", client.GroundTruth().EnclaveHost)
+}
+
+func TestBundleDomainAllowsInitialDiscovery(t *testing.T) {
+	client := NewSecureClient("configured.example", defaultRouterRepo)
+
+	assert.NoError(t, client.validateBundleDomain("discovered.example"))
+}
+
 func TestNewDefaultSecureClient(t *testing.T) {
 	client, err := NewDefaultClient()
 	assert.NoError(t, err)
@@ -72,6 +171,7 @@ func TestClientFetchRouters(t *testing.T) {
 }
 
 func TestClientDefaultClient(t *testing.T) {
+	defaultClient := newFallbackClient()
 	enclave := defaultClient.Enclave()
 	assert.NotEmpty(t, enclave)
 

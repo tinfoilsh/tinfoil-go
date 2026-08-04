@@ -78,6 +78,21 @@ if err != nil {
 // see https://pkg.go.dev/github.com/openai/openai-go/v3 for API documentation
 ```
 
+## Verification document
+
+The client retains the result used by its active secure transport:
+
+```go
+document := client.VerificationDocument()
+fmt.Println(document.ConfigRepo, document.ReleaseTag, document.ReleaseDigest)
+fmt.Println(document.Verifier.Name, document.Verifier.Version)
+fmt.Println(document.VerifiedAt)
+```
+
+`VerifiedAt` is recorded from the local clock after successful verification or
+re-verification. It is not an attested timestamp or evidence freshness
+guarantee.
+
 ## Advanced Functionality
 
 ```go

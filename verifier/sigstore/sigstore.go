@@ -3,6 +3,7 @@ package sigstore
 import (
 	"encoding/hex"
 	"fmt"
+	"regexp"
 	"strings"
 
 	protobundle "github.com/sigstore/protobuf-specs/gen/pb-go/bundle/v1"
@@ -22,14 +23,14 @@ const (
 
 	// platformEndorsementsRepo publishes the platform-endorsements artifact.
 	platformEndorsementsRepo = "tinfoilsh/platform-endorsements"
+)
 
-	// platformEndorsementsIdentity is the only signing certificate identity
-	// accepted for the platform-endorsements artifact: the tag-triggered
-	// build workflow of the publisher repo. Dots are escaped and the pattern
-	// is anchored at both ends so no other workflow path, ref type, or
-	// trailing SAN content can match.
-	platformEndorsementsIdentity = "^https://github\\.com/" + platformEndorsementsRepo +
-		"/\\.github/workflows/build\\.yml@refs/tags/v[0-9][^@]*$"
+// platformEndorsementsIdentity is the only signing certificate identity
+// accepted for the platform-endorsements artifact.
+var platformEndorsementsIdentity = githubActionsIdentity(
+	platformEndorsementsRepo,
+	"build\\.yml",
+	"refs/tags/v[0-9][^@]*",
 )
 
 type Client struct {
@@ -76,8 +77,17 @@ func FetchTrustRoot() ([]byte, error) {
 
 func (c *Client) VerifyBundle(bundleJSON []byte, repo, hexDigest string) (*verify.VerificationResult, error) {
 	// TODO: Can we pin this to latest without fetching the latest release?
-	sanRegex := "^https://github.com/" + repo + "/.github/workflows/.*@refs/tags/*"
+	sanRegex := githubActionsIdentity(repo, "[^@]+", "refs/tags/.+")
 	return c.verifyBundleWithIdentity(bundleJSON, sanRegex, hexDigest)
+}
+
+func releaseIdentity(repo, tag string) string {
+	return githubActionsIdentity(repo, "[^@]+", "refs/tags/"+regexp.QuoteMeta(tag))
+}
+
+func githubActionsIdentity(repo, workflowPattern, refPattern string) string {
+	return "^https://github\\.com/" + regexp.QuoteMeta(repo) +
+		"/\\.github/workflows/" + workflowPattern + "@" + refPattern + "$"
 }
 
 // verifyBundleWithIdentity verifies a Sigstore bundle against an explicit
@@ -187,6 +197,19 @@ func (c *Client) VerifyAttestation(
 	repo, hexDigest string,
 ) (*attestation.Measurement, error) {
 	result, err := c.VerifyBundle(bundleJSON, repo, hexDigest)
+	return measurementFromResult(result, err)
+}
+
+// VerifyAttestationForRelease verifies an attestation signed for an exact release tag.
+func (c *Client) VerifyAttestationForRelease(
+	bundleJSON []byte,
+	repo, tag, hexDigest string,
+) (*attestation.Measurement, error) {
+	result, err := c.verifyBundleWithIdentity(bundleJSON, releaseIdentity(repo, tag), hexDigest)
+	return measurementFromResult(result, err)
+}
+
+func measurementFromResult(result *verify.VerificationResult, err error) (*attestation.Measurement, error) {
 	if err != nil {
 		return nil, fmt.Errorf("verifying bundle: %w", err)
 	}

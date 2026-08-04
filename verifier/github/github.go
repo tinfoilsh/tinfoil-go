@@ -10,6 +10,12 @@ import (
 
 const githubProxy = "https://github-proxy.tinfoil.sh"
 
+// Release identifies the release artifact selected for verification.
+type Release struct {
+	Tag    string
+	Digest string
+}
+
 // FetchLatestTag fetches the latest tag for a repo
 func FetchLatestTag(repo string) (string, error) {
 	url := githubProxy + "/repos/" + repo + "/releases/latest"
@@ -40,17 +46,26 @@ func FetchDigest(repo, tag string) (string, error) {
 	return strings.TrimSpace(string(digest)), nil
 }
 
-// FetchLatestDigest gets the latest release, tag, and attestation digest of a repo
-func FetchLatestDigest(repo string) (string, error) {
+// FetchLatestRelease gets the latest release tag and attestation digest of a repo.
+func FetchLatestRelease(repo string) (*Release, error) {
 	latestTag, err := FetchLatestTag(repo)
 	if err != nil {
-		return "", fmt.Errorf("failed to fetch latest tag: %v", err)
+		return nil, fmt.Errorf("failed to fetch latest tag: %w", err)
 	}
 	digest, err := FetchDigest(repo, latestTag)
 	if err != nil {
-		return "", fmt.Errorf("failed to fetch digest for %s@%s: %v", repo, latestTag, err)
+		return nil, fmt.Errorf("failed to fetch digest for %s@%s: %w", repo, latestTag, err)
 	}
-	return digest, nil
+	return &Release{Tag: latestTag, Digest: digest}, nil
+}
+
+// FetchLatestDigest gets the attestation digest of the latest release of a repo.
+func FetchLatestDigest(repo string) (string, error) {
+	release, err := FetchLatestRelease(repo)
+	if err != nil {
+		return "", err
+	}
+	return release.Digest, nil
 }
 
 // FetchAttestationBundle fetches the sigstore bundle from a repo for a given repo and EIF hash
