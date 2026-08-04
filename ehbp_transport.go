@@ -245,6 +245,7 @@ func tlsPinnedHTTPClient(secureClient *client.SecureClient) (*http.Client, error
 	httpClient.Transport = &reVerifyingTransport{
 		secureClient: secureClient,
 		transport:    httpClient.Transport,
+		document:     secureClient.VerificationDocument(),
 	}
 	return httpClient, nil
 }
@@ -411,6 +412,7 @@ func buildEHBPTransport(hpkePublicKeyHex string) (http.RoundTripper, error) {
 type ehbpReVerifyingTransport struct {
 	mu         sync.RWMutex
 	transport  http.RoundTripper
+	document   *client.VerificationDocument
 	generation uint64
 
 	// reverifyMu serializes re-verification. Re-verification mutates shared
@@ -421,12 +423,17 @@ type ehbpReVerifyingTransport struct {
 
 	// reverify re-runs attestation and returns an EHBP transport built from the
 	// freshly attested HPKE key.
-	reverify func() (http.RoundTripper, error)
+	reverify              func() (http.RoundTripper, error)
+	build                 func(string) (http.RoundTripper, error)
+	documentAfterReverify func() *client.VerificationDocument
 }
 
 func newEHBPReVerifyingTransport(secureClient *client.SecureClient, inner http.RoundTripper, build func(hpkePublicKeyHex string) (http.RoundTripper, error)) *ehbpReVerifyingTransport {
 	return &ehbpReVerifyingTransport{
-		transport: inner,
+		transport:             inner,
+		document:              secureClient.VerificationDocument(),
+		build:                 build,
+		documentAfterReverify: secureClient.VerificationDocument,
 		reverify: func() (http.RoundTripper, error) {
 			groundTruth, err := secureClient.Verify()
 			if err != nil {
@@ -489,11 +496,44 @@ func (t *ehbpReVerifyingTransport) reverifyOnce(seenGeneration uint64) (http.Rou
 
 	t.mu.Lock()
 	t.transport = newTransport
+	if t.documentAfterReverify != nil {
+		t.document = t.documentAfterReverify()
+	}
 	t.generation++
 	t.mu.Unlock()
 
 	log.Info("HPKE key rotation detected, re-verified attestation successfully")
 	return newTransport, nil
+}
+
+func (t *ehbpReVerifyingTransport) replace(transport http.RoundTripper, document *client.VerificationDocument) {
+	t.mu.Lock()
+	t.transport = transport
+	t.document = document
+	t.generation++
+	t.mu.Unlock()
+}
+
+func (t *ehbpReVerifyingTransport) verificationDocument() *client.VerificationDocument {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+	return t.document.Clone()
+}
+
+func (t *ehbpReVerifyingTransport) verifyAndReplace(secureClient *client.SecureClient) (*client.GroundTruth, error) {
+	t.reverifyMu.Lock()
+	defer t.reverifyMu.Unlock()
+
+	groundTruth, err := secureClient.Verify()
+	if err != nil {
+		return nil, err
+	}
+	newTransport, err := t.build(groundTruth.HPKEPublicKey)
+	if err != nil {
+		return nil, err
+	}
+	t.replace(newTransport, secureClient.VerificationDocument())
+	return groundTruth, nil
 }
 
 // resetRequestBody returns a request whose body can be sent again. EHBP

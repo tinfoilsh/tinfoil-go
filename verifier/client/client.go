@@ -7,6 +7,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"sync"
+	"time"
 
 	"github.com/tinfoilsh/tinfoil-go/verifier/attestation"
 	"github.com/tinfoilsh/tinfoil-go/verifier/github"
@@ -24,7 +26,9 @@ var embeddedTrustedRoot []byte
 
 // GroundTruth represents the "known good" state of the enclave
 type GroundTruth struct {
+	ConfigRepo          string                           `json:"config_repo,omitempty"`
 	EnclaveHost         string                           `json:"enclave_host,omitempty"`
+	ReleaseTag          string                           `json:"release_tag,omitempty"`
 	TLSPublicKey        string                           `json:"tls_public_key,omitempty"`
 	HPKEPublicKey       string                           `json:"hpke_public_key,omitempty"`
 	Digest              string                           `json:"digest"`
@@ -33,6 +37,8 @@ type GroundTruth struct {
 	HardwareMeasurement *attestation.HardwareMeasurement `json:"hardware_measurement,omitempty"`
 	CodeFingerprint     string                           `json:"code_fingerprint"`
 	EnclaveFingerprint  string                           `json:"enclave_fingerprint"`
+	Verifier            SoftwareIdentity                 `json:"verifier"`
+	VerifiedAt          string                           `json:"verified_at"`
 }
 
 type SecureClient struct {
@@ -48,15 +54,21 @@ type SecureClient struct {
 	codeMeasurement      *attestation.Measurement
 	hardwareMeasurements []*attestation.HardwareMeasurement
 
-	groundTruth    *GroundTruth
-	sigstoreClient *sigstore.Client
+	groundTruth          *GroundTruth
+	verificationDocument *VerificationDocument
+	stateMu              sync.RWMutex
+	verifyMu             sync.Mutex
+	sigstoreClient       *sigstore.Client
 }
 
 var (
 	defaultRouterRepo = "tinfoilsh/confidential-model-router"
 	defaultRouterURL  = "https://atc.tinfoil.sh/routers"
-	defaultClient     = NewSecureClient("inference.tinfoil.sh", defaultRouterRepo)
 )
+
+func newFallbackClient() *SecureClient {
+	return NewSecureClient("inference.tinfoil.sh", defaultRouterRepo)
+}
 
 func fetchRouters() ([]string, error) {
 	resp, _, err := util.Get(defaultRouterURL)
@@ -97,7 +109,7 @@ func NewDefaultClient() (*SecureClient, error) {
 	routers, err := fetchRouters()
 	if err != nil {
 		// If we can't get routers, fall back to inference.tinfoil.sh immediately
-		return defaultClient, nil
+		return newFallbackClient(), nil
 	}
 
 	// Try each router in sequence
@@ -111,7 +123,7 @@ func NewDefaultClient() (*SecureClient, error) {
 		}
 	}
 
-	return defaultClient, nil
+	return newFallbackClient(), nil
 }
 
 // Enclave returns the enclave URL
@@ -133,12 +145,30 @@ func (s *SecureClient) SetAttestationBundleURL(url string) {
 
 // GroundTruth returns the last verified enclave state
 func (s *SecureClient) GroundTruth() *GroundTruth {
-	return s.groundTruth
+	s.stateMu.RLock()
+	defer s.stateMu.RUnlock()
+	return cloneGroundTruth(s.groundTruth)
 }
 
 // GroundTruthJSON returns the ground truth as a JSON string
 func (s *SecureClient) GroundTruthJSON() (string, error) {
-	encoded, err := json.Marshal(s.groundTruth)
+	encoded, err := json.Marshal(s.GroundTruth())
+	if err != nil {
+		return "", err
+	}
+	return string(encoded), nil
+}
+
+// VerificationDocument returns the last successful Verification Center-compatible result.
+func (s *SecureClient) VerificationDocument() *VerificationDocument {
+	s.stateMu.RLock()
+	defer s.stateMu.RUnlock()
+	return cloneVerificationDocument(s.verificationDocument)
+}
+
+// VerificationDocumentJSON returns the last successful verification document as JSON.
+func (s *SecureClient) VerificationDocumentJSON() (string, error) {
+	encoded, err := json.Marshal(s.VerificationDocument())
 	if err != nil {
 		return "", err
 	}
@@ -158,6 +188,9 @@ func (s *SecureClient) getSigstoreClient() (*sigstore.Client, error) {
 
 // Verify fetches the latest verification information from GitHub and Sigstore and stores the ground truth results in the client
 func (s *SecureClient) Verify() (*GroundTruth, error) {
+	s.verifyMu.Lock()
+	defer s.verifyMu.Unlock()
+
 	// When an attestation bundle URL is configured, attest from the bundle so
 	// the enclave does not need to be reached directly (proxy-friendly).
 	if s.attestationBundleURL != "" {
@@ -181,17 +214,19 @@ func (s *SecureClient) Verify() (*GroundTruth, error) {
 		if err != nil {
 			return nil, fmt.Errorf("fetchBundle: failed to fetch attestation bundle: %v", err)
 		}
-		return s.VerifyFromBundle(bundle)
+		return s.verifyFromBundle(bundle)
 	}
 
 	var codeMeasurement = s.codeMeasurement
 	var digest = pinnedNoDigest
+	var releaseTag string
 	if s.codeMeasurement == nil {
-		var err error
-		digest, err = github.FetchLatestDigest(s.repo)
+		release, err := github.FetchLatestRelease(s.repo)
 		if err != nil {
 			return nil, fmt.Errorf("fetchDigest: failed to fetch latest release: %v", err)
 		}
+		digest = release.Digest
+		releaseTag = release.Tag
 
 		sigstoreClient, err := s.getSigstoreClient()
 		if err != nil {
@@ -256,8 +291,10 @@ func (s *SecureClient) Verify() (*GroundTruth, error) {
 		return nil, fmt.Errorf("measurements: failed to compute enclave fingerprint: %v", err)
 	}
 
-	s.groundTruth = &GroundTruth{
+	groundTruth := &GroundTruth{
+		ConfigRepo:          s.repo,
 		EnclaveHost:         s.enclave,
+		ReleaseTag:          releaseTag,
 		TLSPublicKey:        enclaveVerification.TLSPublicKeyFP,
 		HPKEPublicKey:       enclaveVerification.HPKEPublicKey,
 		Digest:              digest,
@@ -266,12 +303,21 @@ func (s *SecureClient) Verify() (*GroundTruth, error) {
 		EnclaveMeasurement:  enclaveVerification.Measurement,
 		CodeFingerprint:     codeFingerprint,
 		EnclaveFingerprint:  enclaveFingerprint,
+		Verifier:            currentVerifierIdentity(),
+		VerifiedAt:          verificationTime().UTC().Format(time.RFC3339Nano),
 	}
-	return s.groundTruth, nil
+	s.setVerifiedState(groundTruth)
+	return groundTruth, nil
 }
 
 // VerifyFromBundle verifies using a pre-fetched attestation bundle (single-request verification)
 func (s *SecureClient) VerifyFromBundle(bundle *attestation.Bundle) (*GroundTruth, error) {
+	s.verifyMu.Lock()
+	defer s.verifyMu.Unlock()
+	return s.verifyFromBundle(bundle)
+}
+
+func (s *SecureClient) verifyFromBundle(bundle *attestation.Bundle) (*GroundTruth, error) {
 	sigstoreClient, err := s.getSigstoreClient()
 	if err != nil {
 		return nil, fmt.Errorf("verifyCode: failed to create sigstore client: %v", err)
@@ -321,7 +367,8 @@ func (s *SecureClient) VerifyFromBundle(bundle *attestation.Bundle) (*GroundTrut
 	}
 
 	s.enclave = bundle.Domain
-	s.groundTruth = &GroundTruth{
+	groundTruth := &GroundTruth{
+		ConfigRepo:         s.repo,
 		EnclaveHost:        bundle.Domain,
 		TLSPublicKey:       enclaveVerification.TLSPublicKeyFP,
 		HPKEPublicKey:      enclaveVerification.HPKEPublicKey,
@@ -330,21 +377,26 @@ func (s *SecureClient) VerifyFromBundle(bundle *attestation.Bundle) (*GroundTrut
 		EnclaveMeasurement: enclaveVerification.Measurement,
 		CodeFingerprint:    codeFingerprint,
 		EnclaveFingerprint: enclaveFingerprint,
+		Verifier:           currentVerifierIdentity(),
+		VerifiedAt:         verificationTime().UTC().Format(time.RFC3339Nano),
 	}
-	return s.groundTruth, nil
+	s.setVerifiedState(groundTruth)
+	return groundTruth, nil
 }
 
 // HTTPClient returns an HTTP client that only accepts TLS connections to the verified enclave
 func (s *SecureClient) HTTPClient() (*http.Client, error) {
-	if s.groundTruth == nil {
+	groundTruth := s.GroundTruth()
+	if groundTruth == nil {
 		_, err := s.Verify()
 		if err != nil {
 			return nil, fmt.Errorf("failed to verify enclave: %v", err)
 		}
+		groundTruth = s.GroundTruth()
 	}
 
 	return &http.Client{
-		Transport: &TLSBoundRoundTripper{ExpectedPublicKey: s.groundTruth.TLSPublicKey},
+		Transport: &TLSBoundRoundTripper{ExpectedPublicKey: groundTruth.TLSPublicKey},
 	}, nil
 }
 

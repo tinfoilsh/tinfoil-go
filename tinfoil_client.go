@@ -20,11 +20,15 @@ type reVerifyingTransport struct {
 	secureClient *client.SecureClient
 	mu           sync.RWMutex
 	transport    http.RoundTripper
+	document     *client.VerificationDocument
+	generation   uint64
+	reverifyMu   sync.Mutex
 }
 
 func (t *reVerifyingTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	t.mu.RLock()
 	transport := t.transport
+	generation := t.generation
 	t.mu.RUnlock()
 
 	resp, err := transport.RoundTrip(req)
@@ -32,11 +36,26 @@ func (t *reVerifyingTransport) RoundTrip(req *http.Request) (*http.Response, err
 		return resp, err
 	}
 
-	// Certificate error detected, reinitialize secure client to re-verify attestation
-	newSecureClient := client.NewSecureClient(t.secureClient.Enclave(), t.secureClient.Repo())
-	newHTTPClient, clientErr := newSecureClient.HTTPClient()
+	t.reverifyMu.Lock()
+	defer t.reverifyMu.Unlock()
+
+	t.mu.RLock()
+	if t.generation != generation {
+		transport = t.transport
+		t.mu.RUnlock()
+		return transport.RoundTrip(req)
+	}
+	t.mu.RUnlock()
+
+	// Certificate error detected, re-verify the existing client so its
+	// verification document and configured verification mode stay current.
+	_, clientErr := t.secureClient.Verify()
 	if clientErr != nil {
 		// Re-verification failed, connection is genuinely malicious
+		return nil, err
+	}
+	newHTTPClient, clientErr := t.secureClient.HTTPClient()
+	if clientErr != nil {
 		return nil, err
 	}
 
@@ -44,8 +63,9 @@ func (t *reVerifyingTransport) RoundTrip(req *http.Request) (*http.Response, err
 	log.Info("Certificate rotation detected, re-verified attestation successfully")
 
 	t.mu.Lock()
-	t.secureClient = newSecureClient
 	t.transport = newHTTPClient.Transport
+	t.document = t.secureClient.VerificationDocument()
+	t.generation++
 	t.mu.Unlock()
 
 	return newHTTPClient.Transport.RoundTrip(req)
@@ -72,6 +92,8 @@ type Client struct {
 	httpClient    *http.Client
 	enclave, repo string
 	transport     TransportMode
+	tlsTransport  *reVerifyingTransport
+	ehbpTransport *ehbpReVerifyingTransport
 }
 
 // NewClientWithParams creates a new secure OpenAI client with explicit enclave and repo parameters
@@ -110,13 +132,17 @@ func createClientFromSecureClient(secureClient *client.SecureClient, mode Transp
 	)
 
 	openaiClient := openai.NewClient(allOpts...)
+	tlsTransport := findReVerifyingTransport(httpClient.Transport)
+	ehbpTransport := findEHBPReVerifyingTransport(httpClient.Transport)
 	return &Client{
-		Client:       &openaiClient,
-		secureClient: secureClient,
-		httpClient:   httpClient,
-		enclave:      secureClient.Enclave(),
-		repo:         secureClient.Repo(),
-		transport:    mode,
+		Client:        &openaiClient,
+		secureClient:  secureClient,
+		httpClient:    httpClient,
+		enclave:       secureClient.Enclave(),
+		repo:          secureClient.Repo(),
+		transport:     mode,
+		tlsTransport:  tlsTransport,
+		ehbpTransport: ehbpTransport,
 	}, nil
 }
 
@@ -135,7 +161,80 @@ func (c *Client) Transport() TransportMode {
 
 // Verify re-verifies the enclave attestation and returns the ground truth
 func (c *Client) Verify() (*client.GroundTruth, error) {
+	if c.tlsTransport != nil {
+		return c.tlsTransport.verifyAndReplace()
+	}
+	if c.ehbpTransport != nil {
+		return c.ehbpTransport.verifyAndReplace(c.secureClient)
+	}
 	return c.secureClient.Verify()
+}
+
+// VerificationDocument returns the result used by the active secure transport.
+func (c *Client) VerificationDocument() *client.VerificationDocument {
+	if c.tlsTransport != nil {
+		return c.tlsTransport.verificationDocument()
+	}
+	if c.ehbpTransport != nil {
+		return c.ehbpTransport.verificationDocument()
+	}
+	return c.secureClient.VerificationDocument()
+}
+
+func findEHBPReVerifyingTransport(transport http.RoundTripper) *ehbpReVerifyingTransport {
+	switch typed := transport.(type) {
+	case *hostBoundRoundTripper:
+		return findEHBPReVerifyingTransport(typed.transport)
+	case *userCacheSecretTransport:
+		return findEHBPReVerifyingTransport(typed.transport)
+	case *ehbpReVerifyingTransport:
+		return typed
+	default:
+		return nil
+	}
+}
+
+func (t *reVerifyingTransport) replace(transport http.RoundTripper, document *client.VerificationDocument) {
+	t.mu.Lock()
+	t.transport = transport
+	t.document = document
+	t.generation++
+	t.mu.Unlock()
+}
+
+func (t *reVerifyingTransport) verificationDocument() *client.VerificationDocument {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+	return t.document.Clone()
+}
+
+func (t *reVerifyingTransport) verifyAndReplace() (*client.GroundTruth, error) {
+	t.reverifyMu.Lock()
+	defer t.reverifyMu.Unlock()
+
+	groundTruth, err := t.secureClient.Verify()
+	if err != nil {
+		return nil, err
+	}
+	httpClient, err := t.secureClient.HTTPClient()
+	if err != nil {
+		return nil, err
+	}
+	t.replace(httpClient.Transport, t.secureClient.VerificationDocument())
+	return groundTruth, nil
+}
+
+func findReVerifyingTransport(transport http.RoundTripper) *reVerifyingTransport {
+	switch typed := transport.(type) {
+	case *hostBoundRoundTripper:
+		return findReVerifyingTransport(typed.transport)
+	case *userCacheSecretTransport:
+		return findReVerifyingTransport(typed.transport)
+	case *reVerifyingTransport:
+		return typed
+	default:
+		return nil
+	}
 }
 
 // HTTPClient returns the underlying HTTP client used to reach the enclave. It

@@ -5,6 +5,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/tinfoilsh/tinfoil-go/verifier/attestation"
@@ -52,6 +53,39 @@ func TestClientGroundTruthJSON(t *testing.T) {
 	assert.Equal(t, gt, &gt2)
 }
 
+func TestVerificationDocumentJSON(t *testing.T) {
+	verifiedAt := time.Date(2026, time.August, 4, 12, 30, 0, 0, time.UTC).Format(time.RFC3339Nano)
+	groundTruth := &GroundTruth{
+		ConfigRepo:         "tinfoilsh/confidential-model-router",
+		EnclaveHost:        "router.example",
+		ReleaseTag:         "v1.2.3",
+		TLSPublicKey:       "tls-fingerprint",
+		HPKEPublicKey:      "hpke-key",
+		Digest:             "release-digest",
+		CodeMeasurement:    &attestation.Measurement{Type: attestation.SevGuestV2, Registers: []string{"code"}},
+		EnclaveMeasurement: &attestation.Measurement{Type: attestation.SevGuestV2, Registers: []string{"enclave"}},
+		CodeFingerprint:    "code-fingerprint",
+		EnclaveFingerprint: "enclave-fingerprint",
+		Verifier:           SoftwareIdentity{Name: verifierName, Version: "v1.0.0"},
+		VerifiedAt:         verifiedAt,
+	}
+	client := &SecureClient{
+		groundTruth:          groundTruth,
+		verificationDocument: newVerificationDocument(groundTruth),
+	}
+
+	encoded, err := client.VerificationDocumentJSON()
+	assert.NoError(t, err)
+
+	var document VerificationDocument
+	assert.NoError(t, json.Unmarshal([]byte(encoded), &document))
+	assert.Equal(t, verificationDocumentSchemaVersion, document.SchemaVersion)
+	assert.Equal(t, "v1.2.3", document.ReleaseTag)
+	assert.Equal(t, verifiedAt, document.VerifiedAt)
+	assert.Equal(t, "tls-fingerprint", document.EnclaveMeasurement.TLSPublicKeyFingerprint)
+	assert.True(t, document.SecurityVerified)
+}
+
 func TestNewDefaultSecureClient(t *testing.T) {
 	client, err := NewDefaultClient()
 	assert.NoError(t, err)
@@ -72,6 +106,7 @@ func TestClientFetchRouters(t *testing.T) {
 }
 
 func TestClientDefaultClient(t *testing.T) {
+	defaultClient := newFallbackClient()
 	enclave := defaultClient.Enclave()
 	assert.NotEmpty(t, enclave)
 
