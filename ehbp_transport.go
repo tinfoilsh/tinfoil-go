@@ -143,30 +143,30 @@ func NewClientWithOptions(opts ...ClientOption) (*Client, error) {
 		resolveUserCacheSecret(cfg.userCacheSecret, cfg.userCacheSecretSet), cfg.openaiOpts...)
 }
 
-// secureHTTPClient builds an *http.Client for the requested transport mode.
-//
-// The returned client is bound to the verified enclave (and the configured
-// proxy, if any). EHBP does not encrypt request headers end-to-end; TLS encrypts
-// them in transit, but sending them to another origin would disclose them to
-// that endpoint. Requests to any other origin are therefore refused.
-type securedHTTPClient struct {
-	client        *http.Client
-	tlsTransport  *reVerifyingTransport
-	ehbpTransport *ehbpReVerifyingTransport
+type verifiedTransport interface {
+	verifyAndReplace() (*client.GroundTruth, error)
+	verificationDocument() *client.VerificationDocument
 }
 
+type securedHTTPClient struct {
+	client    *http.Client
+	transport verifiedTransport
+}
+
+// secureHTTPClient builds an HTTP client and its verification-state owner for
+// the requested transport mode. The HTTP client is bound to the verified
+// enclave and configured proxy, if any.
 func secureHTTPClient(secureClient *client.SecureClient, mode TransportMode, baseURL, userCacheSecret string) (*securedHTTPClient, error) {
 	var (
 		httpClient    *http.Client
-		tlsTransport  *reVerifyingTransport
-		ehbpTransport *ehbpReVerifyingTransport
+		verifiedState verifiedTransport
 		err           error
 	)
 	switch mode {
 	case TransportTLS:
-		httpClient, tlsTransport, err = tlsPinnedHTTPClient(secureClient)
+		httpClient, verifiedState, err = tlsPinnedHTTPClient(secureClient)
 	case TransportEHBP, "":
-		httpClient, ehbpTransport, err = ehbpHTTPClient(secureClient, baseURL)
+		httpClient, verifiedState, err = ehbpHTTPClient(secureClient, baseURL)
 	default:
 		return nil, fmt.Errorf("unknown transport mode: %q", mode)
 	}
@@ -200,9 +200,8 @@ func secureHTTPClient(secureClient *client.SecureClient, mode TransportMode, bas
 		transport:      transport,
 	}
 	return &securedHTTPClient{
-		client:        httpClient,
-		tlsTransport:  tlsTransport,
-		ehbpTransport: ehbpTransport,
+		client:    httpClient,
+		transport: verifiedState,
 	}, nil
 }
 
@@ -422,10 +421,11 @@ func buildEHBPTransport(hpkePublicKeyHex string) (http.RoundTripper, error) {
 // attestation when the enclave rotates its HPKE key, mirroring the certificate
 // rotation handling of the TLS transport.
 type ehbpReVerifyingTransport struct {
-	mu         sync.RWMutex
-	transport  http.RoundTripper
-	document   *client.VerificationDocument
-	generation uint64
+	secureClient *client.SecureClient
+	mu           sync.RWMutex
+	transport    http.RoundTripper
+	document     *client.VerificationDocument
+	generation   uint64
 
 	// reverifyMu serializes re-verification. Re-verification mutates shared
 	// attestation state on the SecureClient, which is not safe for concurrent
@@ -442,6 +442,7 @@ type ehbpReVerifyingTransport struct {
 
 func newEHBPReVerifyingTransport(secureClient *client.SecureClient, inner http.RoundTripper, build func(hpkePublicKeyHex string) (http.RoundTripper, error)) *ehbpReVerifyingTransport {
 	return &ehbpReVerifyingTransport{
+		secureClient:          secureClient,
 		transport:             inner,
 		document:              secureClient.VerificationDocument(),
 		build:                 build,
@@ -532,11 +533,11 @@ func (t *ehbpReVerifyingTransport) verificationDocument() *client.VerificationDo
 	return t.document.Clone()
 }
 
-func (t *ehbpReVerifyingTransport) verifyAndReplace(secureClient *client.SecureClient) (*client.GroundTruth, error) {
+func (t *ehbpReVerifyingTransport) verifyAndReplace() (*client.GroundTruth, error) {
 	t.reverifyMu.Lock()
 	defer t.reverifyMu.Unlock()
 
-	groundTruth, err := secureClient.Verify()
+	groundTruth, err := t.secureClient.Verify()
 	if err != nil {
 		return nil, err
 	}
@@ -544,7 +545,7 @@ func (t *ehbpReVerifyingTransport) verifyAndReplace(secureClient *client.SecureC
 	if err != nil {
 		return nil, err
 	}
-	t.replace(newTransport, secureClient.VerificationDocument())
+	t.replace(newTransport, t.secureClient.VerificationDocument())
 	return groundTruth, nil
 }
 

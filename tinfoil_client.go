@@ -88,12 +88,11 @@ func isCertificateError(err error) bool {
 // Client wraps the OpenAI client to provide secure inference through Tinfoil
 type Client struct {
 	*openai.Client
-	secureClient  *client.SecureClient
-	httpClient    *http.Client
-	enclave, repo string
-	transport     TransportMode
-	tlsTransport  *reVerifyingTransport
-	ehbpTransport *ehbpReVerifyingTransport
+	secureClient      *client.SecureClient
+	httpClient        *http.Client
+	enclave, repo     string
+	transport         TransportMode
+	verifiedTransport verifiedTransport
 }
 
 // NewClientWithParams creates a new secure OpenAI client with explicit enclave and repo parameters
@@ -134,14 +133,13 @@ func createClientFromSecureClient(secureClient *client.SecureClient, mode Transp
 
 	openaiClient := openai.NewClient(allOpts...)
 	return &Client{
-		Client:        &openaiClient,
-		secureClient:  secureClient,
-		httpClient:    httpClient,
-		enclave:       secureClient.Enclave(),
-		repo:          secureClient.Repo(),
-		transport:     mode,
-		tlsTransport:  securedClient.tlsTransport,
-		ehbpTransport: securedClient.ehbpTransport,
+		Client:            &openaiClient,
+		secureClient:      secureClient,
+		httpClient:        httpClient,
+		enclave:           secureClient.Enclave(),
+		repo:              secureClient.Repo(),
+		transport:         mode,
+		verifiedTransport: securedClient.transport,
 	}, nil
 }
 
@@ -160,22 +158,16 @@ func (c *Client) Transport() TransportMode {
 
 // Verify re-verifies the enclave attestation and returns the ground truth
 func (c *Client) Verify() (*client.GroundTruth, error) {
-	if c.tlsTransport != nil {
-		return c.tlsTransport.verifyAndReplace()
-	}
-	if c.ehbpTransport != nil {
-		return c.ehbpTransport.verifyAndReplace(c.secureClient)
+	if c.verifiedTransport != nil {
+		return c.verifiedTransport.verifyAndReplace()
 	}
 	return c.secureClient.Verify()
 }
 
 // VerificationDocument returns the result used by the active secure transport.
 func (c *Client) VerificationDocument() *client.VerificationDocument {
-	if c.tlsTransport != nil {
-		return c.tlsTransport.verificationDocument()
-	}
-	if c.ehbpTransport != nil {
-		return c.ehbpTransport.verificationDocument()
+	if c.verifiedTransport != nil {
+		return c.verifiedTransport.verificationDocument()
 	}
 	return c.secureClient.VerificationDocument()
 }
