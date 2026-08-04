@@ -50,11 +50,11 @@ func FetchDigest(repo, tag string) (string, error) {
 func FetchLatestRelease(repo string) (*Release, error) {
 	latestTag, err := FetchLatestTag(repo)
 	if err != nil {
-		return nil, fmt.Errorf("failed to fetch latest tag: %v", err)
+		return nil, fmt.Errorf("failed to fetch latest tag: %w", err)
 	}
 	digest, err := FetchDigest(repo, latestTag)
 	if err != nil {
-		return nil, fmt.Errorf("failed to fetch digest for %s@%s: %v", repo, latestTag, err)
+		return nil, fmt.Errorf("failed to fetch digest for %s@%s: %w", repo, latestTag, err)
 	}
 	return &Release{Tag: latestTag, Digest: digest}, nil
 }

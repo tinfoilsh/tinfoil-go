@@ -140,6 +140,8 @@ func (s *SecureClient) Repo() string {
 // pre-assembled attestation bundle from {url}/attestation instead of attesting
 // the enclave directly. Pass an empty string to restore direct attestation.
 func (s *SecureClient) SetAttestationBundleURL(url string) {
+	s.verifyMu.Lock()
+	defer s.verifyMu.Unlock()
 	s.attestationBundleURL = url
 }
 

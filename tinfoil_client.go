@@ -113,10 +113,11 @@ func NewClient(openaiOpts ...option.RequestOption) (*Client, error) {
 
 // createClientFromSecureClient is a helper function to create a Client from a SecureClient
 func createClientFromSecureClient(secureClient *client.SecureClient, mode TransportMode, baseURL, userCacheSecret string, openaiOpts ...option.RequestOption) (*Client, error) {
-	httpClient, err := secureHTTPClient(secureClient, mode, baseURL, userCacheSecret)
+	securedClient, err := secureHTTPClient(secureClient, mode, baseURL, userCacheSecret)
 	if err != nil {
 		return nil, err
 	}
+	httpClient := securedClient.client
 
 	// Route requests through the proxy base URL when set, otherwise straight to
 	// the verified enclave.
@@ -132,8 +133,6 @@ func createClientFromSecureClient(secureClient *client.SecureClient, mode Transp
 	)
 
 	openaiClient := openai.NewClient(allOpts...)
-	tlsTransport := findReVerifyingTransport(httpClient.Transport)
-	ehbpTransport := findEHBPReVerifyingTransport(httpClient.Transport)
 	return &Client{
 		Client:        &openaiClient,
 		secureClient:  secureClient,
@@ -141,8 +140,8 @@ func createClientFromSecureClient(secureClient *client.SecureClient, mode Transp
 		enclave:       secureClient.Enclave(),
 		repo:          secureClient.Repo(),
 		transport:     mode,
-		tlsTransport:  tlsTransport,
-		ehbpTransport: ehbpTransport,
+		tlsTransport:  securedClient.tlsTransport,
+		ehbpTransport: securedClient.ehbpTransport,
 	}, nil
 }
 
@@ -181,19 +180,6 @@ func (c *Client) VerificationDocument() *client.VerificationDocument {
 	return c.secureClient.VerificationDocument()
 }
 
-func findEHBPReVerifyingTransport(transport http.RoundTripper) *ehbpReVerifyingTransport {
-	switch typed := transport.(type) {
-	case *hostBoundRoundTripper:
-		return findEHBPReVerifyingTransport(typed.transport)
-	case *userCacheSecretTransport:
-		return findEHBPReVerifyingTransport(typed.transport)
-	case *ehbpReVerifyingTransport:
-		return typed
-	default:
-		return nil
-	}
-}
-
 func (t *reVerifyingTransport) replace(transport http.RoundTripper, document *client.VerificationDocument) {
 	t.mu.Lock()
 	t.transport = transport
@@ -222,19 +208,6 @@ func (t *reVerifyingTransport) verifyAndReplace() (*client.GroundTruth, error) {
 	}
 	t.replace(httpClient.Transport, t.secureClient.VerificationDocument())
 	return groundTruth, nil
-}
-
-func findReVerifyingTransport(transport http.RoundTripper) *reVerifyingTransport {
-	switch typed := transport.(type) {
-	case *hostBoundRoundTripper:
-		return findReVerifyingTransport(typed.transport)
-	case *userCacheSecretTransport:
-		return findReVerifyingTransport(typed.transport)
-	case *reVerifyingTransport:
-		return typed
-	default:
-		return nil
-	}
 }
 
 // HTTPClient returns the underlying HTTP client used to reach the enclave. It

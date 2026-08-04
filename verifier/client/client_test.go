@@ -80,7 +80,11 @@ func TestVerificationDocumentJSON(t *testing.T) {
 	var document VerificationDocument
 	assert.NoError(t, json.Unmarshal([]byte(encoded), &document))
 	assert.Equal(t, verificationDocumentSchemaVersion, document.SchemaVersion)
+	assert.Equal(t, "tinfoilsh/confidential-model-router", document.ConfigRepo)
 	assert.Equal(t, "v1.2.3", document.ReleaseTag)
+	assert.Equal(t, "release-digest", document.ReleaseDigest)
+	assert.Equal(t, verifierName, document.Verifier.Name)
+	assert.Equal(t, "v1.0.0", document.Verifier.Version)
 	assert.Equal(t, verifiedAt, document.VerifiedAt)
 	assert.Equal(t, "tls-fingerprint", document.EnclaveMeasurement.TLSPublicKeyFingerprint)
 	assert.True(t, document.SecurityVerified)
