@@ -111,7 +111,7 @@ func newUserCacheSecret() string {
 var ephemeralUserCacheSecret = sync.OnceValue(func() string {
 	secret := newUserCacheSecret()
 	if secret != "" {
-		log.Warnf("tinfoil: could not persist the user cache secret; using an in-memory secret, so prompt-cache continuity resets when this process exits (set %s or WithUserCacheSecret to pin one)", userCacheSecretEnv)
+		slog.Warn("tinfoil: could not persist the user cache secret; using an in-memory secret, so prompt-cache continuity resets when this process exits", "env", userCacheSecretEnv)
 	}
 	return secret
 })
