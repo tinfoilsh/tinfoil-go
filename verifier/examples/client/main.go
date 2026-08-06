@@ -1,6 +1,6 @@
 package main
 
-//go:generate go run ../../rootfetch/main.go -o ../../client/trusted_root.json
+//go:generate go run ../../rootfetch/main.go -o ../../provenance/trusted_root.json
 
 import (
 	"log"

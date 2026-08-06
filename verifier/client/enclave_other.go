@@ -4,12 +4,11 @@ import (
 	"crypto/tls"
 	"fmt"
 	"strings"
-
-	"github.com/tinfoilsh/tinfoil-go/verifier/attestation"
 )
 
-// enclaveValidPubKey checks if the public key covered by the attestation matches the public key of the enclave
-func enclaveValidPubKey(enclave string, enclaveVerification *attestation.Verification) error {
+// enclaveValidPubKey checks if the endorsed TLS key fingerprint matches the
+// public key of the enclave's live TLS certificate.
+func enclaveValidPubKey(enclave string, expectedTLSPublicKeyFP string) error {
 	// Get cert from TLS connection
 	var addr string
 	if strings.Contains(enclave, ":") {
@@ -25,14 +24,14 @@ func enclaveValidPubKey(enclave string, enclaveVerification *attestation.Verific
 		return fmt.Errorf("failed to connect to enclave: %v", err)
 	}
 	defer conn.Close()
-	certFP, err := attestation.ConnectionCertFP(conn.ConnectionState())
+	certFP, err := ConnectionCertFP(conn.ConnectionState())
 	if err != nil {
 		return fmt.Errorf("failed to get certificate fingerprint: %v", err)
 	}
 
 	// Check if the certificate fingerprint matches the one in the verification
-	if certFP != enclaveVerification.TLSPublicKeyFP {
-		return fmt.Errorf("certificate fingerprint mismatch: expected %s, got %s", enclaveVerification.TLSPublicKeyFP, certFP)
+	if certFP != expectedTLSPublicKeyFP {
+		return fmt.Errorf("certificate fingerprint mismatch: expected %s, got %s", expectedTLSPublicKeyFP, certFP)
 	}
 
 	return nil

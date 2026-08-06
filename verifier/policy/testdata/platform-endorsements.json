@@ -10,77 +10,215 @@
     "6bb1229b7692b7100000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000": "amd-turin-prod",
     "709d851f68aaf03947badac9e273a09f": "tdx-h200-prod",
     "9e2d1e4f1e26f3347d5d7ddd3841f9f4": "tdx-b300-prod",
-    "cfdce31f5c40fc4e6eef803f6b5ed77e88b22603a91337bacab58446ab05fb8ef7bb5221611dced98dfa01d1eac114ca9a7952c262705977a36d81b0a53f856e": "amd-genoa-prod",
+    "cfdce31f5c40fc4e6eef803f6b5ed77e88b22603a91337bacab58446ab05fb8ef7bb5221611dced98dfa01d1eac114ca9a7952c262705977a36d81b0a53f856e": "amd-genoa-dev",
     "de1fce39576e917957bed9c1fff1a8f0": "tdx-h200-prod",
     "f66463fca6ea06a1537c20b3e02e9076": "tdx-h200-prod"
   },
   "measurements": {
     "extra_large_1d_b200_new": {
       "mrtd": "000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
-      "rtmr0": "101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010"
+      "rtmr0": "101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010",
+      "shape": {
+        "cpus": 64,
+        "memory_mb": 262144,
+        "gpus": 1,
+        "disks": 4
+      }
     },
     "extra_large_1d_b300_new": {
       "mrtd": "010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101",
-      "rtmr0": "111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111"
+      "rtmr0": "111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111",
+      "shape": {
+        "cpus": 64,
+        "memory_mb": 262144,
+        "gpus": 1,
+        "disks": 4
+      }
     },
     "extra_large_1d_new": {
       "mrtd": "020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202",
-      "rtmr0": "121212121212121212121212121212121212121212121212121212121212121212121212121212121212121212121212"
+      "rtmr0": "121212121212121212121212121212121212121212121212121212121212121212121212121212121212121212121212",
+      "shape": {
+        "cpus": 64,
+        "memory_mb": 262144,
+        "gpus": 1,
+        "disks": 4
+      }
     },
     "extra_large_2d_b200_new": {
       "mrtd": "030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303",
-      "rtmr0": "131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313"
+      "rtmr0": "131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313",
+      "shape": {
+        "cpus": 64,
+        "memory_mb": 262144,
+        "gpus": 2,
+        "disks": 4
+      }
     },
     "extra_large_2d_b300_new": {
       "mrtd": "040404040404040404040404040404040404040404040404040404040404040404040404040404040404040404040404",
-      "rtmr0": "141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414"
+      "rtmr0": "141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414",
+      "shape": {
+        "cpus": 64,
+        "memory_mb": 262144,
+        "gpus": 2,
+        "disks": 4
+      }
     },
     "extra_large_2d_new": {
       "mrtd": "050505050505050505050505050505050505050505050505050505050505050505050505050505050505050505050505",
-      "rtmr0": "151515151515151515151515151515151515151515151515151515151515151515151515151515151515151515151515"
+      "rtmr0": "151515151515151515151515151515151515151515151515151515151515151515151515151515151515151515151515",
+      "shape": {
+        "cpus": 64,
+        "memory_mb": 262144,
+        "gpus": 2,
+        "disks": 4
+      }
     },
     "large_1d_new": {
       "mrtd": "060606060606060606060606060606060606060606060606060606060606060606060606060606060606060606060606",
-      "rtmr0": "161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616"
+      "rtmr0": "161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616",
+      "shape": {
+        "cpus": 64,
+        "memory_mb": 262144,
+        "gpus": 1,
+        "disks": 4
+      }
     },
     "medium_0d": {
       "mrtd": "070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707",
-      "rtmr0": "171717171717171717171717171717171717171717171717171717171717171717171717171717171717171717171717"
+      "rtmr0": "171717171717171717171717171717171717171717171717171717171717171717171717171717171717171717171717",
+      "shape": {
+        "cpus": 32,
+        "memory_mb": 131072,
+        "gpus": 1,
+        "disks": 4
+      }
     },
     "medium_0d_new": {
       "mrtd": "080808080808080808080808080808080808080808080808080808080808080808080808080808080808080808080808",
-      "rtmr0": "181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818"
+      "rtmr0": "181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818181818",
+      "shape": {
+        "cpus": 32,
+        "memory_mb": 131072,
+        "gpus": 1,
+        "disks": 4
+      }
     },
     "medium_1d": {
       "mrtd": "090909090909090909090909090909090909090909090909090909090909090909090909090909090909090909090909",
-      "rtmr0": "191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919"
+      "rtmr0": "191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919191919",
+      "shape": {
+        "cpus": 32,
+        "memory_mb": 131072,
+        "gpus": 1,
+        "disks": 4
+      }
     },
     "medium_1d_new": {
       "mrtd": "0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a",
-      "rtmr0": "1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a"
+      "rtmr0": "1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a",
+      "shape": {
+        "cpus": 32,
+        "memory_mb": 131072,
+        "gpus": 1,
+        "disks": 4
+      }
     },
     "medium_2d_new": {
       "mrtd": "0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b",
-      "rtmr0": "1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b"
+      "rtmr0": "1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b",
+      "shape": {
+        "cpus": 32,
+        "memory_mb": 131072,
+        "gpus": 2,
+        "disks": 4
+      }
     },
     "medium_4d_new": {
       "mrtd": "0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c",
-      "rtmr0": "1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c"
+      "rtmr0": "1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c",
+      "shape": {
+        "cpus": 32,
+        "memory_mb": 131072,
+        "gpus": 4,
+        "disks": 4
+      }
     },
     "mini_0d": {
       "mrtd": "0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d",
-      "rtmr0": "1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d"
+      "rtmr0": "1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d",
+      "shape": {
+        "cpus": 96,
+        "memory_mb": 524288,
+        "gpus": 1,
+        "disks": 4
+      }
     },
     "small_0d": {
       "mrtd": "0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e",
-      "rtmr0": "1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e"
+      "rtmr0": "1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e",
+      "shape": {
+        "cpus": 16,
+        "memory_mb": 65536,
+        "gpus": 1,
+        "disks": 4
+      }
     },
     "small_0d_new": {
       "mrtd": "0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f",
-      "rtmr0": "1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f"
+      "rtmr0": "1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f",
+      "shape": {
+        "cpus": 16,
+        "memory_mb": 65536,
+        "gpus": 1,
+        "disks": 4
+      }
     }
   },
   "policies": {
+    "amd-genoa-dev": {
+      "platform": "sev-snp",
+      "sev_snp": {
+        "guest_policy": {
+          "debug": false,
+          "migrate_ma": false,
+          "single_socket": false,
+          "smt": true
+        },
+        "minimum_api_version": "1.55",
+        "minimum_build": 21,
+        "minimum_guest_svn": 0,
+        "minimum_launch_tcb": {
+          "bl_spl": 7,
+          "snp_spl": 14,
+          "tee_spl": 0,
+          "ucode_spl": 72
+        },
+        "minimum_tcb": {
+          "bl_spl": 7,
+          "snp_spl": 14,
+          "tee_spl": 0,
+          "ucode_spl": 72
+        },
+        "permit_provisional_firmware": false,
+        "platform_info": {
+          "alias_check_complete": true,
+          "ciphertext_hiding_dram": false,
+          "ecc_enabled": true,
+          "rapl_disabled": false,
+          "smt_enabled": false,
+          "tsme_enabled": true
+        },
+        "host_data": "0000000000000000000000000000000000000000000000000000000000000000",
+        "image_id": "00000000000000000000000000000000",
+        "family_id": "00000000000000000000000000000000",
+        "vmpl": 0,
+        "minimum_launch_mitigation_vector": 0,
+        "minimum_current_mitigation_vector": 0,
+        "minimum_abi_version": "0.0"
+      }
+    },
     "amd-genoa-prod": {
       "platform": "sev-snp",
       "sev_snp": {
@@ -107,13 +245,20 @@
         },
         "permit_provisional_firmware": false,
         "platform_info": {
+          "alias_check_complete": true,
           "ciphertext_hiding_dram": false,
-          "ecc_enabled": false,
+          "ecc_enabled": true,
           "rapl_disabled": false,
           "smt_enabled": true,
           "tsme_enabled": true
         },
-        "vmpl": null
+        "host_data": "0000000000000000000000000000000000000000000000000000000000000000",
+        "image_id": "00000000000000000000000000000000",
+        "family_id": "00000000000000000000000000000000",
+        "vmpl": 0,
+        "minimum_launch_mitigation_vector": 0,
+        "minimum_current_mitigation_vector": 0,
+        "minimum_abi_version": "0.0"
       }
     },
     "amd-turin-prod": {
@@ -150,22 +295,21 @@
           "smt_enabled": true,
           "tsme_enabled": true
         },
-        "vmpl": null
+        "host_data": "0000000000000000000000000000000000000000000000000000000000000000",
+        "image_id": "00000000000000000000000000000000",
+        "family_id": "00000000000000000000000000000000",
+        "vmpl": 0,
+        "minimum_launch_mitigation_vector": 0,
+        "minimum_current_mitigation_vector": 0,
+        "minimum_abi_version": "0.0"
       }
     },
     "tdx-b200-prod": {
       "platform": "tdx",
       "tdx": {
-        "accepted_mr_seams": [
-          "476a2997c62bccc78370913d0a80b956e3721b24272bc66c4d6307ced4be2865c40e26afac75f12df3425b03eb59ea7c"
-        ],
-        "minimum_pce_svn": 0,
-        "minimum_qe_svn": 0,
         "minimum_tcb_evaluation_data_number": 19,
         "minimum_tee_tcb_svn": "03010200000000000000000000000000",
-        "mr_config_id_zero": true,
-        "mr_owner_config_zero": true,
-        "mr_owner_zero": true,
+        "mr_seam": "476a2997c62bccc78370913d0a80b956e3721b24272bc66c4d6307ced4be2865c40e26afac75f12df3425b03eb59ea7c",
         "platform_measurements": [
           "extra_large_1d_b200_new",
           "extra_large_2d_b200_new"
@@ -178,16 +322,9 @@
     "tdx-b300-prod": {
       "platform": "tdx",
       "tdx": {
-        "accepted_mr_seams": [
-          "476a2997c62bccc78370913d0a80b956e3721b24272bc66c4d6307ced4be2865c40e26afac75f12df3425b03eb59ea7c"
-        ],
-        "minimum_pce_svn": 0,
-        "minimum_qe_svn": 0,
         "minimum_tcb_evaluation_data_number": 19,
         "minimum_tee_tcb_svn": "03010200000000000000000000000000",
-        "mr_config_id_zero": true,
-        "mr_owner_config_zero": true,
-        "mr_owner_zero": true,
+        "mr_seam": "476a2997c62bccc78370913d0a80b956e3721b24272bc66c4d6307ced4be2865c40e26afac75f12df3425b03eb59ea7c",
         "platform_measurements": [
           "extra_large_1d_b300_new",
           "extra_large_2d_b300_new"
@@ -200,16 +337,9 @@
     "tdx-h200-prod": {
       "platform": "tdx",
       "tdx": {
-        "accepted_mr_seams": [
-          "7bf063280e94fb051f5dd7b1fc59ce9aac42bb961df8d44b709c9b0ff87a7b4df648657ba6d1189589feab1d5a3c9a9d"
-        ],
-        "minimum_pce_svn": 0,
-        "minimum_qe_svn": 0,
         "minimum_tcb_evaluation_data_number": 19,
         "minimum_tee_tcb_svn": "03010200000000000000000000000000",
-        "mr_config_id_zero": true,
-        "mr_owner_config_zero": true,
-        "mr_owner_zero": true,
+        "mr_seam": "7bf063280e94fb051f5dd7b1fc59ce9aac42bb961df8d44b709c9b0ff87a7b4df648657ba6d1189589feab1d5a3c9a9d",
         "platform_measurements": [
           "mini_0d",
           "small_0d",
