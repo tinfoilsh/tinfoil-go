@@ -127,6 +127,10 @@ func TestCheckSignerRejectsMaskedChipID(t *testing.T) {
 func ptr[T any](v T) *T { return &v }
 
 func testTCB() policy.TCB {
-	zero := uint8(0)
-	return policy.TCB{BlSpl: &zero, TeeSpl: &zero, SnpSpl: &zero, UcodeSpl: &zero}
+	return policy.TCB{
+		BlSpl:    ptr(uint8(0)),
+		TeeSpl:   ptr(uint8(0)),
+		SnpSpl:   ptr(uint8(0)),
+		UcodeSpl: ptr(uint8(0)),
+	}
 }
