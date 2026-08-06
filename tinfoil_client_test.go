@@ -329,9 +329,7 @@ func loadDotEnvData(data []byte) {
 		if quoted {
 			value = value[1 : len(value)-1]
 		}
-		if !singleQuoted {
-			value = os.ExpandEnv(value)
-		}
+		value = decodeDotEnvValue(value, !singleQuoted)
 		if key != "" {
 			_ = os.Setenv(key, value)
 		}
@@ -341,6 +339,10 @@ func loadDotEnvData(data []byte) {
 func stripDotEnvComment(value string) string {
 	var quote byte
 	for i := 0; i < len(value); i++ {
+		if value[i] == '\\' && i+1 < len(value) {
+			i++
+			continue
+		}
 		switch value[i] {
 		case '\'', '"':
 			if quote == 0 {
@@ -357,21 +359,56 @@ func stripDotEnvComment(value string) string {
 	return value
 }
 
+func decodeDotEnvValue(value string, expand bool) string {
+	const escapedDollar = "\x00"
+	var decoded strings.Builder
+	for i := 0; i < len(value); i++ {
+		if value[i] != '\\' || i+1 == len(value) {
+			decoded.WriteByte(value[i])
+			continue
+		}
+		i++
+		switch value[i] {
+		case '$':
+			decoded.WriteString(escapedDollar)
+		case 'n':
+			decoded.WriteByte('\n')
+		case 'r':
+			decoded.WriteByte('\r')
+		case 't':
+			decoded.WriteByte('\t')
+		case '\\', '\'', '"':
+			decoded.WriteByte(value[i])
+		default:
+			decoded.WriteByte('\\')
+			decoded.WriteByte(value[i])
+		}
+	}
+	result := decoded.String()
+	if expand {
+		result = os.ExpandEnv(result)
+	}
+	return strings.ReplaceAll(result, escapedDollar, "$")
+}
+
 func TestLoadDotEnvData(t *testing.T) {
 	t.Setenv("DOTENV_BASE", "expanded")
 	t.Setenv("DOTENV_EXPORTED", "")
 	t.Setenv("DOTENV_DOUBLE", "")
 	t.Setenv("DOTENV_SINGLE", "")
 	t.Setenv("DOTENV_HASH", "")
+	t.Setenv("DOTENV_ESCAPED", "")
 	loadDotEnvData([]byte(strings.Join([]string{
 		"export DOTENV_EXPORTED=$DOTENV_BASE # comment",
 		`DOTENV_DOUBLE="${DOTENV_BASE} # literal" # comment`,
 		`DOTENV_SINGLE='${DOTENV_BASE} # literal' # comment`,
 		"DOTENV_HASH=value#suffix",
+		`DOTENV_ESCAPED="literal \" # still value \$DOTENV_BASE\nline" # comment`,
 	}, "\n")))
 
 	require.Equal(t, "expanded", os.Getenv("DOTENV_EXPORTED"))
 	require.Equal(t, "expanded # literal", os.Getenv("DOTENV_DOUBLE"))
 	require.Equal(t, "${DOTENV_BASE} # literal", os.Getenv("DOTENV_SINGLE"))
 	require.Equal(t, "value#suffix", os.Getenv("DOTENV_HASH"))
+	require.Equal(t, "literal \" # still value $DOTENV_BASE\nline", os.Getenv("DOTENV_ESCAPED"))
 }
