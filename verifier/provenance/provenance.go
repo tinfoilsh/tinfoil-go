@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"math"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -38,16 +39,23 @@ const (
 	// build workflow of the publisher repo. Dots are escaped and the pattern
 	// is anchored at both ends so no other workflow path, ref type, or
 	// trailing SAN content can match.
-	platformEndorsementsIdentity = "^https://github\\.com/" + platformEndorsementsRepo +
-		"/\\.github/workflows/build\\.yml@refs/tags/v[0-9][^@]*$"
+)
+
+var (
+	platformEndorsementsIdentity = githubWorkflowIdentityPattern(platformEndorsementsRepo, `build\.yml`, `refs/tags/v[0-9][^@]*`)
+	freshnessWitnessIdentity     = githubWorkflowIdentityPattern("tinfoilsh/freshness-witness", `freshness\.yml`, `refs/heads/main`)
 )
 
 type Client struct {
-	trustRoot *root.TrustedRoot
+	trustRoot       *root.TrustedRoot
+	verifierOptions []verify.VerifierOption
 }
 
 //go:embed trusted_root.json
 var embeddedTrustedRoot []byte
+
+//go:embed github_trusted_root.json
+var embeddedGitHubTrustedRoot []byte
 
 // defaultClient is built once from the embedded trusted root. Verification
 // never fetches trust material over the network; the embedded copy is
@@ -56,6 +64,9 @@ var (
 	defaultClient     *Client
 	defaultClientErr  error
 	defaultClientOnce sync.Once
+	githubClient      *Client
+	githubClientErr   error
+	githubClientOnce  sync.Once
 )
 
 func getDefaultClient() (*Client, error) {
@@ -65,15 +76,24 @@ func getDefaultClient() (*Client, error) {
 	return defaultClient, defaultClientErr
 }
 
+func getGitHubClient() (*Client, error) {
+	githubClientOnce.Do(func() {
+		githubClient, githubClientErr = newClientFromJSON(embeddedGitHubTrustedRoot,
+			verify.WithSignedTimestamps(1),
+		)
+	})
+	return githubClient, githubClientErr
+}
+
 // AuthenticateCode authenticates a code-provenance bundle against the
 // embedded trust root and the repo's pinned signing identity, returning
 // the verified content.
-func AuthenticateCode(bundleJSON []byte, repo, hexDigest string) (*Code, error) {
+func AuthenticateCode(bundleJSON []byte, repo, tag, hexDigest string) (*Code, error) {
 	c, err := getDefaultClient()
 	if err != nil {
 		return nil, err
 	}
-	return c.AuthenticateCode(bundleJSON, repo, hexDigest)
+	return c.AuthenticateCode(bundleJSON, repo, tag, hexDigest)
 }
 
 // AuthenticateEndorsements authenticates a platform-endorsements bundle
@@ -87,14 +107,45 @@ func AuthenticateEndorsements(bundleJSON []byte, hexDigest string) (*policy.Arti
 	return c.AuthenticateEndorsements(bundleJSON, hexDigest)
 }
 
+// AuthenticatedArtifact is release identity recovered from a verified
+// Sigstore statement and its signing certificate.
+type AuthenticatedArtifact struct {
+	Repo        string
+	Tag         string
+	Commit      string
+	SubjectName string
+	Digest      string
+}
+
+type PlatformEndorsements struct {
+	AuthenticatedArtifact
+	Artifact *policy.Artifact
+}
+
+func AuthenticatePlatformEndorsements(bundleJSON []byte, repo, tag, hexDigest string) (*PlatformEndorsements, error) {
+	c, err := getDefaultClient()
+	if err != nil {
+		return nil, err
+	}
+	return c.AuthenticatePlatformEndorsements(bundleJSON, repo, tag, hexDigest)
+}
+
 // NewClientFromJSON builds a client from a Sigstore trusted-root document;
 // verification normally uses the embedded copy via the package functions.
 func NewClientFromJSON(trustRootJSON []byte) (*Client, error) {
+	return newClientFromJSON(trustRootJSON,
+		verify.WithSignedCertificateTimestamps(1),
+		verify.WithTransparencyLog(1),
+		verify.WithObserverTimestamps(1),
+	)
+}
+
+func newClientFromJSON(trustRootJSON []byte, verifierOptions ...verify.VerifierOption) (*Client, error) {
 	trustRoot, err := root.NewTrustedRootFromJSON(trustRootJSON)
 	if err != nil {
 		return nil, fmt.Errorf("parsing trust root: %w", err)
 	}
-	return &Client{trustRoot: trustRoot}, nil
+	return &Client{trustRoot: trustRoot, verifierOptions: verifierOptions}, nil
 }
 
 // repoNameRE matches a GitHub "owner/name" repository slug.
@@ -108,8 +159,12 @@ func signingIdentity(repo string) (string, error) {
 	if !repoNameRE.MatchString(repo) {
 		return "", fmt.Errorf("invalid repository name %q", repo)
 	}
+	return githubWorkflowIdentityPattern(repo, `[^/@]+`, `refs/tags/[^@]+`), nil
+}
+
+func githubWorkflowIdentityPattern(repo, workflowPattern, refPattern string) string {
 	return "^https://github\\.com/" + regexp.QuoteMeta(repo) +
-		"/\\.github/workflows/[^/@]+@refs/tags/[^@]+$", nil
+		"/\\.github/workflows/" + workflowPattern + "@" + refPattern + "$"
 }
 
 func (c *Client) verifyBundle(bundleJSON []byte, repo, hexDigest string) (*verify.VerificationResult, error) {
@@ -141,9 +196,7 @@ func (c *Client) verifyBundleWithIdentity(bundleJSON []byte, sanRegex, hexDigest
 
 	verifier, err := verify.NewSignedEntityVerifier(
 		c.trustRoot,
-		verify.WithSignedCertificateTimestamps(1),
-		verify.WithTransparencyLog(1),
-		verify.WithObserverTimestamps(1),
+		c.verifierOptions...,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("creating signed entity verifier: %w", err)
@@ -234,6 +287,7 @@ func enforceSubject0Digest(result *verify.VerificationResult, expectedDigest str
 
 // Code is the verified content of a code-provenance bundle.
 type Code struct {
+	AuthenticatedArtifact
 	// Measurement is the attested launch measurement.
 	Measurement *measurement.Measurement
 	// Shape is the VM shape the artifact declares.
@@ -244,7 +298,7 @@ type Code struct {
 // repo's signing identity and the expected artifact digest, and returns
 // the verified code measurement plus the VM shape the artifact declares
 // (required).
-func (c *Client) AuthenticateCode(bundleJSON []byte, repo, hexDigest string) (*Code, error) {
+func (c *Client) AuthenticateCode(bundleJSON []byte, repo, tag, hexDigest string) (*Code, error) {
 	result, err := c.verifyBundle(bundleJSON, repo, hexDigest)
 	if err != nil {
 		return nil, fmt.Errorf("verifying bundle: %w", err)
@@ -257,7 +311,11 @@ func (c *Client) AuthenticateCode(bundleJSON []byte, repo, hexDigest string) (*C
 	if err != nil {
 		return nil, fmt.Errorf("code predicate: %w", err)
 	}
-	return &Code{Measurement: m, Shape: shape}, nil
+	authenticated, err := authenticatedArtifact(result, repo, tag, hexDigest, "code")
+	if err != nil {
+		return nil, err
+	}
+	return &Code{AuthenticatedArtifact: authenticated, Measurement: m, Shape: shape}, nil
 }
 
 // shapeFromPredicate parses the required vm_shape predicate member.
@@ -282,7 +340,7 @@ func shapeFromPredicate(fields map[string]*structpb.Value) (*policy.Shape, error
 			return nil, fmt.Errorf("vm_shape is missing %q", name)
 		}
 		nv, ok := f.GetKind().(*structpb.Value_NumberValue)
-		if !ok || nv.NumberValue < 0 || nv.NumberValue != math.Trunc(nv.NumberValue) {
+		if !ok || math.IsNaN(nv.NumberValue) || math.IsInf(nv.NumberValue, 0) || nv.NumberValue < 0 || nv.NumberValue != math.Trunc(nv.NumberValue) || nv.NumberValue >= math.Ldexp(1, strconv.IntSize-1) {
 			return nil, fmt.Errorf("vm_shape member %q is not a non-negative integer", name)
 		}
 		*dst = int(nv.NumberValue)
@@ -344,6 +402,14 @@ func measurementFromStatement(statement *in_toto.Statement) (*measurement.Measur
 // against the publisher identity and returns the parsed, validated
 // artifact.
 func (c *Client) AuthenticateEndorsements(bundleJSON []byte, hexDigest string) (*policy.Artifact, error) {
+	verified, err := c.AuthenticatePlatformEndorsements(bundleJSON, platformEndorsementsRepo, "", hexDigest)
+	if err != nil {
+		return nil, err
+	}
+	return verified.Artifact, nil
+}
+
+func (c *Client) AuthenticatePlatformEndorsements(bundleJSON []byte, repo, tag, hexDigest string) (*PlatformEndorsements, error) {
 	result, err := c.verifyBundleWithIdentity(bundleJSON, platformEndorsementsIdentity, hexDigest)
 	if err != nil {
 		return nil, fmt.Errorf("verifying platform endorsements bundle: %w", err)
@@ -357,5 +423,48 @@ func (c *Client) AuthenticateEndorsements(bundleJSON []byte, hexDigest string) (
 	if err != nil {
 		return nil, fmt.Errorf("encoding platform endorsements predicate: %w", err)
 	}
-	return policy.Parse(predicateJSON)
+	artifact, err := policy.Parse(predicateJSON)
+	if err != nil {
+		return nil, err
+	}
+	if repo != platformEndorsementsRepo {
+		return nil, fmt.Errorf("platform endorsements repo %q does not equal %q", repo, platformEndorsementsRepo)
+	}
+	authenticated, err := authenticatedArtifact(result, repo, tag, hexDigest, "platform endorsements")
+	if err != nil {
+		return nil, err
+	}
+	return &PlatformEndorsements{
+		AuthenticatedArtifact: authenticated,
+		Artifact:              artifact,
+	}, nil
+}
+
+func authenticatedArtifact(result *verify.VerificationResult, repo, tag, hexDigest, label string) (AuthenticatedArtifact, error) {
+	if result == nil || result.Signature == nil || result.Signature.Certificate == nil {
+		return AuthenticatedArtifact{}, fmt.Errorf("%s bundle has no signing certificate", label)
+	}
+	certificate := result.Signature.Certificate
+	const tagRefPrefix = "refs/tags/"
+	if !strings.HasPrefix(certificate.SourceRepositoryRef, tagRefPrefix) {
+		return AuthenticatedArtifact{}, fmt.Errorf("%s source ref %q is not a tag", label, certificate.SourceRepositoryRef)
+	}
+	authenticatedTag := strings.TrimPrefix(certificate.SourceRepositoryRef, tagRefPrefix)
+	if tag != "" && authenticatedTag != tag {
+		return AuthenticatedArtifact{}, fmt.Errorf("%s source ref %q does not match tag %q", label, certificate.SourceRepositoryRef, tag)
+	}
+	commit := certificate.SourceRepositoryDigest
+	if !regexp.MustCompile(`^[0-9a-f]{40}$`).MatchString(commit) {
+		return AuthenticatedArtifact{}, fmt.Errorf("%s source digest is not a lowercase Git commit", label)
+	}
+	if result.Statement == nil || len(result.Statement.Subject) == 0 || result.Statement.Subject[0].Name == "" {
+		return AuthenticatedArtifact{}, fmt.Errorf("%s statement has no named subject", label)
+	}
+	return AuthenticatedArtifact{
+		Repo:        repo,
+		Tag:         authenticatedTag,
+		Commit:      commit,
+		SubjectName: result.Statement.Subject[0].Name,
+		Digest:      hexDigest,
+	}, nil
 }
