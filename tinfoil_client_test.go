@@ -308,6 +308,10 @@ func loadDotEnv() {
 	if err != nil {
 		return
 	}
+	loadDotEnvData(data)
+}
+
+func loadDotEnvData(data []byte) {
 	for _, line := range strings.Split(string(data), "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" || strings.HasPrefix(line, "#") {
@@ -318,6 +322,56 @@ func loadDotEnv() {
 		if !found {
 			continue
 		}
-		os.Setenv(strings.TrimSpace(key), strings.Trim(strings.TrimSpace(value), `"'`))
+		key = strings.TrimSpace(key)
+		value = strings.TrimSpace(stripDotEnvComment(value))
+		quoted := len(value) >= 2 && value[0] == value[len(value)-1] && (value[0] == '\'' || value[0] == '"')
+		singleQuoted := quoted && value[0] == '\''
+		if quoted {
+			value = value[1 : len(value)-1]
+		}
+		if !singleQuoted {
+			value = os.ExpandEnv(value)
+		}
+		if key != "" {
+			_ = os.Setenv(key, value)
+		}
 	}
+}
+
+func stripDotEnvComment(value string) string {
+	var quote byte
+	for i := 0; i < len(value); i++ {
+		switch value[i] {
+		case '\'', '"':
+			if quote == 0 {
+				quote = value[i]
+			} else if quote == value[i] {
+				quote = 0
+			}
+		case '#':
+			if quote == 0 && (i == 0 || value[i-1] == ' ' || value[i-1] == '\t') {
+				return value[:i]
+			}
+		}
+	}
+	return value
+}
+
+func TestLoadDotEnvData(t *testing.T) {
+	t.Setenv("DOTENV_BASE", "expanded")
+	t.Setenv("DOTENV_EXPORTED", "")
+	t.Setenv("DOTENV_DOUBLE", "")
+	t.Setenv("DOTENV_SINGLE", "")
+	t.Setenv("DOTENV_HASH", "")
+	loadDotEnvData([]byte(strings.Join([]string{
+		"export DOTENV_EXPORTED=$DOTENV_BASE # comment",
+		`DOTENV_DOUBLE="${DOTENV_BASE} # literal" # comment`,
+		`DOTENV_SINGLE='${DOTENV_BASE} # literal' # comment`,
+		"DOTENV_HASH=value#suffix",
+	}, "\n")))
+
+	require.Equal(t, "expanded", os.Getenv("DOTENV_EXPORTED"))
+	require.Equal(t, "expanded # literal", os.Getenv("DOTENV_DOUBLE"))
+	require.Equal(t, "${DOTENV_BASE} # literal", os.Getenv("DOTENV_SINGLE"))
+	require.Equal(t, "value#suffix", os.Getenv("DOTENV_HASH"))
 }

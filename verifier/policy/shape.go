@@ -15,6 +15,9 @@ type Shape struct {
 // Satisfies reports whether a measured slug shape satisfies the shape a
 // code artifact requires. GPUs is compared only when the slug declares it.
 func (s *Shape) Satisfies(required *Shape) bool {
+	if s == nil || required == nil {
+		return false
+	}
 	if s.CPUs != required.CPUs || s.MemoryMB != required.MemoryMB || s.Disks != required.Disks {
 		return false
 	}

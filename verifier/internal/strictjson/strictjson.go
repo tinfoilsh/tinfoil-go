@@ -53,9 +53,6 @@ func Unmarshal(data []byte, v any) error {
 	if err := dec.Decode(v); err != nil {
 		return err
 	}
-	if _, err := dec.Token(); err != io.EOF {
-		return fmt.Errorf("trailing data")
-	}
 	return nil
 }
 

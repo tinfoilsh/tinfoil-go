@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 
+	sevabi "github.com/google/go-sev-guest/abi"
+	"github.com/google/go-sev-guest/proto/sevsnp"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -109,6 +111,17 @@ func TestIdentity(t *testing.T) {
 
 	_, err = Identity([]byte{1, 2, 3})
 	assert.ErrorContains(t, err, "must be 64 bytes")
+}
+
+func TestCheckSignerRejectsMaskedChipID(t *testing.T) {
+	report := &sevsnp.Report{
+		SignerInfo: sevabi.ComposeSignerInfo(sevabi.SignerInfo{
+			SigningKey:  sevabi.VcekReportSigner,
+			MaskChipKey: true,
+		}),
+	}
+	err := new(Expectations).checkSigner(report)
+	assert.ErrorContains(t, err, "masks CHIP_ID")
 }
 
 func ptr[T any](v T) *T { return &v }

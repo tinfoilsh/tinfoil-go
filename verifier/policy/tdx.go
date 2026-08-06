@@ -1,6 +1,9 @@
 package policy
 
-import "fmt"
+import (
+	"fmt"
+	"strings"
+)
 
 // TDXPolicy is the standard Intel TDX policy block. PlatformMeasurements
 // names the measurements-map entries the machine is endorsed to run; the
@@ -39,5 +42,27 @@ func (p *TDXPolicy) Validate() error {
 	case len(p.PlatformMeasurements) == 0:
 		return fmt.Errorf("platform_measurements must not be empty")
 	}
+	for name, field := range map[string]struct {
+		value   string
+		byteLen int
+	}{
+		"qe_vendor_id":        {p.QEVendorID, 16},
+		"minimum_tee_tcb_svn": {p.MinimumTEETCBSVN, 16},
+		"mr_seam":             {p.MRSeam, 48},
+		"td_attributes":       {p.TDAttributes, 8},
+		"xfam":                {p.XFAM, 8},
+	} {
+		if err := validatePolicyHex(name, field.value, field.byteLen); err != nil {
+			return err
+		}
+	}
 	return nil
+}
+
+func validatePolicyHex(name, value string, byteLen int) error {
+	if value != strings.ToLower(value) {
+		return fmt.Errorf("%s must be lowercase hex", name)
+	}
+	_, err := DecodeHex(name, value, byteLen)
+	return err
 }

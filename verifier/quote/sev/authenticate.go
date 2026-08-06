@@ -168,6 +168,9 @@ func Authenticate(doc *envelope.Document) (*Quote, error) {
 		return nil, err
 	}
 	report := att.GetReport()
+	if err := rejectMaskedChipID(report); err != nil {
+		return nil, err
+	}
 
 	identity, err := Identity(report.GetChipId())
 	if err != nil {
@@ -184,6 +187,17 @@ func Authenticate(doc *envelope.Document) (*Quote, error) {
 	}, nil
 }
 
+func rejectMaskedChipID(report *sevsnp.Report) error {
+	signer, err := abi.ParseSignerInfo(report.GetSignerInfo())
+	if err != nil {
+		return fmt.Errorf("parsing report SIGNER_INFO: %w", err)
+	}
+	if signer.MaskChipKey {
+		return fmt.Errorf("report masks CHIP_ID; masked platform identities are unsupported")
+	}
+	return nil
+}
+
 // verifySignature verifies the report signature under the AMD roots with
 // the provided VCEK and ASK/ARK chain, checking VCEK revocation against
 // the provided CRL. No policy validation.
@@ -191,6 +205,9 @@ func verifySignature(reportBase64 string, vcekDER, askDER, arkDER, crlDER []byte
 	reportBytes, err := base64.StdEncoding.DecodeString(reportBase64)
 	if err != nil {
 		return nil, err
+	}
+	if len(reportBytes) != abi.ReportSize {
+		return nil, fmt.Errorf("SEV-SNP report must be exactly %d bytes, got %d", abi.ReportSize, len(reportBytes))
 	}
 
 	parsedReport, err := abi.ReportToProto(reportBytes)

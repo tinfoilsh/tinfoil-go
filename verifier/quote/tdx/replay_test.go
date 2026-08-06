@@ -1,8 +1,15 @@
 package tdx
 
 import (
+	"crypto"
+	"crypto/ed25519"
+	"crypto/rand"
+	"crypto/x509"
+	"crypto/x509/pkix"
 	"encoding/base64"
+	"math/big"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -55,4 +62,59 @@ func TestTCBEvaluationRecorder(t *testing.T) {
 	n, err := recorder.minimum()
 	require.NoError(t, err)
 	assert.Equal(t, 19, n)
+}
+
+func TestPCSReplayGetterValidatesCRL(t *testing.T) {
+	now := time.Now()
+	for name, tc := range map[string]struct {
+		body    []byte
+		wantErr string
+	}{
+		"malformed": {body: []byte("not a CRL"), wantErr: "parsing captured CRL"},
+		"future":    {body: testCRL(t, now.Add(time.Hour), now.Add(2*time.Hour)), wantErr: "outside its validity window"},
+		"expired":   {body: testCRL(t, now.Add(-2*time.Hour), now.Add(-time.Hour)), wantErr: "outside its validity window"},
+		"current":   {body: testCRL(t, now.Add(-time.Hour), now.Add(time.Hour))},
+	} {
+		t.Run(name, func(t *testing.T) {
+			getter, err := newPCSReplayGetter([]envelope.PCSResponse{{
+				URL:        "https://api.trustedservices.intel.com/tdx/certification/v4/pckcrl?ca=platform",
+				BodyBase64: base64.StdEncoding.EncodeToString(tc.body),
+			}})
+			require.NoError(t, err)
+
+			_, body, err := getter.Get("https://api.trustedservices.intel.com/tdx/certification/v4/pckcrl?ca=platform")
+			if tc.wantErr != "" {
+				assert.ErrorContains(t, err, tc.wantErr)
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, tc.body, body)
+		})
+	}
+}
+
+func testCRL(t *testing.T, thisUpdate, nextUpdate time.Time) []byte {
+	t.Helper()
+	publicKey, privateKey, err := ed25519.GenerateKey(rand.Reader)
+	require.NoError(t, err)
+	template := &x509.Certificate{
+		SerialNumber:          big.NewInt(1),
+		Subject:               pkix.Name{CommonName: "test CA"},
+		NotBefore:             thisUpdate.Add(-time.Hour),
+		NotAfter:              nextUpdate.Add(time.Hour),
+		KeyUsage:              x509.KeyUsageCertSign | x509.KeyUsageCRLSign,
+		BasicConstraintsValid: true,
+		IsCA:                  true,
+	}
+	certDER, err := x509.CreateCertificate(rand.Reader, template, template, publicKey, crypto.Signer(privateKey))
+	require.NoError(t, err)
+	issuer, err := x509.ParseCertificate(certDER)
+	require.NoError(t, err)
+	crlDER, err := x509.CreateRevocationList(rand.Reader, &x509.RevocationList{
+		Number:     big.NewInt(1),
+		ThisUpdate: thisUpdate,
+		NextUpdate: nextUpdate,
+	}, issuer, privateKey)
+	require.NoError(t, err)
+	return crlDER
 }

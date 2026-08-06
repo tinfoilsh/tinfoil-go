@@ -34,7 +34,7 @@ func loadSEVFixture(t *testing.T) (*envelope.Document, [64]byte) {
 	if testing.Short() {
 		t.Skip("fetches the AMD CRL live; skipped with -short")
 	}
-	root := filepath.Join("..", "..", "..", "attestation-samples", "inference.tinfoil.sh")
+	root := filepath.Join("..", "..", "..", "..", "attestation-samples", "inference.tinfoil.sh")
 	freshBytes, err := os.ReadFile(filepath.Join(root, "fresh.json"))
 	if os.IsNotExist(err) {
 		t.Skip("live inference fixture not collected")

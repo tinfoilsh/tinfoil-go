@@ -26,7 +26,7 @@ func fetchLatestDigest(repo string) (string, error) {
 		return "", err
 	}
 
-	digest, _, err := util.Get(fmt.Sprintf("%s/%s/releases/download/%s/tinfoil.hash", githubProxy, repo, release.TagName))
+	digest, _, err := util.Get(fmt.Sprintf("%s/repos/%s/releases/download/%s/tinfoil.hash", githubProxy, repo, release.TagName))
 	if err != nil {
 		return "", err
 	}

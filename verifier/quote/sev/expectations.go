@@ -93,6 +93,9 @@ func (e *Expectations) Validate(q *Quote) error {
 // ID block: ID-block launches are unsupported (policy parsing rejects
 // require_* flags), and the library options cannot require absence.
 func (e *Expectations) checkSigner(report *sevsnp.Report) error {
+	if err := rejectMaskedChipID(report); err != nil {
+		return err
+	}
 	signer, err := sevabi.ParseSignerInfo(report.GetSignerInfo())
 	if err != nil {
 		return fmt.Errorf("parsing report SIGNER_INFO: %w", err)

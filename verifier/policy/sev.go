@@ -1,6 +1,10 @@
 package policy
 
-import "fmt"
+import (
+	"fmt"
+	"strconv"
+	"strings"
+)
 
 // SEVSNPPolicy is the standard SEV-SNP policy block. Every field is
 // required and checked; there are no unchecked report fields. Numeric
@@ -63,7 +67,51 @@ func (p *SEVSNPPolicy) Validate() error {
 	if err := p.MinimumLaunchTCB.validate(); err != nil {
 		return fmt.Errorf("minimum_launch_tcb: %w", err)
 	}
+	if err := validatePolicyVersion("minimum_api_version", p.MinimumAPIVersion); err != nil {
+		return err
+	}
+	if err := validatePolicyVersion("minimum_abi_version", p.MinimumABIVersion); err != nil {
+		return err
+	}
+	for name, field := range map[string]struct {
+		value   string
+		byteLen int
+	}{
+		"host_data": {p.HostData, 32},
+		"image_id":  {p.ImageID, 16},
+		"family_id": {p.FamilyID, 16},
+	} {
+		if err := validatePolicyHex(name, field.value, field.byteLen); err != nil {
+			return err
+		}
+	}
 	return nil
+}
+
+func validatePolicyVersion(name, version string) error {
+	major, minor, found := strings.Cut(version, ".")
+	if !found || !decimalDigits(major) || !decimalDigits(minor) {
+		return fmt.Errorf("%s %q is not maj.min", name, version)
+	}
+	if _, err := strconv.ParseUint(major, 10, 8); err != nil {
+		return fmt.Errorf("%s major: %w", name, err)
+	}
+	if _, err := strconv.ParseUint(minor, 10, 8); err != nil {
+		return fmt.Errorf("%s minor: %w", name, err)
+	}
+	return nil
+}
+
+func decimalDigits(value string) bool {
+	if value == "" {
+		return false
+	}
+	for _, digit := range value {
+		if digit < '0' || digit > '9' {
+			return false
+		}
+	}
+	return true
 }
 
 // TCB holds AMD security patch levels. FmcSpl applies to family 1Ah (Turin)

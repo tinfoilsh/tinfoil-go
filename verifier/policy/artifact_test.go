@@ -56,8 +56,6 @@ func TestParseArtifactFailClosed(t *testing.T) {
 	_, err = Parse([]byte(negativeMin))
 	assert.ErrorContains(t, err, "must not be negative")
 
-	// "}" and "]" are the cases a dec.More() guard misses: More() peeks one
-	// byte and returns false for closing brackets, silently accepting them.
 	for _, trailing := range []string{"}", "]", "{}", "[1]", `"x"`, "{"} {
 		_, err = Parse([]byte(string(data) + trailing))
 		assert.ErrorContains(t, err, "trailing data", "trailing %q must be rejected", trailing)

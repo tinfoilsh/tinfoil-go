@@ -176,10 +176,12 @@ func (g *pcsReplayGetter) Get(requestURL string) (map[string][]string, []byte, e
 	// The library checks CRL NextUpdate but not ThisUpdate, so a
 	// future-dated capture would otherwise pass.
 	if strings.Contains(key, "crl") {
-		if crl, err := x509.ParseRevocationList(body); err == nil {
-			if now := time.Now(); now.Before(crl.ThisUpdate) || now.After(crl.NextUpdate) {
-				return nil, nil, fmt.Errorf("captured CRL for %s is outside its validity window", requestURL)
-			}
+		crl, err := x509.ParseRevocationList(body)
+		if err != nil {
+			return nil, nil, fmt.Errorf("parsing captured CRL for %s: %w", requestURL, err)
+		}
+		if now := time.Now(); now.Before(crl.ThisUpdate) || now.After(crl.NextUpdate) {
+			return nil, nil, fmt.Errorf("captured CRL for %s is outside its validity window", requestURL)
 		}
 	}
 	// Header keys are matched verbatim by go-tdx-guest (canonical MIME form),
