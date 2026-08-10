@@ -1,6 +1,7 @@
 package provenance
 
 import (
+	_ "embed"
 	"testing"
 	"time"
 
@@ -8,6 +9,9 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+//go:embed testdata/platform-freshness-public.json
+var publicFreshnessBundle []byte
 
 func testAuthenticatedArtifact() *AuthenticatedArtifact {
 	return &AuthenticatedArtifact{
@@ -83,23 +87,17 @@ func TestValidateFreshnessTime(t *testing.T) {
 	assert.ErrorContains(t, err, "stale")
 }
 
-func TestLatestPlatformFreshness(t *testing.T) {
-	if testing.Short() {
-		t.Skip("live external services test; skipped with -short")
+func TestAuthenticatePublicFreshnessBundle(t *testing.T) {
+	expected := &AuthenticatedArtifact{
+		Repo:        platformEndorsementsRepo,
+		Tag:         "v0.0.4",
+		Commit:      "d12ef1e789a782688a681f695e779a64fe1aef3d",
+		SubjectName: "platform-endorsements.json",
+		Digest:      "2018b30dca0141ed6c470bac99a7ad8026568e1c39d19e560c6b9025a038916c",
 	}
+	now := time.Date(2026, 8, 9, 20, 0, 0, 0, time.UTC)
 
-	tag, digest, err := fetchLatestRelease(platformEndorsementsRepo)
+	loggedAt, err := AuthenticateFreshness(publicFreshnessBundle, expected, now)
 	require.NoError(t, err)
-
-	platformBundle, err := fetchAttestationBundle(platformEndorsementsRepo, digest)
-	require.NoError(t, err)
-	client := testClient(t)
-	endorsements, err := client.AuthenticatePlatformEndorsements(platformBundle, platformEndorsementsRepo, tag, digest)
-	require.NoError(t, err)
-
-	freshnessBundle, err := fetchAttestationBundle(freshnessWitnessRepo, digest)
-	require.NoError(t, err)
-	loggedAt, err := client.AuthenticateFreshness(freshnessBundle, &endorsements.AuthenticatedArtifact, time.Now())
-	require.NoError(t, err)
-	assert.False(t, loggedAt.IsZero())
+	assert.True(t, loggedAt.Equal(time.Date(2026, 8, 9, 19, 15, 18, 0, time.UTC)))
 }

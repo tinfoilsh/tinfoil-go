@@ -15,27 +15,22 @@ import (
 const githubProxy = "https://github-proxy.tinfoil.sh"
 
 func fetchLatestDigest(repo string) (string, error) {
-	_, digest, err := fetchLatestRelease(repo)
-	return digest, err
-}
-
-func fetchLatestRelease(repo string) (string, string, error) {
 	releaseResponse, _, err := util.Get(githubProxy + "/repos/" + repo + "/releases/latest")
 	if err != nil {
-		return "", "", err
+		return "", err
 	}
 	var release struct {
 		TagName string `json:"tag_name"`
 	}
 	if err := json.Unmarshal(releaseResponse, &release); err != nil {
-		return "", "", err
+		return "", err
 	}
 
 	digest, _, err := util.Get(fmt.Sprintf("%s/repos/%s/releases/download/%s/tinfoil.hash", githubProxy, repo, release.TagName))
 	if err != nil {
-		return "", "", err
+		return "", err
 	}
-	return release.TagName, strings.TrimSpace(string(digest)), nil
+	return strings.TrimSpace(string(digest)), nil
 }
 
 func fetchAttestationBundle(repo, digest string) ([]byte, error) {
