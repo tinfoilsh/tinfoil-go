@@ -34,6 +34,17 @@ func TestSigningIdentity(t *testing.T) {
 	}
 }
 
+func TestPinnedWorkflowIdentitiesAreAnchored(t *testing.T) {
+	assert.Equal(t,
+		`^https://github\.com/tinfoilsh/platform-endorsements/\.github/workflows/build\.yml@refs/tags/v[0-9][^@]*$`,
+		platformEndorsementsIdentity,
+	)
+	assert.Equal(t,
+		`^https://github\.com/tinfoilsh/freshness-witness/\.github/workflows/freshness\.yml@refs/heads/main$`,
+		freshnessWitnessIdentity,
+	)
+}
+
 func TestAuthenticateCode(t *testing.T) {
 	if testing.Short() {
 		t.Skip("live external services test; skipped with -short")
@@ -41,12 +52,17 @@ func TestAuthenticateCode(t *testing.T) {
 	client := testClient(t)
 
 	const repo = "tinfoilsh/confidential-debug"
+	const tag = "v0.0.52"
 	const hexDigest = "910ee7535b0d3e4918e59972994977c2ab6c3e093081885c357a9088d6492402"
 	bundle, err := fetchAttestationBundle(repo, hexDigest)
 	require.NoError(t, err)
 
-	code, err := client.AuthenticateCode(bundle, repo, hexDigest)
+	code, err := client.AuthenticateCode(bundle, repo, tag, hexDigest)
 	require.NoError(t, err)
+	assert.Equal(t, repo, code.Repo)
+	assert.Equal(t, tag, code.Tag)
+	assert.Equal(t, "tinfoil-deployment.json", code.SubjectName)
+	assert.Equal(t, hexDigest, code.Digest)
 	m := code.Measurement
 	assert.Equal(t, measurement.SnpTdxMultiPlatformV1, m.Type)
 	assert.Equal(t, []string{

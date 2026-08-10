@@ -332,6 +332,47 @@ func TestParseRejectsDuplicateCollateralIDs(t *testing.T) {
 	assert.ErrorContains(t, err, `duplicate collateral entry id "cpu-endorsement"`)
 }
 
+func TestFreshnessCollateralSelectsArtifactID(t *testing.T) {
+	doc := &Document{Collateral: []CollateralEntry{
+		{
+			ID:     FreshnessCollateralIDCode,
+			Role:   RoleReferenceValues,
+			Format: CollateralSigstoreFreshnessV1Format,
+			Data:   json.RawMessage(`{"sigstore_bundle":{"mediaType":"code"}}`),
+		},
+		{
+			ID:     FreshnessCollateralIDPlatform,
+			Role:   RoleReferenceValues,
+			Format: CollateralSigstoreFreshnessV1Format,
+			Data:   json.RawMessage(`{"sigstore_bundle":{"mediaType":"platform"}}`),
+		},
+	}}
+
+	code, err := doc.FreshnessCollateral(FreshnessCollateralIDCode)
+	require.NoError(t, err)
+	assert.Contains(t, string(code.SigstoreBundle), "code")
+
+	platform, err := doc.FreshnessCollateral(FreshnessCollateralIDPlatform)
+	require.NoError(t, err)
+	assert.Contains(t, string(platform.SigstoreBundle), "platform")
+
+	_, err = doc.FreshnessCollateral("missing-freshness")
+	assert.ErrorIs(t, err, ErrCollateralNotFound)
+}
+
+func TestFreshnessCollateralRejectsDuplicateArtifactID(t *testing.T) {
+	entry := CollateralEntry{
+		ID:     FreshnessCollateralIDCode,
+		Role:   RoleReferenceValues,
+		Format: CollateralSigstoreFreshnessV1Format,
+		Data:   json.RawMessage(`{"sigstore_bundle":{}}`),
+	}
+	doc := &Document{Collateral: []CollateralEntry{entry, entry}}
+
+	_, err := doc.FreshnessCollateral(FreshnessCollateralIDCode)
+	assert.ErrorContains(t, err, "duplicate freshness collateral")
+}
+
 func TestParseRejectsInvalidUTF8(t *testing.T) {
 	nonce := testNonce()
 	_, docBytes := buildTestDocument(t, nonce)

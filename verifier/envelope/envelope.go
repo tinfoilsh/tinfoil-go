@@ -26,13 +26,13 @@ import (
 // (crypto_material, device_evidence), and an array of collateral entries.
 // The endorsed sections are hash-bound into the CPU quote's REPORT_DATA:
 //
-//	crypto_material_hash = SHA-256(crypto_material section bytes as transmitted)
-//	device_evidence_hash = SHA-256(device_evidence section bytes as transmitted)
-//	REPORT_DATA[0:32]    = SHA-256(nonce || crypto_material_hash || device_evidence_hash)
+//	crypto_material_hash = SHA-256(base64-decoded crypto_material JSON bytes)
+//	device_evidence_hash = SHA-256(base64-decoded device_evidence JSON bytes)
+//	REPORT_DATA[0:32]    = SHA-256(ReportDataV1Algorithm || nonce || crypto_material_hash || device_evidence_hash)
 //	REPORT_DATA[32:64]   = zeros
 //
-// Endorsed-section hashes are computed over the exact bytes of the JSON
-// member value as transmitted; verifiers must never re-serialize them.
+// Endorsed-section hashes are computed over the exact base64-decoded section
+// bytes; verifiers must never re-serialize them.
 
 // Format registry (v3).
 const (
@@ -77,6 +77,9 @@ const (
 	// CollateralSigstorePlatformV1Format carries the platform-endorsements
 	// Sigstore bundle {repo, tag, digest, sigstore_bundle}.
 	CollateralSigstorePlatformV1Format = "https://tinfoil.sh/collateral/sigstore-platform/v1"
+	// CollateralSigstoreFreshnessV1Format carries a freshness witness for a
+	// Sigstore reference-values artifact.
+	CollateralSigstoreFreshnessV1Format = "https://tinfoil.sh/collateral/sigstore-freshness/v1"
 )
 
 // Collateral roles (RATS, RFC 9334).
@@ -97,6 +100,10 @@ const (
 	CryptoMaterialIDHPKE = "hpke"
 	// SubjectCPU is the reserved collateral subject id for the CPU quote.
 	SubjectCPU = "cpu"
+	// Freshness collateral IDs associate each freshness proof with the
+	// Sigstore reference-values entry it refreshes.
+	FreshnessCollateralIDCode     = "code-freshness"
+	FreshnessCollateralIDPlatform = "platform-freshness"
 )
 
 // NonceSize is the required challenge nonce size in bytes.
@@ -218,6 +225,12 @@ type SigstoreCollateral struct {
 	Repo           string          `json:"repo"`
 	Tag            string          `json:"tag"`
 	Digest         string          `json:"digest"`
+	SigstoreBundle json.RawMessage `json:"sigstore_bundle"`
+}
+
+// FreshnessCollateral carries the independently signed witness bundle for
+// the Sigstore artifact selected by its collateral entry ID.
+type FreshnessCollateral struct {
 	SigstoreBundle json.RawMessage `json:"sigstore_bundle"`
 }
 
@@ -527,6 +540,28 @@ func (d *Document) ReferenceValuesCollateral(format string) (*SigstoreCollateral
 		return &sc, nil
 	}
 	return nil, fmt.Errorf("%w: document carries no %s reference-values entry", ErrCollateralNotFound, format)
+}
+
+func (d *Document) FreshnessCollateral(id string) (*FreshnessCollateral, error) {
+	var found *FreshnessCollateral
+	for i := range d.Collateral {
+		entry := &d.Collateral[i]
+		if entry.ID != id || entry.Role != RoleReferenceValues || entry.Format != CollateralSigstoreFreshnessV1Format {
+			continue
+		}
+		if found != nil {
+			return nil, fmt.Errorf("document carries duplicate freshness collateral entry %q", id)
+		}
+		var collateral FreshnessCollateral
+		if err := strictjson.Unmarshal(entry.Data, &collateral); err != nil {
+			return nil, fmt.Errorf("parsing freshness collateral entry %q: %w", entry.ID, err)
+		}
+		found = &collateral
+	}
+	if found == nil {
+		return nil, fmt.Errorf("%w: document carries no %s reference-values entry %q", ErrCollateralNotFound, CollateralSigstoreFreshnessV1Format, id)
+	}
+	return found, nil
 }
 
 // ErrCollateralNotFound reports that a document carries no collateral entry

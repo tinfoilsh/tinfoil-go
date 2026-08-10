@@ -6,7 +6,6 @@ import (
 
 	"github.com/tinfoilsh/tinfoil-go/verifier/envelope"
 	"github.com/tinfoilsh/tinfoil-go/verifier/measurement"
-	"github.com/tinfoilsh/tinfoil-go/verifier/policy"
 	"github.com/tinfoilsh/tinfoil-go/verifier/provenance"
 	"github.com/tinfoilsh/tinfoil-go/verifier/quote"
 )
@@ -59,9 +58,9 @@ func (v *VerifiedDocumentV3) cryptoMaterialData(id, format string) (string, erro
 //  1. Check the envelope: format, nonce equality, endorsed-section hash
 //     recomputation, REPORT_DATA recomputation (no authentication).
 //  2. Authenticate the reference values: the sigstore-code and
-//     sigstore-platform entries (both required) against the pinned signing
+//     sigstore-platform, and sigstore-freshness entries against pinned signing
 //     identities, recovering the code measurement, its declared VM shape,
-//     and the policy artifact.
+//     the policy artifact, and its current freshness proof.
 //  3. Verify the CPU quote: authenticate against the pinned vendor roots,
 //     assemble the complete policy from the reference values, validate in
 //     one call.
@@ -76,48 +75,63 @@ func VerifyDocumentV3(docBytes, nonce []byte, repo string) (*VerifiedDocumentV3,
 		return nil, fmt.Errorf("envelope: %w", err)
 	}
 
-	code, codeTag, codeDigest, endorsements, err := authenticateReferenceValues(doc, repo)
+	code, endorsements, err := authenticateReferenceValues(doc, repo)
 	if err != nil {
 		return nil, fmt.Errorf("reference values: %w", err)
 	}
 
-	_, authenticated, err := quote.Verify(doc, endorsements, code.Measurement, code.Shape, expectedReportData)
+	_, authenticated, err := quote.Verify(doc, endorsements.Artifact, code.Measurement, code.Shape, expectedReportData)
 	if err != nil {
 		return nil, fmt.Errorf("cpu evidence: %w", err)
 	}
 
 	return &VerifiedDocumentV3{
-		CodeDigest:         codeDigest,
-		CodeTag:            codeTag,
+		CodeDigest:         code.Digest,
+		CodeTag:            code.Tag,
 		CodeMeasurement:    code.Measurement,
 		EnclaveMeasurement: authenticated.Measurement,
 		CryptoMaterial:     doc.CryptoMaterialItems(),
 	}, nil
 }
 
-// authenticateReferenceValues authenticates the document's sigstore-code
-// and sigstore-platform collateral entries (both required), returning the
-// verified code provenance, its digest, and the policy artifact.
-func authenticateReferenceValues(doc *envelope.Document, repo string) (*provenance.Code, string, string, *policy.Artifact, error) {
+// authenticateReferenceValues authenticates the document's required code and
+// platform Sigstore artifacts plus the matching freshness proof for each,
+// returning the authenticated code and platform values.
+func authenticateReferenceValues(doc *envelope.Document, repo string) (*provenance.Code, *provenance.PlatformEndorsements, error) {
 	codeRef, err := doc.ReferenceValuesCollateral(envelope.CollateralSigstoreCodeV1Format)
 	if err != nil {
-		return nil, "", "", nil, err
+		return nil, nil, err
 	}
-	code, err := provenance.AuthenticateCode(codeRef.SigstoreBundle, repo, codeRef.Digest)
+	code, err := provenance.AuthenticateCode(codeRef.SigstoreBundle, repo, codeRef.Tag, codeRef.Digest)
 	if err != nil {
-		return nil, "", "", nil, fmt.Errorf("verifying code measurement: %w", err)
+		return nil, nil, fmt.Errorf("verifying code measurement: %w", err)
+	}
+	codeFreshnessRef, err := doc.FreshnessCollateral(envelope.FreshnessCollateralIDCode)
+	if err != nil {
+		return nil, nil, err
+	}
+	appraisalTime := time.Now()
+	if _, err := provenance.AuthenticateFreshness(codeFreshnessRef.SigstoreBundle, &code.AuthenticatedArtifact, appraisalTime); err != nil {
+		return nil, nil, fmt.Errorf("verifying code freshness: %w", err)
 	}
 
 	platformRef, err := doc.ReferenceValuesCollateral(envelope.CollateralSigstorePlatformV1Format)
 	if err != nil {
-		return nil, "", "", nil, err
+		return nil, nil, err
 	}
-	endorsements, err := provenance.AuthenticateEndorsements(platformRef.SigstoreBundle, platformRef.Digest)
+	endorsements, err := provenance.AuthenticatePlatformEndorsements(platformRef.SigstoreBundle, platformRef.Repo, platformRef.Tag, platformRef.Digest)
 	if err != nil {
-		return nil, "", "", nil, fmt.Errorf("verifying platform endorsements: %w", err)
+		return nil, nil, fmt.Errorf("verifying platform endorsements: %w", err)
+	}
+	freshnessRef, err := doc.FreshnessCollateral(envelope.FreshnessCollateralIDPlatform)
+	if err != nil {
+		return nil, nil, err
+	}
+	if _, err := provenance.AuthenticateFreshness(freshnessRef.SigstoreBundle, &endorsements.AuthenticatedArtifact, appraisalTime); err != nil {
+		return nil, nil, fmt.Errorf("verifying platform freshness: %w", err)
 	}
 
-	return code, codeRef.Tag, codeRef.Digest, endorsements, nil
+	return code, endorsements, nil
 }
 
 // VerifyV3 runs the single-request v3 flow against the client's enclave:
