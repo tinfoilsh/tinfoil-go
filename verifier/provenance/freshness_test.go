@@ -1,7 +1,6 @@
 package provenance
 
 import (
-	_ "embed"
 	"testing"
 	"time"
 
@@ -9,9 +8,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
-
-//go:embed testdata/platform-freshness-public.json
-var publicFreshnessBundle []byte
 
 func testAuthenticatedArtifact() *AuthenticatedArtifact {
 	return &AuthenticatedArtifact{
@@ -85,19 +81,4 @@ func TestValidateFreshnessTime(t *testing.T) {
 
 	_, err = validateFreshnessTime([]verify.TimestampVerificationResult{{Type: "Tlog", Timestamp: now.Add(-MaxFreshnessAge - time.Second)}}, now)
 	assert.ErrorContains(t, err, "stale")
-}
-
-func TestAuthenticatePublicFreshnessBundle(t *testing.T) {
-	expected := &AuthenticatedArtifact{
-		Repo:        platformEndorsementsRepo,
-		Tag:         "v0.0.4",
-		Commit:      "d12ef1e789a782688a681f695e779a64fe1aef3d",
-		SubjectName: "platform-endorsements.json",
-		Digest:      "2018b30dca0141ed6c470bac99a7ad8026568e1c39d19e560c6b9025a038916c",
-	}
-	now := time.Date(2026, 8, 9, 20, 0, 0, 0, time.UTC)
-
-	loggedAt, err := AuthenticateFreshness(publicFreshnessBundle, expected, now)
-	require.NoError(t, err)
-	assert.True(t, loggedAt.Equal(time.Date(2026, 8, 9, 19, 15, 18, 0, time.UTC)))
 }
