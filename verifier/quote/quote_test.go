@@ -205,3 +205,36 @@ func TestVerifyUnknownFormat(t *testing.T) {
 	assert.Error(t, err)
 	assert.Contains(t, fmt.Sprint(err), "unsupported cpu_evidence format")
 }
+
+func TestSEVLaunchDigestRequiresCanonicalRegisterCount(t *testing.T) {
+	register := strings.Repeat("ab", registerSize)
+	tests := []struct {
+		name        string
+		measurement *measurement.Measurement
+		wantError   string
+	}{
+		{
+			name: "SEV guest",
+			measurement: &measurement.Measurement{
+				Type:      measurement.SevGuestV2,
+				Registers: []string{register, register},
+			},
+			wantError: "SEV code measurement carries 2 registers, want 1",
+		},
+		{
+			name: "multiplatform",
+			measurement: &measurement.Measurement{
+				Type:      measurement.SnpTdxMultiPlatformV1,
+				Registers: []string{register},
+			},
+			wantError: "multiplatform code measurement carries 1 registers, want 3",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			_, err := sevLaunchDigest(test.measurement)
+			assert.ErrorContains(t, err, test.wantError)
+		})
+	}
+}

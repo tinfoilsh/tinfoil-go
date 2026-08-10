@@ -165,9 +165,14 @@ func Verify(doc *envelope.Document, endorsements *policy.Artifact, code *measure
 // digest register.
 func sevLaunchDigest(m *measurement.Measurement) ([]byte, error) {
 	switch m.Type {
-	case measurement.SnpTdxMultiPlatformV1, measurement.SevGuestV2:
-		if len(m.Registers) < 1 {
-			return nil, fmt.Errorf("code measurement carries no registers")
+	case measurement.SnpTdxMultiPlatformV1:
+		if len(m.Registers) != 3 {
+			return nil, fmt.Errorf("multiplatform code measurement carries %d registers, want 3", len(m.Registers))
+		}
+		return decodeRegister(m.Registers[0])
+	case measurement.SevGuestV2:
+		if len(m.Registers) != 1 {
+			return nil, fmt.Errorf("SEV code measurement carries %d registers, want 1", len(m.Registers))
 		}
 		return decodeRegister(m.Registers[0])
 	default:
