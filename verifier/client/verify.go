@@ -75,7 +75,7 @@ func VerifyDocumentV3(docBytes, nonce []byte, repo string) (*VerifiedDocumentV3,
 		return nil, fmt.Errorf("envelope: %w", err)
 	}
 
-	code, codeTag, codeDigest, endorsements, err := authenticateReferenceValues(doc, repo)
+	code, endorsements, err := authenticateReferenceValues(doc, repo)
 	if err != nil {
 		return nil, fmt.Errorf("reference values: %w", err)
 	}
@@ -86,8 +86,8 @@ func VerifyDocumentV3(docBytes, nonce []byte, repo string) (*VerifiedDocumentV3,
 	}
 
 	return &VerifiedDocumentV3{
-		CodeDigest:         codeDigest,
-		CodeTag:            codeTag,
+		CodeDigest:         code.Digest,
+		CodeTag:            code.Tag,
 		CodeMeasurement:    code.Measurement,
 		EnclaveMeasurement: authenticated.Measurement,
 		CryptoMaterial:     doc.CryptoMaterialItems(),
@@ -96,41 +96,42 @@ func VerifyDocumentV3(docBytes, nonce []byte, repo string) (*VerifiedDocumentV3,
 
 // authenticateReferenceValues authenticates the document's required code and
 // platform Sigstore artifacts plus the matching freshness proof for each,
-// returning the verified code provenance, its digest, and the policy artifact.
-func authenticateReferenceValues(doc *envelope.Document, repo string) (*provenance.Code, string, string, *provenance.PlatformEndorsements, error) {
+// returning the authenticated code and platform values.
+func authenticateReferenceValues(doc *envelope.Document, repo string) (*provenance.Code, *provenance.PlatformEndorsements, error) {
 	codeRef, err := doc.ReferenceValuesCollateral(envelope.CollateralSigstoreCodeV1Format)
 	if err != nil {
-		return nil, "", "", nil, err
+		return nil, nil, err
 	}
 	code, err := provenance.AuthenticateCode(codeRef.SigstoreBundle, repo, codeRef.Tag, codeRef.Digest)
 	if err != nil {
-		return nil, "", "", nil, fmt.Errorf("verifying code measurement: %w", err)
+		return nil, nil, fmt.Errorf("verifying code measurement: %w", err)
 	}
 	codeFreshnessRef, err := doc.FreshnessCollateral(envelope.FreshnessCollateralIDCode)
 	if err != nil {
-		return nil, "", "", nil, err
+		return nil, nil, err
 	}
-	if _, err := provenance.AuthenticateFreshness(codeFreshnessRef.SigstoreBundle, &code.AuthenticatedArtifact, time.Now()); err != nil {
-		return nil, "", "", nil, fmt.Errorf("verifying code freshness: %w", err)
+	appraisalTime := time.Now()
+	if _, err := provenance.AuthenticateFreshness(codeFreshnessRef.SigstoreBundle, &code.AuthenticatedArtifact, appraisalTime); err != nil {
+		return nil, nil, fmt.Errorf("verifying code freshness: %w", err)
 	}
 
 	platformRef, err := doc.ReferenceValuesCollateral(envelope.CollateralSigstorePlatformV1Format)
 	if err != nil {
-		return nil, "", "", nil, err
+		return nil, nil, err
 	}
 	endorsements, err := provenance.AuthenticatePlatformEndorsements(platformRef.SigstoreBundle, platformRef.Repo, platformRef.Tag, platformRef.Digest)
 	if err != nil {
-		return nil, "", "", nil, fmt.Errorf("verifying platform endorsements: %w", err)
+		return nil, nil, fmt.Errorf("verifying platform endorsements: %w", err)
 	}
 	freshnessRef, err := doc.FreshnessCollateral(envelope.FreshnessCollateralIDPlatform)
 	if err != nil {
-		return nil, "", "", nil, err
+		return nil, nil, err
 	}
-	if _, err := provenance.AuthenticateFreshness(freshnessRef.SigstoreBundle, &endorsements.AuthenticatedArtifact, time.Now()); err != nil {
-		return nil, "", "", nil, fmt.Errorf("verifying platform freshness: %w", err)
+	if _, err := provenance.AuthenticateFreshness(freshnessRef.SigstoreBundle, &endorsements.AuthenticatedArtifact, appraisalTime); err != nil {
+		return nil, nil, fmt.Errorf("verifying platform freshness: %w", err)
 	}
 
-	return code, code.Tag, code.Digest, endorsements, nil
+	return code, endorsements, nil
 }
 
 // VerifyV3 runs the single-request v3 flow against the client's enclave:
