@@ -39,19 +39,6 @@ func (v *VerifiedDocumentV3) HPKEPublicKey() (string, error) {
 	return v.cryptoMaterialData(envelope.CryptoMaterialIDHPKE, envelope.KeyX25519HPKEV1Format)
 }
 
-func (v *VerifiedDocumentV3) optionalHPKEPublicKey() (string, error) {
-	for _, item := range v.CryptoMaterial {
-		if item.ID != envelope.CryptoMaterialIDHPKE {
-			continue
-		}
-		if item.Format != envelope.KeyX25519HPKEV1Format {
-			return "", fmt.Errorf("crypto_material item %q has format %q, want %q", item.ID, item.Format, envelope.KeyX25519HPKEV1Format)
-		}
-		return item.Data, nil
-	}
-	return "", nil
-}
-
 func (v *VerifiedDocumentV3) cryptoMaterialData(id, format string) (string, error) {
 	for _, item := range v.CryptoMaterial {
 		if item.ID != id {
@@ -143,7 +130,7 @@ func authenticateReferenceValues(doc *envelope.Document, repo string) (*provenan
 		return nil, "", "", nil, fmt.Errorf("verifying platform freshness: %w", err)
 	}
 
-	return code, codeRef.Tag, codeRef.Digest, endorsements, nil
+	return code, code.Tag, code.Digest, endorsements, nil
 }
 
 // VerifyV3 runs the single-request v3 flow against the client's enclave:
@@ -181,7 +168,7 @@ func (s *SecureClient) verifyV3() (*VerifiedDocumentV3, error) {
 	if err != nil {
 		return nil, fmt.Errorf("binding: %w", err)
 	}
-	hpkeKey, err := verified.optionalHPKEPublicKey()
+	hpkeKey, err := verified.HPKEPublicKey()
 	if err != nil {
 		return nil, fmt.Errorf("binding: %w", err)
 	}
