@@ -49,7 +49,7 @@ type freshnessStatement struct {
 }
 
 func AuthenticateFreshness(bundleJSON []byte, expected *AuthenticatedArtifact, now time.Time) (time.Time, error) {
-	c, err := getGitHubClient()
+	c, err := getDefaultClient()
 	if err != nil {
 		return time.Time{}, err
 	}
@@ -106,22 +106,22 @@ func validateAuthenticatedArtifact(expected *AuthenticatedArtifact) error {
 }
 
 func validateFreshnessTime(timestamps []verify.TimestampVerificationResult, now time.Time) (time.Time, error) {
-	var issuedAt time.Time
+	var loggedAt time.Time
 	for _, timestamp := range timestamps {
-		if timestamp.Type == "TimestampAuthority" && (issuedAt.IsZero() || timestamp.Timestamp.Before(issuedAt)) {
-			issuedAt = timestamp.Timestamp
+		if timestamp.Type == "Tlog" && (loggedAt.IsZero() || timestamp.Timestamp.Before(loggedAt)) {
+			loggedAt = timestamp.Timestamp
 		}
 	}
-	if issuedAt.IsZero() {
-		return time.Time{}, fmt.Errorf("freshness witness has no verified timestamp-authority timestamp")
+	if loggedAt.IsZero() {
+		return time.Time{}, fmt.Errorf("freshness witness has no verified transparency-log timestamp")
 	}
-	if issuedAt.After(now.Add(MaxFreshnessFutureSkew)) {
+	if loggedAt.After(now.Add(MaxFreshnessFutureSkew)) {
 		return time.Time{}, fmt.Errorf("freshness witness timestamp is in the future")
 	}
-	if now.Sub(issuedAt) > MaxFreshnessAge {
+	if now.Sub(loggedAt) > MaxFreshnessAge {
 		return time.Time{}, fmt.Errorf("freshness witness is stale")
 	}
-	return issuedAt, nil
+	return loggedAt, nil
 }
 
 func parseFreshnessStatement(bundleJSON []byte) (*freshnessStatement, error) {

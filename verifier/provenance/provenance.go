@@ -33,6 +33,7 @@ const (
 
 	// platformEndorsementsRepo publishes the platform-endorsements artifact.
 	platformEndorsementsRepo = "tinfoilsh/platform-endorsements"
+	freshnessWitnessRepo     = "tinfoilsh/freshness-witness"
 
 	// platformEndorsementsIdentity is the only signing certificate identity
 	// accepted for the platform-endorsements artifact: the tag-triggered
@@ -43,7 +44,7 @@ const (
 
 var (
 	platformEndorsementsIdentity = githubWorkflowIdentityPattern(platformEndorsementsRepo, `build\.yml`, `refs/tags/v[0-9][^@]*`)
-	freshnessWitnessIdentity     = githubWorkflowIdentityPattern("tinfoilsh/freshness-witness", `freshness\.yml`, `refs/heads/main`)
+	freshnessWitnessIdentity     = githubWorkflowIdentityPattern(freshnessWitnessRepo, `freshness\.yml`, `refs/heads/main`)
 )
 
 type Client struct {
@@ -54,9 +55,6 @@ type Client struct {
 //go:embed trusted_root.json
 var embeddedTrustedRoot []byte
 
-//go:embed github_trusted_root.json
-var embeddedGitHubTrustedRoot []byte
-
 // defaultClient is built once from the embedded trusted root. Verification
 // never fetches trust material over the network; the embedded copy is
 // refreshed by the rootfetch tool.
@@ -64,9 +62,6 @@ var (
 	defaultClient     *Client
 	defaultClientErr  error
 	defaultClientOnce sync.Once
-	githubClient      *Client
-	githubClientErr   error
-	githubClientOnce  sync.Once
 )
 
 func getDefaultClient() (*Client, error) {
@@ -74,15 +69,6 @@ func getDefaultClient() (*Client, error) {
 		defaultClient, defaultClientErr = NewClientFromJSON(embeddedTrustedRoot)
 	})
 	return defaultClient, defaultClientErr
-}
-
-func getGitHubClient() (*Client, error) {
-	githubClientOnce.Do(func() {
-		githubClient, githubClientErr = newClientFromJSON(embeddedGitHubTrustedRoot,
-			verify.WithSignedTimestamps(1),
-		)
-	})
-	return githubClient, githubClientErr
 }
 
 // AuthenticateCode authenticates a code-provenance bundle against the

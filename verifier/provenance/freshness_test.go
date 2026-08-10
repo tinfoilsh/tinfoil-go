@@ -62,20 +62,44 @@ func TestValidateAuthenticatedArtifact(t *testing.T) {
 func TestValidateFreshnessTime(t *testing.T) {
 	now := time.Date(2026, 8, 6, 0, 0, 0, 0, time.UTC)
 	timestamps := []verify.TimestampVerificationResult{
-		{Type: "Tlog", Timestamp: now.Add(-time.Hour)},
-		{Type: "TimestampAuthority", Timestamp: now.Add(-2 * time.Hour)},
-		{Type: "TimestampAuthority", Timestamp: now.Add(-3 * time.Hour)},
+		{Type: "TimestampAuthority", Timestamp: now.Add(-time.Hour)},
+		{Type: "Tlog", Timestamp: now.Add(-2 * time.Hour)},
+		{Type: "Tlog", Timestamp: now.Add(-3 * time.Hour)},
 	}
-	issuedAt, err := validateFreshnessTime(timestamps, now)
+	loggedAt, err := validateFreshnessTime(timestamps, now)
 	require.NoError(t, err)
-	assert.Equal(t, now.Add(-3*time.Hour), issuedAt)
+	assert.Equal(t, now.Add(-3*time.Hour), loggedAt)
 
 	_, err = validateFreshnessTime(nil, now)
-	assert.ErrorContains(t, err, "no verified timestamp-authority timestamp")
+	assert.ErrorContains(t, err, "no verified transparency-log timestamp")
 
-	_, err = validateFreshnessTime([]verify.TimestampVerificationResult{{Type: "TimestampAuthority", Timestamp: now.Add(MaxFreshnessFutureSkew + time.Second)}}, now)
+	_, err = validateFreshnessTime([]verify.TimestampVerificationResult{{Type: "TimestampAuthority", Timestamp: now.Add(-time.Hour)}}, now)
+	assert.ErrorContains(t, err, "no verified transparency-log timestamp")
+
+	_, err = validateFreshnessTime([]verify.TimestampVerificationResult{{Type: "Tlog", Timestamp: now.Add(MaxFreshnessFutureSkew + time.Second)}}, now)
 	assert.ErrorContains(t, err, "in the future")
 
-	_, err = validateFreshnessTime([]verify.TimestampVerificationResult{{Type: "TimestampAuthority", Timestamp: now.Add(-MaxFreshnessAge - time.Second)}}, now)
+	_, err = validateFreshnessTime([]verify.TimestampVerificationResult{{Type: "Tlog", Timestamp: now.Add(-MaxFreshnessAge - time.Second)}}, now)
 	assert.ErrorContains(t, err, "stale")
+}
+
+func TestLatestPlatformFreshness(t *testing.T) {
+	if testing.Short() {
+		t.Skip("live external services test; skipped with -short")
+	}
+
+	tag, digest, err := fetchLatestRelease(platformEndorsementsRepo)
+	require.NoError(t, err)
+
+	platformBundle, err := fetchAttestationBundle(platformEndorsementsRepo, digest)
+	require.NoError(t, err)
+	client := testClient(t)
+	endorsements, err := client.AuthenticatePlatformEndorsements(platformBundle, platformEndorsementsRepo, tag, digest)
+	require.NoError(t, err)
+
+	freshnessBundle, err := fetchAttestationBundle(freshnessWitnessRepo, digest)
+	require.NoError(t, err)
+	loggedAt, err := client.AuthenticateFreshness(freshnessBundle, &endorsements.AuthenticatedArtifact, time.Now())
+	require.NoError(t, err)
+	assert.False(t, loggedAt.IsZero())
 }
