@@ -76,6 +76,9 @@ func decodeCertChain(chainPEM string) (askDER, arkDER []byte, err error) {
 		if block.Type != "CERTIFICATE" {
 			return nil, nil, fmt.Errorf("cert_chain_pem carries a %q block, want CERTIFICATE", block.Type)
 		}
+		if len(block.Bytes) == 0 {
+			return nil, nil, fmt.Errorf("cert_chain_pem carries an empty CERTIFICATE block")
+		}
 		blocks = append(blocks, block.Bytes)
 	}
 	if len(blocks) != 2 {

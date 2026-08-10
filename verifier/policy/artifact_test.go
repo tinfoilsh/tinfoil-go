@@ -47,8 +47,7 @@ func TestParseArtifactFailClosed(t *testing.T) {
 	_, err = Parse([]byte(danglingRef))
 	assert.ErrorContains(t, err, "unknown policy")
 
-	// A negative minimum would make checkTCBEvaluationDataNumber pass for
-	// any collateral, silently disabling the freshness floor.
+	// A negative minimum would let any observed collateral satisfy the floor.
 	negativeMin := strings.Replace(string(data),
 		`"minimum_tcb_evaluation_data_number": 19`,
 		`"minimum_tcb_evaluation_data_number": -1`, 1)

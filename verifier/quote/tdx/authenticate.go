@@ -174,15 +174,15 @@ func (g *pcsReplayGetter) Get(requestURL string) (map[string][]string, []byte, e
 		return nil, nil, fmt.Errorf("decoding captured PCS response body for %s: %w", requestURL, err)
 	}
 	// The library checks CRL NextUpdate but not ThisUpdate, so a
-	// future-dated capture would otherwise pass.
-	if strings.Contains(key, "crl") {
-		crl, err := x509.ParseRevocationList(body)
-		if err != nil {
-			return nil, nil, fmt.Errorf("parsing captured CRL for %s: %w", requestURL, err)
-		}
+	// future-dated capture would otherwise pass. Intel also serves a root-CA
+	// CRL from a .der URL that does not identify the body as a CRL.
+	crl, crlErr := x509.ParseRevocationList(body)
+	if crlErr == nil {
 		if now := time.Now(); now.Before(crl.ThisUpdate) || now.After(crl.NextUpdate) {
 			return nil, nil, fmt.Errorf("captured CRL for %s is outside its validity window", requestURL)
 		}
+	} else if strings.Contains(key, "crl") {
+		return nil, nil, fmt.Errorf("parsing captured CRL for %s: %w", requestURL, crlErr)
 	}
 	// Header keys are matched verbatim by go-tdx-guest (canonical MIME form),
 	// so normalize whatever casing the capture used.

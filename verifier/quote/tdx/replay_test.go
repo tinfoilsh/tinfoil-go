@@ -67,22 +67,38 @@ func TestTCBEvaluationRecorder(t *testing.T) {
 func TestPCSReplayGetterValidatesCRL(t *testing.T) {
 	now := time.Now()
 	for name, tc := range map[string]struct {
+		url     string
 		body    []byte
 		wantErr string
 	}{
-		"malformed": {body: []byte("not a CRL"), wantErr: "parsing captured CRL"},
-		"future":    {body: testCRL(t, now.Add(time.Hour), now.Add(2*time.Hour)), wantErr: "outside its validity window"},
-		"expired":   {body: testCRL(t, now.Add(-2*time.Hour), now.Add(-time.Hour)), wantErr: "outside its validity window"},
-		"current":   {body: testCRL(t, now.Add(-time.Hour), now.Add(time.Hour))},
+		"malformed": {
+			url:     "https://api.trustedservices.intel.com/tdx/certification/v4/pckcrl?ca=platform",
+			body:    []byte("not a CRL"),
+			wantErr: "parsing captured CRL",
+		},
+		"future DER": {
+			url:     "https://certificates.trustedservices.intel.com/IntelSGXRootCA.der",
+			body:    testCRL(t, now.Add(time.Hour), now.Add(2*time.Hour)),
+			wantErr: "outside its validity window",
+		},
+		"expired": {
+			url:     "https://api.trustedservices.intel.com/tdx/certification/v4/pckcrl?ca=platform",
+			body:    testCRL(t, now.Add(-2*time.Hour), now.Add(-time.Hour)),
+			wantErr: "outside its validity window",
+		},
+		"current DER": {
+			url:  "https://certificates.trustedservices.intel.com/IntelSGXRootCA.der",
+			body: testCRL(t, now.Add(-time.Hour), now.Add(time.Hour)),
+		},
 	} {
 		t.Run(name, func(t *testing.T) {
 			getter, err := newPCSReplayGetter([]envelope.PCSResponse{{
-				URL:        "https://api.trustedservices.intel.com/tdx/certification/v4/pckcrl?ca=platform",
+				URL:        tc.url,
 				BodyBase64: base64.StdEncoding.EncodeToString(tc.body),
 			}})
 			require.NoError(t, err)
 
-			_, body, err := getter.Get("https://api.trustedservices.intel.com/tdx/certification/v4/pckcrl?ca=platform")
+			_, body, err := getter.Get(tc.url)
 			if tc.wantErr != "" {
 				assert.ErrorContains(t, err, tc.wantErr)
 				return
