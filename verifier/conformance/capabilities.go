@@ -12,7 +12,7 @@ func Capabilities() map[string]any {
 			"supported":          true,
 			"stages_supported":   []string{StageVerify, StageCheckEnvelope, StageAuthenticateProvenance, StageAssemblePolicy, StageAuthenticateQuote},
 			"synthetic_roots":    map[string]bool{"amd": true, "intel": true, "sigstore": true},
-			"freshness_enforced": false,
+			"freshness_enforced": true,
 		},
 	}
 }
