@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
 )
 
@@ -16,10 +17,13 @@ type fixture struct {
 	Stage    string `json:"stage"`
 	Input    Input  `json:"input"`
 	Expected struct {
-		Accepted       bool   `json:"accepted"`
-		Code           string `json:"code,omitempty"`
-		TLSPublicKeyFP string `json:"tls_public_key_fp,omitempty"`
-		HPKEPublicKey  string `json:"hpke_public_key,omitempty"`
+		Accepted           bool         `json:"accepted"`
+		Code               string       `json:"code,omitempty"`
+		TLSPublicKeyFP     string       `json:"tls_public_key_fp,omitempty"`
+		HPKEPublicKey      string       `json:"hpke_public_key,omitempty"`
+		CodeDigest         string       `json:"code_digest,omitempty"`
+		CodeMeasurement    *Measurement `json:"code_measurement,omitempty"`
+		EnclaveMeasurement *Measurement `json:"enclave_measurement,omitempty"`
 	} `json:"expected"`
 }
 
@@ -64,18 +68,30 @@ func TestFixtures(t *testing.T) {
 					t.Errorf("rejection code=%q, want %q", got, f.Expected.Code)
 				}
 			}
-			// When an accept fixture declares the endorsed channel keys, assert
-			// the harness recovered exactly those — a client that fails to bind
-			// the right TLS/HPKE key is not conformant even if it accepts.
-			if f.Expected.Accepted && f.Expected.TLSPublicKeyFP != "" {
+			// When an accept fixture declares the verified facts, assert the
+			// harness recovered exactly those. A client that accepts but yields a
+			// different code digest, measurement register set, or channel key is
+			// not conformant — this is what forces cross-SDK output equivalence.
+			e := f.Expected
+			if e.Accepted && (e.TLSPublicKeyFP != "" || e.CodeDigest != "" || e.CodeMeasurement != nil || e.EnclaveMeasurement != nil) {
 				if out.Outputs == nil {
-					t.Fatalf("accepted but no outputs; want tls/hpke keys")
+					t.Fatalf("accepted but no outputs; want declared facts")
 				}
-				if out.Outputs.TLSPublicKeyFP != f.Expected.TLSPublicKeyFP {
-					t.Errorf("tls_public_key_fp=%q, want %q", out.Outputs.TLSPublicKeyFP, f.Expected.TLSPublicKeyFP)
+				o := out.Outputs
+				if e.TLSPublicKeyFP != "" && o.TLSPublicKeyFP != e.TLSPublicKeyFP {
+					t.Errorf("tls_public_key_fp=%q, want %q", o.TLSPublicKeyFP, e.TLSPublicKeyFP)
 				}
-				if out.Outputs.HPKEPublicKey != f.Expected.HPKEPublicKey {
-					t.Errorf("hpke_public_key=%q, want %q", out.Outputs.HPKEPublicKey, f.Expected.HPKEPublicKey)
+				if e.HPKEPublicKey != "" && o.HPKEPublicKey != e.HPKEPublicKey {
+					t.Errorf("hpke_public_key=%q, want %q", o.HPKEPublicKey, e.HPKEPublicKey)
+				}
+				if e.CodeDigest != "" && o.CodeDigest != e.CodeDigest {
+					t.Errorf("code_digest=%q, want %q", o.CodeDigest, e.CodeDigest)
+				}
+				if e.CodeMeasurement != nil && !reflect.DeepEqual(o.CodeMeasurement, *e.CodeMeasurement) {
+					t.Errorf("code_measurement=%+v, want %+v", o.CodeMeasurement, *e.CodeMeasurement)
+				}
+				if e.EnclaveMeasurement != nil && !reflect.DeepEqual(o.EnclaveMeasurement, *e.EnclaveMeasurement) {
+					t.Errorf("enclave_measurement=%+v, want %+v", o.EnclaveMeasurement, *e.EnclaveMeasurement)
 				}
 			}
 		})
