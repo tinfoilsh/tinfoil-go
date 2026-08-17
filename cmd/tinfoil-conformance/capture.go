@@ -82,7 +82,10 @@ func runCapture(args []string) int {
 	b = append(b, '\n')
 
 	if *out == "" {
-		os.Stdout.Write(b)
+		if _, err := os.Stdout.Write(b); err != nil {
+			fmt.Fprintf(os.Stderr, "writing fixture: %v\n", err)
+			return conformance.ExitInternal
+		}
 	} else if err := os.WriteFile(*out, b, 0o644); err != nil {
 		fmt.Fprintf(os.Stderr, "writing %s: %v\n", *out, err)
 		return conformance.ExitInternal

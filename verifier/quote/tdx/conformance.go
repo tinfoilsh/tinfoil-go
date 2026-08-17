@@ -2,6 +2,10 @@
 
 package tdx
 
+// The setters below mutate process-global seams and are not safe to call
+// while verifications run concurrently; the conformance adapter is
+// single-call by contract.
+
 import (
 	"crypto/x509"
 	"encoding/pem"

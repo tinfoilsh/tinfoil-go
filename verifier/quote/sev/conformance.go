@@ -2,6 +2,10 @@
 
 package sev
 
+// The setters below mutate process-global seams and are not safe to call
+// while verifications run concurrently; the conformance adapter is
+// single-call by contract.
+
 import "time"
 
 // SetAMDRoot injects a trust anchor (ASK+ARK PEM) for authenticating synthetic
