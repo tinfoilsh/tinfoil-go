@@ -73,7 +73,7 @@ func TestFixtures(t *testing.T) {
 			// different code digest, measurement register set, or channel key is
 			// not conformant — this is what forces cross-SDK output equivalence.
 			e := f.Expected
-			if e.Accepted && (e.TLSPublicKeyFP != "" || e.CodeDigest != "" || e.CodeMeasurement != nil || e.EnclaveMeasurement != nil) {
+			if e.Accepted && (e.TLSPublicKeyFP != "" || e.HPKEPublicKey != "" || e.CodeDigest != "" || e.CodeMeasurement != nil || e.EnclaveMeasurement != nil) {
 				if out.Outputs == nil {
 					t.Fatalf("accepted but no outputs; want declared facts")
 				}

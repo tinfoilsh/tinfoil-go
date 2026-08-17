@@ -11,6 +11,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 
 	"github.com/tinfoilsh/tinfoil-go/verifier/conformance"
@@ -33,7 +34,9 @@ func main() {
 	}
 
 	var in conformance.Input
-	if err := json.NewDecoder(os.Stdin).Decode(&in); err != nil {
+	dec := json.NewDecoder(os.Stdin)
+	if err := dec.Decode(&in); err != nil || dec.Decode(new(any)) != io.EOF {
+		// Exactly one JSON value: trailing data is malformed input.
 		writeJSON(conformance.Output{Stage: cmd, Rejection: &conformance.Rejection{Code: "MALFORMED_INPUT"}})
 		os.Exit(conformance.ExitMalformed)
 	}
@@ -46,5 +49,8 @@ func main() {
 func writeJSON(v any) {
 	enc := json.NewEncoder(os.Stdout)
 	enc.SetIndent("", "  ")
-	_ = enc.Encode(v)
+	if err := enc.Encode(v); err != nil {
+		fmt.Fprintf(os.Stderr, "writing output: %v\n", err)
+		os.Exit(conformance.ExitInternal)
+	}
 }

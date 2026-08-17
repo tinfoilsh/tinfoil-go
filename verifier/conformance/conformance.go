@@ -70,7 +70,9 @@ type Input struct {
 	VerificationTimeUnix int64 `json:"verification_time_unix,omitempty"`
 }
 
-// Output is the stdout JSON. Exactly one of Outputs / Rejection is set.
+// Output is the stdout JSON. Rejection is present iff Accepted is false;
+// Outputs is present on accepts that carry verified facts (block-stage
+// accepts may carry neither).
 type Output struct {
 	Stage     string         `json:"stage"`
 	Accepted  bool           `json:"accepted"`
@@ -120,23 +122,23 @@ func Run(stage string, in Input) (Output, int) {
 	}
 
 	if in.SchemaVersion != SchemaVersion {
-		return malformed(stage, fmt.Errorf("schema_version %q, want %q", in.SchemaVersion, SchemaVersion))
+		return malformed(stage)
 	}
 	doc, err := base64.StdEncoding.DecodeString(in.DocumentB64)
 	if err != nil {
-		return malformed(stage, fmt.Errorf("document_b64: %w", err))
+		return malformed(stage)
 	}
 	nonce, err := hex.DecodeString(in.NonceHex)
 	if err != nil {
-		return malformed(stage, fmt.Errorf("nonce_hex: %w", err))
+		return malformed(stage)
 	}
 	rts, err := in.roots()
 	if err != nil {
-		return malformed(stage, err)
+		return malformed(stage)
 	}
 	prov, err := newProvAuth(rts.sigstore)
 	if err != nil {
-		return malformed(stage, err)
+		return malformed(stage)
 	}
 
 	switch stage {
@@ -150,7 +152,7 @@ func Run(stage string, in Input) (Output, int) {
 	case StageAuthenticateProvenance:
 		parsed, err := envelope.Parse(doc)
 		if err != nil {
-			return malformed(stage, fmt.Errorf("envelope: %w", err))
+			return malformed(stage)
 		}
 		codeRef, err := parsed.ReferenceValuesCollateral(envelope.CollateralSigstoreCodeV1Format)
 		if err != nil {
@@ -167,7 +169,7 @@ func Run(stage string, in Input) (Output, int) {
 	case StageAssemblePolicy:
 		parsed, err := envelope.Parse(doc)
 		if err != nil {
-			return malformed(stage, fmt.Errorf("envelope: %w", err))
+			return malformed(stage)
 		}
 		platRef, err := parsed.ReferenceValuesCollateral(envelope.CollateralSigstorePlatformV1Format)
 		if err != nil {
@@ -180,11 +182,11 @@ func Run(stage string, in Input) (Output, int) {
 	case StageAuthenticateQuote:
 		parsed, err := envelope.Parse(doc)
 		if err != nil {
-			return malformed(stage, fmt.Errorf("envelope: %w", err))
+			return malformed(stage)
 		}
 		undo, err := setQuoteRoots(rts)
 		if err != nil {
-			return malformed(stage, err)
+			return malformed(stage)
 		}
 		defer undo()
 		auth, err := quote.Authenticate(parsed)
@@ -211,7 +213,7 @@ func verifyFull(doc, nonce []byte, repo string, rts roots, prov provAuth, apprai
 	}
 	undo, err := setQuoteRoots(rts)
 	if err != nil {
-		return malformed(StageVerify, err)
+		return malformed(StageVerify)
 	}
 	defer undo()
 	auth, err := quote.Authenticate(parsed)
@@ -375,6 +377,6 @@ func reject(stage, code string) (Output, int) {
 	return Output{Stage: stage, Accepted: false, Rejection: &Rejection{Code: code}}, ExitRejected
 }
 
-func malformed(stage string, _ error) (Output, int) {
+func malformed(stage string) (Output, int) {
 	return Output{Stage: stage, Accepted: false, Rejection: &Rejection{Code: "MALFORMED_INPUT"}}, ExitMalformed
 }
