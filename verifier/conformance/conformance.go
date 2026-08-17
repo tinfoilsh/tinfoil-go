@@ -119,6 +119,9 @@ func Run(stage string, in Input) (Output, int) {
 		defer tdx.ResetVerificationTime()
 	}
 
+	if in.SchemaVersion != SchemaVersion {
+		return malformed(stage, fmt.Errorf("schema_version %q, want %q", in.SchemaVersion, SchemaVersion))
+	}
 	doc, err := base64.StdEncoding.DecodeString(in.DocumentB64)
 	if err != nil {
 		return malformed(stage, fmt.Errorf("document_b64: %w", err))
