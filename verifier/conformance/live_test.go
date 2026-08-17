@@ -3,16 +3,15 @@
 package conformance
 
 import (
-	"crypto/sha256"
 	"crypto/tls"
 	"encoding/base64"
 	"encoding/hex"
-	"fmt"
 	"net"
 	"os"
 	"testing"
 	"time"
 
+	"github.com/tinfoilsh/tinfoil-go/verifier/client"
 	"github.com/tinfoilsh/tinfoil-go/verifier/envelope"
 )
 
@@ -77,21 +76,18 @@ func TestLiveVerification(t *testing.T) {
 	}
 }
 
-// tlsSPKIFingerprint dials host:443 and returns the SHA-256 of the presented
-// leaf certificate's DER SubjectPublicKeyInfo, lowercase hex. Certificate-chain
-// verification is skipped on purpose: trust comes from matching this against
-// the attested fingerprint, not from the public PKI.
+// tlsSPKIFingerprint dials host:443 and returns the SDK's canonical SPKI
+// fingerprint of the presented leaf (client.ConnectionCertFP — the same
+// computation TLSBoundRoundTripper enforces). Certificate-chain verification is
+// skipped on purpose: trust comes from matching the attested fingerprint, not
+// the public PKI.
 func tlsSPKIFingerprint(host string) (string, error) {
-	conn, err := tls.Dial("tcp", net.JoinHostPort(host, "443"),
+	dialer := &net.Dialer{Timeout: 10 * time.Second}
+	conn, err := tls.DialWithDialer(dialer, "tcp", net.JoinHostPort(host, "443"),
 		&tls.Config{ServerName: host, InsecureSkipVerify: true}) //nolint:gosec // bound by SPKI, not PKI
 	if err != nil {
 		return "", err
 	}
 	defer conn.Close()
-	certs := conn.ConnectionState().PeerCertificates
-	if len(certs) == 0 {
-		return "", fmt.Errorf("no peer certificate")
-	}
-	sum := sha256.Sum256(certs[0].RawSubjectPublicKeyInfo)
-	return hex.EncodeToString(sum[:]), nil
+	return client.ConnectionCertFP(conn.ConnectionState())
 }
