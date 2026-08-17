@@ -103,6 +103,11 @@ type Rejection struct {
 }
 
 // Run executes one stage and returns the wire Output plus the adapter exit code.
+//
+// Run is single-call by contract: it pins process-wide seams (verification
+// clock, injected roots) for the duration of the call and restores them on
+// return. The adapter binary and the fixture runner invoke it sequentially;
+// it must not be called concurrently.
 func Run(stage string, in Input) (Output, int) {
 	// Pin the validity-window and freshness clock for a frozen document.
 	appraisal := time.Now()
@@ -217,7 +222,13 @@ func verifyFull(doc, nonce []byte, repo string, rts roots, prov provAuth, apprai
 	if err := assembled.Validate(); err != nil {
 		return reject(StageVerify, "POLICY_REJECTED")
 	}
+	// A document that verifies but endorses no usable channel keys is useless
+	// to every real client (SecureClient rejects at binding), so the full
+	// stage requires both — mirroring the deployed end-to-end behavior.
 	tlsFP, hpke := boundKeys(parsed)
+	if tlsFP == "" || hpke == "" {
+		return reject(StageVerify, "ENVELOPE_REJECTED")
+	}
 	return Output{Stage: StageVerify, Accepted: true, Outputs: &AcceptOutputs{
 		CodeDigest:         code.Digest,
 		CodeMeasurement:    toMeasurement(code.Measurement),

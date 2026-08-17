@@ -20,7 +20,13 @@ func SetIntelRoot(rootPEM []byte) error {
 	return nil
 }
 
-func ResetIntelRoot() { intelRootCertPool, _ = poolFromPEM(sgxRootCACertPEM) }
+func ResetIntelRoot() {
+	pool, err := poolFromPEM(sgxRootCACertPEM)
+	if err != nil {
+		panic("embedded Intel root failed to parse: " + err.Error()) // matches init()
+	}
+	intelRootCertPool = pool
+}
 
 func poolFromPEM(rootPEM []byte) (*x509.CertPool, error) {
 	block, _ := pem.Decode(rootPEM)

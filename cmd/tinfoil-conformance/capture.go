@@ -50,7 +50,7 @@ func runCapture(args []string) int {
 	// every future replay reproduces.
 	captureUnix := time.Now().Unix()
 	in := conformance.Input{
-		SchemaVersion:        "1",
+		SchemaVersion:        conformance.SchemaVersion,
 		DocumentB64:          base64.StdEncoding.EncodeToString(doc),
 		NonceHex:             hex.EncodeToString(nonce),
 		Repo:                 *repo,

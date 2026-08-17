@@ -18,8 +18,8 @@ import (
 
 func main() {
 	if len(os.Args) < 2 {
-		fmt.Fprintln(os.Stderr, "usage: tinfoil-conformance <stage>|capabilities")
-		os.Exit(conformance.ExitInternal)
+		fmt.Fprintln(os.Stderr, "usage: tinfoil-conformance <stage>|capabilities|capture")
+		os.Exit(conformance.ExitMalformed)
 	}
 	cmd := os.Args[1]
 
