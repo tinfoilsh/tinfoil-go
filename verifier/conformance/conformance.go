@@ -81,9 +81,9 @@ type Output struct {
 // AcceptOutputs are the verified facts, in a shape every SDK can produce and
 // the suite can diff for cross-SDK equivalence.
 type AcceptOutputs struct {
-	CodeDigest         string      `json:"code_digest"`
-	CodeMeasurement    Measurement `json:"code_measurement"`
-	EnclaveMeasurement Measurement `json:"enclave_measurement"`
+	CodeDigest         string      `json:"code_digest,omitempty"`
+	CodeMeasurement    Measurement `json:"code_measurement,omitzero"`
+	EnclaveMeasurement Measurement `json:"enclave_measurement,omitzero"`
 	// Endorsed channel keys the caller binds its connection to: the TLS SPKI
 	// fingerprint and HPKE public key, hash-bound into the quote. Recovering
 	// these is the point of verification, so every SDK must surface them.
