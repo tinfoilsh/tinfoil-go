@@ -84,6 +84,11 @@ type AcceptOutputs struct {
 	CodeDigest         string      `json:"code_digest"`
 	CodeMeasurement    Measurement `json:"code_measurement"`
 	EnclaveMeasurement Measurement `json:"enclave_measurement"`
+	// Endorsed channel keys the caller binds its connection to: the TLS SPKI
+	// fingerprint and HPKE public key, hash-bound into the quote. Recovering
+	// these is the point of verification, so every SDK must surface them.
+	TLSPublicKeyFP string `json:"tls_public_key_fp,omitempty"`
+	HPKEPublicKey  string `json:"hpke_public_key,omitempty"`
 }
 
 // Measurement mirrors verifier/measurement.Measurement as plain JSON.
@@ -212,11 +217,28 @@ func verifyFull(doc, nonce []byte, repo string, rts roots, prov provAuth, apprai
 	if err := assembled.Validate(); err != nil {
 		return reject(StageVerify, "POLICY_REJECTED")
 	}
+	tlsFP, hpke := boundKeys(parsed)
 	return Output{Stage: StageVerify, Accepted: true, Outputs: &AcceptOutputs{
 		CodeDigest:         code.Digest,
 		CodeMeasurement:    toMeasurement(code.Measurement),
 		EnclaveMeasurement: toMeasurement(auth.Measurement),
+		TLSPublicKeyFP:     tlsFP,
+		HPKEPublicKey:      hpke,
 	}}, ExitAccepted
+}
+
+// boundKeys returns the endorsed TLS SPKI fingerprint and HPKE public key from
+// the verified crypto material (hash-bound into the quote via envelope.Check).
+func boundKeys(doc *envelope.Document) (tlsFP, hpke string) {
+	for _, it := range doc.CryptoMaterialItems() {
+		switch {
+		case it.ID == envelope.CryptoMaterialIDTLS && it.Format == envelope.KeySPKIFPSHA256V1Format:
+			tlsFP = it.Data
+		case it.ID == envelope.CryptoMaterialIDHPKE && it.Format == envelope.KeyX25519HPKEV1Format:
+			hpke = it.Data
+		}
+	}
+	return
 }
 
 // authReferenceValues authenticates the code and platform artifacts and their

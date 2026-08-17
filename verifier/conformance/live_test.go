@@ -3,8 +3,12 @@
 package conformance
 
 import (
+	"crypto/sha256"
+	"crypto/tls"
 	"encoding/base64"
 	"encoding/hex"
+	"fmt"
+	"net"
 	"os"
 	"testing"
 	"time"
@@ -51,10 +55,43 @@ func TestLiveVerification(t *testing.T) {
 	}
 	t.Logf("accepted: code_digest=%s enclave=%s", out.Outputs.CodeDigest, out.Outputs.EnclaveMeasurement.Type)
 
+	// Channel binding: the endorsed TLS key must be the key the live enclave
+	// actually presents on the wire. This is the whole point of attestation —
+	// verifying the document lets the caller trust this connection.
+	if fp := out.Outputs.TLSPublicKeyFP; fp != "" {
+		live, err := tlsSPKIFingerprint(host)
+		if err != nil {
+			t.Fatalf("dialing %s for channel binding: %v", host, err)
+		}
+		if live != fp {
+			t.Fatalf("channel binding: live TLS key %s != endorsed %s", live, fp)
+		}
+		t.Logf("channel bound: live TLS SPKI-fp matches the attested key %s", fp)
+	}
+
 	// The same bytes must still verify with the clock pinned to now — the
 	// contract a frozen real-frozen fixture relies on, checked on live collateral.
 	in.VerificationTimeUnix = time.Now().Unix()
 	if _, code := Run(StageVerify, in); code != ExitAccepted {
 		t.Fatalf("pinned-time replay of the live document did not accept (exit %d)", code)
 	}
+}
+
+// tlsSPKIFingerprint dials host:443 and returns the SHA-256 of the presented
+// leaf certificate's DER SubjectPublicKeyInfo, lowercase hex. Certificate-chain
+// verification is skipped on purpose: trust comes from matching this against
+// the attested fingerprint, not from the public PKI.
+func tlsSPKIFingerprint(host string) (string, error) {
+	conn, err := tls.Dial("tcp", net.JoinHostPort(host, "443"),
+		&tls.Config{ServerName: host, InsecureSkipVerify: true}) //nolint:gosec // bound by SPKI, not PKI
+	if err != nil {
+		return "", err
+	}
+	defer conn.Close()
+	certs := conn.ConnectionState().PeerCertificates
+	if len(certs) == 0 {
+		return "", fmt.Errorf("no peer certificate")
+	}
+	sum := sha256.Sum256(certs[0].RawSubjectPublicKeyInfo)
+	return hex.EncodeToString(sum[:]), nil
 }

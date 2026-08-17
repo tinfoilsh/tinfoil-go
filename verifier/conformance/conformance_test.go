@@ -16,8 +16,10 @@ type fixture struct {
 	Stage    string `json:"stage"`
 	Input    Input  `json:"input"`
 	Expected struct {
-		Accepted bool   `json:"accepted"`
-		Code     string `json:"code,omitempty"`
+		Accepted       bool   `json:"accepted"`
+		Code           string `json:"code,omitempty"`
+		TLSPublicKeyFP string `json:"tls_public_key_fp,omitempty"`
+		HPKEPublicKey  string `json:"hpke_public_key,omitempty"`
 	} `json:"expected"`
 }
 
@@ -60,6 +62,20 @@ func TestFixtures(t *testing.T) {
 				}
 				if got != f.Expected.Code {
 					t.Errorf("rejection code=%q, want %q", got, f.Expected.Code)
+				}
+			}
+			// When an accept fixture declares the endorsed channel keys, assert
+			// the harness recovered exactly those — a client that fails to bind
+			// the right TLS/HPKE key is not conformant even if it accepts.
+			if f.Expected.Accepted && f.Expected.TLSPublicKeyFP != "" {
+				if out.Outputs == nil {
+					t.Fatalf("accepted but no outputs; want tls/hpke keys")
+				}
+				if out.Outputs.TLSPublicKeyFP != f.Expected.TLSPublicKeyFP {
+					t.Errorf("tls_public_key_fp=%q, want %q", out.Outputs.TLSPublicKeyFP, f.Expected.TLSPublicKeyFP)
+				}
+				if out.Outputs.HPKEPublicKey != f.Expected.HPKEPublicKey {
+					t.Errorf("hpke_public_key=%q, want %q", out.Outputs.HPKEPublicKey, f.Expected.HPKEPublicKey)
 				}
 			}
 		})
