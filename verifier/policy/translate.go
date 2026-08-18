@@ -7,29 +7,52 @@ import (
 	"strconv"
 	"strings"
 
-	sevabi "github.com/google/go-sev-guest/abi"
-	"github.com/google/go-sev-guest/kds"
-	sevvalidate "github.com/google/go-sev-guest/validate"
 	tdxpb "github.com/google/go-tdx-guest/proto/tdx"
 	tdxvalidate "github.com/google/go-tdx-guest/validate"
+	sevabi "github.com/tinfoilsh/go-sev-guest/abi"
+	"github.com/tinfoilsh/go-sev-guest/kds"
+	sevvalidate "github.com/tinfoilsh/go-sev-guest/validate"
 )
 
-// ProductGenoa is the only AMD product line currently supported by the
-// verifier. Turin (family 1Ah) is not supported yet.
-const ProductGenoa = "Genoa"
+const (
+	// ProductGenoa identifies AMD EPYC family 19h model 11h.
+	ProductGenoa = "Genoa"
+	// ProductTurin identifies AMD EPYC family 1Ah model 02h.
+	ProductTurin = "Turin"
+)
 
 // SEVOptions translates the policy block into go-sev-guest validation
-// options for the given product line. Only Genoa (family 19h) is supported.
+// options for the given product line.
 func (p *SEVSNPPolicy) SEVOptions(productLine string) (*sevvalidate.Options, error) {
-	if productLine != ProductGenoa {
-		return nil, fmt.Errorf("unsupported SEV product line %q (only %s is supported)", productLine, ProductGenoa)
+	switch productLine {
+	case ProductGenoa:
+		if p.MinimumTCB.FmcSpl != nil || p.MinimumLaunchTCB.FmcSpl != nil {
+			return nil, fmt.Errorf("fmc_spl is not valid for product line %s", productLine)
+		}
+		if p.PlatformInfo.IOMMUWriteSafe {
+			return nil, fmt.Errorf("iommu_write_safe is not valid for product line %s", productLine)
+		}
+	case ProductTurin:
+		if p.MinimumTCB.FmcSpl == nil || p.MinimumLaunchTCB.FmcSpl == nil {
+			return nil, fmt.Errorf("fmc_spl is required for product line %s", productLine)
+		}
+		if !p.PlatformInfo.IOMMUWriteSafe {
+			return nil, fmt.Errorf("iommu_write_safe is required for product line %s", productLine)
+		}
+	default:
+		return nil, fmt.Errorf("unsupported SEV product line %q", productLine)
 	}
 	version, err := parseAPIVersion(p.MinimumAPIVersion)
 	if err != nil {
 		return nil, err
 	}
-	if p.MinimumTCB.FmcSpl != nil || p.MinimumLaunchTCB.FmcSpl != nil {
-		return nil, fmt.Errorf("fmc_spl is not valid for product line %s", productLine)
+	minimumTCB, err := sevTCBParts("minimum_tcb", productLine, p.MinimumTCB)
+	if err != nil {
+		return nil, err
+	}
+	minimumLaunchTCB, err := sevTCBParts("minimum_launch_tcb", productLine, p.MinimumLaunchTCB)
+	if err != nil {
+		return nil, err
 	}
 	familyID, err := optionalHexField("family_id", p.FamilyID, 16)
 	if err != nil {
@@ -71,6 +94,7 @@ func (p *SEVSNPPolicy) SEVOptions(productLine string) (*sevvalidate.Options, err
 		PermitProvisionalFirmware: p.PermitProvisionalFirmware,
 		PlatformInfo: &sevabi.SnpPlatformInfo{
 			AliasCheckComplete:          p.PlatformInfo.AliasCheckComplete,
+			IOMMUWriteSafe:              p.PlatformInfo.IOMMUWriteSafe,
 			SMTEnabled:                  p.PlatformInfo.SMTEnabled,
 			TSMEEnabled:                 p.PlatformInfo.TSMEEnabled,
 			ECCEnabled:                  p.PlatformInfo.ECCEnabled,
@@ -79,20 +103,28 @@ func (p *SEVSNPPolicy) SEVOptions(productLine string) (*sevvalidate.Options, err
 		},
 		MinimumCurrentMitigationVector: p.MinimumCurrentMitigationVector,
 		MinimumLaunchMitigationVector:  p.MinimumLaunchMitigationVector,
-		MinimumTCB: kds.TCBParts{
-			BlSpl:    p.MinimumTCB.BlSpl,
-			TeeSpl:   p.MinimumTCB.TeeSpl,
-			SnpSpl:   p.MinimumTCB.SnpSpl,
-			UcodeSpl: p.MinimumTCB.UcodeSpl,
-		},
-		MinimumLaunchTCB: kds.TCBParts{
-			BlSpl:    p.MinimumLaunchTCB.BlSpl,
-			TeeSpl:   p.MinimumLaunchTCB.TeeSpl,
-			SnpSpl:   p.MinimumLaunchTCB.SnpSpl,
-			UcodeSpl: p.MinimumLaunchTCB.UcodeSpl,
-		},
-		VMPL: p.VMPL,
+		MinimumTCB:                     minimumTCB,
+		MinimumLaunchTCB:               minimumLaunchTCB,
+		VMPL:                           p.VMPL,
 	}, nil
+}
+
+func sevTCBParts(field, productLine string, value TCB) (kds.TCBParts, error) {
+	var fmcSpl uint8
+	if value.FmcSpl != nil {
+		fmcSpl = *value.FmcSpl
+	}
+	parts, err := kds.NewTCBParts(productLine, kds.TCBParts{
+		FmcSpl:   fmcSpl,
+		BlSpl:    value.BlSpl,
+		TeeSpl:   value.TeeSpl,
+		SnpSpl:   value.SnpSpl,
+		UcodeSpl: value.UcodeSpl,
+	})
+	if err != nil {
+		return kds.TCBParts{}, fmt.Errorf("%s: %w", field, err)
+	}
+	return parts, nil
 }
 
 // ValidateTDXQuote enforces the complete TDX policy against a quote:

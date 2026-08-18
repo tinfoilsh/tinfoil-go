@@ -188,8 +188,6 @@ github.com/google/go-configfs-tsm v0.2.2 h1:YnJ9rXIOj5BYD7/0DNnzs8AOp7UcvjfTvt21
 github.com/google/go-configfs-tsm v0.2.2/go.mod h1:EL1GTDFMb5PZQWDviGfZV9n87WeGTR/JUg13RfwkgRo=
 github.com/google/go-containerregistry v0.21.7 h1:/vPFuVXDjtFREsVArW+0h1CIl5urnOhzei4X2DMW9IU=
 github.com/google/go-containerregistry v0.21.7/go.mod h1:kjSbt7/zMsKLWfnHrIvKvhXHUw91jbe9DNjPPJ32gXE=
-github.com/google/go-sev-guest v0.15.0 h1:Xzfut5mbhcVb7TyPiyc5PolLUzdai7VH3QpyvXwcW9Y=
-github.com/google/go-sev-guest v0.15.0/go.mod h1:SK9vW+uyfuzYdVN0m8BShL3OQCtXZe/JPF7ZkpD3760=
 github.com/google/go-tdx-guest v0.3.1 h1:gl0KvjdsD4RrJzyLefDOvFOUH3NAJri/3qvaL5m83Iw=
 github.com/google/go-tdx-guest v0.3.1/go.mod h1:/rc3d7rnPykOPuY8U9saMyEps0PZDThLk/RygXm04nE=
 github.com/google/s2a-go v0.1.9 h1:LGD7gtMgezd8a/Xak7mEWL0PjoTQFvpRudN895yqKW0=
@@ -334,6 +332,8 @@ github.com/tidwall/sjson v1.2.5 h1:kLy8mja+1c9jlljvWTlSazM7cKDRfJuR/bOJhcY5NcY=
 github.com/tidwall/sjson v1.2.5/go.mod h1:Fvgq9kS/6ociJEDnK0Fk1cpYF4FIW6ZF7LAe+6jwd28=
 github.com/tinfoilsh/encrypted-http-body-protocol v0.3.2 h1:yKxfC3pVJ4ORwLeHwflvv2x8ld2Eo3fpcKt+wYIJorc=
 github.com/tinfoilsh/encrypted-http-body-protocol v0.3.2/go.mod h1:THDK0GFNny7Pcc+nO3AQi4f6Wf1cDkfLatmHAUlIn5s=
+github.com/tinfoilsh/go-sev-guest v0.0.0-20260818055935-bec7bdb637fd h1:qprAQDbhLiW9wxztGqgZgxUlKTnN6jJZx/FQl9HyLH8=
+github.com/tinfoilsh/go-sev-guest v0.0.0-20260818055935-bec7bdb637fd/go.mod h1:2L/TPoX4xeq44MkhftLSU6JBpdwzLPIsFvijrGKKe1s=
 github.com/tinfoilsh/google-logger v0.0.0-20251028051824-44df5807cdb9 h1:V8QUnjoufKzz35lqI8ekP58g+JQVyi2twGVvlMwUY4o=
 github.com/tinfoilsh/google-logger v0.0.0-20251028051824-44df5807cdb9/go.mod h1:yhXfkxV3qOWUUWXbUfYTbGZZUN/SF43DkCjnc/FOzaU=
 github.com/tinfoilsh/in-toto-golang v0.0.0-20251028050300-aa5edaf95dd8 h1:FSbKW2nDCj8Pi6SMCeglYze8wn8G0pNE4OBHEynZvHY=

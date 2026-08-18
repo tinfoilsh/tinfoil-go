@@ -5,7 +5,6 @@ go 1.26.6
 require (
 	github.com/Masterminds/semver/v3 v3.5.0
 	github.com/charmbracelet/log v1.0.0
-	github.com/google/go-sev-guest v0.15.0
 	github.com/google/go-tdx-guest v0.3.1
 	github.com/openai/openai-go/v3 v3.42.0
 	github.com/sigstore/protobuf-specs v0.5.1
@@ -15,6 +14,7 @@ require (
 	github.com/subosito/gotenv v1.6.0
 	github.com/theupdateframework/go-tuf/v2 v2.4.2
 	github.com/tinfoilsh/encrypted-http-body-protocol v0.3.2
+	github.com/tinfoilsh/go-sev-guest v0.0.0-20260818055935-bec7bdb637fd
 	google.golang.org/protobuf v1.36.11
 )
 

@@ -85,8 +85,8 @@ type SEVSNPPolicy struct {
 	VMPL                           *int        `json:"vmpl"`
 }
 
-// TCB holds AMD security patch levels. FmcSpl applies to family 1Ah (Turin)
-// parts only, which are not yet supported for verification.
+// TCB holds AMD security patch levels. FmcSpl applies only to family 1Ah
+// (Turin) parts.
 type TCB struct {
 	FmcSpl   *uint8 `json:"fmc_spl,omitempty"`
 	BlSpl    uint8  `json:"bl_spl"`
@@ -106,6 +106,7 @@ type GuestPolicy struct {
 // SNPPlatform mirrors the SNP PLATFORM_INFO expectations.
 type SNPPlatform struct {
 	AliasCheckComplete   bool `json:"alias_check_complete"`
+	IOMMUWriteSafe       bool `json:"iommu_write_safe,omitempty"`
 	SMTEnabled           bool `json:"smt_enabled"`
 	TSMEEnabled          bool `json:"tsme_enabled"`
 	ECCEnabled           bool `json:"ecc_enabled"`
