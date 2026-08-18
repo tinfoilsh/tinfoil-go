@@ -27,13 +27,10 @@ func Box2TurinReport() ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("decompress Box2 Turin report: %w", err)
 	}
-	report, readErr := io.ReadAll(reader)
-	closeErr := reader.Close()
-	if readErr != nil {
-		return nil, fmt.Errorf("read Box2 Turin report: %w", readErr)
-	}
-	if closeErr != nil {
-		return nil, fmt.Errorf("close Box2 Turin report stream: %w", closeErr)
+	defer reader.Close()
+	report, err := io.ReadAll(reader)
+	if err != nil {
+		return nil, fmt.Errorf("read Box2 Turin report: %w", err)
 	}
 	return report, nil
 }

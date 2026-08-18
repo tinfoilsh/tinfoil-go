@@ -227,6 +227,7 @@ func defaultSEVOptions(productLine string) (*validate.Options, error) {
 		sevPolicy.MinimumAPIVersion = "1.58"
 		sevPolicy.MinimumTCB = policy.TCB{FmcSpl: &fmcSpl, BlSpl: 1, TeeSpl: 1, SnpSpl: 4, UcodeSpl: 82}
 		sevPolicy.MinimumLaunchTCB = sevPolicy.MinimumTCB
+		sevPolicy.PlatformInfo.IOMMUWriteSafe = true
 	default:
 		return nil, fmt.Errorf("unsupported SEV product line %q", productLine)
 	}
