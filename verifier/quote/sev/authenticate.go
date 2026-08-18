@@ -15,10 +15,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/google/go-sev-guest/abi"
-	"github.com/google/go-sev-guest/proto/sevsnp"
-	"github.com/google/go-sev-guest/verify"
-	"github.com/google/go-sev-guest/verify/trust"
+	"github.com/tinfoilsh/go-sev-guest/abi"
+	"github.com/tinfoilsh/go-sev-guest/proto/sevsnp"
+	"github.com/tinfoilsh/go-sev-guest/verify"
+	"github.com/tinfoilsh/go-sev-guest/verify/trust"
 
 	"github.com/tinfoilsh/tinfoil-go/verifier/envelope"
 	"github.com/tinfoilsh/tinfoil-go/verifier/internal/strictjson"
@@ -29,19 +29,29 @@ import (
 //go:embed genoa_cert_chain.pem
 var askArkGenoaPEM []byte
 
-// trustedRoots builds the pinned AMD trust anchor (Genoa ASK+ARK) from the
-// repo-owned copy rather than the library's embedded default, so the
-// anchor only changes when the file is deliberately regenerated. A fresh
-// instance is built per authentication: the library caches the CRL it
-// fetched on this object, and document-supplied collateral must never
-// affect other verifications.
+//go:generate sh -xc "curl -fo turin_cert_chain.pem https://kdsintf.amd.com/vcek/v1/Turin/cert_chain"
+//go:embed turin_cert_chain.pem
+var askArkTurinPEM []byte
+
+// trustedRoots builds the pinned AMD trust anchors from repo-owned copies
+// rather than the library's embedded defaults, so an anchor only changes
+// when its file is deliberately regenerated. A fresh instance is built per
+// authentication: the library caches the CRL it fetched on this object, and
+// document-supplied collateral must never affect other verifications.
 func trustedRoots() (map[string][]*trust.AMDRootCerts, error) {
-	genoa := new(trust.AMDRootCerts)
-	if err := genoa.FromKDSCertBytes(askArkGenoaPEM); err != nil {
-		return nil, fmt.Errorf("parsing embedded AMD Genoa root certificates: %w", err)
+	result := make(map[string][]*trust.AMDRootCerts, 2)
+	for productLine, rootPEM := range map[string][]byte{
+		"Genoa": askArkGenoaPEM,
+		"Turin": askArkTurinPEM,
+	} {
+		roots := new(trust.AMDRootCerts)
+		if err := roots.FromKDSCertBytes(rootPEM); err != nil {
+			return nil, fmt.Errorf("parsing embedded AMD %s root certificates: %w", productLine, err)
+		}
+		roots.ProductLine = productLine
+		result[productLine] = []*trust.AMDRootCerts{roots}
 	}
-	genoa.ProductLine = "Genoa"
-	return map[string][]*trust.AMDRootCerts{"Genoa": {genoa}}, nil
+	return result, nil
 }
 
 // offlineGetter serves the library's fetches from pre-provided material:
@@ -98,7 +108,13 @@ func productFromReport(report *sevsnp.Report) (*sevsnp.SevProduct, error) {
 	if fms == 0 {
 		return nil, fmt.Errorf("report carries no CPUID product identity (report version %d, want 3+)", report.GetVersion())
 	}
-	return abi.SevProductFromCpuid1Eax(fms), nil
+	product := abi.SevProductFromCpuid1Eax(fms)
+	switch product.GetName() {
+	case sevsnp.SevProduct_SEV_PRODUCT_GENOA, sevsnp.SevProduct_SEV_PRODUCT_TURIN:
+		return product, nil
+	default:
+		return nil, fmt.Errorf("unsupported SEV product in report CPUID 0x%x", fms)
+	}
 }
 
 // Quote is a signature-verified SEV-SNP report, not yet compared against

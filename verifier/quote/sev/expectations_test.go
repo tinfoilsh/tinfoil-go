@@ -7,10 +7,11 @@ import (
 	"strings"
 	"testing"
 
-	sevabi "github.com/google/go-sev-guest/abi"
-	"github.com/google/go-sev-guest/proto/sevsnp"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	sevabi "github.com/tinfoilsh/go-sev-guest/abi"
+	"github.com/tinfoilsh/go-sev-guest/proto/sevsnp"
+	sevtestdata "github.com/tinfoilsh/go-sev-guest/verify/testdata"
 
 	"github.com/tinfoilsh/tinfoil-go/verifier/policy"
 )
@@ -44,8 +45,29 @@ func TestOptionsGenoa(t *testing.T) {
 	assert.Equal(t, uint8(72), opts.MinimumTCB.UcodeSpl)
 	assert.True(t, opts.GuestPolicy.SMT)
 	assert.False(t, opts.GuestPolicy.Debug)
+	assert.False(t, opts.PermitPlatformInfoBit6)
 	require.NotNil(t, opts.PlatformInfo)
 	assert.True(t, opts.PlatformInfo.TSMEEnabled)
+}
+
+func TestOptionsTurin(t *testing.T) {
+	a := loadFixture(t)
+	_, p, err := a.PolicyFor(box2TurinID, policy.PlatformSEVSNP)
+	require.NoError(t, err)
+
+	opts, err := options(p.SEVSNP, ProductTurin)
+	require.NoError(t, err)
+	assert.Equal(t, uint8(0), opts.MinimumBuild)
+	assert.Equal(t, uint16(1<<8|58), opts.MinimumVersion)
+	assert.Equal(t, uint8(1), opts.MinimumTCB.FmcSpl)
+	assert.Equal(t, uint8(1), opts.MinimumTCB.BlSpl)
+	assert.Equal(t, uint8(1), opts.MinimumTCB.TeeSpl)
+	assert.Equal(t, uint8(4), opts.MinimumTCB.SnpSpl)
+	assert.Equal(t, uint8(82), opts.MinimumTCB.UcodeSpl)
+	assert.True(t, opts.PermitPlatformInfoBit6)
+	tcb, err := opts.MinimumTCB.ToTCBVersionStruct()
+	require.NoError(t, err)
+	assert.Equal(t, uint64(0x5200000004010101), tcb.TCB)
 }
 
 func TestOptionsPinnedFields(t *testing.T) {
@@ -89,17 +111,71 @@ func TestOptionsPinnedFields(t *testing.T) {
 	assert.ErrorContains(t, err, "not supported")
 }
 
-// options must reject any non-Genoa product line.
-func TestOptionsRejectsNonGenoa(t *testing.T) {
+func TestOptionsRejectsInvalidProductFields(t *testing.T) {
 	a := loadFixture(t)
-	_, p, err := a.PolicyFor(box2TurinID, policy.PlatformSEVSNP)
+	_, turinPolicy, err := a.PolicyFor(box2TurinID, policy.PlatformSEVSNP)
 	require.NoError(t, err)
 
-	_, err = options(p.SEVSNP, "Turin")
-	assert.ErrorContains(t, err, "unsupported SEV product line")
+	missingFMC := *turinPolicy.SEVSNP
+	minimumTCB := missingFMC.MinimumTCB
+	minimumTCB.FmcSpl = nil
+	missingFMC.MinimumTCB = minimumTCB
+	_, err = options(&missingFMC, ProductTurin)
+	assert.ErrorContains(t, err, "fmc_spl is required")
 
-	_, err = options(p.SEVSNP, "Milan")
+	_, genoaPolicy, err := a.PolicyFor(box3GenoaID, policy.PlatformSEVSNP)
+	require.NoError(t, err)
+	unexpectedFMC := *genoaPolicy.SEVSNP
+	minimumTCB = unexpectedFMC.MinimumTCB
+	minimumTCB.FmcSpl = ptr(uint8(1))
+	unexpectedFMC.MinimumTCB = minimumTCB
+	_, err = options(&unexpectedFMC, ProductGenoa)
+	assert.ErrorContains(t, err, "fmc_spl is not valid")
+
+	_, err = options(turinPolicy.SEVSNP, "Milan")
 	assert.ErrorContains(t, err, "unsupported SEV product line")
+}
+
+func TestParseTurinPlatformInfo(t *testing.T) {
+	got, err := parsePlatformInfo(0x64, true)
+	require.NoError(t, err)
+	assert.Equal(t, sevabi.SnpPlatformInfo{ECCEnabled: true, AliasCheckComplete: true}, got)
+
+	_, err = parsePlatformInfo(0x64, false)
+	assert.ErrorContains(t, err, "reserved platform info bit 6")
+	_, err = parsePlatformInfo(0x164, true)
+	assert.ErrorContains(t, err, "unrecognized platform info bit")
+}
+
+func TestValidateBox2TurinAttestation(t *testing.T) {
+	reportRaw, err := sevtestdata.Box2TurinReport()
+	require.NoError(t, err)
+	report, err := sevabi.ReportToProto(reportRaw)
+	require.NoError(t, err)
+	vcek, err := sevtestdata.Box2TurinVcek()
+	require.NoError(t, err)
+	product, err := productFromReport(report)
+	require.NoError(t, err)
+	identity, err := Identity(report.GetChipId())
+	require.NoError(t, err)
+	q := &Quote{
+		Identity: identity,
+		attestation: &sevsnp.Attestation{
+			Report: report,
+			CertificateChain: &sevsnp.CertificateChain{
+				VcekCert: vcek,
+			},
+			Product: product,
+		},
+	}
+	var reportData [64]byte
+	copy(reportData[:], report.GetReportData())
+	a := loadFixture(t)
+	_, p, err := a.PolicyFor(identity, policy.PlatformSEVSNP)
+	require.NoError(t, err)
+	expectations, err := Assemble(p.SEVSNP, q, report.GetMeasurement(), reportData)
+	require.NoError(t, err)
+	require.NoError(t, expectations.Validate(q))
 }
 
 func TestIdentity(t *testing.T) {
