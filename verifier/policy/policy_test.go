@@ -105,7 +105,6 @@ func TestSEVOptionsGenoa(t *testing.T) {
 	assert.Equal(t, uint8(72), opts.MinimumTCB.UcodeSpl)
 	assert.True(t, opts.GuestPolicy.SMT)
 	assert.False(t, opts.GuestPolicy.Debug)
-	assert.False(t, opts.PermitPlatformInfoBit6)
 	require.NotNil(t, opts.PlatformInfo)
 	assert.True(t, opts.PlatformInfo.TSMEEnabled)
 }
@@ -124,7 +123,8 @@ func TestSEVOptionsTurin(t *testing.T) {
 	assert.Equal(t, uint8(1), opts.MinimumTCB.TeeSpl)
 	assert.Equal(t, uint8(4), opts.MinimumTCB.SnpSpl)
 	assert.Equal(t, uint8(82), opts.MinimumTCB.UcodeSpl)
-	assert.True(t, opts.PermitPlatformInfoBit6)
+	require.NotNil(t, opts.PlatformInfo)
+	assert.True(t, opts.PlatformInfo.IOMMUWriteSafe)
 	tcb, err := opts.MinimumTCB.ToTCBVersionStruct()
 	require.NoError(t, err)
 	assert.Equal(t, uint64(0x5200000004010101), tcb.TCB)

@@ -86,9 +86,9 @@ func (p *SEVSNPPolicy) SEVOptions(productLine string) (*sevvalidate.Options, err
 		MinimumBuild:              p.MinimumBuild,
 		MinimumVersion:            version,
 		PermitProvisionalFirmware: p.PermitProvisionalFirmware,
-		PermitPlatformInfoBit6:    productLine == ProductTurin,
 		PlatformInfo: &sevabi.SnpPlatformInfo{
 			AliasCheckComplete:          p.PlatformInfo.AliasCheckComplete,
+			IOMMUWriteSafe:              p.PlatformInfo.IOMMUWriteSafe,
 			SMTEnabled:                  p.PlatformInfo.SMTEnabled,
 			TSMEEnabled:                 p.PlatformInfo.TSMEEnabled,
 			ECCEnabled:                  p.PlatformInfo.ECCEnabled,

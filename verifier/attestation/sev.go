@@ -55,16 +55,27 @@ var (
 )
 
 // sevProductFromReport derives the SEV product from the report's CPUID
-// family/model/stepping field (present in report version 3+). Reports
-// without the field (version 2) predate Turin and are treated as Genoa.
-func sevProductFromReport(report *sevsnp.Report) *sevsnp.SevProduct {
+// family/model/stepping field (present in report version 3+). Only version 2
+// reports may use the legacy Genoa fallback because that format predates the
+// signed CPUID field.
+func sevProductFromReport(report *sevsnp.Report) (*sevsnp.SevProduct, error) {
+	if report == nil {
+		return nil, fmt.Errorf("SEV report is missing")
+	}
 	if fms := report.GetCpuid1EaxFms(); fms != 0 {
-		return abi.SevProductFromCpuid1Eax(fms)
+		product := abi.SevProductFromCpuid1Eax(fms)
+		if product.GetName() == sevsnp.SevProduct_SEV_PRODUCT_UNKNOWN {
+			return nil, fmt.Errorf("unsupported SEV product FMS 0x%x", fms)
+		}
+		return product, nil
+	}
+	if report.GetVersion() != 2 {
+		return nil, fmt.Errorf("unsupported SEV product: report version %d has zero CPUID FMS", report.GetVersion())
 	}
 	return &sevsnp.SevProduct{
 		Name:            sevsnp.SevProduct_SEV_PRODUCT_GENOA,
 		MachineStepping: &wrapperspb.UInt32Value{Value: uint32(0)},
-	}
+	}, nil
 }
 
 // verifySevSignature decodes a report, derives its product, and verifies the
@@ -91,7 +102,10 @@ func verifySevSignature(attestationDoc string, isCompressed bool, vcekDER []byte
 
 	opts := verify.DefaultOptions()
 	opts.Getter = &getter{}
-	opts.Product = sevProductFromReport(parsedReport)
+	opts.Product, err = sevProductFromReport(parsedReport)
+	if err != nil {
+		return nil, err
+	}
 
 	var attestation *sevsnp.Attestation
 	if vcekDER != nil {
@@ -143,7 +157,11 @@ func verifySevReportWithEndorsements(attestationDoc string, isCompressed bool, v
 		return nil, "", err
 	}
 
-	productLine := kds.ProductLine(sevProductFromReport(report))
+	product, err := sevProductFromReport(report)
+	if err != nil {
+		return nil, "", err
+	}
+	productLine := kds.ProductLine(product)
 	valOpts, err := machinePolicy.SEVSNP.SEVOptions(productLine)
 	if err != nil {
 		return nil, "", err
@@ -160,7 +178,11 @@ func verifySevReport(attestationDoc string, isCompressed bool, vcekDER []byte) (
 	if err != nil {
 		return nil, err
 	}
-	productLine := kds.ProductLine(sevProductFromReport(attestation.GetReport()))
+	product, err := sevProductFromReport(attestation.GetReport())
+	if err != nil {
+		return nil, err
+	}
+	productLine := kds.ProductLine(product)
 	valOpts, err := defaultSEVOptions(productLine)
 	if err != nil {
 		return nil, err

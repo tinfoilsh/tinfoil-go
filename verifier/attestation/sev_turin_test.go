@@ -10,8 +10,9 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	sevabi "github.com/tinfoilsh/go-sev-guest/abi"
-	sevtestdata "github.com/tinfoilsh/go-sev-guest/verify/testdata"
+	sevsnp "github.com/tinfoilsh/go-sev-guest/proto/sevsnp"
 
+	sevtestdata "github.com/tinfoilsh/tinfoil-go/verifier/internal/testdata"
 	"github.com/tinfoilsh/tinfoil-go/verifier/policy"
 )
 
@@ -31,6 +32,15 @@ func TestVerifyTurinAttestationV2(t *testing.T) {
 	assert.Equal(t, []string{hex.EncodeToString(report.GetMeasurement())}, verification.Measurement.Registers)
 	assert.Equal(t, hex.EncodeToString(report.GetReportData()[:32]), verification.TLSPublicKeyFP)
 	assert.Equal(t, hex.EncodeToString(report.GetReportData()[32:]), verification.HPKEPublicKey)
+}
+
+func TestSEVProductFallbackRequiresVersion2(t *testing.T) {
+	product, err := sevProductFromReport(&sevsnp.Report{Version: 2})
+	require.NoError(t, err)
+	assert.Equal(t, sevsnp.SevProduct_SEV_PRODUCT_GENOA, product.GetName())
+
+	_, err = sevProductFromReport(&sevsnp.Report{Version: sevabi.ReportVersion3})
+	assert.ErrorContains(t, err, "zero CPUID FMS")
 }
 
 func TestVerifyTurinReportWithEndorsements(t *testing.T) {

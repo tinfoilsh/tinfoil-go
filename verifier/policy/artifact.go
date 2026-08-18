@@ -106,6 +106,7 @@ type GuestPolicy struct {
 // SNPPlatform mirrors the SNP PLATFORM_INFO expectations.
 type SNPPlatform struct {
 	AliasCheckComplete   bool `json:"alias_check_complete"`
+	IOMMUWriteSafe       bool `json:"iommu_write_safe,omitempty"`
 	SMTEnabled           bool `json:"smt_enabled"`
 	TSMEEnabled          bool `json:"tsme_enabled"`
 	ECCEnabled           bool `json:"ecc_enabled"`
