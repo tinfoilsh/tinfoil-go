@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/tinfoilsh/go-sev-guest/abi"
+	"github.com/tinfoilsh/go-sev-guest/kds"
 	"github.com/tinfoilsh/go-sev-guest/proto/sevsnp"
 	"github.com/tinfoilsh/go-sev-guest/verify"
 	"github.com/tinfoilsh/go-sev-guest/verify/trust"
@@ -38,20 +39,22 @@ var askArkTurinPEM []byte
 // when its file is deliberately regenerated. A fresh instance is built per
 // authentication: the library caches the CRL it fetched on this object, and
 // document-supplied collateral must never affect other verifications.
-func trustedRoots() (map[string][]*trust.AMDRootCerts, error) {
-	result := make(map[string][]*trust.AMDRootCerts, 2)
-	for productLine, rootPEM := range map[string][]byte{
-		"Genoa": askArkGenoaPEM,
-		"Turin": askArkTurinPEM,
-	} {
-		roots := new(trust.AMDRootCerts)
-		if err := roots.FromKDSCertBytes(rootPEM); err != nil {
-			return nil, fmt.Errorf("parsing embedded AMD %s root certificates: %w", productLine, err)
-		}
-		roots.ProductLine = productLine
-		result[productLine] = []*trust.AMDRootCerts{roots}
+func trustedRoots(productLine string) (map[string][]*trust.AMDRootCerts, error) {
+	var rootPEM []byte
+	switch productLine {
+	case ProductGenoa:
+		rootPEM = askArkGenoaPEM
+	case ProductTurin:
+		rootPEM = askArkTurinPEM
+	default:
+		return nil, fmt.Errorf("unsupported SEV product line %q", productLine)
 	}
-	return result, nil
+	roots := new(trust.AMDRootCerts)
+	if err := roots.FromKDSCertBytes(rootPEM); err != nil {
+		return nil, fmt.Errorf("parsing embedded AMD %s root certificates: %w", productLine, err)
+	}
+	roots.ProductLine = productLine
+	return map[string][]*trust.AMDRootCerts{productLine: {roots}}, nil
 }
 
 // offlineGetter serves the library's fetches from pre-provided material:
@@ -238,7 +241,8 @@ func verifySignature(reportBase64 string, vcekDER, askDER, arkDER, crlDER []byte
 	if err != nil {
 		return nil, err
 	}
-	roots, err := trustedRoots()
+	productLine := kds.ProductLine(product)
+	roots, err := trustedRoots(productLine)
 	if err != nil {
 		return nil, err
 	}

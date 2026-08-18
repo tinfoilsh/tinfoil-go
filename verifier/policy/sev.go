@@ -163,5 +163,6 @@ type SNPPlatform struct {
 	RAPLDisabled         bool `json:"rapl_disabled"`
 	CiphertextHidingDRAM bool `json:"ciphertext_hiding_dram"`
 	AliasCheckComplete   bool `json:"alias_check_complete,omitempty"`
+	IOMMUWriteSafe       bool `json:"iommu_write_safe,omitempty"`
 	TIOEnabled           bool `json:"tio_enabled,omitempty"`
 }

@@ -11,7 +11,8 @@ import (
 	sevabi "github.com/tinfoilsh/go-sev-guest/abi"
 	"github.com/tinfoilsh/go-sev-guest/proto/sevsnp"
 	"github.com/tinfoilsh/go-sev-guest/verify"
-	sevtestdata "github.com/tinfoilsh/go-sev-guest/verify/testdata"
+
+	sevtestdata "github.com/tinfoilsh/tinfoil-go/verifier/internal/testdata"
 )
 
 func TestVerifySignatureRejectsNonExactReportSize(t *testing.T) {
@@ -22,12 +23,19 @@ func TestVerifySignatureRejectsNonExactReportSize(t *testing.T) {
 	}
 }
 
-func TestTrustedRootsIncludeTurin(t *testing.T) {
-	roots, err := trustedRoots()
-	require.NoError(t, err)
-	assert.Contains(t, roots, ProductGenoa)
-	assert.Contains(t, roots, ProductTurin)
-	assert.Equal(t, ProductTurin, roots[ProductTurin][0].ProductLine)
+func TestTrustedRootsSelectProduct(t *testing.T) {
+	for _, productLine := range []string{ProductGenoa, ProductTurin} {
+		t.Run(productLine, func(t *testing.T) {
+			roots, err := trustedRoots(productLine)
+			require.NoError(t, err)
+			require.Len(t, roots, 1)
+			require.Len(t, roots[productLine], 1)
+			assert.Equal(t, productLine, roots[productLine][0].ProductLine)
+		})
+	}
+
+	_, err := trustedRoots("Milan")
+	assert.ErrorContains(t, err, "unsupported SEV product line")
 }
 
 func TestProductFromReportRejectsUnknownProduct(t *testing.T) {
@@ -50,7 +58,7 @@ func TestVerifyBox2TurinSignatureWithPinnedRoots(t *testing.T) {
 	require.NoError(t, err)
 	product, err := productFromReport(report)
 	require.NoError(t, err)
-	roots, err := trustedRoots()
+	roots, err := trustedRoots(ProductTurin)
 	require.NoError(t, err)
 	attestation := &sevsnp.Attestation{
 		Report: report,

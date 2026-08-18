@@ -79,7 +79,7 @@ func (e *Expectations) Validate(q *Quote) error {
 		return fmt.Errorf("report guest policy %+v does not equal the endorsed policy %+v", gotPolicy, wantPolicy)
 	}
 
-	gotInfo, err := parsePlatformInfo(report.GetPlatformInfo(), e.opts.PermitPlatformInfoBit6)
+	gotInfo, err := sevabi.ParseSnpPlatformInfo(report.GetPlatformInfo())
 	if err != nil {
 		return fmt.Errorf("parsing report PLATFORM_INFO: %w", err)
 	}
@@ -88,13 +88,6 @@ func (e *Expectations) Validate(q *Quote) error {
 	}
 
 	return e.checkSigner(report)
-}
-
-func parsePlatformInfo(value uint64, permitBit6 bool) (sevabi.SnpPlatformInfo, error) {
-	if permitBit6 {
-		value &^= 1 << 6
-	}
-	return sevabi.ParseSnpPlatformInfo(value)
 }
 
 // checkSigner requires the report to be launched without an author key or
@@ -148,6 +141,7 @@ func expectedPlatformInfo(p *policy.SEVSNPPolicy) sevabi.SnpPlatformInfo {
 		RAPLDisabled:                p.PlatformInfo.RAPLDisabled,
 		CiphertextHidingDRAMEnabled: p.PlatformInfo.CiphertextHidingDRAM,
 		AliasCheckComplete:          p.PlatformInfo.AliasCheckComplete,
+		IOMMUWriteSafe:              p.PlatformInfo.IOMMUWriteSafe,
 		TIOEnabled:                  p.PlatformInfo.TIOEnabled,
 	}
 }
@@ -215,7 +209,6 @@ func options(p *policy.SEVSNPPolicy, productLine string) (*sevvalidate.Options, 
 		MinimumBuild:                   *p.MinimumBuild,
 		MinimumVersion:                 version,
 		PermitProvisionalFirmware:      p.PermitProvisionalFirmware,
-		PermitPlatformInfoBit6:         productLine == ProductTurin,
 		PlatformInfo:                   &platformInfo,
 		MinimumTCB:                     minimumTCB,
 		MinimumLaunchTCB:               minimumLaunchTCB,

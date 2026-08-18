@@ -11,8 +11,8 @@ import (
 	"github.com/stretchr/testify/require"
 	sevabi "github.com/tinfoilsh/go-sev-guest/abi"
 	"github.com/tinfoilsh/go-sev-guest/proto/sevsnp"
-	sevtestdata "github.com/tinfoilsh/go-sev-guest/verify/testdata"
 
+	sevtestdata "github.com/tinfoilsh/tinfoil-go/verifier/internal/testdata"
 	"github.com/tinfoilsh/tinfoil-go/verifier/policy"
 )
 
@@ -45,7 +45,6 @@ func TestOptionsGenoa(t *testing.T) {
 	assert.Equal(t, uint8(72), opts.MinimumTCB.UcodeSpl)
 	assert.True(t, opts.GuestPolicy.SMT)
 	assert.False(t, opts.GuestPolicy.Debug)
-	assert.False(t, opts.PermitPlatformInfoBit6)
 	require.NotNil(t, opts.PlatformInfo)
 	assert.True(t, opts.PlatformInfo.TSMEEnabled)
 }
@@ -64,7 +63,8 @@ func TestOptionsTurin(t *testing.T) {
 	assert.Equal(t, uint8(1), opts.MinimumTCB.TeeSpl)
 	assert.Equal(t, uint8(4), opts.MinimumTCB.SnpSpl)
 	assert.Equal(t, uint8(82), opts.MinimumTCB.UcodeSpl)
-	assert.True(t, opts.PermitPlatformInfoBit6)
+	require.NotNil(t, opts.PlatformInfo)
+	assert.True(t, opts.PlatformInfo.IOMMUWriteSafe)
 	tcb, err := opts.MinimumTCB.ToTCBVersionStruct()
 	require.NoError(t, err)
 	assert.Equal(t, uint64(0x5200000004010101), tcb.TCB)
@@ -137,13 +137,15 @@ func TestOptionsRejectsInvalidProductFields(t *testing.T) {
 }
 
 func TestParseTurinPlatformInfo(t *testing.T) {
-	got, err := parsePlatformInfo(0x64, true)
+	got, err := sevabi.ParseSnpPlatformInfo(0x64)
 	require.NoError(t, err)
-	assert.Equal(t, sevabi.SnpPlatformInfo{ECCEnabled: true, AliasCheckComplete: true}, got)
+	assert.Equal(t, sevabi.SnpPlatformInfo{
+		ECCEnabled:         true,
+		AliasCheckComplete: true,
+		IOMMUWriteSafe:     true,
+	}, got)
 
-	_, err = parsePlatformInfo(0x64, false)
-	assert.ErrorContains(t, err, "reserved platform info bit 6")
-	_, err = parsePlatformInfo(0x164, true)
+	_, err = sevabi.ParseSnpPlatformInfo(0x164)
 	assert.ErrorContains(t, err, "unrecognized platform info bit")
 }
 
