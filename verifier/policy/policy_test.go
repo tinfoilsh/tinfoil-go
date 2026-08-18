@@ -105,20 +105,50 @@ func TestSEVOptionsGenoa(t *testing.T) {
 	assert.Equal(t, uint8(72), opts.MinimumTCB.UcodeSpl)
 	assert.True(t, opts.GuestPolicy.SMT)
 	assert.False(t, opts.GuestPolicy.Debug)
+	assert.False(t, opts.PermitPlatformInfoBit6)
 	require.NotNil(t, opts.PlatformInfo)
 	assert.True(t, opts.PlatformInfo.TSMEEnabled)
 }
 
-// SEVOptions must reject any non-Genoa product line.
-func TestSEVOptionsRejectsNonGenoa(t *testing.T) {
+func TestSEVOptionsTurin(t *testing.T) {
 	a := loadFixture(t)
 	_, p, err := a.PolicyFor(box2TurinID, PlatformSEVSNP)
 	require.NoError(t, err)
 
-	_, err = p.SEVSNP.SEVOptions("Turin")
-	assert.ErrorContains(t, err, "unsupported SEV product line")
+	opts, err := p.SEVSNP.SEVOptions(ProductTurin)
+	require.NoError(t, err)
+	assert.Equal(t, uint8(0), opts.MinimumBuild)
+	assert.Equal(t, uint16(1<<8|58), opts.MinimumVersion)
+	assert.Equal(t, uint8(1), opts.MinimumTCB.FmcSpl)
+	assert.Equal(t, uint8(1), opts.MinimumTCB.BlSpl)
+	assert.Equal(t, uint8(1), opts.MinimumTCB.TeeSpl)
+	assert.Equal(t, uint8(4), opts.MinimumTCB.SnpSpl)
+	assert.Equal(t, uint8(82), opts.MinimumTCB.UcodeSpl)
+	assert.True(t, opts.PermitPlatformInfoBit6)
+	tcb, err := opts.MinimumTCB.ToTCBVersionStruct()
+	require.NoError(t, err)
+	assert.Equal(t, uint64(0x5200000004010101), tcb.TCB)
+}
 
-	_, err = p.SEVSNP.SEVOptions("Milan")
+func TestSEVOptionsRejectsInvalidProductFields(t *testing.T) {
+	a := loadFixture(t)
+	_, turinPolicy, err := a.PolicyFor(box2TurinID, PlatformSEVSNP)
+	require.NoError(t, err)
+
+	missingFMC := *turinPolicy.SEVSNP
+	missingFMC.MinimumTCB.FmcSpl = nil
+	_, err = missingFMC.SEVOptions(ProductTurin)
+	assert.ErrorContains(t, err, "fmc_spl is required")
+
+	_, genoaPolicy, err := a.PolicyFor(box3GenoaID, PlatformSEVSNP)
+	require.NoError(t, err)
+	unexpectedFMC := *genoaPolicy.SEVSNP
+	fmc := uint8(1)
+	unexpectedFMC.MinimumTCB.FmcSpl = &fmc
+	_, err = unexpectedFMC.SEVOptions(ProductGenoa)
+	assert.ErrorContains(t, err, "fmc_spl is not valid")
+
+	_, err = turinPolicy.SEVSNP.SEVOptions("Milan")
 	assert.ErrorContains(t, err, "unsupported SEV product line")
 }
 

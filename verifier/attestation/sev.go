@@ -8,12 +8,12 @@ import (
 	"net/url"
 	"strings"
 
-	"github.com/google/go-sev-guest/abi"
-	"github.com/google/go-sev-guest/kds"
-	"github.com/google/go-sev-guest/proto/sevsnp"
-	"github.com/google/go-sev-guest/validate"
-	"github.com/google/go-sev-guest/verify"
-	"github.com/google/go-sev-guest/verify/trust"
+	"github.com/tinfoilsh/go-sev-guest/abi"
+	"github.com/tinfoilsh/go-sev-guest/kds"
+	"github.com/tinfoilsh/go-sev-guest/proto/sevsnp"
+	"github.com/tinfoilsh/go-sev-guest/validate"
+	"github.com/tinfoilsh/go-sev-guest/verify"
+	"github.com/tinfoilsh/go-sev-guest/verify/trust"
 	"google.golang.org/protobuf/types/known/wrapperspb"
 
 	"github.com/tinfoilsh/tinfoil-go/verifier/policy"
@@ -33,8 +33,11 @@ func (*getter) Get(targetURL string) ([]byte, error) {
 	}
 
 	if strings.HasSuffix(u.Path, "/cert_chain") {
-		if u.Path == "/vcek/v1/Genoa/cert_chain" {
+		switch u.Path {
+		case "/vcek/v1/Genoa/cert_chain":
 			return vcekGenoaCertChain, nil
+		case "/vcek/v1/Turin/cert_chain":
+			return trust.AskArkTurinVcekBytes, nil
 		}
 		return nil, fmt.Errorf("cert_chain is not supported")
 	}
@@ -140,7 +143,7 @@ func verifySevReportWithEndorsements(attestationDoc string, isCompressed bool, v
 		return nil, "", err
 	}
 
-	productLine := kds.ProductLine(attestation.GetProduct())
+	productLine := kds.ProductLine(sevProductFromReport(report))
 	valOpts, err := machinePolicy.SEVSNP.SEVOptions(productLine)
 	if err != nil {
 		return nil, "", err
@@ -157,51 +160,10 @@ func verifySevReport(attestationDoc string, isCompressed bool, vcekDER []byte) (
 	if err != nil {
 		return nil, err
 	}
-
-	mintcb := kds.TCBParts{
-		BlSpl:    0x7,
-		TeeSpl:   0x0,
-		SnpSpl:   0xe,
-		UcodeSpl: 0x48,
-	}
-
-	valOpts := &validate.Options{
-		GuestPolicy: abi.SnpPolicy{
-			SMT:          true,
-			MigrateMA:    false,
-			Debug:        false,
-			SingleSocket: false,
-		},
-		MinimumGuestSvn: 0,
-		// ReportData // For now does not contain a nonce (content )
-		// HostData
-		// ImageID
-		// FamilyID
-		// ReportID
-		// ReportIDMA
-		// Measurement // Is verified in latter steps
-		// ChipID
-		MinimumBuild:              21,
-		MinimumVersion:            uint16((1 << 8) | 55), // 1.55
-		MinimumTCB:                mintcb,
-		MinimumLaunchTCB:          mintcb,
-		PermitProvisionalFirmware: false,
-		PlatformInfo: &abi.SnpPlatformInfo{
-			SMTEnabled:                  true,
-			TSMEEnabled:                 true,
-			ECCEnabled:                  false,
-			RAPLDisabled:                false,
-			CiphertextHidingDRAMEnabled: false,
-			AliasCheckComplete:          false,
-		},
-		RequireAuthorKey: false,
-		VMPL:             nil,
-		RequireIDBlock:   false,
-		// TrustedAuthorKey
-		// TrustedAuthorKeyHashes
-		// TrustedIDKeys
-		// TrustedIDKeyHashes
-		// CertTableOptions
+	productLine := kds.ProductLine(sevProductFromReport(attestation.GetReport()))
+	valOpts, err := defaultSEVOptions(productLine)
+	if err != nil {
+		return nil, err
 	}
 
 	if err := validate.SnpAttestation(attestation, valOpts); err != nil {
@@ -209,6 +171,44 @@ func verifySevReport(attestationDoc string, isCompressed bool, vcekDER []byte) (
 	}
 
 	return attestation.GetReport(), nil
+}
+
+func defaultSEVOptions(productLine string) (*validate.Options, error) {
+	sevPolicy := &policy.SEVSNPPolicy{
+		MinimumGuestSVN: 0,
+		GuestPolicy: policy.GuestPolicy{
+			SMT:          true,
+			MigrateMA:    false,
+			Debug:        false,
+			SingleSocket: false,
+		},
+		PlatformInfo: policy.SNPPlatform{
+			SMTEnabled:           true,
+			TSMEEnabled:          true,
+			ECCEnabled:           false,
+			RAPLDisabled:         false,
+			CiphertextHidingDRAM: false,
+			AliasCheckComplete:   false,
+		},
+		PermitProvisionalFirmware: false,
+	}
+
+	switch productLine {
+	case policy.ProductGenoa:
+		sevPolicy.MinimumBuild = 21
+		sevPolicy.MinimumAPIVersion = "1.55"
+		sevPolicy.MinimumTCB = policy.TCB{BlSpl: 7, TeeSpl: 0, SnpSpl: 14, UcodeSpl: 72}
+		sevPolicy.MinimumLaunchTCB = sevPolicy.MinimumTCB
+	case policy.ProductTurin:
+		fmcSpl := uint8(1)
+		sevPolicy.MinimumBuild = 0
+		sevPolicy.MinimumAPIVersion = "1.58"
+		sevPolicy.MinimumTCB = policy.TCB{FmcSpl: &fmcSpl, BlSpl: 1, TeeSpl: 1, SnpSpl: 4, UcodeSpl: 82}
+		sevPolicy.MinimumLaunchTCB = sevPolicy.MinimumTCB
+	default:
+		return nil, fmt.Errorf("unsupported SEV product line %q", productLine)
+	}
+	return sevPolicy.SEVOptions(productLine)
 }
 
 func verifySevAttestationV2(attestationDoc string) (*Verification, error) {
