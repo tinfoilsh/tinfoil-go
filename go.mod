@@ -10,7 +10,7 @@ require (
 	github.com/sigstore/sigstore-go v1.2.2
 	github.com/stretchr/testify v1.11.1
 	github.com/tinfoilsh/encrypted-http-body-protocol v0.3.2
-	github.com/tinfoilsh/go-sev-guest v0.0.0-20260818042457-228d7fc41732
+	github.com/tinfoilsh/go-sev-guest v0.0.0-20260818042609-d75c05add84b
 	google.golang.org/protobuf v1.36.11
 )
 
