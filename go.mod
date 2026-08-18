@@ -14,7 +14,7 @@ require (
 	github.com/subosito/gotenv v1.6.0
 	github.com/theupdateframework/go-tuf/v2 v2.4.2
 	github.com/tinfoilsh/encrypted-http-body-protocol v0.3.2
-	github.com/tinfoilsh/go-sev-guest v0.0.0-20260818042457-228d7fc41732
+	github.com/tinfoilsh/go-sev-guest v0.0.0-20260818042609-d75c05add84b
 	google.golang.org/protobuf v1.36.11
 )
 
