@@ -1,6 +1,6 @@
 module github.com/tinfoilsh/tinfoil-go
 
-go 1.26.5
+go 1.26.6
 
 require (
 	github.com/google/go-tdx-guest v0.3.1
