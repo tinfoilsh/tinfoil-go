@@ -159,9 +159,15 @@ func options(p *policy.SEVSNPPolicy, productLine string) (*sevvalidate.Options, 
 		if p.MinimumTCB.FmcSpl != nil || p.MinimumLaunchTCB.FmcSpl != nil {
 			return nil, fmt.Errorf("fmc_spl is not valid for product line %s", productLine)
 		}
+		if p.PlatformInfo.IOMMUWriteSafe {
+			return nil, fmt.Errorf("iommu_write_safe is not valid for product line %s", productLine)
+		}
 	case ProductTurin:
 		if p.MinimumTCB.FmcSpl == nil || p.MinimumLaunchTCB.FmcSpl == nil {
 			return nil, fmt.Errorf("fmc_spl is required for product line %s", productLine)
+		}
+		if !p.PlatformInfo.IOMMUWriteSafe {
+			return nil, fmt.Errorf("iommu_write_safe is required for product line %s", productLine)
 		}
 	default:
 		return nil, fmt.Errorf("unsupported SEV product line %q", productLine)

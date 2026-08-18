@@ -122,6 +122,10 @@ func TestOptionsRejectsInvalidProductFields(t *testing.T) {
 	missingFMC.MinimumTCB = minimumTCB
 	_, err = options(&missingFMC, ProductTurin)
 	assert.ErrorContains(t, err, "fmc_spl is required")
+	missingIOMMUWriteSafe := *turinPolicy.SEVSNP
+	missingIOMMUWriteSafe.PlatformInfo.IOMMUWriteSafe = false
+	_, err = options(&missingIOMMUWriteSafe, ProductTurin)
+	assert.ErrorContains(t, err, "iommu_write_safe is required")
 
 	_, genoaPolicy, err := a.PolicyFor(box3GenoaID, policy.PlatformSEVSNP)
 	require.NoError(t, err)
@@ -131,6 +135,10 @@ func TestOptionsRejectsInvalidProductFields(t *testing.T) {
 	unexpectedFMC.MinimumTCB = minimumTCB
 	_, err = options(&unexpectedFMC, ProductGenoa)
 	assert.ErrorContains(t, err, "fmc_spl is not valid")
+	unexpectedIOMMUWriteSafe := *genoaPolicy.SEVSNP
+	unexpectedIOMMUWriteSafe.PlatformInfo.IOMMUWriteSafe = true
+	_, err = options(&unexpectedIOMMUWriteSafe, ProductGenoa)
+	assert.ErrorContains(t, err, "iommu_write_safe is not valid")
 
 	_, err = options(turinPolicy.SEVSNP, "Milan")
 	assert.ErrorContains(t, err, "unsupported SEV product line")
