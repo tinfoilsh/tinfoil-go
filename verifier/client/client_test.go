@@ -134,21 +134,49 @@ func TestCurrentVerifierVersion(t *testing.T) {
 	}
 }
 
-func TestVerifyFromBundleRejectsVerifiedDomainMismatch(t *testing.T) {
-	client := NewSecureClient("verified.example", defaultRouterRepo)
-	client.setVerifiedState(&GroundTruth{EnclaveHost: "verified.example"})
+func TestVerifyFromBundleRejectsConfiguredDomainMismatch(t *testing.T) {
+	client := NewSecureClient("configured.example", defaultRouterRepo)
+	client.setVerifiedState(&GroundTruth{EnclaveHost: "configured.example"})
 
 	_, err := client.VerifyFromBundle(&attestation.Bundle{Domain: "other.example"})
 
-	assert.EqualError(t, err, `verifyBundle: domain "other.example" does not match verified enclave "verified.example"`)
-	assert.Equal(t, "verified.example", client.Enclave())
-	assert.Equal(t, "verified.example", client.GroundTruth().EnclaveHost)
+	assert.EqualError(t, err, `verifyBundle: domain "other.example" does not match configured enclave "configured.example"`)
+	assert.Equal(t, "configured.example", client.Enclave())
+	assert.Equal(t, "configured.example", client.GroundTruth().EnclaveHost)
 }
 
-func TestBundleDomainAllowsInitialDiscovery(t *testing.T) {
+func TestBundleDomainRejectsInitialConfiguredMismatch(t *testing.T) {
 	client := NewSecureClient("configured.example", defaultRouterRepo)
 
-	assert.NoError(t, client.validateBundleDomain("discovered.example"))
+	assert.EqualError(t, client.validateBundleDomain("discovered.example"),
+		`verifyBundle: domain "discovered.example" does not match configured enclave "configured.example"`)
+}
+
+func TestBundleDomainAllowsAutomaticRouterRotation(t *testing.T) {
+	client := NewSecureClient("", defaultRouterRepo)
+	client.setVerifiedState(&GroundTruth{EnclaveHost: "old-router.example"})
+
+	assert.NoError(t, client.validateBundleDomain("new-router.example"))
+}
+
+func TestAutomaticBundleRecoveryDoesNotPinDiscoveredRouter(t *testing.T) {
+	client := NewSecureClient("", defaultRouterRepo)
+	client.setVerifiedState(&GroundTruth{EnclaveHost: "old-router.example"})
+
+	enclaveURL, repo := client.bundleRequestParameters()
+
+	assert.Empty(t, enclaveURL)
+	assert.Empty(t, repo)
+}
+
+func TestConfiguredBundleRecoveryKeepsCallerConstraints(t *testing.T) {
+	client := NewSecureClient("configured.example", "owner/custom-router")
+	client.setVerifiedState(&GroundTruth{EnclaveHost: "configured.example"})
+
+	enclaveURL, repo := client.bundleRequestParameters()
+
+	assert.Equal(t, "https://configured.example", enclaveURL)
+	assert.Equal(t, "owner/custom-router", repo)
 }
 
 func TestNewDefaultSecureClient(t *testing.T) {

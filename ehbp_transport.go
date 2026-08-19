@@ -37,6 +37,7 @@ const (
 const (
 	defaultTransportMode = TransportEHBP
 	defaultConfigRepo    = "tinfoilsh/confidential-model-router"
+	defaultInferenceHost = "inference.tinfoil.sh"
 )
 
 type clientConfig struct {
@@ -120,6 +121,11 @@ func NewClientWithOptions(opts ...ClientOption) (*Client, error) {
 		if _, err := originOf(cfg.baseURL); err != nil {
 			return nil, fmt.Errorf("invalid base URL: %w", err)
 		}
+		resolvedEnclave, err := resolveEnclaveForBaseURL(cfg.baseURL, cfg.enclave)
+		if err != nil {
+			return nil, err
+		}
+		cfg.enclave = resolvedEnclave
 	}
 
 	var secureClient *client.SecureClient
@@ -141,6 +147,26 @@ func NewClientWithOptions(opts ...ClientOption) (*Client, error) {
 
 	return createClientFromSecureClient(secureClient, cfg.transport, cfg.baseURL,
 		resolveUserCacheSecret(cfg.userCacheSecret, cfg.userCacheSecretSet), cfg.openaiOpts...)
+}
+
+func resolveEnclaveForBaseURL(baseURL, enclave string) (string, error) {
+	origin, err := originOf(baseURL)
+	if err != nil {
+		return "", fmt.Errorf("invalid base URL: %w", err)
+	}
+	if origin != "https://"+defaultInferenceHost {
+		return enclave, nil
+	}
+	if enclave == "" {
+		// inference.tinfoil.sh is a stable enclave identity, not a
+		// router-forwarding proxy. Request its matching bundle instead of
+		// combining a random default-router key with this base URL.
+		return defaultInferenceHost, nil
+	}
+	if enclave != defaultInferenceHost {
+		return "", fmt.Errorf("base URL %q cannot route to enclave %q; use a proxy that forwards %s or connect directly", baseURL, enclave, enclaveURLHeader)
+	}
+	return enclave, nil
 }
 
 type verifiedTransport interface {

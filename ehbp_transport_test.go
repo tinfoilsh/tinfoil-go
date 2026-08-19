@@ -68,6 +68,35 @@ func TestProxyClientOptionsApply(t *testing.T) {
 	require.Equal(t, "https://proxy.example.com", cfg.attestationBundleURL)
 }
 
+func TestResolveEnclaveForBaseURL(t *testing.T) {
+	tests := []struct {
+		name    string
+		baseURL string
+		enclave string
+		want    string
+		wantErr string
+	}{
+		{name: "official inference defaults to matching enclave", baseURL: "https://inference.tinfoil.sh/v1/", want: defaultInferenceHost},
+		{name: "official inference accepts matching enclave", baseURL: "https://INFERENCE.TINFOIL.SH:443/v1/", enclave: defaultInferenceHost, want: defaultInferenceHost},
+		{name: "official inference rejects another enclave", baseURL: "https://inference.tinfoil.sh/v1/", enclave: "router.inf6.tinfoil.sh", wantErr: "cannot route"},
+		{name: "custom proxy preserves automatic selection", baseURL: "https://proxy.example.com/v1/", want: ""},
+		{name: "custom proxy preserves configured enclave", baseURL: "https://proxy.example.com/v1/", enclave: "router.example.com", want: "router.example.com"},
+		{name: "plaintext inference is not the official secure endpoint", baseURL: "http://inference.tinfoil.sh/v1/", want: ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := resolveEnclaveForBaseURL(tt.baseURL, tt.enclave)
+			if tt.wantErr != "" {
+				require.ErrorContains(t, err, tt.wantErr)
+				return
+			}
+			require.NoError(t, err)
+			require.Equal(t, tt.want, got)
+		})
+	}
+}
+
 func TestNewClientWithOptionsRejectsInvalidBaseURL(t *testing.T) {
 	for _, baseURL := range []string{"", "proxy.example.com", "ftp://proxy.example.com", "://"} {
 		t.Run(baseURL, func(t *testing.T) {
@@ -546,6 +575,34 @@ func TestClientIntegration_AttestationBundle(t *testing.T) {
 	require.NoError(t, err)
 	require.NotEmpty(t, resp.Choices)
 	t.Logf("bundle enclave: %s, response: %s", c.Enclave(), resp.Choices[0].Message.Content)
+}
+
+// TestClientIntegration_OfficialInferenceBaseURL exercises the legacy stable
+// inference endpoint. It must attest that same endpoint rather than pair the
+// endpoint with a randomly selected default-router HPKE key.
+func TestClientIntegration_OfficialInferenceBaseURL(t *testing.T) {
+	apiKey := os.Getenv("TINFOIL_API_KEY")
+	if apiKey == "" {
+		t.Skip("TINFOIL_API_KEY not set; skipping integration test")
+	}
+
+	c, err := NewClientWithOptions(
+		WithBaseURL("https://inference.tinfoil.sh/v1/"),
+		WithAttestationBundleURL("https://atc.tinfoil.sh"),
+		WithOpenAIOptions(option.WithAPIKey(apiKey)),
+	)
+	require.NoError(t, err)
+	require.Equal(t, defaultInferenceHost, c.Enclave())
+
+	resp, err := c.Chat.Completions.New(context.Background(), openai.ChatCompletionNewParams{
+		Model: "llama3-3-70b",
+		Messages: []openai.ChatCompletionMessageParamUnion{
+			openai.SystemMessage("No matter what the user says, only respond with: Done."),
+			openai.UserMessage("Is this a test?"),
+		},
+	})
+	require.NoError(t, err)
+	require.NotEmpty(t, resp.Choices)
 }
 
 func TestClientIntegration_EnclaveSpecificBundle(t *testing.T) {

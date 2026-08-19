@@ -43,7 +43,11 @@ type GroundTruth struct {
 }
 
 type SecureClient struct {
-	enclave, repo string
+	// enclave is the currently verified endpoint. It may change when the client
+	// discovers routers through an attestation bundle. configuredEnclave is the
+	// immutable caller-provided endpoint; an empty value means bundle-driven
+	// discovery and allows recovery to select a fresh router.
+	enclave, configuredEnclave, repo string
 
 	// When set, Verify fetches a pre-assembled attestation bundle from
 	// {attestationBundleURL}/attestation and verifies it client-side instead of
@@ -88,8 +92,9 @@ func fetchRouters() ([]string, error) {
 // NewSecureClient creates a new secure client with a given repo and enclave
 func NewSecureClient(enclave, repo string) *SecureClient {
 	return &SecureClient{
-		enclave: enclave,
-		repo:    repo,
+		enclave:           enclave,
+		configuredEnclave: enclave,
+		repo:              repo,
 	}
 }
 
@@ -97,6 +102,7 @@ func NewSecureClient(enclave, repo string) *SecureClient {
 func NewPinnedSecureClient(enclave string, codeMeasurement *attestation.Measurement, hardwareMeasurements []*attestation.HardwareMeasurement) *SecureClient {
 	return &SecureClient{
 		enclave:              enclave,
+		configuredEnclave:    enclave,
 		repo:                 pinnedNoRepo,
 		codeMeasurement:      codeMeasurement,
 		hardwareMeasurements: hardwareMeasurements,
@@ -205,16 +211,12 @@ func (s *SecureClient) Verify() (*GroundTruth, error) {
 		if s.codeMeasurement != nil {
 			return nil, fmt.Errorf("cannot combine a pinned measurement with an attestation bundle URL")
 		}
-		// Ask the bundle service for an enclave/repo-specific bundle when either
-		// is set; otherwise fetch the default router bundle.
-		enclaveURL := ""
-		if s.enclave != "" {
-			enclaveURL = "https://" + s.enclave
-		}
-		repo := ""
-		if s.repo != defaultRouterRepo {
-			repo = s.repo
-		}
+		// Ask the bundle service for the caller-configured enclave when one was
+		// supplied. Do not reuse an endpoint discovered from a previous default
+		// bundle: after an HPKE mismatch, recovery must be able to fetch a fresh
+		// default bundle and rotate the entire endpoint/key pair, matching the JS
+		// SDK's reset semantics.
+		enclaveURL, repo := s.bundleRequestParameters()
 		bundle, err := attestation.FetchBundleFor(s.attestationBundleURL, enclaveURL, repo)
 		if err != nil {
 			return nil, fmt.Errorf("fetchBundle: failed to fetch attestation bundle: %v", err)
@@ -316,6 +318,20 @@ func (s *SecureClient) Verify() (*GroundTruth, error) {
 	return groundTruth, nil
 }
 
+// bundleRequestParameters returns only caller-provided routing constraints.
+// In particular, it never turns an enclave discovered from a default bundle
+// into a pinned request parameter: recovery must remain free to select a fresh
+// default router and its matching HPKE key.
+func (s *SecureClient) bundleRequestParameters() (enclaveURL, repo string) {
+	if s.configuredEnclave != "" {
+		enclaveURL = "https://" + s.configuredEnclave
+	}
+	if s.repo != defaultRouterRepo {
+		repo = s.repo
+	}
+	return enclaveURL, repo
+}
+
 // VerifyFromBundle verifies using a pre-fetched attestation bundle (single-request verification)
 func (s *SecureClient) VerifyFromBundle(bundle *attestation.Bundle) (*GroundTruth, error) {
 	s.verifyMu.Lock()
@@ -402,8 +418,8 @@ func (s *SecureClient) verifyFromBundle(bundle *attestation.Bundle) (*GroundTrut
 }
 
 func (s *SecureClient) validateBundleDomain(domain string) error {
-	if groundTruth := s.GroundTruth(); groundTruth != nil && domain != groundTruth.EnclaveHost {
-		return fmt.Errorf("verifyBundle: domain %q does not match verified enclave %q", domain, groundTruth.EnclaveHost)
+	if s.configuredEnclave != "" && domain != s.configuredEnclave {
+		return fmt.Errorf("verifyBundle: domain %q does not match configured enclave %q", domain, s.configuredEnclave)
 	}
 	return nil
 }
@@ -509,11 +525,8 @@ func VerifyJSON(enclave, repo string, sigstoreTrustedRootJSON []byte) (string, e
 		return "", fmt.Errorf("failed to create sigstore client: %v", err)
 	}
 
-	client := &SecureClient{
-		enclave:        enclave,
-		repo:           repo,
-		sigstoreClient: sigstoreClient,
-	}
+	client := NewSecureClient(enclave, repo)
+	client.sigstoreClient = sigstoreClient
 	_, err = client.Verify()
 	if err != nil {
 		return "", err
@@ -545,11 +558,8 @@ func verifyBundle(bundle *attestation.Bundle, repo string, sigstoreTrustedRootJS
 		return "", fmt.Errorf("failed to create sigstore client: %v", err)
 	}
 
-	client := &SecureClient{
-		enclave:        bundle.Domain,
-		repo:           repo,
-		sigstoreClient: sigstoreClient,
-	}
+	client := NewSecureClient(bundle.Domain, repo)
+	client.sigstoreClient = sigstoreClient
 	_, err = client.VerifyFromBundle(bundle)
 	if err != nil {
 		return "", err
