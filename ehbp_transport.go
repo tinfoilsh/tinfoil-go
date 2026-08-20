@@ -163,10 +163,10 @@ func resolveEnclaveForBaseURL(baseURL, enclave string) (string, error) {
 		// combining a random default-router key with this base URL.
 		return defaultInferenceHost, nil
 	}
-	if enclave != defaultInferenceHost {
+	if !strings.EqualFold(enclave, defaultInferenceHost) {
 		return "", fmt.Errorf("base URL %q cannot route to enclave %q; use a proxy that forwards %s or connect directly", baseURL, enclave, enclaveURLHeader)
 	}
-	return enclave, nil
+	return defaultInferenceHost, nil
 }
 
 type verifiedTransport interface {

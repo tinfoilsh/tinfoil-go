@@ -78,6 +78,7 @@ func TestResolveEnclaveForBaseURL(t *testing.T) {
 	}{
 		{name: "official inference defaults to matching enclave", baseURL: "https://inference.tinfoil.sh/v1/", want: defaultInferenceHost},
 		{name: "official inference accepts matching enclave", baseURL: "https://INFERENCE.TINFOIL.SH:443/v1/", enclave: defaultInferenceHost, want: defaultInferenceHost},
+		{name: "official inference canonicalizes matching enclave case", baseURL: "https://inference.tinfoil.sh/v1/", enclave: "INFERENCE.TINFOIL.SH", want: defaultInferenceHost},
 		{name: "official inference rejects another enclave", baseURL: "https://inference.tinfoil.sh/v1/", enclave: "router.inf6.tinfoil.sh", wantErr: "cannot route"},
 		{name: "custom proxy preserves automatic selection", baseURL: "https://proxy.example.com/v1/", want: ""},
 		{name: "custom proxy preserves configured enclave", baseURL: "https://proxy.example.com/v1/", enclave: "router.example.com", want: "router.example.com"},
