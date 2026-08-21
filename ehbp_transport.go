@@ -292,18 +292,18 @@ func ehbpHTTPClient(secureClient *client.SecureClient, baseURL string) (*http.Cl
 	// rebuilds the transport with the then-current enclave, which keeps the
 	// header correct (including on the retry that follows a key rotation) without
 	// an unsynchronized read of the client's mutable state.
-	buildTransport := func(hpkePublicKeyHex string) (http.RoundTripper, error) {
-		inner, err := buildEHBPTransport(hpkePublicKeyHex)
+	buildTransport := func(verified *client.GroundTruth) (http.RoundTripper, error) {
+		inner, err := buildEHBPTransport(verified.HPKEPublicKey)
 		if err != nil {
 			return nil, err
 		}
 		if baseURL == "" {
 			// The OpenAI client keeps the base URL it received at construction.
-			// Route each direct request to the currently verified bundle domain so
-			// an ATC-driven endpoint/key rotation replaces the pair atomically.
-			return &directEnclaveTransport{enclave: secureClient, transport: inner}, nil
+			// Capture the verified endpoint with the transport's HPKE key so a
+			// concurrent later verification cannot split the route/key pair.
+			return &directEnclaveTransport{enclave: verified.EnclaveHost, transport: inner}, nil
 		}
-		if headerValue, ok := enclaveURLHeaderValue(baseURL, secureClient.Enclave()); ok {
+		if headerValue, ok := enclaveURLHeaderValue(baseURL, verified.EnclaveHost); ok {
 			return &enclaveURLHeaderTransport{
 				enclaveURL: headerValue,
 				transport:  inner,
@@ -312,7 +312,7 @@ func ehbpHTTPClient(secureClient *client.SecureClient, baseURL string) (*http.Cl
 		return inner, nil
 	}
 
-	inner, err := buildTransport(groundTruth.HPKEPublicKey)
+	inner, err := buildTransport(groundTruth)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -325,18 +325,17 @@ func ehbpHTTPClient(secureClient *client.SecureClient, baseURL string) (*http.Cl
 // verified state. The outer host-bound transport has already rejected any
 // caller-supplied foreign origin before this rewrite occurs.
 type directEnclaveTransport struct {
-	enclave   enclaveProvider
+	enclave   string
 	transport http.RoundTripper
 }
 
 func (t *directEnclaveTransport) RoundTrip(req *http.Request) (*http.Response, error) {
-	host := t.enclave.Enclave()
-	if host == "" {
+	if t.enclave == "" {
 		return nil, fmt.Errorf("verified enclave endpoint is empty")
 	}
 	req = req.Clone(req.Context())
 	req.URL.Scheme = "https"
-	req.URL.Host = host
+	req.URL.Host = t.enclave
 	return t.transport.RoundTrip(req)
 }
 
@@ -470,11 +469,11 @@ type ehbpReVerifyingTransport struct {
 	// reverify re-runs attestation and returns an EHBP transport built from the
 	// freshly attested HPKE key.
 	reverify              func() (http.RoundTripper, error)
-	build                 func(string) (http.RoundTripper, error)
+	build                 func(*client.GroundTruth) (http.RoundTripper, error)
 	documentAfterReverify func() *client.VerificationDocument
 }
 
-func newEHBPReVerifyingTransport(secureClient *client.SecureClient, inner http.RoundTripper, build func(hpkePublicKeyHex string) (http.RoundTripper, error)) *ehbpReVerifyingTransport {
+func newEHBPReVerifyingTransport(secureClient *client.SecureClient, inner http.RoundTripper, build func(*client.GroundTruth) (http.RoundTripper, error)) *ehbpReVerifyingTransport {
 	return &ehbpReVerifyingTransport{
 		secureClient:          secureClient,
 		transport:             inner,
@@ -486,7 +485,7 @@ func newEHBPReVerifyingTransport(secureClient *client.SecureClient, inner http.R
 			if err != nil {
 				return nil, err
 			}
-			return build(groundTruth.HPKEPublicKey)
+			return build(groundTruth)
 		},
 	}
 }
@@ -575,7 +574,7 @@ func (t *ehbpReVerifyingTransport) verifyAndReplace() (*client.GroundTruth, erro
 	if err != nil {
 		return nil, err
 	}
-	newTransport, err := t.build(groundTruth.HPKEPublicKey)
+	newTransport, err := t.build(groundTruth)
 	if err != nil {
 		return nil, err
 	}

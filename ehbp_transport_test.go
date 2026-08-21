@@ -257,24 +257,22 @@ func TestHostBoundRoundTripperRejectsForeignHostAndScheme(t *testing.T) {
 	require.Contains(t, err.Error(), "ftp://enclave.example.com")
 }
 
-func TestDirectEnclaveTransportFollowsVerifiedEndpointRotation(t *testing.T) {
-	endpoint := &mutableEnclave{host: "old.example.com"}
+func TestDirectEnclaveTransportKeepsEndpointPairedWithTransportKey(t *testing.T) {
 	var seen []string
 	inner := roundTripFunc(func(req *http.Request) (*http.Response, error) {
 		seen = append(seen, req.URL.Host)
 		return newResponse(http.StatusOK, "ok"), nil
 	})
-	rt := &directEnclaveTransport{enclave: endpoint, transport: inner}
+	rt := &directEnclaveTransport{enclave: "old.example.com", transport: inner}
 	req, err := http.NewRequest(http.MethodGet, "https://old.example.com/v1/models", nil)
 	require.NoError(t, err)
 
 	_, err = rt.RoundTrip(req)
 	require.NoError(t, err)
-	endpoint.host = "new.example.com"
 	_, err = rt.RoundTrip(req)
 	require.NoError(t, err)
 
-	require.Equal(t, []string{"old.example.com", "new.example.com"}, seen)
+	require.Equal(t, []string{"old.example.com", "old.example.com"}, seen)
 	require.Equal(t, "old.example.com", req.URL.Host, "routing must not mutate the caller's request")
 }
 
