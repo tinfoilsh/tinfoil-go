@@ -290,10 +290,12 @@
         "permit_provisional_firmware": false,
         "platform_info": {
           "ciphertext_hiding_dram": false,
-          "ecc_enabled": false,
+          "ecc_enabled": true,
+          "iommu_write_safe": true,
           "rapl_disabled": false,
-          "smt_enabled": true,
-          "tsme_enabled": true
+          "smt_enabled": false,
+          "tsme_enabled": false,
+          "alias_check_complete": true
         },
         "host_data": "0000000000000000000000000000000000000000000000000000000000000000",
         "image_id": "00000000000000000000000000000000",

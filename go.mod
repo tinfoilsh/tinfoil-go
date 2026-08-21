@@ -1,9 +1,8 @@
 module github.com/tinfoilsh/tinfoil-go
 
-go 1.26.5
+go 1.26.6
 
 require (
-	github.com/google/go-sev-guest v0.15.0
 	github.com/google/go-tdx-guest v0.3.1
 	github.com/in-toto/attestation v1.2.0
 	github.com/openai/openai-go/v3 v3.42.0
@@ -11,6 +10,7 @@ require (
 	github.com/sigstore/sigstore-go v1.2.2
 	github.com/stretchr/testify v1.11.1
 	github.com/tinfoilsh/encrypted-http-body-protocol v0.3.2
+	github.com/tinfoilsh/go-sev-guest v0.0.0-20260818055935-bec7bdb637fd
 	google.golang.org/protobuf v1.36.11
 )
 

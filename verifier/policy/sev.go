@@ -114,8 +114,8 @@ func decimalDigits(value string) bool {
 	return true
 }
 
-// TCB holds AMD security patch levels. FmcSpl applies to family 1Ah (Turin)
-// parts only, which are not yet supported for verification.
+// TCB holds AMD security patch levels. FmcSpl applies only to family 1Ah
+// (Turin) parts.
 type TCB struct {
 	FmcSpl   *uint8 `json:"fmc_spl,omitempty"`
 	BlSpl    *uint8 `json:"bl_spl"`
@@ -163,5 +163,6 @@ type SNPPlatform struct {
 	RAPLDisabled         bool `json:"rapl_disabled"`
 	CiphertextHidingDRAM bool `json:"ciphertext_hiding_dram"`
 	AliasCheckComplete   bool `json:"alias_check_complete,omitempty"`
+	IOMMUWriteSafe       bool `json:"iommu_write_safe,omitempty"`
 	TIOEnabled           bool `json:"tio_enabled,omitempty"`
 }

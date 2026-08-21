@@ -7,17 +7,18 @@ import (
 	"strconv"
 	"strings"
 
-	sevabi "github.com/google/go-sev-guest/abi"
-	"github.com/google/go-sev-guest/kds"
-	"github.com/google/go-sev-guest/proto/sevsnp"
-	sevvalidate "github.com/google/go-sev-guest/validate"
+	sevabi "github.com/tinfoilsh/go-sev-guest/abi"
+	"github.com/tinfoilsh/go-sev-guest/kds"
+	"github.com/tinfoilsh/go-sev-guest/proto/sevsnp"
+	sevvalidate "github.com/tinfoilsh/go-sev-guest/validate"
 
 	"github.com/tinfoilsh/tinfoil-go/verifier/policy"
 )
 
-// ProductGenoa is the only AMD product line currently supported by the
-// verifier. Turin (family 1Ah) is not supported yet.
-const ProductGenoa = "Genoa"
+const (
+	ProductGenoa = "Genoa"
+	ProductTurin = "Turin"
+)
 
 // Expectations is the fully translated SEV-SNP expected state, resolved at
 // assembly so that validation performs no translation and no lookups. The
@@ -32,7 +33,7 @@ type Expectations struct {
 // Assemble translates a policy block into the complete expected state for
 // the quote: validation options carrying every policy field, the expected
 // launch measurement, the expected REPORT_DATA, and the endorsed CHIP_ID
-// the policy was selected by. Only Genoa is supported.
+// the policy was selected by.
 func Assemble(p *policy.SEVSNPPolicy, q *Quote, launchDigest []byte, reportData [64]byte) (*Expectations, error) {
 	opts, err := options(p, q.ProductLine())
 	if err != nil {
@@ -140,6 +141,7 @@ func expectedPlatformInfo(p *policy.SEVSNPPolicy) sevabi.SnpPlatformInfo {
 		RAPLDisabled:                p.PlatformInfo.RAPLDisabled,
 		CiphertextHidingDRAMEnabled: p.PlatformInfo.CiphertextHidingDRAM,
 		AliasCheckComplete:          p.PlatformInfo.AliasCheckComplete,
+		IOMMUWriteSafe:              p.PlatformInfo.IOMMUWriteSafe,
 		TIOEnabled:                  p.PlatformInfo.TIOEnabled,
 	}
 }
@@ -149,11 +151,26 @@ func expectedPlatformInfo(p *policy.SEVSNPPolicy) sevabi.SnpPlatformInfo {
 // PlatformInfo as maximum-acceptable masks; strict equality on both is
 // enforced by the companion checks composed in Validate.
 func options(p *policy.SEVSNPPolicy, productLine string) (*sevvalidate.Options, error) {
-	if productLine != ProductGenoa {
-		return nil, fmt.Errorf("unsupported SEV product line %q (only %s is supported)", productLine, ProductGenoa)
-	}
 	if err := p.Validate(); err != nil {
 		return nil, err
+	}
+	switch productLine {
+	case ProductGenoa:
+		if p.MinimumTCB.FmcSpl != nil || p.MinimumLaunchTCB.FmcSpl != nil {
+			return nil, fmt.Errorf("fmc_spl is not valid for product line %s", productLine)
+		}
+		if p.PlatformInfo.IOMMUWriteSafe {
+			return nil, fmt.Errorf("iommu_write_safe is not valid for product line %s", productLine)
+		}
+	case ProductTurin:
+		if p.MinimumTCB.FmcSpl == nil || p.MinimumLaunchTCB.FmcSpl == nil {
+			return nil, fmt.Errorf("fmc_spl is required for product line %s", productLine)
+		}
+		if !p.PlatformInfo.IOMMUWriteSafe {
+			return nil, fmt.Errorf("iommu_write_safe is required for product line %s", productLine)
+		}
+	default:
+		return nil, fmt.Errorf("unsupported SEV product line %q", productLine)
 	}
 	version, err := parseVersion("minimum_api_version", p.MinimumAPIVersion)
 	if err != nil {
@@ -163,8 +180,13 @@ func options(p *policy.SEVSNPPolicy, productLine string) (*sevvalidate.Options, 
 	if err != nil {
 		return nil, err
 	}
-	if p.MinimumTCB.FmcSpl != nil || p.MinimumLaunchTCB.FmcSpl != nil {
-		return nil, fmt.Errorf("fmc_spl is not valid for product line %s", productLine)
+	minimumTCB, err := tcbParts("minimum_tcb", productLine, p.MinimumTCB)
+	if err != nil {
+		return nil, err
+	}
+	minimumLaunchTCB, err := tcbParts("minimum_launch_tcb", productLine, p.MinimumLaunchTCB)
+	if err != nil {
+		return nil, err
 	}
 	// Snapshot so the assembled expectations do not alias the policy.
 	vmpl := *p.VMPL
@@ -194,8 +216,8 @@ func options(p *policy.SEVSNPPolicy, productLine string) (*sevvalidate.Options, 
 		MinimumVersion:                 version,
 		PermitProvisionalFirmware:      p.PermitProvisionalFirmware,
 		PlatformInfo:                   &platformInfo,
-		MinimumTCB:                     tcbParts(p.MinimumTCB),
-		MinimumLaunchTCB:               tcbParts(p.MinimumLaunchTCB),
+		MinimumTCB:                     minimumTCB,
+		MinimumLaunchTCB:               minimumLaunchTCB,
 		VMPL:                           &vmpl,
 		HostData:                       hostData,
 		ImageID:                        imageID,
@@ -205,13 +227,22 @@ func options(p *policy.SEVSNPPolicy, productLine string) (*sevvalidate.Options, 
 	}, nil
 }
 
-func tcbParts(t policy.TCB) kds.TCBParts {
-	return kds.TCBParts{
+func tcbParts(field, productLine string, t policy.TCB) (kds.TCBParts, error) {
+	var fmcSpl uint8
+	if t.FmcSpl != nil {
+		fmcSpl = *t.FmcSpl
+	}
+	parts, err := kds.NewTCBParts(productLine, kds.TCBParts{
+		FmcSpl:   fmcSpl,
 		BlSpl:    *t.BlSpl,
 		TeeSpl:   *t.TeeSpl,
 		SnpSpl:   *t.SnpSpl,
 		UcodeSpl: *t.UcodeSpl,
+	})
+	if err != nil {
+		return kds.TCBParts{}, fmt.Errorf("%s: %w", field, err)
 	}
+	return parts, nil
 }
 
 func parseVersion(name, v string) (uint16, error) {

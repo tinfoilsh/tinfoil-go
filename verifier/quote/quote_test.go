@@ -9,9 +9,9 @@ import (
 	"strings"
 	"testing"
 
-	sevabi "github.com/google/go-sev-guest/abi"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	sevabi "github.com/tinfoilsh/go-sev-guest/abi"
 
 	"github.com/tinfoilsh/tinfoil-go/verifier/envelope"
 	"github.com/tinfoilsh/tinfoil-go/verifier/measurement"
