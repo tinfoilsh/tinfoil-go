@@ -264,7 +264,7 @@ func TestDirectEnclaveTransportKeepsEndpointPairedWithTransportKey(t *testing.T)
 		return newResponse(http.StatusOK, "ok"), nil
 	})
 	rt := &directEnclaveTransport{enclave: "old.example.com", transport: inner}
-	req, err := http.NewRequest(http.MethodGet, "https://old.example.com/v1/models", nil)
+	req, err := http.NewRequest(http.MethodGet, "https://api.openai.com/v1/models", nil)
 	require.NoError(t, err)
 
 	_, err = rt.RoundTrip(req)
@@ -273,7 +273,7 @@ func TestDirectEnclaveTransportKeepsEndpointPairedWithTransportKey(t *testing.T)
 	require.NoError(t, err)
 
 	require.Equal(t, []string{"old.example.com", "old.example.com"}, seen)
-	require.Equal(t, "old.example.com", req.URL.Host, "routing must not mutate the caller's request")
+	require.Equal(t, "api.openai.com", req.URL.Host, "routing must not mutate the caller's request")
 }
 
 func TestHostBoundRoundTripperAllowsNewlyVerifiedEndpoint(t *testing.T) {
