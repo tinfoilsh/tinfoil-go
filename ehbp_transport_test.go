@@ -24,6 +24,12 @@ func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
 	return f(req)
 }
 
+type mutableEnclave struct {
+	host string
+}
+
+func (e *mutableEnclave) Enclave() string { return e.host }
+
 func newResponse(status int, body string) *http.Response {
 	return &http.Response{
 		StatusCode: status,
@@ -66,36 +72,6 @@ func TestProxyClientOptionsApply(t *testing.T) {
 	require.Equal(t, "https://proxy.example.com/", cfg.baseURL)
 	require.True(t, cfg.baseURLSet)
 	require.Equal(t, "https://proxy.example.com", cfg.attestationBundleURL)
-}
-
-func TestResolveEnclaveForBaseURL(t *testing.T) {
-	tests := []struct {
-		name    string
-		baseURL string
-		enclave string
-		want    string
-		wantErr string
-	}{
-		{name: "official inference defaults to matching enclave", baseURL: "https://inference.tinfoil.sh/v1/", want: defaultInferenceHost},
-		{name: "official inference accepts matching enclave", baseURL: "https://INFERENCE.TINFOIL.SH:443/v1/", enclave: defaultInferenceHost, want: defaultInferenceHost},
-		{name: "official inference canonicalizes matching enclave case", baseURL: "https://inference.tinfoil.sh/v1/", enclave: "INFERENCE.TINFOIL.SH", want: defaultInferenceHost},
-		{name: "official inference rejects another enclave", baseURL: "https://inference.tinfoil.sh/v1/", enclave: "router.inf6.tinfoil.sh", wantErr: "cannot route"},
-		{name: "custom proxy preserves automatic selection", baseURL: "https://proxy.example.com/v1/", want: ""},
-		{name: "custom proxy preserves configured enclave", baseURL: "https://proxy.example.com/v1/", enclave: "router.example.com", want: "router.example.com"},
-		{name: "plaintext inference is not the official secure endpoint", baseURL: "http://inference.tinfoil.sh/v1/", want: ""},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got, err := resolveEnclaveForBaseURL(tt.baseURL, tt.enclave)
-			if tt.wantErr != "" {
-				require.ErrorContains(t, err, tt.wantErr)
-				return
-			}
-			require.NoError(t, err)
-			require.Equal(t, tt.want, got)
-		})
-	}
 }
 
 func TestNewClientWithOptionsRejectsInvalidBaseURL(t *testing.T) {
@@ -236,7 +212,7 @@ func TestHostBoundRoundTripperAllowsEnclaveAndProxy(t *testing.T) {
 		calls++
 		return newResponse(http.StatusOK, "ok"), nil
 	})
-	rt := &hostBoundRoundTripper{allowedOrigins: origins, enclave: "enclave.example.com", transport: inner}
+	rt := &hostBoundRoundTripper{allowedOrigins: origins, enclave: &mutableEnclave{host: "enclave.example.com"}, transport: inner}
 
 	for _, target := range []string{
 		"https://enclave.example.com/v1/models",
@@ -260,7 +236,7 @@ func TestHostBoundRoundTripperRejectsForeignHostAndScheme(t *testing.T) {
 		t.Fatalf("inner transport must not be called for a rejected request")
 		return nil, nil
 	})
-	rt := &hostBoundRoundTripper{allowedOrigins: origins, enclave: "enclave.example.com", transport: inner}
+	rt := &hostBoundRoundTripper{allowedOrigins: origins, enclave: &mutableEnclave{host: "enclave.example.com"}, transport: inner}
 
 	foreign, err := http.NewRequest(http.MethodGet, "https://evil.example.com/v1/models", nil)
 	require.NoError(t, err)
@@ -279,6 +255,49 @@ func TestHostBoundRoundTripperRejectsForeignHostAndScheme(t *testing.T) {
 	_, err = rt.RoundTrip(unsupported)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "ftp://enclave.example.com")
+}
+
+func TestDirectEnclaveTransportFollowsVerifiedEndpointRotation(t *testing.T) {
+	endpoint := &mutableEnclave{host: "old.example.com"}
+	var seen []string
+	inner := roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		seen = append(seen, req.URL.Host)
+		return newResponse(http.StatusOK, "ok"), nil
+	})
+	rt := &directEnclaveTransport{enclave: endpoint, transport: inner}
+	req, err := http.NewRequest(http.MethodGet, "https://old.example.com/v1/models", nil)
+	require.NoError(t, err)
+
+	_, err = rt.RoundTrip(req)
+	require.NoError(t, err)
+	endpoint.host = "new.example.com"
+	_, err = rt.RoundTrip(req)
+	require.NoError(t, err)
+
+	require.Equal(t, []string{"old.example.com", "new.example.com"}, seen)
+	require.Equal(t, "old.example.com", req.URL.Host, "routing must not mutate the caller's request")
+}
+
+func TestHostBoundRoundTripperAllowsNewlyVerifiedEndpoint(t *testing.T) {
+	endpoint := &mutableEnclave{host: "old.example.com"}
+	origins, err := allowedOrigins(endpoint.host, "")
+	require.NoError(t, err)
+	var seen string
+	rt := &hostBoundRoundTripper{
+		allowedOrigins: origins,
+		enclave:        endpoint,
+		transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			seen = req.URL.Host
+			return newResponse(http.StatusOK, "ok"), nil
+		}),
+	}
+	endpoint.host = "new.example.com"
+	req, err := http.NewRequest(http.MethodGet, "https://new.example.com/v1/models", nil)
+	require.NoError(t, err)
+
+	_, err = rt.RoundTrip(req)
+	require.NoError(t, err)
+	require.Equal(t, "new.example.com", seen)
 }
 
 func TestBuildEHBPTransportRequiresKey(t *testing.T) {
@@ -576,34 +595,6 @@ func TestClientIntegration_AttestationBundle(t *testing.T) {
 	require.NoError(t, err)
 	require.NotEmpty(t, resp.Choices)
 	t.Logf("bundle enclave: %s, response: %s", c.Enclave(), resp.Choices[0].Message.Content)
-}
-
-// TestClientIntegration_OfficialInferenceBaseURL exercises the legacy stable
-// inference endpoint. It must attest that same endpoint rather than pair the
-// endpoint with a randomly selected default-router HPKE key.
-func TestClientIntegration_OfficialInferenceBaseURL(t *testing.T) {
-	apiKey := os.Getenv("TINFOIL_API_KEY")
-	if apiKey == "" {
-		t.Skip("TINFOIL_API_KEY not set; skipping integration test")
-	}
-
-	c, err := NewClientWithOptions(
-		WithBaseURL("https://inference.tinfoil.sh/v1/"),
-		WithAttestationBundleURL("https://atc.tinfoil.sh"),
-		WithOpenAIOptions(option.WithAPIKey(apiKey)),
-	)
-	require.NoError(t, err)
-	require.Equal(t, defaultInferenceHost, c.Enclave())
-
-	resp, err := c.Chat.Completions.New(context.Background(), openai.ChatCompletionNewParams{
-		Model: "llama3-3-70b",
-		Messages: []openai.ChatCompletionMessageParamUnion{
-			openai.SystemMessage("No matter what the user says, only respond with: Done."),
-			openai.UserMessage("Is this a test?"),
-		},
-	})
-	require.NoError(t, err)
-	require.NotEmpty(t, resp.Choices)
 }
 
 func TestClientIntegration_EnclaveSpecificBundle(t *testing.T) {

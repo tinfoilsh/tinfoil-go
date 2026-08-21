@@ -2,6 +2,8 @@ package client
 
 import (
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"runtime/debug"
 	"strings"
@@ -198,13 +200,21 @@ func TestClientFetchRouters(t *testing.T) {
 	assert.True(t, strings.HasSuffix(routers[0], ".tinfoil.sh"))
 }
 
-func TestClientDefaultClient(t *testing.T) {
-	defaultClient := newFallbackClient()
-	enclave := defaultClient.Enclave()
-	assert.NotEmpty(t, enclave)
+func TestNewDefaultClientFailsClosedWhenATCReturnsNoRouters(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`[]`))
+	}))
+	defer server.Close()
 
-	_, err := defaultClient.Verify()
-	assert.NoError(t, err)
+	originalRouterURL := defaultRouterURL
+	defaultRouterURL = server.URL
+	t.Cleanup(func() { defaultRouterURL = originalRouterURL })
+
+	secureClient, err := NewDefaultClient()
+
+	assert.Nil(t, secureClient)
+	assert.EqualError(t, err, "ATC returned no routers")
 }
 
 func TestVerifyFromBundle(t *testing.T) {

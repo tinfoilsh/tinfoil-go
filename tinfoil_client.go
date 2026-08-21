@@ -90,7 +90,7 @@ type Client struct {
 	*openai.Client
 	secureClient      *client.SecureClient
 	httpClient        *http.Client
-	enclave, repo     string
+	repo              string
 	transport         TransportMode
 	verifiedTransport verifiedTransport
 }
@@ -136,7 +136,6 @@ func createClientFromSecureClient(secureClient *client.SecureClient, mode Transp
 		Client:            &openaiClient,
 		secureClient:      secureClient,
 		httpClient:        httpClient,
-		enclave:           secureClient.Enclave(),
 		repo:              secureClient.Repo(),
 		transport:         mode,
 		verifiedTransport: securedClient.transport,
@@ -144,7 +143,7 @@ func createClientFromSecureClient(secureClient *client.SecureClient, mode Transp
 }
 
 func (c *Client) Enclave() string {
-	return c.enclave
+	return c.secureClient.Enclave()
 }
 
 func (c *Client) Repo() string {

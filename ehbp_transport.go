@@ -37,7 +37,6 @@ const (
 const (
 	defaultTransportMode = TransportEHBP
 	defaultConfigRepo    = "tinfoilsh/confidential-model-router"
-	defaultInferenceHost = "inference.tinfoil.sh"
 )
 
 type clientConfig struct {
@@ -121,11 +120,6 @@ func NewClientWithOptions(opts ...ClientOption) (*Client, error) {
 		if _, err := originOf(cfg.baseURL); err != nil {
 			return nil, fmt.Errorf("invalid base URL: %w", err)
 		}
-		resolvedEnclave, err := resolveEnclaveForBaseURL(cfg.baseURL, cfg.enclave)
-		if err != nil {
-			return nil, err
-		}
-		cfg.enclave = resolvedEnclave
 	}
 
 	var secureClient *client.SecureClient
@@ -147,26 +141,6 @@ func NewClientWithOptions(opts ...ClientOption) (*Client, error) {
 
 	return createClientFromSecureClient(secureClient, cfg.transport, cfg.baseURL,
 		resolveUserCacheSecret(cfg.userCacheSecret, cfg.userCacheSecretSet), cfg.openaiOpts...)
-}
-
-func resolveEnclaveForBaseURL(baseURL, enclave string) (string, error) {
-	origin, err := originOf(baseURL)
-	if err != nil {
-		return "", fmt.Errorf("invalid base URL: %w", err)
-	}
-	if origin != "https://"+defaultInferenceHost {
-		return enclave, nil
-	}
-	if enclave == "" {
-		// inference.tinfoil.sh is a stable enclave identity, not a
-		// router-forwarding proxy. Request its matching bundle instead of
-		// combining a random default-router key with this base URL.
-		return defaultInferenceHost, nil
-	}
-	if !strings.EqualFold(enclave, defaultInferenceHost) {
-		return "", fmt.Errorf("base URL %q cannot route to enclave %q; use a proxy that forwards %s or connect directly", baseURL, enclave, enclaveURLHeader)
-	}
-	return defaultInferenceHost, nil
 }
 
 type verifiedTransport interface {
@@ -222,7 +196,7 @@ func secureHTTPClient(secureClient *client.SecureClient, mode TransportMode, bas
 	}
 	httpClient.Transport = &hostBoundRoundTripper{
 		allowedOrigins: origins,
-		enclave:        secureClient.Enclave(),
+		enclave:        secureClient,
 		transport:      transport,
 	}
 	return &securedHTTPClient{
@@ -258,16 +232,25 @@ func allowedOrigins(enclave, baseURL string) (map[string]struct{}, error) {
 // API key, to an arbitrary host.
 type hostBoundRoundTripper struct {
 	allowedOrigins map[string]struct{}
-	enclave        string
+	enclave        enclaveProvider
 	transport      http.RoundTripper
 }
 
 func (t *hostBoundRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
 	origin := normalizedOrigin(req.URL)
-	if _, ok := t.allowedOrigins[origin]; !ok {
-		return nil, fmt.Errorf("refusing to send request to %q: client is bound to enclave %q", origin, t.enclave)
+	_, staticallyAllowed := t.allowedOrigins[origin]
+	currentOrigin, err := originOf("https://" + t.enclave.Enclave())
+	if err != nil {
+		return nil, fmt.Errorf("invalid verified enclave: %w", err)
+	}
+	if !staticallyAllowed && origin != currentOrigin {
+		return nil, fmt.Errorf("refusing to send request to %q: client is bound to enclave %q", origin, t.enclave.Enclave())
 	}
 	return t.transport.RoundTrip(req)
+}
+
+type enclaveProvider interface {
+	Enclave() string
 }
 
 // tlsPinnedHTTPClient returns the enclave-pinned HTTP client that re-verifies
@@ -314,6 +297,12 @@ func ehbpHTTPClient(secureClient *client.SecureClient, baseURL string) (*http.Cl
 		if err != nil {
 			return nil, err
 		}
+		if baseURL == "" {
+			// The OpenAI client keeps the base URL it received at construction.
+			// Route each direct request to the currently verified bundle domain so
+			// an ATC-driven endpoint/key rotation replaces the pair atomically.
+			return &directEnclaveTransport{enclave: secureClient, transport: inner}, nil
+		}
 		if headerValue, ok := enclaveURLHeaderValue(baseURL, secureClient.Enclave()); ok {
 			return &enclaveURLHeaderTransport{
 				enclaveURL: headerValue,
@@ -330,6 +319,25 @@ func ehbpHTTPClient(secureClient *client.SecureClient, baseURL string) (*http.Cl
 
 	transport := newEHBPReVerifyingTransport(secureClient, inner, buildTransport)
 	return &http.Client{Transport: transport}, transport, nil
+}
+
+// directEnclaveTransport routes a request to the endpoint in the active
+// verified state. The outer host-bound transport has already rejected any
+// caller-supplied foreign origin before this rewrite occurs.
+type directEnclaveTransport struct {
+	enclave   enclaveProvider
+	transport http.RoundTripper
+}
+
+func (t *directEnclaveTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	host := t.enclave.Enclave()
+	if host == "" {
+		return nil, fmt.Errorf("verified enclave endpoint is empty")
+	}
+	req = req.Clone(req.Context())
+	req.URL.Scheme = "https"
+	req.URL.Host = host
+	return t.transport.RoundTrip(req)
 }
 
 // enclaveURLHeaderValue returns the X-Tinfoil-Enclave-Url header value and
