@@ -2,6 +2,8 @@ package client
 
 import (
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"runtime/debug"
 	"strings"
@@ -134,21 +136,49 @@ func TestCurrentVerifierVersion(t *testing.T) {
 	}
 }
 
-func TestVerifyFromBundleRejectsVerifiedDomainMismatch(t *testing.T) {
-	client := NewSecureClient("verified.example", defaultRouterRepo)
-	client.setVerifiedState(&GroundTruth{EnclaveHost: "verified.example"})
+func TestVerifyFromBundleRejectsConfiguredDomainMismatch(t *testing.T) {
+	client := NewSecureClient("configured.example", defaultRouterRepo)
+	client.setVerifiedState(&GroundTruth{EnclaveHost: "configured.example"})
 
 	_, err := client.VerifyFromBundle(&attestation.Bundle{Domain: "other.example"})
 
-	assert.EqualError(t, err, `verifyBundle: domain "other.example" does not match verified enclave "verified.example"`)
-	assert.Equal(t, "verified.example", client.Enclave())
-	assert.Equal(t, "verified.example", client.GroundTruth().EnclaveHost)
+	assert.EqualError(t, err, `verifyBundle: domain "other.example" does not match configured enclave "configured.example"`)
+	assert.Equal(t, "configured.example", client.Enclave())
+	assert.Equal(t, "configured.example", client.GroundTruth().EnclaveHost)
 }
 
-func TestBundleDomainAllowsInitialDiscovery(t *testing.T) {
+func TestBundleDomainRejectsInitialConfiguredMismatch(t *testing.T) {
 	client := NewSecureClient("configured.example", defaultRouterRepo)
 
-	assert.NoError(t, client.validateBundleDomain("discovered.example"))
+	assert.EqualError(t, client.validateBundleDomain("discovered.example"),
+		`verifyBundle: domain "discovered.example" does not match configured enclave "configured.example"`)
+}
+
+func TestBundleDomainAllowsAutomaticRouterRotation(t *testing.T) {
+	client := NewSecureClient("", defaultRouterRepo)
+	client.setVerifiedState(&GroundTruth{EnclaveHost: "old-router.example"})
+
+	assert.NoError(t, client.validateBundleDomain("new-router.example"))
+}
+
+func TestAutomaticBundleRecoveryDoesNotPinDiscoveredRouter(t *testing.T) {
+	client := NewSecureClient("", defaultRouterRepo)
+	client.setVerifiedState(&GroundTruth{EnclaveHost: "old-router.example"})
+
+	enclaveURL, repo := client.bundleRequestParameters()
+
+	assert.Empty(t, enclaveURL)
+	assert.Empty(t, repo)
+}
+
+func TestConfiguredBundleRecoveryKeepsCallerConstraints(t *testing.T) {
+	client := NewSecureClient("configured.example", "owner/custom-router")
+	client.setVerifiedState(&GroundTruth{EnclaveHost: "configured.example"})
+
+	enclaveURL, repo := client.bundleRequestParameters()
+
+	assert.Equal(t, "https://configured.example", enclaveURL)
+	assert.Equal(t, "owner/custom-router", repo)
 }
 
 func TestNewDefaultSecureClient(t *testing.T) {
@@ -170,13 +200,21 @@ func TestClientFetchRouters(t *testing.T) {
 	assert.True(t, strings.HasSuffix(routers[0], ".tinfoil.sh"))
 }
 
-func TestClientDefaultClient(t *testing.T) {
-	defaultClient := newFallbackClient()
-	enclave := defaultClient.Enclave()
-	assert.NotEmpty(t, enclave)
+func TestNewDefaultClientFailsClosedWhenATCReturnsNoRouters(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`[]`))
+	}))
+	defer server.Close()
 
-	_, err := defaultClient.Verify()
-	assert.NoError(t, err)
+	originalRouterURL := defaultRouterURL
+	defaultRouterURL = server.URL
+	t.Cleanup(func() { defaultRouterURL = originalRouterURL })
+
+	secureClient, err := NewDefaultClient()
+
+	assert.Nil(t, secureClient)
+	assert.EqualError(t, err, "ATC returned no routers")
 }
 
 func TestVerifyFromBundle(t *testing.T) {

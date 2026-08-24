@@ -24,6 +24,12 @@ func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
 	return f(req)
 }
 
+type mutableEnclave struct {
+	host string
+}
+
+func (e *mutableEnclave) Enclave() string { return e.host }
+
 func newResponse(status int, body string) *http.Response {
 	return &http.Response{
 		StatusCode: status,
@@ -206,7 +212,7 @@ func TestHostBoundRoundTripperAllowsEnclaveAndProxy(t *testing.T) {
 		calls++
 		return newResponse(http.StatusOK, "ok"), nil
 	})
-	rt := &hostBoundRoundTripper{allowedOrigins: origins, enclave: "enclave.example.com", transport: inner}
+	rt := &hostBoundRoundTripper{allowedOrigins: origins, enclave: &mutableEnclave{host: "enclave.example.com"}, transport: inner}
 
 	for _, target := range []string{
 		"https://enclave.example.com/v1/models",
@@ -230,7 +236,7 @@ func TestHostBoundRoundTripperRejectsForeignHostAndScheme(t *testing.T) {
 		t.Fatalf("inner transport must not be called for a rejected request")
 		return nil, nil
 	})
-	rt := &hostBoundRoundTripper{allowedOrigins: origins, enclave: "enclave.example.com", transport: inner}
+	rt := &hostBoundRoundTripper{allowedOrigins: origins, enclave: &mutableEnclave{host: "enclave.example.com"}, transport: inner}
 
 	foreign, err := http.NewRequest(http.MethodGet, "https://evil.example.com/v1/models", nil)
 	require.NoError(t, err)
@@ -249,6 +255,47 @@ func TestHostBoundRoundTripperRejectsForeignHostAndScheme(t *testing.T) {
 	_, err = rt.RoundTrip(unsupported)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "ftp://enclave.example.com")
+}
+
+func TestDirectEnclaveTransportKeepsEndpointPairedWithTransportKey(t *testing.T) {
+	var seen []string
+	inner := roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		seen = append(seen, req.URL.Host)
+		return newResponse(http.StatusOK, "ok"), nil
+	})
+	rt := &directEnclaveTransport{enclave: "old.example.com", transport: inner}
+	req, err := http.NewRequest(http.MethodGet, "https://api.openai.com/v1/models", nil)
+	require.NoError(t, err)
+
+	_, err = rt.RoundTrip(req)
+	require.NoError(t, err)
+	_, err = rt.RoundTrip(req)
+	require.NoError(t, err)
+
+	require.Equal(t, []string{"old.example.com", "old.example.com"}, seen)
+	require.Equal(t, "api.openai.com", req.URL.Host, "routing must not mutate the caller's request")
+}
+
+func TestHostBoundRoundTripperAllowsNewlyVerifiedEndpoint(t *testing.T) {
+	endpoint := &mutableEnclave{host: "old.example.com"}
+	origins, err := allowedOrigins(endpoint.host, "")
+	require.NoError(t, err)
+	var seen string
+	rt := &hostBoundRoundTripper{
+		allowedOrigins: origins,
+		enclave:        endpoint,
+		transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			seen = req.URL.Host
+			return newResponse(http.StatusOK, "ok"), nil
+		}),
+	}
+	endpoint.host = "new.example.com"
+	req, err := http.NewRequest(http.MethodGet, "https://new.example.com/v1/models", nil)
+	require.NoError(t, err)
+
+	_, err = rt.RoundTrip(req)
+	require.NoError(t, err)
+	require.Equal(t, "new.example.com", seen)
 }
 
 func TestBuildEHBPTransportRequiresKey(t *testing.T) {
