@@ -136,9 +136,9 @@ func authenticateReferenceValues(doc *envelope.Document, repo string) (*provenan
 
 // VerifyV3 runs the single-request v3 flow against the client's enclave:
 // generate a fresh nonce, fetch the document (evidence + collateral) in one
-// request, verify it, and bind the TLS channel to the endorsed key. On
-// success the client's ground truth is updated so HTTPClient enforces the
-// endorsed TLS key on every subsequent connection.
+// request, verify it, and recover its endorsed transport keys. On success the
+// client's ground truth is updated so the first and every subsequent request
+// enforce the endorsed TLS or HPKE key.
 //
 // The enclave fetch is the only network request: all collateral travels in
 // the document and Sigstore verification uses the embedded trust root.
@@ -163,8 +163,8 @@ func (s *SecureClient) verifyV3() (*VerifiedDocumentV3, error) {
 		return nil, err
 	}
 
-	// Channel binding: the live TLS key must equal the endorsed fingerprint.
-	// Enforced again per-connection by TLSBoundRoundTripper.
+	// Recover the transport keys bound into the verified CPU report. The
+	// selected transport enforces its key before sending the first request.
 	tlsFP, err := verified.TLSPublicKeyFP()
 	if err != nil {
 		return nil, fmt.Errorf("binding: %w", err)
@@ -173,10 +173,6 @@ func (s *SecureClient) verifyV3() (*VerifiedDocumentV3, error) {
 	if err != nil {
 		return nil, fmt.Errorf("binding: %w", err)
 	}
-	if err := enclaveValidPubKey(s.enclave, tlsFP); err != nil {
-		return nil, fmt.Errorf("binding: %w", err)
-	}
-
 	// Fingerprints mirror the legacy flow for consumers that display or
 	// compare them. TDX fingerprints incorporate the platform registers,
 	// which in v3 come from the verified quote itself (their values were
