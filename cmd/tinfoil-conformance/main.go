@@ -6,6 +6,8 @@
 // `tinfoil-conformance capabilities` prints the SDK's capabilities.
 // `tinfoil-conformance capture` fetches a live enclave's v3 attestation and
 // freezes it as a real-frozen fixture (see capture.go).
+// `tinfoil-conformance live-verify` verifies a live enclave through the public
+// production entry point and binds the TLS channel (see live.go).
 package main
 
 import (
@@ -19,7 +21,7 @@ import (
 
 func main() {
 	if len(os.Args) < 2 {
-		fmt.Fprintln(os.Stderr, "usage: tinfoil-conformance <stage>|capabilities|capture")
+		fmt.Fprintln(os.Stderr, "usage: tinfoil-conformance <stage>|capabilities|capture|live-verify")
 		os.Exit(conformance.ExitMalformed)
 	}
 	cmd := os.Args[1]
@@ -31,6 +33,10 @@ func main() {
 
 	if cmd == "capture" {
 		os.Exit(runCapture(os.Args[2:]))
+	}
+
+	if cmd == "live-verify" {
+		os.Exit(runLive())
 	}
 
 	var in conformance.Input

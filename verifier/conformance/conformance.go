@@ -91,6 +91,9 @@ type AcceptOutputs struct {
 	// these is the point of verification, so every SDK must surface them.
 	TLSPublicKeyFP string `json:"tls_public_key_fp,omitempty"`
 	HPKEPublicKey  string `json:"hpke_public_key,omitempty"`
+	// ChannelBinding is set by the live-verify integration lane after the
+	// live transport key was matched against the endorsed one.
+	ChannelBinding string `json:"channel_binding,omitempty"`
 }
 
 // Measurement mirrors verifier/measurement.Measurement as plain JSON.

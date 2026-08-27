@@ -10,8 +10,8 @@ import "time"
 
 // SetAMDRoot injects a trust anchor (ASK+ARK PEM) for authenticating synthetic
 // reports; ResetAMDRoot restores the embedded Genoa root.
-func SetAMDRoot(pem []byte) { amdRootPEM = pem }
-func ResetAMDRoot()         { amdRootPEM = askArkGenoaPEM }
+func SetAMDRoot(pem []byte) { amdRootPEMOverride = pem }
+func ResetAMDRoot()         { amdRootPEMOverride = nil }
 
 // SetVerificationTime pins the validity-window clock so the harness can replay
 // a frozen document at its capture time; ResetVerificationTime restores time.Now.

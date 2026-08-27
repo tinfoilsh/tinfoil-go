@@ -20,6 +20,8 @@ func Capabilities() map[string]any {
 			"stages_supported":   []string{StageVerify, StageCheckEnvelope, StageAuthenticateProvenance, StageAssemblePolicy, StageAuthenticateQuote},
 			"synthetic_roots":    map[string]bool{"amd": true, "intel": true, "sigstore": true},
 			"freshness_enforced": true,
+			"live_verify":        true,
+			"channel_binding":    "tls-spki",
 		},
 	}
 }
