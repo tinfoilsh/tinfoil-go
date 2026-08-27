@@ -3,15 +3,12 @@
 package conformance
 
 import (
-	"crypto/tls"
 	"encoding/base64"
 	"encoding/hex"
-	"net"
 	"os"
 	"testing"
 	"time"
 
-	"github.com/tinfoilsh/tinfoil-go/verifier/client"
 	"github.com/tinfoilsh/tinfoil-go/verifier/envelope"
 )
 
@@ -58,7 +55,7 @@ func TestLiveVerification(t *testing.T) {
 	// actually presents on the wire. This is the whole point of attestation —
 	// verifying the document lets the caller trust this connection.
 	if fp := out.Outputs.TLSPublicKeyFP; fp != "" {
-		live, err := tlsSPKIFingerprint(host)
+		live, err := TLSSPKIFingerprint(host)
 		if err != nil {
 			t.Fatalf("dialing %s for channel binding: %v", host, err)
 		}
@@ -74,26 +71,4 @@ func TestLiveVerification(t *testing.T) {
 	if _, code := Run(StageVerify, in); code != ExitAccepted {
 		t.Fatalf("pinned-time replay of the live document did not accept (exit %d)", code)
 	}
-}
-
-// tlsSPKIFingerprint dials host:443 and returns the SDK's canonical SPKI
-// fingerprint of the presented leaf (client.ConnectionCertFP — the same
-// computation TLSBoundRoundTripper enforces). Certificate-chain verification is
-// skipped on purpose: trust comes from matching the attested fingerprint, not
-// the public PKI.
-func tlsSPKIFingerprint(host string) (string, error) {
-	addr, serverName := host, host
-	if h, _, err := net.SplitHostPort(host); err == nil {
-		serverName = h // host already carries a port
-	} else {
-		addr = net.JoinHostPort(host, "443")
-	}
-	dialer := &net.Dialer{Timeout: 10 * time.Second}
-	conn, err := tls.DialWithDialer(dialer, "tcp", addr,
-		&tls.Config{ServerName: serverName, InsecureSkipVerify: true}) //nolint:gosec // bound by SPKI, not PKI
-	if err != nil {
-		return "", err
-	}
-	defer conn.Close()
-	return client.ConnectionCertFP(conn.ConnectionState())
 }
