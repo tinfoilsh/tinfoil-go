@@ -582,3 +582,14 @@ func TestClientIntegration_EnclaveSpecificBundle(t *testing.T) {
 	require.NoError(t, err)
 	require.NotEmpty(t, resp.Choices)
 }
+
+func TestNewClientWithOptionsRejectsRepoWithoutEnclave(t *testing.T) {
+	_, err := NewClientWithOptions(WithRepo("tinfoilsh/confidential-llama3-3-70b"))
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "needs an enclave to verify")
+
+	// Naming the default repo explicitly is not a downgrade: it is what the fallback verifies against.
+	_, err = NewClientWithOptions(WithRepo(defaultConfigRepo), WithEnclave("enclave.example.com"))
+	require.Error(t, err) // no such enclave, but not the configuration error
+	require.NotContains(t, err.Error(), "needs an enclave to verify")
+}

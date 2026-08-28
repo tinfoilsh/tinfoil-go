@@ -283,10 +283,10 @@ func TestUserCacheSecretFallsBackWhenHomeNotADirectory(t *testing.T) {
 	require.NotEmpty(t, resolveUserCacheSecret("", false))
 }
 
-// captureTransport returns a userCacheSecretTransport whose inner round
+// captureTransport returns a sealedBodyTransport whose inner round
 // tripper records the outgoing body.
-func captureTransport(secret string, gotBody *[]byte, gotReq **http.Request) *userCacheSecretTransport {
-	return &userCacheSecretTransport{
+func captureTransport(secret string, gotBody *[]byte, gotReq **http.Request) *sealedBodyTransport {
+	return &sealedBodyTransport{
 		secret: secret,
 		transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
 			if req.Body != nil {
@@ -531,7 +531,7 @@ func TestUserCacheSecretThroughOpenAIClient(t *testing.T) {
 	}))
 	defer server.Close()
 
-	httpClient := &http.Client{Transport: &userCacheSecretTransport{
+	httpClient := &http.Client{Transport: &sealedBodyTransport{
 		secret:    "client-level",
 		transport: http.DefaultTransport,
 	}}
