@@ -73,13 +73,14 @@ func TestValidateFreshnessTime(t *testing.T) {
 	}
 	loggedAt, err := validateFreshnessTime(timestamps, now, MaxFreshnessAge)
 	require.NoError(t, err)
-	assert.Equal(t, now.Add(-3*time.Hour), loggedAt)
+	assert.Equal(t, now.Add(-4*time.Hour), loggedAt)
 
 	_, err = validateFreshnessTime(nil, now, MaxFreshnessAge)
-	assert.ErrorContains(t, err, "no verified transparency-log timestamp")
+	assert.ErrorContains(t, err, "no verified authenticated timestamp")
 
-	_, err = validateFreshnessTime([]verify.TimestampVerificationResult{{Type: "TimestampAuthority", Timestamp: now.Add(-time.Hour)}}, now, MaxFreshnessAge)
-	assert.ErrorContains(t, err, "no verified transparency-log timestamp")
+	timestampedAt, err := validateFreshnessTime([]verify.TimestampVerificationResult{{Type: "TimestampAuthority", Timestamp: now.Add(-time.Hour)}}, now, MaxFreshnessAge)
+	require.NoError(t, err)
+	assert.Equal(t, now.Add(-time.Hour), timestampedAt)
 
 	for _, tt := range []struct {
 		name   string
@@ -105,7 +106,7 @@ func TestValidateFreshnessTime(t *testing.T) {
 		})
 	}
 
-	dayOld := []verify.TimestampVerificationResult{{Type: "Tlog", Timestamp: now.Add(-25 * time.Hour)}}
+	dayOld := []verify.TimestampVerificationResult{{Type: "TimestampAuthority", Timestamp: now.Add(-25 * time.Hour)}}
 	_, err = validateFreshnessTime(dayOld, now, 24*time.Hour)
 	assert.ErrorContains(t, err, "stale")
 	_, err = validateFreshnessTime(dayOld, now, 30*24*time.Hour)
