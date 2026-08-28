@@ -122,6 +122,11 @@ func NewClientWithOptions(opts ...ClientOption) (*Client, error) {
 		}
 	}
 
+	// With no enclave the client falls back to the default routers, which are verified against the default repo.
+	if cfg.enclave == "" && cfg.attestationBundleURL == "" && cfg.repo != defaultConfigRepo {
+		return nil, fmt.Errorf("WithRepo(%q) needs an enclave to verify: with none set the client falls back to the default routers, which are verified against %s", cfg.repo, defaultConfigRepo)
+	}
+
 	var secureClient *client.SecureClient
 	switch {
 	case cfg.attestationBundleURL != "":
@@ -139,13 +144,15 @@ func NewClientWithOptions(opts ...ClientOption) (*Client, error) {
 		secureClient = client.NewSecureClient(cfg.enclave, cfg.repo)
 	}
 
-	return createClientFromSecureClient(secureClient, cfg.transport, cfg.baseURL,
+	return createClientFromSecureClient(secureClient, cfg.transport, cfg.baseURL, cfg.attestationBundleURL,
 		resolveUserCacheSecret(cfg.userCacheSecret, cfg.userCacheSecretSet), cfg.openaiOpts...)
 }
 
 type verifiedTransport interface {
 	verifyAndReplace() (*client.GroundTruth, error)
 	verificationDocument() *client.VerificationDocument
+	// activeEnclave names the enclave traffic is secured to, which EHBP moves as the gateway routes.
+	activeEnclave() string
 }
 
 type securedHTTPClient struct {
@@ -156,7 +163,7 @@ type securedHTTPClient struct {
 // secureHTTPClient builds an HTTP client and its verification-state owner for
 // the requested transport mode. The HTTP client is bound to the verified
 // enclave and configured proxy, if any.
-func secureHTTPClient(secureClient *client.SecureClient, mode TransportMode, baseURL, userCacheSecret string) (*securedHTTPClient, error) {
+func secureHTTPClient(secureClient *client.SecureClient, mode TransportMode, baseURL, attestationBundleURL, userCacheSecret string) (*securedHTTPClient, error) {
 	var (
 		httpClient    *http.Client
 		verifiedState verifiedTransport
@@ -166,7 +173,7 @@ func secureHTTPClient(secureClient *client.SecureClient, mode TransportMode, bas
 	case TransportTLS:
 		httpClient, verifiedState, err = tlsPinnedHTTPClient(secureClient)
 	case TransportEHBP, "":
-		httpClient, verifiedState, err = ehbpHTTPClient(secureClient, baseURL)
+		httpClient, verifiedState, err = ehbpHTTPClient(secureClient, baseURL, attestationBundleURL)
 	default:
 		return nil, fmt.Errorf("unknown transport mode: %q", mode)
 	}
@@ -179,16 +186,7 @@ func secureHTTPClient(secureClient *client.SecureClient, mode TransportMode, bas
 		}
 	}
 
-	// The cache-secret layer sits above the sealing transport, so the field it
-	// injects is encrypted with the rest of the body (EHBP) or sent over the
-	// pinned connection (TLS).
-	transport := httpClient.Transport
-	if userCacheSecret != "" {
-		transport = &userCacheSecretTransport{
-			secret:    userCacheSecret,
-			transport: transport,
-		}
-	}
+	transport := sealedRequestTransport(httpClient.Transport, mode, userCacheSecret)
 
 	origins, err := allowedOrigins(secureClient.Enclave(), baseURL)
 	if err != nil {
@@ -203,6 +201,18 @@ func secureHTTPClient(secureClient *client.SecureClient, mode TransportMode, bas
 		client:    httpClient,
 		transport: verifiedState,
 	}, nil
+}
+
+func sealedRequestTransport(sealing http.RoundTripper, mode TransportMode, userCacheSecret string) http.RoundTripper {
+	routing := mode != TransportTLS
+	if !routing && userCacheSecret == "" {
+		return sealing
+	}
+	return &sealedBodyTransport{
+		secret:    userCacheSecret,
+		routing:   routing,
+		transport: sealing,
+	}
 }
 
 // allowedOrigins returns the set of origins a secured request may target: the
@@ -267,13 +277,30 @@ func tlsPinnedHTTPClient(secureClient *client.SecureClient) (*http.Client, *reVe
 // the server rotates its HPKE key. When baseURL routes requests through a proxy
 // whose origin differs from the enclave's, the client adds the
 // X-Tinfoil-Enclave-Url header so the proxy can forward to the verified enclave.
-func ehbpHTTPClient(secureClient *client.SecureClient, baseURL string) (*http.Client, *ehbpReVerifyingTransport, error) {
+func ehbpHTTPClient(secureClient *client.SecureClient, baseURL, attestationBundleURL string) (*http.Client, verifiedTransport, error) {
+	initial, err := ehbpTransportFor(secureClient, baseURL)
+	if err != nil {
+		return nil, nil, err
+	}
+	// A replica the gateway names is attested with this client's own configuration, so a redirect cannot downgrade it.
+	transport := newSealFollowingTransport(secureClient.Enclave(), initial, func(enclave string) (*ehbpReVerifyingTransport, error) {
+		next := client.NewSecureClient(enclave, secureClient.Repo())
+		if attestationBundleURL != "" {
+			next.SetAttestationBundleURL(attestationBundleURL)
+		}
+		return ehbpTransportFor(next, baseURL)
+	})
+	return &http.Client{Transport: transport}, transport, nil
+}
+
+// ehbpTransportFor attests one enclave and returns the transport that seals bodies to it.
+func ehbpTransportFor(secureClient *client.SecureClient, baseURL string) (*ehbpReVerifyingTransport, error) {
 	groundTruth := secureClient.GroundTruth()
 	if groundTruth == nil {
 		var err error
 		groundTruth, err = secureClient.Verify()
 		if err != nil {
-			return nil, nil, fmt.Errorf("failed to verify enclave: %w", err)
+			return nil, fmt.Errorf("failed to verify enclave: %w", err)
 		}
 	}
 
@@ -299,11 +326,9 @@ func ehbpHTTPClient(secureClient *client.SecureClient, baseURL string) (*http.Cl
 
 	inner, err := buildTransport(groundTruth.HPKEPublicKey)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
-
-	transport := newEHBPReVerifyingTransport(secureClient, inner, buildTransport)
-	return &http.Client{Transport: transport}, transport, nil
+	return newEHBPReVerifyingTransport(secureClient, inner, buildTransport), nil
 }
 
 // enclaveURLHeaderValue returns the X-Tinfoil-Enclave-Url header value and
@@ -525,6 +550,10 @@ func (t *ehbpReVerifyingTransport) replace(transport http.RoundTripper, document
 	t.document = document
 	t.generation++
 	t.mu.Unlock()
+}
+
+func (t *ehbpReVerifyingTransport) activeEnclave() string {
+	return t.secureClient.Enclave()
 }
 
 func (t *ehbpReVerifyingTransport) verificationDocument() *client.VerificationDocument {
