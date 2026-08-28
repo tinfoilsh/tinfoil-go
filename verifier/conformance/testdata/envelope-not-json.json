@@ -1,0 +1,11 @@
+{
+  "id": "envelope-not-json",
+  "stage": "v3-check-envelope",
+  "input": {
+    "schema_version": "1",
+    "document_b64": "aGVsbG8=",
+    "nonce_hex": "0000000000000000000000000000000000000000000000000000000000000000",
+    "repo": "tinfoilsh/confidential-inference-proxy"
+  },
+  "expected": { "accepted": false }
+}
