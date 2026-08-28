@@ -41,7 +41,11 @@ func TestPinnedWorkflowIdentitiesAreAnchored(t *testing.T) {
 	)
 	assert.Equal(t,
 		`^https://github\.com/tinfoilsh/freshness-witness/\.github/workflows/freshness\.yml@refs/heads/main$`,
-		freshnessWitnessIdentity,
+		publicFreshnessIdentity,
+	)
+	assert.Equal(t,
+		`^https://github\.com/tinfoilsh/freshness-witness/\.github/workflows/private\.yml@refs/heads/main$`,
+		privateFreshnessIdentity,
 	)
 }
 
