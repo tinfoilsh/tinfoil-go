@@ -191,7 +191,12 @@ func (s *SecureClient) getSigstoreClient() (*sigstore.Client, error) {
 	return s.sigstoreClient, nil
 }
 
-// Verify fetches the latest verification information from GitHub and Sigstore and stores the ground truth results in the client
+// Verify fetches the latest verification information from GitHub and Sigstore and stores the ground truth results in the client.
+//
+// Verify authenticates the attestation evidence and the TLS and HPKE keys it
+// endorses; it does not open a connection to the enclave beyond fetching the
+// attestation document. The endorsed TLS key is enforced per connection by
+// TLSBoundRoundTripper before any request data is sent.
 func (s *SecureClient) Verify() (*GroundTruth, error) {
 	s.verifyMu.Lock()
 	defer s.verifyMu.Unlock()
@@ -277,10 +282,6 @@ func (s *SecureClient) Verify() (*GroundTruth, error) {
 		if err != nil {
 			return nil, fmt.Errorf("verifyHardware: failed to verify hardware measurements: %v", err)
 		}
-	}
-
-	if err := enclaveValidPubKey(s.enclave, enclaveVerification); err != nil {
-		return nil, fmt.Errorf("validateTLS: %v", err)
 	}
 
 	if err = codeMeasurement.Equals(enclaveVerification.Measurement); err != nil {
