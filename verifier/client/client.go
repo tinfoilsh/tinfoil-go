@@ -59,6 +59,10 @@ type SecureClient struct {
 	// verification unless a caller says which value to expect.
 	expectedRTMR3 string
 
+	// Held outside groundTruth so invalidating a cached verification cannot
+	// unpin the domain this client already verified.
+	verifiedDomain string
+
 	groundTruth          *GroundTruth
 	verificationDocument *VerificationDocument
 	stateMu              sync.RWMutex
@@ -428,8 +432,12 @@ func (s *SecureClient) verifyFromBundle(bundle *attestation.Bundle) (*GroundTrut
 }
 
 func (s *SecureClient) validateBundleDomain(domain string) error {
-	if groundTruth := s.GroundTruth(); groundTruth != nil && domain != groundTruth.EnclaveHost {
-		return fmt.Errorf("verifyBundle: domain %q does not match verified enclave %q", domain, groundTruth.EnclaveHost)
+	s.stateMu.RLock()
+	verifiedDomain := s.verifiedDomain
+	s.stateMu.RUnlock()
+
+	if verifiedDomain != "" && domain != verifiedDomain {
+		return fmt.Errorf("verifyBundle: domain %q does not match verified enclave %q", domain, verifiedDomain)
 	}
 	return nil
 }

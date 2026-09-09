@@ -145,6 +145,17 @@ func TestVerifyFromBundleRejectsVerifiedDomainMismatch(t *testing.T) {
 	assert.Equal(t, "verified.example", client.GroundTruth().EnclaveHost)
 }
 
+func TestSetExpectedRTMR3KeepsTheVerifiedDomainPinned(t *testing.T) {
+	client := NewSecureClient("verified.example", defaultRouterRepo)
+	client.setVerifiedState(&GroundTruth{EnclaveHost: "verified.example"})
+
+	client.SetExpectedRTMR3("sealed")
+
+	assert.Nil(t, client.GroundTruth())
+	assert.EqualError(t, client.validateBundleDomain("other.example"),
+		`verifyBundle: domain "other.example" does not match verified enclave "verified.example"`)
+}
+
 func TestBundleDomainAllowsInitialDiscovery(t *testing.T) {
 	client := NewSecureClient("configured.example", defaultRouterRepo)
 

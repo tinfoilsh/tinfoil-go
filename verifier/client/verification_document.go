@@ -154,6 +154,7 @@ func (s *SecureClient) setVerifiedState(groundTruth *GroundTruth) {
 	s.stateMu.Lock()
 	if clonedGroundTruth.EnclaveHost != "" {
 		s.enclave = clonedGroundTruth.EnclaveHost
+		s.verifiedDomain = clonedGroundTruth.EnclaveHost
 	}
 	s.groundTruth = clonedGroundTruth
 	s.verificationDocument = newVerificationDocument(clonedGroundTruth)

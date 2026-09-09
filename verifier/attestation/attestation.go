@@ -203,7 +203,7 @@ func (m *Measurement) EqualsSealedDisplay(other *Measurement, expectedRtmr3 stri
 			return "", ErrRtmr3Unavailable
 		}
 	case TdxGuestV2:
-		if len(m.Registers) < 5 || len(other.Registers) < 5 {
+		if len(m.Registers) != 5 || len(other.Registers) != 5 {
 			return "", ErrFewRegisters
 		}
 		if expectedRtmr3 != other.Registers[4] {

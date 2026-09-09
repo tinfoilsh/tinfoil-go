@@ -98,6 +98,66 @@ func TestMeasurementEquals(t *testing.T) {
 				Registers: []string{"mrtd", "rtmr0", "rtmr1", "rtmr2", "theirs"},
 			},
 		}, {
+			name:     "TDX to TDX match sealed to the expected owner",
+			sealedTo: "sealed",
+			wantErr:  nil,
+			m1: &Measurement{
+				Type:      TdxGuestV2,
+				Registers: []string{"mrtd", "rtmr0", "rtmr1", "rtmr2", RTMR3_ZERO},
+			},
+			m2: &Measurement{
+				Type:      TdxGuestV2,
+				Registers: []string{"mrtd", "rtmr0", "rtmr1", "rtmr2", "sealed"},
+			},
+		}, {
+			name:     "TDX to TDX sealed to another owner",
+			sealedTo: "mine",
+			wantErr:  ErrRtmr3Mismatch,
+			m1: &Measurement{
+				Type:      TdxGuestV2,
+				Registers: []string{"mrtd", "rtmr0", "rtmr1", "rtmr2", RTMR3_ZERO},
+			},
+			m2: &Measurement{
+				Type:      TdxGuestV2,
+				Registers: []string{"mrtd", "rtmr0", "rtmr1", "rtmr2", "theirs"},
+			},
+		}, {
+			name:     "TDX to TDX mismatch outside RTMR3",
+			sealedTo: "sealed",
+			wantErr:  ErrMeasurementMismatch,
+			m1: &Measurement{
+				Type:      TdxGuestV2,
+				Registers: []string{"mrtd", "rtmr0", "rtmr1", "rtmr2_other", RTMR3_ZERO},
+			},
+			m2: &Measurement{
+				Type:      TdxGuestV2,
+				Registers: []string{"mrtd", "rtmr0", "rtmr1", "rtmr2", "sealed"},
+			},
+		}, {
+			name:     "TDX to TDX rejects a register the comparison would ignore",
+			sealedTo: "sealed",
+			wantErr:  ErrFewRegisters,
+			m1: &Measurement{
+				Type:      TdxGuestV2,
+				Registers: []string{"mrtd", "rtmr0", "rtmr1", "rtmr2", RTMR3_ZERO},
+			},
+			m2: &Measurement{
+				Type:      TdxGuestV2,
+				Registers: []string{"mrtd", "rtmr0", "rtmr1", "rtmr2", "sealed", "extra"},
+			},
+		}, {
+			name:     "SEV-SNP to SEV-SNP has no register to hold a seal",
+			sealedTo: "sealed",
+			wantErr:  ErrRtmr3Unavailable,
+			m1: &Measurement{
+				Type:      SevGuestV2,
+				Registers: []string{"sevsnp"},
+			},
+			m2: &Measurement{
+				Type:      SevGuestV2,
+				Registers: []string{"sevsnp"},
+			},
+		}, {
 			name:     "SEV-SNP has no register to hold a seal",
 			sealedTo: "sealed",
 			wantErr:  ErrRtmr3Unavailable,
