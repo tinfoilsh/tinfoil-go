@@ -42,6 +42,7 @@ var (
 	ErrRtmr1Mismatch               = errors.New("RTMR1 mismatch")
 	ErrRtmr2Mismatch               = errors.New("RTMR2 mismatch")
 	ErrRtmr3Mismatch               = errors.New("RTMR3 mismatch")
+	ErrRtmr3Unavailable            = errors.New("platform has no RTMR3 to hold the expected value")
 	ErrFewRegisters                = errors.New("fewer registers than expected")
 	ErrMultiPlatformMismatch       = errors.New("multi-platform measurement mismatch")
 	ErrMultiPlatformSevSnpMismatch = errors.New("multi-platform SEV-SNP measurement mismatch")
@@ -103,7 +104,17 @@ func newVerificationV2(measurement *Measurement, keys []byte) *Verification {
 	}
 }
 
+// EqualsDisplay reports whether an enclave measurement matches this code
+// measurement, requiring an unextended RTMR3.
 func (m *Measurement) EqualsDisplay(other *Measurement) (string, error) {
+	return m.EqualsSealedDisplay(other, RTMR3_ZERO)
+}
+
+// EqualsSealedDisplay is EqualsDisplay for an enclave whose RTMR3 the caller
+// expects to have been extended to a known value. A release measures code and
+// cannot predict a runtime extend, so the expectation has to come from whoever
+// knows what the enclave was sealed to.
+func (m *Measurement) EqualsSealedDisplay(other *Measurement, expectedRtmr3 string) (string, error) {
 	// Base case: if both measurements are multi-platform, compare directly
 	if m.Type == SnpTdxMultiPlatformV1 && other.Type == SnpTdxMultiPlatformV1 {
 		if !slices.Equal(m.Registers, other.Registers) {
@@ -114,7 +125,7 @@ func (m *Measurement) EqualsDisplay(other *Measurement) (string, error) {
 
 	// Flip comparison order for multi-platform measurements
 	if other.Type == SnpTdxMultiPlatformV1 {
-		return other.EqualsDisplay(m)
+		return other.EqualsSealedDisplay(m, expectedRtmr3)
 	}
 
 	if m.Type == SnpTdxMultiPlatformV1 {
@@ -128,8 +139,6 @@ func (m *Measurement) EqualsDisplay(other *Measurement) (string, error) {
 		expectedSnp := m.Registers[0]
 		expectedRtmr1 := m.Registers[1]
 		expectedRtmr2 := m.Registers[2]
-		// For now, we expect all RTMR3s to be zeros
-		expectedRtmr3 := RTMR3_ZERO
 
 		switch other.Type {
 		case TdxGuestV2:
@@ -162,6 +171,11 @@ func (m *Measurement) EqualsDisplay(other *Measurement) (string, error) {
 
 			return strings.TrimRight(out.String(), "\n"), err
 		case SevGuestV2:
+			// Refusing beats reporting a match a platform without the register
+			// cannot back.
+			if expectedRtmr3 != RTMR3_ZERO {
+				return "", ErrRtmr3Unavailable
+			}
 			actualSnp := other.Registers[0]
 
 			if expectedSnp != actualSnp {
@@ -192,6 +206,12 @@ func (m *Measurement) EqualsDisplay(other *Measurement) (string, error) {
 
 func (m *Measurement) Equals(other *Measurement) error {
 	_, err := m.EqualsDisplay(other)
+	return err
+}
+
+// EqualsSealed is EqualsSealedDisplay without the register comparison text.
+func (m *Measurement) EqualsSealed(other *Measurement, expectedRtmr3 string) error {
+	_, err := m.EqualsSealedDisplay(other, expectedRtmr3)
 	return err
 }
 
