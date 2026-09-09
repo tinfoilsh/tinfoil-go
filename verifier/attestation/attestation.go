@@ -197,6 +197,26 @@ func (m *Measurement) EqualsSealedDisplay(other *Measurement, expectedRtmr3 stri
 		return "", ErrFormatMismatch
 	}
 
+	switch other.Type {
+	case SevGuestV2:
+		if expectedRtmr3 != RTMR3_ZERO {
+			return "", ErrRtmr3Unavailable
+		}
+	case TdxGuestV2:
+		if len(m.Registers) < 5 || len(other.Registers) < 5 {
+			return "", ErrFewRegisters
+		}
+		if expectedRtmr3 != other.Registers[4] {
+			return "", ErrRtmr3Mismatch
+		}
+		// RTMR3 holds a runtime extend no code measurement can predict, so the
+		// expectation above is the only authority on it.
+		if !slices.Equal(m.Registers[:4], other.Registers[:4]) {
+			return "", ErrMeasurementMismatch
+		}
+		return "", nil
+	}
+
 	if !slices.Equal(m.Registers, other.Registers) {
 		return "", ErrMeasurementMismatch
 	}

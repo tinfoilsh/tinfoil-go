@@ -158,6 +158,12 @@ func (s *SecureClient) SetExpectedRTMR3(rtmr3 string) {
 	s.verifyMu.Lock()
 	defer s.verifyMu.Unlock()
 	s.expectedRTMR3 = rtmr3
+
+	// Any cached verification passed without this expectation.
+	s.stateMu.Lock()
+	s.groundTruth = nil
+	s.verificationDocument = nil
+	s.stateMu.Unlock()
 }
 
 func (s *SecureClient) rtmr3Expectation() string {
