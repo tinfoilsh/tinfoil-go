@@ -55,6 +55,14 @@ type SecureClient struct {
 	codeMeasurement      *attestation.Measurement
 	hardwareMeasurements []*attestation.HardwareMeasurement
 
+	// Empty means an unextended RTMR3, so an enclave that extended one fails
+	// verification unless a caller says which value to expect.
+	expectedRTMR3 string
+
+	// Held outside groundTruth so invalidating a cached verification cannot
+	// unpin the domain this client already verified.
+	verifiedDomain string
+
 	groundTruth          *GroundTruth
 	verificationDocument *VerificationDocument
 	stateMu              sync.RWMutex
@@ -146,6 +154,27 @@ func (s *SecureClient) SetAttestationBundleURL(url string) {
 	s.verifyMu.Lock()
 	defer s.verifyMu.Unlock()
 	s.attestationBundleURL = url
+}
+
+// SetExpectedRTMR3 sets the RTMR3 value verification requires of the enclave.
+// Pass an empty string to require an unextended register.
+func (s *SecureClient) SetExpectedRTMR3(rtmr3 string) {
+	s.verifyMu.Lock()
+	defer s.verifyMu.Unlock()
+	s.expectedRTMR3 = rtmr3
+
+	// Any cached verification passed without this expectation.
+	s.stateMu.Lock()
+	s.groundTruth = nil
+	s.verificationDocument = nil
+	s.stateMu.Unlock()
+}
+
+func (s *SecureClient) rtmr3Expectation() string {
+	if s.expectedRTMR3 == "" {
+		return attestation.RTMR3_ZERO
+	}
+	return s.expectedRTMR3
 }
 
 // GroundTruth returns the last verified enclave state
@@ -284,8 +313,8 @@ func (s *SecureClient) Verify() (*GroundTruth, error) {
 		}
 	}
 
-	if err = codeMeasurement.Equals(enclaveVerification.Measurement); err != nil {
-		return nil, fmt.Errorf("measurements: %v", err)
+	if err = codeMeasurement.EqualsSealed(enclaveVerification.Measurement, s.rtmr3Expectation()); err != nil {
+		return nil, fmt.Errorf("measurements: %w", err)
 	}
 
 	codeFingerprint, err := attestation.Fingerprint(codeMeasurement, matchedHwMeasurement, enclaveVerification.Measurement.Type)
@@ -357,8 +386,8 @@ func (s *SecureClient) verifyFromBundle(bundle *attestation.Bundle) (*GroundTrut
 		return nil, fmt.Errorf("verifyEnclave: failed to verify enclave measurements: %v", err)
 	}
 
-	if err = codeMeasurement.Equals(enclaveVerification.Measurement); err != nil {
-		return nil, fmt.Errorf("measurements: %v", err)
+	if err = codeMeasurement.EqualsSealed(enclaveVerification.Measurement, s.rtmr3Expectation()); err != nil {
+		return nil, fmt.Errorf("measurements: %w", err)
 	}
 
 	codeFingerprint, err := attestation.Fingerprint(codeMeasurement, nil, enclaveVerification.Measurement.Type)
@@ -403,8 +432,12 @@ func (s *SecureClient) verifyFromBundle(bundle *attestation.Bundle) (*GroundTrut
 }
 
 func (s *SecureClient) validateBundleDomain(domain string) error {
-	if groundTruth := s.GroundTruth(); groundTruth != nil && domain != groundTruth.EnclaveHost {
-		return fmt.Errorf("verifyBundle: domain %q does not match verified enclave %q", domain, groundTruth.EnclaveHost)
+	s.stateMu.RLock()
+	verifiedDomain := s.verifiedDomain
+	s.stateMu.RUnlock()
+
+	if verifiedDomain != "" && domain != verifiedDomain {
+		return fmt.Errorf("verifyBundle: domain %q does not match verified enclave %q", domain, verifiedDomain)
 	}
 	return nil
 }

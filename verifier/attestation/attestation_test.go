@@ -10,10 +10,12 @@ import (
 
 func TestMeasurementEquals(t *testing.T) {
 	tests := []struct {
-		name    string
-		m1      *Measurement
-		m2      *Measurement
-		wantErr error
+		name string
+		m1   *Measurement
+		m2   *Measurement
+		// Empty exercises the default expectation of an unextended RTMR3.
+		sealedTo string
+		wantErr  error
 	}{
 
 		{
@@ -60,12 +62,123 @@ func TestMeasurementEquals(t *testing.T) {
 				Type:      TdxGuestV2,
 				Registers: []string{"mrtd", "rtmr0", "rtmr1", "rtmr2", RTMR3_ZERO},
 			},
+		}, {
+			name:    "multi-platform TDX v2 rejects an unexpected runtime extend",
+			wantErr: ErrRtmr3Mismatch,
+			m1: &Measurement{
+				Type:      SnpTdxMultiPlatformV1,
+				Registers: []string{"sevsnp", "rtmr1", "rtmr2"},
+			},
+			m2: &Measurement{
+				Type:      TdxGuestV2,
+				Registers: []string{"mrtd", "rtmr0", "rtmr1", "rtmr2", "sealed"},
+			},
+		}, {
+			name:     "multi-platform TDX v2 match sealed to the expected owner",
+			sealedTo: "sealed",
+			wantErr:  nil,
+			m1: &Measurement{
+				Type:      SnpTdxMultiPlatformV1,
+				Registers: []string{"sevsnp", "rtmr1", "rtmr2"},
+			},
+			m2: &Measurement{
+				Type:      TdxGuestV2,
+				Registers: []string{"mrtd", "rtmr0", "rtmr1", "rtmr2", "sealed"},
+			},
+		}, {
+			name:     "multi-platform TDX v2 sealed to another owner",
+			sealedTo: "mine",
+			wantErr:  ErrRtmr3Mismatch,
+			m1: &Measurement{
+				Type:      SnpTdxMultiPlatformV1,
+				Registers: []string{"sevsnp", "rtmr1", "rtmr2"},
+			},
+			m2: &Measurement{
+				Type:      TdxGuestV2,
+				Registers: []string{"mrtd", "rtmr0", "rtmr1", "rtmr2", "theirs"},
+			},
+		}, {
+			name:     "TDX to TDX match sealed to the expected owner",
+			sealedTo: "sealed",
+			wantErr:  nil,
+			m1: &Measurement{
+				Type:      TdxGuestV2,
+				Registers: []string{"mrtd", "rtmr0", "rtmr1", "rtmr2", RTMR3_ZERO},
+			},
+			m2: &Measurement{
+				Type:      TdxGuestV2,
+				Registers: []string{"mrtd", "rtmr0", "rtmr1", "rtmr2", "sealed"},
+			},
+		}, {
+			name:     "TDX to TDX sealed to another owner",
+			sealedTo: "mine",
+			wantErr:  ErrRtmr3Mismatch,
+			m1: &Measurement{
+				Type:      TdxGuestV2,
+				Registers: []string{"mrtd", "rtmr0", "rtmr1", "rtmr2", RTMR3_ZERO},
+			},
+			m2: &Measurement{
+				Type:      TdxGuestV2,
+				Registers: []string{"mrtd", "rtmr0", "rtmr1", "rtmr2", "theirs"},
+			},
+		}, {
+			name:     "TDX to TDX mismatch outside RTMR3",
+			sealedTo: "sealed",
+			wantErr:  ErrMeasurementMismatch,
+			m1: &Measurement{
+				Type:      TdxGuestV2,
+				Registers: []string{"mrtd", "rtmr0", "rtmr1", "rtmr2_other", RTMR3_ZERO},
+			},
+			m2: &Measurement{
+				Type:      TdxGuestV2,
+				Registers: []string{"mrtd", "rtmr0", "rtmr1", "rtmr2", "sealed"},
+			},
+		}, {
+			name:     "TDX to TDX rejects a register the comparison would ignore",
+			sealedTo: "sealed",
+			wantErr:  ErrFewRegisters,
+			m1: &Measurement{
+				Type:      TdxGuestV2,
+				Registers: []string{"mrtd", "rtmr0", "rtmr1", "rtmr2", RTMR3_ZERO},
+			},
+			m2: &Measurement{
+				Type:      TdxGuestV2,
+				Registers: []string{"mrtd", "rtmr0", "rtmr1", "rtmr2", "sealed", "extra"},
+			},
+		}, {
+			name:     "SEV-SNP to SEV-SNP has no register to hold a seal",
+			sealedTo: "sealed",
+			wantErr:  ErrRtmr3Unavailable,
+			m1: &Measurement{
+				Type:      SevGuestV2,
+				Registers: []string{"sevsnp"},
+			},
+			m2: &Measurement{
+				Type:      SevGuestV2,
+				Registers: []string{"sevsnp"},
+			},
+		}, {
+			name:     "SEV-SNP has no register to hold a seal",
+			sealedTo: "sealed",
+			wantErr:  ErrRtmr3Unavailable,
+			m1: &Measurement{
+				Type:      SnpTdxMultiPlatformV1,
+				Registers: []string{"sevsnp", "rtmr1", "rtmr2"},
+			},
+			m2: &Measurement{
+				Type:      SevGuestV2,
+				Registers: []string{"sevsnp"},
+			},
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			assert.ErrorIs(t, tt.m1.Equals(tt.m2), tt.wantErr)
+			if tt.sealedTo == "" {
+				assert.ErrorIs(t, tt.m1.Equals(tt.m2), tt.wantErr)
+				return
+			}
+			assert.ErrorIs(t, tt.m1.EqualsSealed(tt.m2, tt.sealedTo), tt.wantErr)
 		})
 	}
 }
