@@ -59,6 +59,10 @@ type SecureClient struct {
 	// verification unless a caller says which value to expect.
 	expectedRTMR3 string
 
+	// When set, the enclave is asked to quote a nonce this client chooses
+	// instead of serving the report it took at boot.
+	nonced bool
+
 	// Held outside groundTruth so invalidating a cached verification cannot
 	// unpin the domain this client already verified.
 	verifiedDomain string
@@ -164,6 +168,22 @@ func (s *SecureClient) SetExpectedRTMR3(rtmr3 string) {
 	s.expectedRTMR3 = rtmr3
 
 	// Any cached verification passed without this expectation.
+	s.stateMu.Lock()
+	s.groundTruth = nil
+	s.verificationDocument = nil
+	s.stateMu.Unlock()
+}
+
+// SetNoncedAttestation makes verification challenge the enclave with a fresh
+// nonce, which only a re-quote can answer. Pass true to see the state the
+// enclave is in now rather than the one it booted into; enclaves that do not
+// serve a nonced document fail verification.
+func (s *SecureClient) SetNoncedAttestation(nonced bool) {
+	s.verifyMu.Lock()
+	defer s.verifyMu.Unlock()
+	s.nonced = nonced
+
+	// Any cached verification answered a different challenge, or none.
 	s.stateMu.Lock()
 	s.groundTruth = nil
 	s.verificationDocument = nil
@@ -283,18 +303,24 @@ func (s *SecureClient) Verify() (*GroundTruth, error) {
 		}
 	}
 
-	enclaveAttestation, err := attestation.Fetch(s.enclave)
-	if err != nil {
-		return nil, fmt.Errorf("verifyEnclave: failed to fetch enclave measurements: %v", err)
+	var enclaveVerification *attestation.Verification
+	var err error
+	if s.nonced {
+		enclaveVerification, err = attestation.FetchNonced(s.enclave)
+	} else {
+		var enclaveAttestation *attestation.Document
+		enclaveAttestation, err = attestation.Fetch(s.enclave)
+		if err == nil {
+			enclaveVerification, err = enclaveAttestation.Verify()
+		}
 	}
-	enclaveVerification, err := enclaveAttestation.Verify()
 	if err != nil {
 		return nil, fmt.Errorf("verifyEnclave: failed to verify enclave measurements: %v", err)
 	}
 
 	// Fetch hardware platform measurements if required
 	var matchedHwMeasurement *attestation.HardwareMeasurement
-	if enclaveAttestation.Format == attestation.TdxGuestV2 {
+	if enclaveVerification.Measurement.Type == attestation.TdxGuestV2 {
 		var hwMeasurements = s.hardwareMeasurements
 		if len(s.hardwareMeasurements) == 0 {
 			sigstoreClient, err := s.getSigstoreClient()
