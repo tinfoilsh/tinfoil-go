@@ -94,6 +94,7 @@ type Verification struct {
 	Measurement    *Measurement `json:"measurement"`
 	TLSPublicKeyFP string       `json:"tls_public_key,omitempty"`
 	HPKEPublicKey  string       `json:"hpke_public_key,omitempty"`
+	Nonce          string       `json:"nonce,omitempty"`
 }
 
 func newVerificationV2(measurement *Measurement, keys []byte) *Verification {
