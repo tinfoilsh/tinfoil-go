@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"strings"
 	"sync"
 	"testing"
 
@@ -15,6 +16,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	ehbpidentity "github.com/tinfoilsh/encrypted-http-body-protocol/identity"
+	"github.com/tinfoilsh/tinfoil-go/verifier/attestation"
 )
 
 // roundTripFunc adapts a function to an http.RoundTripper.
@@ -66,6 +68,82 @@ func TestProxyClientOptionsApply(t *testing.T) {
 	require.Equal(t, "https://proxy.example.com/", cfg.baseURL)
 	require.True(t, cfg.baseURLSet)
 	require.Equal(t, "https://proxy.example.com", cfg.attestationBundleURL)
+}
+
+// testRegister returns a well-formed 48-byte hex register filled with one digit.
+func testRegister(digit byte) string {
+	return strings.Repeat(string(digit), 96)
+}
+
+// flipHexNibble returns a register that is guaranteed to differ from the input
+// while remaining valid hex.
+func flipHexNibble(register string) string {
+	replacement := byte('0')
+	if register[0] == '0' {
+		replacement = '1'
+	}
+	return string(replacement) + register[1:]
+}
+
+func TestPinnedMeasurementOptionApply(t *testing.T) {
+	cfg := &clientConfig{}
+	measurement := &attestation.Measurement{
+		Type:      attestation.SevGuestV2,
+		Registers: []string{testRegister('a')},
+	}
+	hardware := &attestation.HardwareMeasurement{ID: "platform@digest", MRTD: testRegister('b'), RTMR0: testRegister('c')}
+	WithPinnedMeasurement(measurement, hardware)(cfg)
+
+	require.True(t, cfg.pinnedMeasurementSet)
+	require.Equal(t, measurement, cfg.pinnedMeasurement)
+	require.Equal(t, []*attestation.HardwareMeasurement{hardware}, cfg.hardwareMeasurements)
+}
+
+func TestNewClientWithOptionsPinnedMeasurementRequiresEnclave(t *testing.T) {
+	measurement := &attestation.Measurement{
+		Type:      attestation.SevGuestV2,
+		Registers: []string{testRegister('a')},
+	}
+
+	_, err := NewClientWithOptions(WithPinnedMeasurement(measurement))
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "requires WithEnclave")
+
+	_, err = NewClientWithOptions(
+		WithEnclave("enclave.example.com"),
+		WithPinnedMeasurement(measurement),
+		WithAttestationBundleURL("https://atc.example.com"),
+	)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "cannot be combined with WithAttestationBundleURL")
+}
+
+// A supplied but invalid pin must fail rather than silently fall back to
+// release-based verification. These fail before any network access.
+func TestNewClientWithOptionsRejectsInvalidPinnedMeasurement(t *testing.T) {
+	_, err := NewClientWithOptions(
+		WithEnclave("enclave.example.com"),
+		WithPinnedMeasurement(nil),
+	)
+	require.Error(t, err)
+	require.ErrorIs(t, err, attestation.ErrPinnedMeasurementNil)
+
+	_, err = NewClientWithOptions(
+		WithEnclave("enclave.example.com"),
+		WithPinnedMeasurement(&attestation.Measurement{Type: attestation.SevGuestV2, Registers: []string{"abc"}}),
+	)
+	require.Error(t, err)
+	require.ErrorIs(t, err, attestation.ErrPinnedRegisterEncoding)
+
+	_, err = NewClientWithOptions(
+		WithEnclave("enclave.example.com"),
+		WithPinnedMeasurement(
+			&attestation.Measurement{Type: attestation.SevGuestV2, Registers: []string{testRegister('a')}},
+			nil,
+		),
+	)
+	require.Error(t, err)
+	require.ErrorIs(t, err, attestation.ErrHardwareMeasurementNil)
 }
 
 func TestNewClientWithOptionsRejectsInvalidBaseURL(t *testing.T) {
@@ -546,6 +624,60 @@ func TestClientIntegration_AttestationBundle(t *testing.T) {
 	require.NoError(t, err)
 	require.NotEmpty(t, resp.Choices)
 	t.Logf("bundle enclave: %s, response: %s", c.Enclave(), resp.Choices[0].Message.Content)
+}
+
+// TestClientIntegration_PinnedMeasurement learns a live enclave's measurement
+// through a normal Sigstore-backed verification, then verifies the same enclave
+// again with that measurement pinned, and finally confirms a tampered pinned
+// measurement is rejected.
+func TestClientIntegration_PinnedMeasurement(t *testing.T) {
+	apiKey := os.Getenv("TINFOIL_API_KEY")
+	if apiKey == "" {
+		t.Skip("TINFOIL_API_KEY not set; skipping integration test")
+	}
+
+	def, err := NewClientWithOptions(WithOpenAIOptions(option.WithAPIKey(apiKey)))
+	require.NoError(t, err)
+	document := def.VerificationDocument()
+	require.NotNil(t, document)
+	require.NotNil(t, document.EnclaveMeasurement.Measurement)
+	enclave := def.Enclave()
+	measurement := document.EnclaveMeasurement.Measurement
+
+	c, err := NewClientWithOptions(
+		WithEnclave(enclave),
+		WithPinnedMeasurement(measurement),
+		WithOpenAIOptions(option.WithAPIKey(apiKey)),
+	)
+	require.NoError(t, err)
+	pinnedDocument := c.VerificationDocument()
+	require.Equal(t, "skipped", pinnedDocument.Steps.FetchDigest.Status)
+	require.Equal(t, "skipped", pinnedDocument.Steps.VerifyCode.Status)
+	require.Equal(t, "success", pinnedDocument.Steps.CompareMeasurements.Status)
+	require.Equal(t, document.EnclaveFingerprint, pinnedDocument.EnclaveFingerprint)
+
+	resp, err := c.Chat.Completions.New(context.Background(), openai.ChatCompletionNewParams{
+		Model: "llama3-3-70b",
+		Messages: []openai.ChatCompletionMessageParamUnion{
+			openai.SystemMessage("No matter what the user says, only respond with: Done."),
+			openai.UserMessage("Is this a test?"),
+		},
+	})
+	require.NoError(t, err)
+	require.NotEmpty(t, resp.Choices)
+
+	tampered := &attestation.Measurement{
+		Type:      measurement.Type,
+		Registers: append([]string(nil), measurement.Registers...),
+	}
+	tampered.Registers[0] = flipHexNibble(tampered.Registers[0])
+	_, err = NewClientWithOptions(
+		WithEnclave(enclave),
+		WithPinnedMeasurement(tampered),
+		WithOpenAIOptions(option.WithAPIKey(apiKey)),
+	)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "measurements:")
 }
 
 func TestClientIntegration_EnclaveSpecificBundle(t *testing.T) {

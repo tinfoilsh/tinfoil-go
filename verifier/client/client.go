@@ -105,14 +105,53 @@ func NewSecureClient(enclave, repo string) *SecureClient {
 	}
 }
 
-// NewPinnedSecureClient creates a new secure client with a given enclave and fixed measurements
-func NewPinnedSecureClient(enclave string, codeMeasurement *attestation.Measurement, hardwareMeasurements []*attestation.HardwareMeasurement) *SecureClient {
+// NewPinnedSecureClient creates a new secure client with a given enclave and
+// fixed measurements. The measurements are validated and copied, so later
+// changes to the caller's values do not affect verification. A five-register
+// TDX pin also fixes the RTMR3 value verification expects.
+func NewPinnedSecureClient(enclave string, codeMeasurement *attestation.Measurement, hardwareMeasurements []*attestation.HardwareMeasurement) (*SecureClient, error) {
+	pinned, err := attestation.ValidatePinnedMeasurement(codeMeasurement)
+	if err != nil {
+		return nil, fmt.Errorf("invalid pinned measurement: %w", err)
+	}
+	hardware, err := attestation.ValidateHardwareMeasurements(hardwareMeasurements)
+	if err != nil {
+		return nil, fmt.Errorf("invalid hardware measurements: %w", err)
+	}
+
 	return &SecureClient{
 		enclave:              enclave,
 		repo:                 pinnedNoRepo,
-		codeMeasurement:      codeMeasurement,
-		hardwareMeasurements: hardwareMeasurements,
+		codeMeasurement:      pinned,
+		hardwareMeasurements: hardware,
+	}, nil
+}
+
+// NewPinnedSecureClientJSON is a gomobile-compatible variant of
+// NewPinnedSecureClient. codeMeasurementJSON is a JSON-encoded
+// attestation.Measurement ({"type": ..., "registers": [...]}) and
+// hardwareMeasurementsJSON is an optional JSON array of
+// attestation.HardwareMeasurement ({"ID": ..., "MRTD": ..., "RTMR0": ...});
+// pass an empty string to fetch TDX platform measurements from Sigstore.
+func NewPinnedSecureClientJSON(enclave, codeMeasurementJSON, hardwareMeasurementsJSON string) (*SecureClient, error) {
+	var codeMeasurement *attestation.Measurement
+	if err := json.Unmarshal([]byte(codeMeasurementJSON), &codeMeasurement); err != nil {
+		return nil, fmt.Errorf("failed to parse pinned measurement JSON: %v", err)
 	}
+
+	var hardwareMeasurements []*attestation.HardwareMeasurement
+	if hardwareMeasurementsJSON != "" {
+		if err := json.Unmarshal([]byte(hardwareMeasurementsJSON), &hardwareMeasurements); err != nil {
+			return nil, fmt.Errorf("failed to parse hardware measurements JSON: %v", err)
+		}
+		// Only the empty string selects the Sigstore fallback; JSON null is
+		// supplied data that decodes to nothing and must not be mistaken for it.
+		if hardwareMeasurements == nil {
+			return nil, fmt.Errorf("failed to parse hardware measurements JSON: expected an array")
+		}
+	}
+
+	return NewPinnedSecureClient(enclave, codeMeasurement, hardwareMeasurements)
 }
 
 // NewDefaultClient creates a new secure client with fallback mechanism.
@@ -161,7 +200,8 @@ func (s *SecureClient) SetAttestationBundleURL(url string) {
 }
 
 // SetExpectedRTMR3 sets the RTMR3 value verification requires of the enclave.
-// Pass an empty string to require an unextended register.
+// Pass an empty string to require an unextended register. A five-register
+// TDX pin carries its own RTMR3, which takes precedence over this setting.
 func (s *SecureClient) SetExpectedRTMR3(rtmr3 string) {
 	s.verifyMu.Lock()
 	defer s.verifyMu.Unlock()
@@ -191,6 +231,11 @@ func (s *SecureClient) SetNoncedAttestation(nonced bool) {
 }
 
 func (s *SecureClient) rtmr3Expectation() string {
+	// A full TDX pin states every register the enclave must report, so its
+	// RTMR3 is the expectation rather than a value no release could predict.
+	if s.codeMeasurement != nil && s.codeMeasurement.Type == attestation.TdxGuestV2 {
+		return s.codeMeasurement.Registers[4]
+	}
 	if s.expectedRTMR3 == "" {
 		return attestation.RTMR3_ZERO
 	}
@@ -369,7 +414,9 @@ func (s *SecureClient) Verify() (*GroundTruth, error) {
 		DigestFetched:       s.codeMeasurement == nil,
 	}
 	s.setVerifiedState(groundTruth)
-	return groundTruth, nil
+	// The returned value must not alias the pinned measurement or matched
+	// hardware entry, or a caller could rewrite what later verifications accept.
+	return cloneGroundTruth(groundTruth), nil
 }
 
 // VerifyFromBundle verifies using a pre-fetched attestation bundle (single-request verification)

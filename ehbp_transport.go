@@ -12,6 +12,7 @@ import (
 	log "github.com/sirupsen/logrus"
 	ehbpclient "github.com/tinfoilsh/encrypted-http-body-protocol/client"
 	ehbpidentity "github.com/tinfoilsh/encrypted-http-body-protocol/identity"
+	"github.com/tinfoilsh/tinfoil-go/verifier/attestation"
 	"github.com/tinfoilsh/tinfoil-go/verifier/client"
 )
 
@@ -46,6 +47,9 @@ type clientConfig struct {
 	baseURL              string
 	baseURLSet           bool
 	attestationBundleURL string
+	pinnedMeasurement    *attestation.Measurement
+	pinnedMeasurementSet bool
+	hardwareMeasurements []*attestation.HardwareMeasurement
 	userCacheSecret      string
 	userCacheSecretSet   bool
 	openaiOpts           []option.RequestOption
@@ -92,6 +96,25 @@ func WithAttestationBundleURL(attestationBundleURL string) ClientOption {
 	return func(c *clientConfig) { c.attestationBundleURL = attestationBundleURL }
 }
 
+// WithPinnedMeasurement verifies the enclave against a caller-supplied code
+// measurement instead of the latest signed release of the config repository.
+// The GitHub release lookup and Sigstore code verification are skipped, so the
+// measurement's provenance must be established out of band. Requires
+// WithEnclave and is incompatible with WithAttestationBundleURL. The
+// measurement must carry the register layout of its type (1 for SEV-SNP, 5 for
+// TDX, 3 for multi-platform) as 48-byte hex; a five-register TDX pin also
+// fixes the RTMR3 value the enclave must report. Optional hardware measurements
+// replace the Sigstore-published TDX platform values; when omitted, they are
+// still fetched from Sigstore for TDX enclaves. The values are validated and
+// copied when the client is created.
+func WithPinnedMeasurement(measurement *attestation.Measurement, hardwareMeasurements ...*attestation.HardwareMeasurement) ClientOption {
+	return func(c *clientConfig) {
+		c.pinnedMeasurement = measurement
+		c.pinnedMeasurementSet = true
+		c.hardwareMeasurements = hardwareMeasurements
+	}
+}
+
 // WithOpenAIOptions appends options passed through to the underlying OpenAI client.
 func WithOpenAIOptions(opts ...option.RequestOption) ClientOption {
 	return func(c *clientConfig) { c.openaiOpts = append(c.openaiOpts, opts...) }
@@ -121,9 +144,25 @@ func NewClientWithOptions(opts ...ClientOption) (*Client, error) {
 			return nil, fmt.Errorf("invalid base URL: %w", err)
 		}
 	}
+	if cfg.pinnedMeasurementSet {
+		if cfg.enclave == "" {
+			return nil, fmt.Errorf("WithPinnedMeasurement requires WithEnclave: a pinned measurement cannot be verified against an auto-selected router")
+		}
+		if cfg.attestationBundleURL != "" {
+			return nil, fmt.Errorf("WithPinnedMeasurement cannot be combined with WithAttestationBundleURL")
+		}
+	}
 
 	var secureClient *client.SecureClient
 	switch {
+	case cfg.pinnedMeasurementSet:
+		// A supplied pin is a policy choice; a nil or malformed one must fail
+		// rather than fall back to release-based verification.
+		var err error
+		secureClient, err = client.NewPinnedSecureClient(cfg.enclave, cfg.pinnedMeasurement, cfg.hardwareMeasurements)
+		if err != nil {
+			return nil, fmt.Errorf("WithPinnedMeasurement: %w", err)
+		}
 	case cfg.attestationBundleURL != "":
 		// The verified bundle supplies the enclave host, so the router lookup
 		// in NewDefaultClient is unnecessary even when no enclave is set.
