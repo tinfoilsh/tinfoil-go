@@ -336,6 +336,7 @@ func TestNewPinnedSecureClientJSON(t *testing.T) {
 
 	for name, input := range map[string]string{
 		"not json":   `not json`,
+		"null":       `null`,
 		"null entry": `[null]`,
 	} {
 		t.Run("hardware "+name, func(t *testing.T) {

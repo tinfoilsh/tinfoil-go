@@ -144,6 +144,11 @@ func NewPinnedSecureClientJSON(enclave, codeMeasurementJSON, hardwareMeasurement
 		if err := json.Unmarshal([]byte(hardwareMeasurementsJSON), &hardwareMeasurements); err != nil {
 			return nil, fmt.Errorf("failed to parse hardware measurements JSON: %v", err)
 		}
+		// Only the empty string selects the Sigstore fallback; JSON null is
+		// supplied data that decodes to nothing and must not be mistaken for it.
+		if hardwareMeasurements == nil {
+			return nil, fmt.Errorf("failed to parse hardware measurements JSON: expected an array")
+		}
 	}
 
 	return NewPinnedSecureClient(enclave, codeMeasurement, hardwareMeasurements)

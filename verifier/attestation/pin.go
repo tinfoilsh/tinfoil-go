@@ -12,14 +12,13 @@ import (
 const registerHexLength = 96
 
 var (
-	ErrPinnedMeasurementNil      = errors.New("pinned measurement is nil")
-	ErrPinnedMeasurementType     = errors.New("unsupported pinned measurement type")
-	ErrPinnedRegisterCount       = errors.New("pinned measurement has the wrong number of registers")
-	ErrPinnedRegisterEncoding    = errors.New("pinned measurement register is not 48-byte hex")
-	ErrHardwareMeasurementNil    = errors.New("hardware measurement entry is nil")
-	ErrHardwareMeasurementID     = errors.New("hardware measurement entry is missing an ID")
-	ErrHardwareRegisterEncoding  = errors.New("hardware measurement register is not 48-byte hex")
-	errPinnedRegisterMissingType = errors.New("pinned measurement has no type")
+	ErrPinnedMeasurementNil     = errors.New("pinned measurement is nil")
+	ErrPinnedMeasurementType    = errors.New("unsupported pinned measurement type")
+	ErrPinnedRegisterCount      = errors.New("pinned measurement has the wrong number of registers")
+	ErrPinnedRegisterEncoding   = errors.New("pinned measurement register is not 48-byte hex")
+	ErrHardwareMeasurementNil   = errors.New("hardware measurement entry is nil")
+	ErrHardwareMeasurementID    = errors.New("hardware measurement entry is missing an ID")
+	ErrHardwareRegisterEncoding = errors.New("hardware measurement register is not 48-byte hex")
 )
 
 // registerCount returns the register layout a code measurement of the given
@@ -55,12 +54,9 @@ func ValidatePinnedMeasurement(m *Measurement) (*Measurement, error) {
 	if m == nil {
 		return nil, ErrPinnedMeasurementNil
 	}
-	if m.Type == "" {
-		return nil, errPinnedRegisterMissingType
-	}
 	want, ok := registerCount(m.Type)
 	if !ok {
-		return nil, fmt.Errorf("%w: %s", ErrPinnedMeasurementType, m.Type)
+		return nil, fmt.Errorf("%w: %q", ErrPinnedMeasurementType, m.Type)
 	}
 	if len(m.Registers) != want {
 		return nil, fmt.Errorf("%w: %s has %d registers, want %d", ErrPinnedRegisterCount, m.Type, len(m.Registers), want)
