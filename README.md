@@ -130,7 +130,11 @@ client, err := tinfoil.NewClientWithOptions(
 ```
 
 `WithPinnedMeasurement` requires `WithEnclave` and cannot be combined with
-`WithAttestationBundleURL`.
+`WithAttestationBundleURL`. The measurement must carry the register layout of
+its type (1 register for SEV-SNP, 5 for TDX, 3 for multi-platform) as 48-byte
+hex; it is validated and copied when the client is created, so a nil or
+malformed pin is an error rather than a fallback to release verification. A
+five-register TDX pin also fixes the RTMR3 value the enclave must report.
 
 ## Prompt Cache Scoping
 
