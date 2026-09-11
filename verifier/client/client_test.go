@@ -222,6 +222,38 @@ func TestVerifyRejectsPinnedMeasurementWithBundle(t *testing.T) {
 	assert.Contains(t, err.Error(), "cannot combine")
 }
 
+func TestNewPinnedSecureClientJSON(t *testing.T) {
+	measurementJSON := `{"type":"https://tinfoil.sh/predicate/sev-snp-guest/v2","registers":["abc"]}`
+	hardwareJSON := `[{"ID":"platform@digest","MRTD":"m","RTMR0":"r"}]`
+
+	client, err := NewPinnedSecureClientJSON("enclave.test", measurementJSON, hardwareJSON)
+	assert.NoError(t, err)
+	assert.Equal(t, "enclave.test", client.Enclave())
+	assert.Equal(t, pinnedNoRepo, client.Repo())
+	assert.Equal(t, attestation.SevGuestV2, client.codeMeasurement.Type)
+	assert.Equal(t, []string{"abc"}, client.codeMeasurement.Registers)
+	assert.Len(t, client.hardwareMeasurements, 1)
+	assert.Equal(t, "m", client.hardwareMeasurements[0].MRTD)
+
+	client, err = NewPinnedSecureClientJSON("enclave.test", measurementJSON, "")
+	assert.NoError(t, err)
+	assert.Empty(t, client.hardwareMeasurements)
+
+	for name, input := range map[string]string{
+		"invalid JSON":    `{`,
+		"missing type":    `{"registers":["abc"]}`,
+		"empty registers": `{"type":"https://tinfoil.sh/predicate/sev-snp-guest/v2","registers":[]}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, err := NewPinnedSecureClientJSON("enclave.test", input, "")
+			assert.Error(t, err)
+		})
+	}
+
+	_, err = NewPinnedSecureClientJSON("enclave.test", measurementJSON, `not json`)
+	assert.Error(t, err)
+}
+
 func TestVerifyFromBundleJSON(t *testing.T) {
 	bundle, err := attestation.FetchBundle()
 	assert.NoError(t, err)

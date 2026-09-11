@@ -15,6 +15,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	ehbpidentity "github.com/tinfoilsh/encrypted-http-body-protocol/identity"
+	"github.com/tinfoilsh/tinfoil-go/verifier/attestation"
 )
 
 // roundTripFunc adapts a function to an http.RoundTripper.
@@ -66,6 +67,38 @@ func TestProxyClientOptionsApply(t *testing.T) {
 	require.Equal(t, "https://proxy.example.com/", cfg.baseURL)
 	require.True(t, cfg.baseURLSet)
 	require.Equal(t, "https://proxy.example.com", cfg.attestationBundleURL)
+}
+
+func TestPinnedMeasurementOptionApply(t *testing.T) {
+	cfg := &clientConfig{}
+	measurement := &attestation.Measurement{
+		Type:      attestation.SevGuestV2,
+		Registers: []string{"abc"},
+	}
+	hardware := &attestation.HardwareMeasurement{ID: "platform@digest", MRTD: "m", RTMR0: "r"}
+	WithPinnedMeasurement(measurement, hardware)(cfg)
+
+	require.Same(t, measurement, cfg.pinnedMeasurement)
+	require.Equal(t, []*attestation.HardwareMeasurement{hardware}, cfg.hardwareMeasurements)
+}
+
+func TestNewClientWithOptionsPinnedMeasurementRequiresEnclave(t *testing.T) {
+	measurement := &attestation.Measurement{
+		Type:      attestation.SevGuestV2,
+		Registers: []string{"abc"},
+	}
+
+	_, err := NewClientWithOptions(WithPinnedMeasurement(measurement))
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "requires WithEnclave")
+
+	_, err = NewClientWithOptions(
+		WithEnclave("enclave.example.com"),
+		WithPinnedMeasurement(measurement),
+		WithAttestationBundleURL("https://atc.example.com"),
+	)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "cannot be combined with WithAttestationBundleURL")
 }
 
 func TestNewClientWithOptionsRejectsInvalidBaseURL(t *testing.T) {
@@ -546,6 +579,60 @@ func TestClientIntegration_AttestationBundle(t *testing.T) {
 	require.NoError(t, err)
 	require.NotEmpty(t, resp.Choices)
 	t.Logf("bundle enclave: %s, response: %s", c.Enclave(), resp.Choices[0].Message.Content)
+}
+
+// TestClientIntegration_PinnedMeasurement learns a live enclave's measurement
+// through a normal Sigstore-backed verification, then verifies the same enclave
+// again with that measurement pinned, and finally confirms a tampered pinned
+// measurement is rejected.
+func TestClientIntegration_PinnedMeasurement(t *testing.T) {
+	apiKey := os.Getenv("TINFOIL_API_KEY")
+	if apiKey == "" {
+		t.Skip("TINFOIL_API_KEY not set; skipping integration test")
+	}
+
+	def, err := NewClientWithOptions(WithOpenAIOptions(option.WithAPIKey(apiKey)))
+	require.NoError(t, err)
+	document := def.VerificationDocument()
+	require.NotNil(t, document)
+	require.NotNil(t, document.EnclaveMeasurement.Measurement)
+	enclave := def.Enclave()
+	measurement := document.EnclaveMeasurement.Measurement
+
+	c, err := NewClientWithOptions(
+		WithEnclave(enclave),
+		WithPinnedMeasurement(measurement),
+		WithOpenAIOptions(option.WithAPIKey(apiKey)),
+	)
+	require.NoError(t, err)
+	pinnedDocument := c.VerificationDocument()
+	require.Equal(t, "skipped", pinnedDocument.Steps.FetchDigest.Status)
+	require.Equal(t, "skipped", pinnedDocument.Steps.VerifyCode.Status)
+	require.Equal(t, "success", pinnedDocument.Steps.CompareMeasurements.Status)
+	require.Equal(t, document.EnclaveFingerprint, pinnedDocument.EnclaveFingerprint)
+
+	resp, err := c.Chat.Completions.New(context.Background(), openai.ChatCompletionNewParams{
+		Model: "llama3-3-70b",
+		Messages: []openai.ChatCompletionMessageParamUnion{
+			openai.SystemMessage("No matter what the user says, only respond with: Done."),
+			openai.UserMessage("Is this a test?"),
+		},
+	})
+	require.NoError(t, err)
+	require.NotEmpty(t, resp.Choices)
+
+	tampered := &attestation.Measurement{
+		Type:      measurement.Type,
+		Registers: append([]string(nil), measurement.Registers...),
+	}
+	tampered.Registers[0] = "00" + tampered.Registers[0][2:]
+	_, err = NewClientWithOptions(
+		WithEnclave(enclave),
+		WithPinnedMeasurement(tampered),
+		WithOpenAIOptions(option.WithAPIKey(apiKey)),
+	)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "measurements:")
 }
 
 func TestClientIntegration_EnclaveSpecificBundle(t *testing.T) {

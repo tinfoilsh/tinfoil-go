@@ -111,6 +111,27 @@ if err != nil {
 }
 ```
 
+### Pinning a measurement
+
+By default the client fetches the expected code measurement from the latest
+signed release of the config repository. To verify against a measurement you
+obtained out of band instead, pin it explicitly. This skips the GitHub release
+lookup and Sigstore code verification, so the measurement's provenance is your
+responsibility; the verification document reports those steps as `skipped`.
+
+```go
+client, err := tinfoil.NewClientWithOptions(
+	tinfoil.WithEnclave(enclave),
+	tinfoil.WithPinnedMeasurement(&attestation.Measurement{
+		Type:      attestation.SevGuestV2,
+		Registers: []string{"<hex measurement>"},
+	}),
+)
+```
+
+`WithPinnedMeasurement` requires `WithEnclave` and cannot be combined with
+`WithAttestationBundleURL`.
+
 ## Prompt Cache Scoping
 
 The inference router partitions prompt-prefix caches using both the authenticated API identity and `user_cache_secret`. Cache reuse requires the same identity, secret, model, and matching prompt prefix. Changing the identity or secret selects a different cache namespace, so those requests do not share cache entries or cache-hit timing.

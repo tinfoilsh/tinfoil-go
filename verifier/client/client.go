@@ -115,6 +115,31 @@ func NewPinnedSecureClient(enclave string, codeMeasurement *attestation.Measurem
 	}
 }
 
+// NewPinnedSecureClientJSON is a gomobile-compatible variant of
+// NewPinnedSecureClient. codeMeasurementJSON is a JSON-encoded
+// attestation.Measurement ({"type": ..., "registers": [...]}) and
+// hardwareMeasurementsJSON is an optional JSON array of
+// attestation.HardwareMeasurement ({"ID": ..., "MRTD": ..., "RTMR0": ...});
+// pass an empty string to fetch TDX platform measurements from Sigstore.
+func NewPinnedSecureClientJSON(enclave, codeMeasurementJSON, hardwareMeasurementsJSON string) (*SecureClient, error) {
+	var codeMeasurement attestation.Measurement
+	if err := json.Unmarshal([]byte(codeMeasurementJSON), &codeMeasurement); err != nil {
+		return nil, fmt.Errorf("failed to parse pinned measurement JSON: %v", err)
+	}
+	if codeMeasurement.Type == "" || len(codeMeasurement.Registers) == 0 {
+		return nil, fmt.Errorf("pinned measurement must include a type and at least one register")
+	}
+
+	var hardwareMeasurements []*attestation.HardwareMeasurement
+	if hardwareMeasurementsJSON != "" {
+		if err := json.Unmarshal([]byte(hardwareMeasurementsJSON), &hardwareMeasurements); err != nil {
+			return nil, fmt.Errorf("failed to parse hardware measurements JSON: %v", err)
+		}
+	}
+
+	return NewPinnedSecureClient(enclave, &codeMeasurement, hardwareMeasurements), nil
+}
+
 // NewDefaultClient creates a new secure client with fallback mechanism.
 // It tries to fetch routers from the router service, attempts to verify each one,
 // and falls back to inference.tinfoil.sh if all routers fail.

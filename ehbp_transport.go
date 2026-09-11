@@ -12,6 +12,7 @@ import (
 	log "github.com/sirupsen/logrus"
 	ehbpclient "github.com/tinfoilsh/encrypted-http-body-protocol/client"
 	ehbpidentity "github.com/tinfoilsh/encrypted-http-body-protocol/identity"
+	"github.com/tinfoilsh/tinfoil-go/verifier/attestation"
 	"github.com/tinfoilsh/tinfoil-go/verifier/client"
 )
 
@@ -46,6 +47,8 @@ type clientConfig struct {
 	baseURL              string
 	baseURLSet           bool
 	attestationBundleURL string
+	pinnedMeasurement    *attestation.Measurement
+	hardwareMeasurements []*attestation.HardwareMeasurement
 	userCacheSecret      string
 	userCacheSecretSet   bool
 	openaiOpts           []option.RequestOption
@@ -92,6 +95,20 @@ func WithAttestationBundleURL(attestationBundleURL string) ClientOption {
 	return func(c *clientConfig) { c.attestationBundleURL = attestationBundleURL }
 }
 
+// WithPinnedMeasurement verifies the enclave against a caller-supplied code
+// measurement instead of the latest signed release of the config repository.
+// The GitHub release lookup and Sigstore code verification are skipped, so the
+// measurement's provenance must be established out of band. Requires
+// WithEnclave and is incompatible with WithAttestationBundleURL. Optional
+// hardware measurements replace the Sigstore-published TDX platform values;
+// when omitted, they are still fetched from Sigstore for TDX enclaves.
+func WithPinnedMeasurement(measurement *attestation.Measurement, hardwareMeasurements ...*attestation.HardwareMeasurement) ClientOption {
+	return func(c *clientConfig) {
+		c.pinnedMeasurement = measurement
+		c.hardwareMeasurements = hardwareMeasurements
+	}
+}
+
 // WithOpenAIOptions appends options passed through to the underlying OpenAI client.
 func WithOpenAIOptions(opts ...option.RequestOption) ClientOption {
 	return func(c *clientConfig) { c.openaiOpts = append(c.openaiOpts, opts...) }
@@ -121,9 +138,19 @@ func NewClientWithOptions(opts ...ClientOption) (*Client, error) {
 			return nil, fmt.Errorf("invalid base URL: %w", err)
 		}
 	}
+	if cfg.pinnedMeasurement != nil {
+		if cfg.enclave == "" {
+			return nil, fmt.Errorf("WithPinnedMeasurement requires WithEnclave: a pinned measurement cannot be verified against an auto-selected router")
+		}
+		if cfg.attestationBundleURL != "" {
+			return nil, fmt.Errorf("WithPinnedMeasurement cannot be combined with WithAttestationBundleURL")
+		}
+	}
 
 	var secureClient *client.SecureClient
 	switch {
+	case cfg.pinnedMeasurement != nil:
+		secureClient = client.NewPinnedSecureClient(cfg.enclave, cfg.pinnedMeasurement, cfg.hardwareMeasurements)
 	case cfg.attestationBundleURL != "":
 		// The verified bundle supplies the enclave host, so the router lookup
 		// in NewDefaultClient is unnecessary even when no enclave is set.
