@@ -48,6 +48,7 @@ type clientConfig struct {
 	baseURLSet           bool
 	attestationBundleURL string
 	pinnedMeasurement    *attestation.Measurement
+	pinnedMeasurementSet bool
 	hardwareMeasurements []*attestation.HardwareMeasurement
 	userCacheSecret      string
 	userCacheSecretSet   bool
@@ -99,12 +100,17 @@ func WithAttestationBundleURL(attestationBundleURL string) ClientOption {
 // measurement instead of the latest signed release of the config repository.
 // The GitHub release lookup and Sigstore code verification are skipped, so the
 // measurement's provenance must be established out of band. Requires
-// WithEnclave and is incompatible with WithAttestationBundleURL. Optional
-// hardware measurements replace the Sigstore-published TDX platform values;
-// when omitted, they are still fetched from Sigstore for TDX enclaves.
+// WithEnclave and is incompatible with WithAttestationBundleURL. The
+// measurement must carry the register layout of its type (1 for SEV-SNP, 5 for
+// TDX, 3 for multi-platform) as 48-byte hex; a five-register TDX pin also
+// fixes the RTMR3 value the enclave must report. Optional hardware measurements
+// replace the Sigstore-published TDX platform values; when omitted, they are
+// still fetched from Sigstore for TDX enclaves. The values are validated and
+// copied when the client is created.
 func WithPinnedMeasurement(measurement *attestation.Measurement, hardwareMeasurements ...*attestation.HardwareMeasurement) ClientOption {
 	return func(c *clientConfig) {
 		c.pinnedMeasurement = measurement
+		c.pinnedMeasurementSet = true
 		c.hardwareMeasurements = hardwareMeasurements
 	}
 }
@@ -138,7 +144,7 @@ func NewClientWithOptions(opts ...ClientOption) (*Client, error) {
 			return nil, fmt.Errorf("invalid base URL: %w", err)
 		}
 	}
-	if cfg.pinnedMeasurement != nil {
+	if cfg.pinnedMeasurementSet {
 		if cfg.enclave == "" {
 			return nil, fmt.Errorf("WithPinnedMeasurement requires WithEnclave: a pinned measurement cannot be verified against an auto-selected router")
 		}
@@ -149,8 +155,14 @@ func NewClientWithOptions(opts ...ClientOption) (*Client, error) {
 
 	var secureClient *client.SecureClient
 	switch {
-	case cfg.pinnedMeasurement != nil:
-		secureClient = client.NewPinnedSecureClient(cfg.enclave, cfg.pinnedMeasurement, cfg.hardwareMeasurements)
+	case cfg.pinnedMeasurementSet:
+		// A supplied pin is a policy choice; a nil or malformed one must fail
+		// rather than fall back to release-based verification.
+		var err error
+		secureClient, err = client.NewPinnedSecureClient(cfg.enclave, cfg.pinnedMeasurement, cfg.hardwareMeasurements)
+		if err != nil {
+			return nil, fmt.Errorf("WithPinnedMeasurement: %w", err)
+		}
 	case cfg.attestationBundleURL != "":
 		// The verified bundle supplies the enclave host, so the router lookup
 		// in NewDefaultClient is unnecessary even when no enclave is set.

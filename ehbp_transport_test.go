@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"strings"
 	"sync"
 	"testing"
 
@@ -69,23 +70,39 @@ func TestProxyClientOptionsApply(t *testing.T) {
 	require.Equal(t, "https://proxy.example.com", cfg.attestationBundleURL)
 }
 
+// testRegister returns a well-formed 48-byte hex register filled with one digit.
+func testRegister(digit byte) string {
+	return strings.Repeat(string(digit), 96)
+}
+
+// flipHexNibble returns a register that is guaranteed to differ from the input
+// while remaining valid hex.
+func flipHexNibble(register string) string {
+	replacement := byte('0')
+	if register[0] == '0' {
+		replacement = '1'
+	}
+	return string(replacement) + register[1:]
+}
+
 func TestPinnedMeasurementOptionApply(t *testing.T) {
 	cfg := &clientConfig{}
 	measurement := &attestation.Measurement{
 		Type:      attestation.SevGuestV2,
-		Registers: []string{"abc"},
+		Registers: []string{testRegister('a')},
 	}
-	hardware := &attestation.HardwareMeasurement{ID: "platform@digest", MRTD: "m", RTMR0: "r"}
+	hardware := &attestation.HardwareMeasurement{ID: "platform@digest", MRTD: testRegister('b'), RTMR0: testRegister('c')}
 	WithPinnedMeasurement(measurement, hardware)(cfg)
 
-	require.Same(t, measurement, cfg.pinnedMeasurement)
+	require.True(t, cfg.pinnedMeasurementSet)
+	require.Equal(t, measurement, cfg.pinnedMeasurement)
 	require.Equal(t, []*attestation.HardwareMeasurement{hardware}, cfg.hardwareMeasurements)
 }
 
 func TestNewClientWithOptionsPinnedMeasurementRequiresEnclave(t *testing.T) {
 	measurement := &attestation.Measurement{
 		Type:      attestation.SevGuestV2,
-		Registers: []string{"abc"},
+		Registers: []string{testRegister('a')},
 	}
 
 	_, err := NewClientWithOptions(WithPinnedMeasurement(measurement))
@@ -99,6 +116,34 @@ func TestNewClientWithOptionsPinnedMeasurementRequiresEnclave(t *testing.T) {
 	)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "cannot be combined with WithAttestationBundleURL")
+}
+
+// A supplied but invalid pin must fail rather than silently fall back to
+// release-based verification. These fail before any network access.
+func TestNewClientWithOptionsRejectsInvalidPinnedMeasurement(t *testing.T) {
+	_, err := NewClientWithOptions(
+		WithEnclave("enclave.example.com"),
+		WithPinnedMeasurement(nil),
+	)
+	require.Error(t, err)
+	require.ErrorIs(t, err, attestation.ErrPinnedMeasurementNil)
+
+	_, err = NewClientWithOptions(
+		WithEnclave("enclave.example.com"),
+		WithPinnedMeasurement(&attestation.Measurement{Type: attestation.SevGuestV2, Registers: []string{"abc"}}),
+	)
+	require.Error(t, err)
+	require.ErrorIs(t, err, attestation.ErrPinnedRegisterEncoding)
+
+	_, err = NewClientWithOptions(
+		WithEnclave("enclave.example.com"),
+		WithPinnedMeasurement(
+			&attestation.Measurement{Type: attestation.SevGuestV2, Registers: []string{testRegister('a')}},
+			nil,
+		),
+	)
+	require.Error(t, err)
+	require.ErrorIs(t, err, attestation.ErrHardwareMeasurementNil)
 }
 
 func TestNewClientWithOptionsRejectsInvalidBaseURL(t *testing.T) {
@@ -625,7 +670,7 @@ func TestClientIntegration_PinnedMeasurement(t *testing.T) {
 		Type:      measurement.Type,
 		Registers: append([]string(nil), measurement.Registers...),
 	}
-	tampered.Registers[0] = "00" + tampered.Registers[0][2:]
+	tampered.Registers[0] = flipHexNibble(tampered.Registers[0])
 	_, err = NewClientWithOptions(
 		WithEnclave(enclave),
 		WithPinnedMeasurement(tampered),

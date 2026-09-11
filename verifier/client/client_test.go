@@ -209,31 +209,113 @@ func TestVerifyFromBundle(t *testing.T) {
 	assert.Equal(t, bundle.Digest, groundTruth.Digest)
 }
 
+// testRegister returns a well-formed 48-byte hex register filled with one digit.
+func testRegister(digit byte) string {
+	return strings.Repeat(string(digit), 96)
+}
+
 func TestVerifyRejectsPinnedMeasurementWithBundle(t *testing.T) {
 	codeMeasurement := &attestation.Measurement{
 		Type:      attestation.SnpTdxMultiPlatformV1,
-		Registers: []string{"a", "b"},
+		Registers: []string{testRegister('a'), testRegister('b'), testRegister('c')},
 	}
-	client := NewPinnedSecureClient("enclave.test", codeMeasurement, nil)
+	client, err := NewPinnedSecureClient("enclave.test", codeMeasurement, nil)
+	assert.NoError(t, err)
 	client.SetAttestationBundleURL("https://atc.example")
 
-	_, err := client.Verify()
+	_, err = client.Verify()
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "cannot combine")
 }
 
+func TestNewPinnedSecureClientCopiesInputs(t *testing.T) {
+	codeMeasurement := &attestation.Measurement{
+		Type:      attestation.SevGuestV2,
+		Registers: []string{strings.ToUpper(testRegister('a'))},
+	}
+	hardware := &attestation.HardwareMeasurement{ID: "platform@digest", MRTD: testRegister('b'), RTMR0: testRegister('c')}
+
+	client, err := NewPinnedSecureClient("enclave.test", codeMeasurement, []*attestation.HardwareMeasurement{hardware})
+	assert.NoError(t, err)
+
+	// Registers are normalized to lowercase for comparison.
+	assert.Equal(t, []string{testRegister('a')}, client.codeMeasurement.Registers)
+
+	// Mutating the caller's values after construction must not change the pin.
+	codeMeasurement.Registers[0] = testRegister('f')
+	codeMeasurement.Type = attestation.TdxGuestV2
+	hardware.MRTD = testRegister('f')
+	assert.Equal(t, attestation.SevGuestV2, client.codeMeasurement.Type)
+	assert.Equal(t, []string{testRegister('a')}, client.codeMeasurement.Registers)
+	assert.Equal(t, testRegister('b'), client.hardwareMeasurements[0].MRTD)
+}
+
+func TestNewPinnedSecureClientRejectsMalformedPins(t *testing.T) {
+	valid := testRegister('a')
+	tests := map[string]*attestation.Measurement{
+		"nil":                nil,
+		"missing type":       {Registers: []string{valid}},
+		"unsupported type":   {Type: attestation.HardwareMeasurementsV1, Registers: []string{valid}},
+		"no registers":       {Type: attestation.SevGuestV2, Registers: nil},
+		"too many registers": {Type: attestation.SevGuestV2, Registers: []string{valid, valid}},
+		"too few TDX":        {Type: attestation.TdxGuestV2, Registers: []string{valid, valid, valid, valid}},
+		"too few MP":         {Type: attestation.SnpTdxMultiPlatformV1, Registers: []string{valid, valid}},
+		"short register":     {Type: attestation.SevGuestV2, Registers: []string{"abc"}},
+		"non-hex register":   {Type: attestation.SevGuestV2, Registers: []string{strings.Repeat("z", 96)}},
+	}
+	for name, measurement := range tests {
+		t.Run(name, func(t *testing.T) {
+			_, err := NewPinnedSecureClient("enclave.test", measurement, nil)
+			assert.Error(t, err)
+		})
+	}
+
+	for name, hardware := range map[string][]*attestation.HardwareMeasurement{
+		"nil entry":    {nil},
+		"missing ID":   {{MRTD: valid, RTMR0: valid}},
+		"short MRTD":   {{ID: "p", MRTD: "abc", RTMR0: valid}},
+		"non-hex RTMR": {{ID: "p", MRTD: valid, RTMR0: strings.Repeat("z", 96)}},
+	} {
+		t.Run("hardware "+name, func(t *testing.T) {
+			_, err := NewPinnedSecureClient("enclave.test", &attestation.Measurement{Type: attestation.SevGuestV2, Registers: []string{valid}}, hardware)
+			assert.Error(t, err)
+		})
+	}
+}
+
+func TestPinnedTDXMeasurementFixesRTMR3Expectation(t *testing.T) {
+	sealed := testRegister('e')
+	client, err := NewPinnedSecureClient("enclave.test", &attestation.Measurement{
+		Type:      attestation.TdxGuestV2,
+		Registers: []string{testRegister('a'), testRegister('b'), testRegister('c'), testRegister('d'), sealed},
+	}, nil)
+	assert.NoError(t, err)
+	assert.Equal(t, sealed, client.rtmr3Expectation())
+
+	// The pin is the authority on RTMR3, so a later expectation cannot loosen it.
+	client.SetExpectedRTMR3("")
+	assert.Equal(t, sealed, client.rtmr3Expectation())
+
+	sev, err := NewPinnedSecureClient("enclave.test", &attestation.Measurement{
+		Type:      attestation.SevGuestV2,
+		Registers: []string{testRegister('a')},
+	}, nil)
+	assert.NoError(t, err)
+	assert.Equal(t, attestation.RTMR3_ZERO, sev.rtmr3Expectation())
+}
+
 func TestNewPinnedSecureClientJSON(t *testing.T) {
-	measurementJSON := `{"type":"https://tinfoil.sh/predicate/sev-snp-guest/v2","registers":["abc"]}`
-	hardwareJSON := `[{"ID":"platform@digest","MRTD":"m","RTMR0":"r"}]`
+	measurementJSON := `{"type":"https://tinfoil.sh/predicate/sev-snp-guest/v2","registers":["` + testRegister('a') + `"]}`
+	hardwareJSON := `[{"ID":"platform@digest","MRTD":"` + testRegister('b') + `","RTMR0":"` + testRegister('c') + `"}]`
 
 	client, err := NewPinnedSecureClientJSON("enclave.test", measurementJSON, hardwareJSON)
 	assert.NoError(t, err)
 	assert.Equal(t, "enclave.test", client.Enclave())
 	assert.Equal(t, pinnedNoRepo, client.Repo())
 	assert.Equal(t, attestation.SevGuestV2, client.codeMeasurement.Type)
-	assert.Equal(t, []string{"abc"}, client.codeMeasurement.Registers)
+	assert.Equal(t, []string{testRegister('a')}, client.codeMeasurement.Registers)
 	assert.Len(t, client.hardwareMeasurements, 1)
-	assert.Equal(t, "m", client.hardwareMeasurements[0].MRTD)
+	assert.Equal(t, testRegister('b'), client.hardwareMeasurements[0].MRTD)
 
 	client, err = NewPinnedSecureClientJSON("enclave.test", measurementJSON, "")
 	assert.NoError(t, err)
@@ -241,8 +323,10 @@ func TestNewPinnedSecureClientJSON(t *testing.T) {
 
 	for name, input := range map[string]string{
 		"invalid JSON":    `{`,
-		"missing type":    `{"registers":["abc"]}`,
+		"null":            `null`,
+		"missing type":    `{"registers":["` + testRegister('a') + `"]}`,
 		"empty registers": `{"type":"https://tinfoil.sh/predicate/sev-snp-guest/v2","registers":[]}`,
+		"short register":  `{"type":"https://tinfoil.sh/predicate/sev-snp-guest/v2","registers":["abc"]}`,
 	} {
 		t.Run(name, func(t *testing.T) {
 			_, err := NewPinnedSecureClientJSON("enclave.test", input, "")
@@ -250,8 +334,15 @@ func TestNewPinnedSecureClientJSON(t *testing.T) {
 		})
 	}
 
-	_, err = NewPinnedSecureClientJSON("enclave.test", measurementJSON, `not json`)
-	assert.Error(t, err)
+	for name, input := range map[string]string{
+		"not json":   `not json`,
+		"null entry": `[null]`,
+	} {
+		t.Run("hardware "+name, func(t *testing.T) {
+			_, err := NewPinnedSecureClientJSON("enclave.test", measurementJSON, input)
+			assert.Error(t, err)
+		})
+	}
 }
 
 func TestVerifyFromBundleJSON(t *testing.T) {
