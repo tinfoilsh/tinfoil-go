@@ -98,7 +98,7 @@ type Client struct {
 // NewClientWithParams creates a new secure OpenAI client with explicit enclave and repo parameters
 func NewClientWithParams(enclave, repo string, openaiOpts ...option.RequestOption) (*Client, error) {
 	secureClient := client.NewSecureClient(enclave, repo)
-	return createClientFromSecureClient(secureClient, defaultTransportMode, "", resolveUserCacheSecret("", false), openaiOpts...)
+	return createClientFromSecureClient(secureClient, defaultTransportMode, "", "", resolveUserCacheSecret("", false), openaiOpts...)
 }
 
 // NewClient creates a new secure OpenAI client using default parameters
@@ -107,12 +107,12 @@ func NewClient(openaiOpts ...option.RequestOption) (*Client, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to create secure client: %w", err)
 	}
-	return createClientFromSecureClient(secureClient, defaultTransportMode, "", resolveUserCacheSecret("", false), openaiOpts...)
+	return createClientFromSecureClient(secureClient, defaultTransportMode, "", "", resolveUserCacheSecret("", false), openaiOpts...)
 }
 
 // createClientFromSecureClient is a helper function to create a Client from a SecureClient
-func createClientFromSecureClient(secureClient *client.SecureClient, mode TransportMode, baseURL, userCacheSecret string, openaiOpts ...option.RequestOption) (*Client, error) {
-	securedClient, err := secureHTTPClient(secureClient, mode, baseURL, userCacheSecret)
+func createClientFromSecureClient(secureClient *client.SecureClient, mode TransportMode, baseURL, attestationBundleURL, userCacheSecret string, openaiOpts ...option.RequestOption) (*Client, error) {
+	securedClient, err := secureHTTPClient(secureClient, mode, baseURL, attestationBundleURL, userCacheSecret)
 	if err != nil {
 		return nil, err
 	}
@@ -143,7 +143,11 @@ func createClientFromSecureClient(secureClient *client.SecureClient, mode Transp
 	}, nil
 }
 
+// Enclave returns the enclave traffic is secured to, which EHBP moves as the gateway routes.
 func (c *Client) Enclave() string {
+	if c.verifiedTransport != nil {
+		return c.verifiedTransport.activeEnclave()
+	}
 	return c.enclave
 }
 
@@ -178,6 +182,10 @@ func (t *reVerifyingTransport) replace(transport http.RoundTripper, document *cl
 	t.document = document
 	t.generation++
 	t.mu.Unlock()
+}
+
+func (t *reVerifyingTransport) activeEnclave() string {
+	return t.secureClient.Enclave()
 }
 
 func (t *reVerifyingTransport) verificationDocument() *client.VerificationDocument {

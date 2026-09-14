@@ -3,6 +3,7 @@ package tinfoil
 import (
 	"bytes"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -245,18 +246,20 @@ func writeUserCacheSecretCandidate(dir, secret string) (string, error) {
 	return path, nil
 }
 
-// userCacheSecretTransport injects the client-level secret into request bodies
-// on the way out. It sits above the sealing transport (EHBP or pinned TLS), so
-// the field is added before the body is encrypted, and below the host-binding
-// guard. A non-empty or non-string field already present in the body is never
-// overwritten; an empty string is replaced with the client-level secret.
-type userCacheSecretTransport struct {
+const (
+	modelHeader = "X-Tinfoil-Model"
+
+	cachePrefixHeader = "X-Tinfoil-Cache-Prefix"
+)
+
+type sealedBodyTransport struct {
 	secret    string
+	routing   bool
 	transport http.RoundTripper
 }
 
-func (t *userCacheSecretTransport) RoundTrip(req *http.Request) (*http.Response, error) {
-	if t.secret == "" || !userCacheSecretPathEligible(req) || req.GetBody == nil {
+func (t *sealedBodyTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	if !t.shapes(req) {
 		return t.transport.RoundTrip(req)
 	}
 
@@ -266,32 +269,100 @@ func (t *userCacheSecretTransport) RoundTrip(req *http.Request) (*http.Response,
 		return nil, err
 	}
 
-	newBody, changed := injectUserCacheSecret(raw, t.secret)
 	out := req.Clone(req.Context())
-	if !changed {
-		// Not a JSON object, or the caller set a non-empty or non-string field:
-		// forward the original bytes untouched.
-		out.Body = io.NopCloser(bytes.NewReader(raw))
-		return t.transport.RoundTrip(out)
+	body := raw
+	if t.secret != "" && userCacheSecretPathEligible(req) {
+		if injected, changed := injectUserCacheSecret(raw, t.secret); changed {
+			body = injected
+			out.ContentLength = int64(len(body))
+			out.Header.Set("Content-Length", strconv.Itoa(len(body)))
+			out.GetBody = func() (io.ReadCloser, error) {
+				return io.NopCloser(bytes.NewReader(body)), nil
+			}
+		}
 	}
-
-	out.Body = io.NopCloser(bytes.NewReader(newBody))
-	out.ContentLength = int64(len(newBody))
-	out.Header.Set("Content-Length", strconv.Itoa(len(newBody)))
-	// Retries below this layer (EHBP key rotation, redirects) must replay the
-	// injected body, not the caller's original.
-	out.GetBody = func() (io.ReadCloser, error) {
-		return io.NopCloser(bytes.NewReader(newBody)), nil
+	out.Body = io.NopCloser(bytes.NewReader(body))
+	if t.routing {
+		setRoutingHeaders(out, body)
 	}
 	return t.transport.RoundTrip(out)
 }
 
-// userCacheSecretPathEligible reports whether the request can carry the field:
-// a POST with a body to one of the supported endpoints.
-func userCacheSecretPathEligible(req *http.Request) bool {
-	if req.Method != http.MethodPost || req.Body == nil || req.Body == http.NoBody {
+func (t *sealedBodyTransport) shapes(req *http.Request) bool {
+	if req.Method != http.MethodPost || req.Body == nil || req.Body == http.NoBody || req.GetBody == nil {
 		return false
 	}
+	if t.secret != "" && userCacheSecretPathEligible(req) {
+		return true
+	}
+	return t.routing && strings.HasPrefix(req.Header.Get("Content-Type"), "application/json")
+}
+
+func setRoutingHeaders(req *http.Request, body []byte) {
+	var fields map[string]json.RawMessage
+	if json.Unmarshal(body, &fields) != nil {
+		return
+	}
+	if req.Header.Get(modelHeader) == "" {
+		if model := unquote(fields["model"]); model != "" {
+			req.Header.Set(modelHeader, model)
+		}
+	}
+	if req.Header.Get(cachePrefixHeader) != "" {
+		return
+	}
+	secret := unquote(fields[userCacheSecretField])
+	if secret == "" {
+		return
+	}
+	if head, ok := promptHead(fields); ok {
+		req.Header.Set(cachePrefixHeader, cachePrefix(secret, head))
+	}
+}
+
+// cachePrefix keys routing on the secret, so the gateway cannot link the value back to a prompt or compute it itself.
+func cachePrefix(secret string, head []byte) string {
+	h := sha256.New()
+	h.Write([]byte(secret))
+	// NUL frames the secret unambiguously: head is JSON, which escapes NUL rather than emitting it.
+	h.Write([]byte{0})
+	h.Write(head)
+	return hex.EncodeToString(h.Sum(nil))
+}
+
+// promptHead returns the leading part of a prompt that stays byte-identical as a conversation grows.
+func promptHead(body map[string]json.RawMessage) ([]byte, bool) {
+	// `instructions` precedes `input` in a Responses prompt, so it is the longest head shared by later turns.
+	if instructions := unquote(body["instructions"]); instructions != "" {
+		return body["instructions"], true
+	}
+	for _, field := range []string{"messages", "input", "prompt"} {
+		value, ok := body[field]
+		if !ok || len(value) == 0 || bytes.Equal(value, []byte("null")) {
+			continue
+		}
+		if value[0] != '[' {
+			return value, true
+		}
+		var items []json.RawMessage
+		if json.Unmarshal(value, &items) != nil || len(items) == 0 {
+			continue
+		}
+		return items[0], true
+	}
+	return nil, false
+}
+
+// unquote returns a JSON string's value, or "" for anything else.
+func unquote(raw json.RawMessage) string {
+	var s string
+	if json.Unmarshal(raw, &s) != nil {
+		return ""
+	}
+	return s
+}
+
+func userCacheSecretPathEligible(req *http.Request) bool {
 	for _, p := range userCacheSecretPaths {
 		if strings.HasSuffix(req.URL.Path, p) {
 			return true
