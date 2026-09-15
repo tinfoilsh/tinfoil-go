@@ -25,6 +25,10 @@ type VerifiedDocumentV3 struct {
 	EnclaveMeasurement *measurement.Measurement
 	// CryptoMaterial holds the endorsed key items (hash-bound into the quote).
 	CryptoMaterial []envelope.CryptoMaterialItem
+	// FreshnessExpiresAt is the earlier authenticated code/platform witness
+	// deadline. Cached verification must not authorize new requests at or
+	// after this time; re-verifying the same witness does not extend it.
+	FreshnessExpiresAt time.Time
 }
 
 // TLSPublicKeyFP returns the endorsed TLS key fingerprint (the id=tls
@@ -75,7 +79,7 @@ func VerifyDocumentV3(docBytes, nonce []byte, repo string) (*VerifiedDocumentV3,
 		return nil, fmt.Errorf("envelope: %w", err)
 	}
 
-	code, endorsements, err := authenticateReferenceValues(doc, repo)
+	code, endorsements, freshnessExpiresAt, err := authenticateReferenceValues(doc, repo)
 	if err != nil {
 		return nil, fmt.Errorf("reference values: %w", err)
 	}
@@ -91,47 +95,58 @@ func VerifyDocumentV3(docBytes, nonce []byte, repo string) (*VerifiedDocumentV3,
 		CodeMeasurement:    code.Measurement,
 		EnclaveMeasurement: authenticated.Measurement,
 		CryptoMaterial:     doc.CryptoMaterialItems(),
+		FreshnessExpiresAt: freshnessExpiresAt,
 	}, nil
 }
 
 // authenticateReferenceValues authenticates the document's required code and
 // platform Sigstore artifacts plus the matching freshness proof for each,
 // returning the authenticated code and platform values.
-func authenticateReferenceValues(doc *envelope.Document, repo string) (*provenance.Code, *provenance.PlatformEndorsements, error) {
+func authenticateReferenceValues(doc *envelope.Document, repo string) (*provenance.Code, *provenance.PlatformEndorsements, time.Time, error) {
 	codeRef, err := doc.ReferenceValuesCollateral(envelope.CollateralSigstoreCodeV1Format)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, time.Time{}, err
 	}
 	code, err := provenance.AuthenticateCode(codeRef.SigstoreBundle, repo, codeRef.Tag, codeRef.Digest)
 	if err != nil {
-		return nil, nil, fmt.Errorf("verifying code measurement: %w", err)
+		return nil, nil, time.Time{}, fmt.Errorf("verifying code measurement: %w", err)
 	}
 	codeFreshnessRef, err := doc.FreshnessCollateral(envelope.FreshnessCollateralIDCode)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, time.Time{}, err
 	}
 	appraisalTime := time.Now()
-	if _, err := provenance.AuthenticateFreshness(codeFreshnessRef.SigstoreBundle, &code.AuthenticatedArtifact, appraisalTime); err != nil {
-		return nil, nil, fmt.Errorf("verifying code freshness: %w", err)
+	codeWitnessedAt, err := provenance.AuthenticateFreshness(codeFreshnessRef.SigstoreBundle, &code.AuthenticatedArtifact, appraisalTime)
+	if err != nil {
+		return nil, nil, time.Time{}, fmt.Errorf("verifying code freshness: %w", err)
 	}
 
 	platformRef, err := doc.ReferenceValuesCollateral(envelope.CollateralSigstorePlatformV1Format)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, time.Time{}, err
 	}
 	endorsements, err := provenance.AuthenticatePlatformEndorsements(platformRef.SigstoreBundle, platformRef.Repo, platformRef.Tag, platformRef.Digest)
 	if err != nil {
-		return nil, nil, fmt.Errorf("verifying platform endorsements: %w", err)
+		return nil, nil, time.Time{}, fmt.Errorf("verifying platform endorsements: %w", err)
 	}
 	freshnessRef, err := doc.FreshnessCollateral(envelope.FreshnessCollateralIDPlatform)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, time.Time{}, err
 	}
-	if _, err := provenance.AuthenticateFreshness(freshnessRef.SigstoreBundle, &endorsements.AuthenticatedArtifact, appraisalTime); err != nil {
-		return nil, nil, fmt.Errorf("verifying platform freshness: %w", err)
+	platformWitnessedAt, err := provenance.AuthenticateFreshness(freshnessRef.SigstoreBundle, &endorsements.AuthenticatedArtifact, appraisalTime)
+	if err != nil {
+		return nil, nil, time.Time{}, fmt.Errorf("verifying platform freshness: %w", err)
 	}
 
-	return code, endorsements, nil
+	return code, endorsements, freshnessDeadline(codeWitnessedAt, platformWitnessedAt), nil
+}
+
+// freshnessDeadline uses authenticated issuance times, never local verification time.
+func freshnessDeadline(codeWitnessedAt, platformWitnessedAt time.Time) time.Time {
+	if platformWitnessedAt.Before(codeWitnessedAt) {
+		codeWitnessedAt = platformWitnessedAt
+	}
+	return codeWitnessedAt.Add(provenance.MaxFreshnessAge)
 }
 
 // VerifyV3 runs the single-request v3 flow against the client's enclave:
