@@ -139,12 +139,17 @@ func authenticateReferenceValues(doc *envelope.Document, repo string) (*provenan
 		return nil, nil, time.Time{}, fmt.Errorf("verifying platform freshness: %w", err)
 	}
 
+	return code, endorsements, freshnessExpiration(codeWitnessedAt, platformWitnessedAt), nil
+}
+
+// freshnessExpiration uses authenticated witness times, never local verification time.
+func freshnessExpiration(codeWitnessedAt, platformWitnessedAt time.Time) time.Time {
 	expiresAt := codeWitnessedAt.Add(provenance.MaxFreshnessAge)
 	platformExpiresAt := platformWitnessedAt.Add(provenance.MaxFreshnessAge)
 	if platformExpiresAt.Before(expiresAt) {
 		expiresAt = platformExpiresAt
 	}
-	return code, endorsements, expiresAt, nil
+	return expiresAt
 }
 
 // VerifyV3 runs the single-request v3 flow against the client's enclave:

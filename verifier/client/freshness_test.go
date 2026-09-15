@@ -10,8 +10,27 @@ import (
 	"github.com/tinfoilsh/tinfoil-go/verifier/provenance"
 )
 
-// Like TestVerify, this is opt-in. Assert the public result against both
-// authenticated witnesses, rather than testing a standalone min-time helper.
+func TestFreshnessExpiration(t *testing.T) {
+	issuedAt := time.Date(2026, time.August, 6, 12, 0, 0, 0, time.UTC)
+	later := issuedAt.Add(time.Hour)
+	want := issuedAt.Add(provenance.MaxFreshnessAge)
+	for _, tt := range []struct {
+		name                string
+		codeWitnessedAt     time.Time
+		platformWitnessedAt time.Time
+	}{
+		{"code expires first", issuedAt, later},
+		{"platform expires first", later, issuedAt},
+		{"same issuance time", issuedAt, issuedAt},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			require.Equal(t, want, freshnessExpiration(tt.codeWitnessedAt, tt.platformWitnessedAt))
+		})
+	}
+}
+
+// Like TestVerify, this is opt-in. It also checks that the public result carries
+// the earlier expiration from the authenticated witnesses.
 func TestVerifyV3FreshnessExpiration(t *testing.T) {
 	host, repo := os.Getenv("TINFOIL_ENCLAVE"), os.Getenv("TINFOIL_REPO")
 	if host == "" || repo == "" {
@@ -22,6 +41,7 @@ func TestVerifyV3FreshnessExpiration(t *testing.T) {
 	raw, err := envelope.Fetch(host, nonce)
 	require.NoError(t, err)
 	verified, err := VerifyDocumentV3(raw, nonce, repo)
+	skipIfEnclaveNotV3(t, err)
 	require.NoError(t, err)
 	doc, err := envelope.Parse(raw)
 	require.NoError(t, err)
