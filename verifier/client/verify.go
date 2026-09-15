@@ -101,7 +101,8 @@ func VerifyDocumentV3(docBytes, nonce []byte, repo string) (*VerifiedDocumentV3,
 
 // authenticateReferenceValues authenticates the document's required code and
 // platform Sigstore artifacts plus the matching freshness proof for each,
-// returning the authenticated code and platform values.
+// returning the authenticated code, platform values, and the earlier of their
+// authenticated freshness expiration times.
 func authenticateReferenceValues(doc *envelope.Document, repo string) (*provenance.Code, *provenance.PlatformEndorsements, time.Time, error) {
 	codeRef, err := doc.ReferenceValuesCollateral(envelope.CollateralSigstoreCodeV1Format)
 	if err != nil {
@@ -138,15 +139,12 @@ func authenticateReferenceValues(doc *envelope.Document, repo string) (*provenan
 		return nil, nil, time.Time{}, fmt.Errorf("verifying platform freshness: %w", err)
 	}
 
-	return code, endorsements, freshnessDeadline(codeWitnessedAt, platformWitnessedAt), nil
-}
-
-// freshnessDeadline uses authenticated issuance times, never local verification time.
-func freshnessDeadline(codeWitnessedAt, platformWitnessedAt time.Time) time.Time {
-	if platformWitnessedAt.Before(codeWitnessedAt) {
-		codeWitnessedAt = platformWitnessedAt
+	expiresAt := codeWitnessedAt.Add(provenance.MaxFreshnessAge)
+	platformExpiresAt := platformWitnessedAt.Add(provenance.MaxFreshnessAge)
+	if platformExpiresAt.Before(expiresAt) {
+		expiresAt = platformExpiresAt
 	}
-	return codeWitnessedAt.Add(provenance.MaxFreshnessAge)
+	return code, endorsements, expiresAt, nil
 }
 
 // VerifyV3 runs the single-request v3 flow against the client's enclave:
