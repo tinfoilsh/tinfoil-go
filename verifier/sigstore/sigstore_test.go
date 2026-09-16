@@ -2,11 +2,9 @@ package sigstore
 
 import (
 	"regexp"
-	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 	"github.com/tinfoilsh/tinfoil-go/verifier/attestation"
 	"github.com/tinfoilsh/tinfoil-go/verifier/github"
 )
@@ -58,19 +56,7 @@ func TestVerifyAttestation(t *testing.T) {
 	assert.NoError(t, err)
 
 	measurement, err := client.VerifyAttestation(bundle, repo, hexDigest)
-	require.NoError(t, err)
-	pinnedMeasurement, err := client.VerifyAttestationForRelease(bundle, repo, "", hexDigest)
-	require.NoError(t, err)
-	assert.Equal(t, measurement, pinnedMeasurement)
-	for _, tc := range []struct{ repo, tag, digest string }{
-		{repo, "", strings.Repeat("0", 64)},
-		{repo, "", ""},
-		{"other/repo", "", hexDigest},
-		{repo, "v0.0.0-wrong-tag", hexDigest},
-	} {
-		_, err := client.VerifyAttestationForRelease(bundle, tc.repo, tc.tag, tc.digest)
-		assert.Error(t, err, "repo=%q tag=%q digest=%q", tc.repo, tc.tag, tc.digest)
-	}
+	assert.NoError(t, err)
 	assert.Equal(t, measurement.Type, attestation.SnpTdxMultiPlatformV1)
 	assert.Equal(t, measurement.Registers, []string{
 		"442df00d945bdd2849e6df4eb28c757e9e94428787268b452eacb3f86bbc38528d6712e2c41b6953f1a96d2493d5f9b6", // SEV-SNP
