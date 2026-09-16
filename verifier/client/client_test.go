@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"github.com/tinfoilsh/tinfoil-go/verifier/attestation"
 )
 
@@ -20,8 +21,15 @@ func TestVerify(t *testing.T) {
 	}
 
 	client := NewSecureClient(enclave, repo)
-	_, err := client.Verify()
-	assert.NoError(t, err)
+	groundTruth, err := client.Verify()
+	require.NoError(t, err)
+
+	pinned := NewSecureClient(enclave, repo+"@sha256:"+groundTruth.Digest)
+	pinnedGroundTruth, err := pinned.Verify()
+	require.NoError(t, err)
+	assert.Equal(t, groundTruth.Digest, pinnedGroundTruth.Digest)
+	assert.Equal(t, groundTruth.CodeMeasurement, pinnedGroundTruth.CodeMeasurement)
+	assert.Equal(t, groundTruth.TLSPublicKey, pinnedGroundTruth.TLSPublicKey)
 }
 
 func TestClientGroundTruthJSON(t *testing.T) {

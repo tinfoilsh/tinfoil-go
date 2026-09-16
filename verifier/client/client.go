@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -279,6 +280,7 @@ func (s *SecureClient) Verify() (*GroundTruth, error) {
 	var codeMeasurement = s.codeMeasurement
 	var digest = pinnedNoDigest
 	var releaseTag string
+	repo, _, _ := strings.Cut(s.repo, "@sha256:")
 	if s.codeMeasurement == nil {
 		release, err := github.FetchLatestRelease(s.repo)
 		if err != nil {
@@ -292,12 +294,12 @@ func (s *SecureClient) Verify() (*GroundTruth, error) {
 			return nil, fmt.Errorf("verifyCode: failed to create sigstore client: %v", err)
 		}
 
-		sigstoreBundle, err := github.FetchAttestationBundle(s.repo, digest)
+		sigstoreBundle, err := github.FetchAttestationBundle(repo, digest)
 		if err != nil {
 			return nil, fmt.Errorf("verifyCode: failed to fetch attestation bundle: %v", err)
 		}
 
-		codeMeasurement, err = sigstoreClient.VerifyAttestationForRelease(sigstoreBundle, s.repo, releaseTag, digest)
+		codeMeasurement, err = sigstoreClient.VerifyAttestationForRelease(sigstoreBundle, repo, releaseTag, digest)
 		if err != nil {
 			return nil, fmt.Errorf("verifyCode: failed to verify attested measurements: %v", err)
 		}

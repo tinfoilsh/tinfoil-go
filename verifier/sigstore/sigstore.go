@@ -201,10 +201,14 @@ func (c *Client) VerifyAttestation(
 }
 
 // VerifyAttestationForRelease verifies an attestation signed for an exact release tag.
+// An empty tag accepts any release tag from repo, still requiring hexDigest.
 func (c *Client) VerifyAttestationForRelease(
 	bundleJSON []byte,
 	repo, tag, hexDigest string,
 ) (*attestation.Measurement, error) {
+	if tag == "" {
+		return c.VerifyAttestation(bundleJSON, repo, hexDigest)
+	}
 	result, err := c.verifyBundleWithIdentity(bundleJSON, releaseIdentity(repo, tag), hexDigest)
 	return measurementFromResult(result, err)
 }

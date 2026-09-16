@@ -47,7 +47,11 @@ func FetchDigest(repo, tag string) (string, error) {
 }
 
 // FetchLatestRelease gets the latest release tag and attestation digest of a repo.
+// An @sha256: suffix selects a digest without looking up a release.
 func FetchLatestRelease(repo string) (*Release, error) {
+	if _, digest, pinned := strings.Cut(repo, "@sha256:"); pinned {
+		return &Release{Digest: digest}, nil
+	}
 	latestTag, err := FetchLatestTag(repo)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch latest tag: %w", err)
