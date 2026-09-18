@@ -1,0 +1,2 @@
+github.com/tinfoilsh/tinfoil-go/verifier/client
+github.com/tinfoilsh/tinfoil-go/verifier/measurement
