@@ -82,3 +82,30 @@ func TestValidateFreshnessTime(t *testing.T) {
 	_, err = validateFreshnessTime([]verify.TimestampVerificationResult{{Type: "Tlog", Timestamp: now.Add(-MaxFreshnessAge - time.Second)}}, now)
 	assert.ErrorContains(t, err, "stale")
 }
+
+func TestFreshnessMaximumAgeBoundaries(t *testing.T) {
+	now := time.Date(2026, 9, 18, 12, 0, 0, 0, time.UTC)
+	for _, age := range []time.Duration{time.Hour, MaxFreshnessAge, 14 * 24 * time.Hour} {
+		for _, delta := range []time.Duration{-time.Nanosecond, 0, time.Nanosecond} {
+			timestamps := []verify.TimestampVerificationResult{{Type: "Tlog", Timestamp: now.Add(-age).Add(delta)}}
+			_, err := validateFreshnessTimeWithMaxAge(timestamps, now, age)
+			if delta > 0 {
+				require.NoError(t, err)
+			} else {
+				require.ErrorContains(t, err, "stale")
+			}
+		}
+	}
+	old := []verify.TimestampVerificationResult{{Type: "Tlog", Timestamp: now.Add(-10 * 24 * time.Hour)}}
+	_, err := validateFreshnessTime(old, now)
+	require.ErrorContains(t, err, "stale")
+	_, err = validateFreshnessTimeWithMaxAge(old, now, 14*24*time.Hour)
+	require.NoError(t, err)
+	future := []verify.TimestampVerificationResult{{Type: "Tlog", Timestamp: now.Add(MaxFreshnessFutureSkew + time.Nanosecond)}}
+	_, err = validateFreshnessTimeWithMaxAge(future, now, 14*24*time.Hour)
+	require.ErrorContains(t, err, "in the future")
+	for _, age := range []time.Duration{0, -time.Hour} {
+		_, err = AuthenticateFreshnessWithMaxAge(nil, nil, now, age)
+		require.ErrorContains(t, err, "must be positive")
+	}
+}

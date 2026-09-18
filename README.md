@@ -138,6 +138,35 @@ Resolution order is a non-empty per-request string, a non-empty client value, a 
 
 Multi-user services must provide a stable, non-empty, opaque value for each user (or group whose members may share cache-hit timing) on every eligible request. Do not use a raw user identifier, API key, or encryption key. A single client, environment, or generated value groups all requests using it under the same API identity. If persistence is unavailable, the SDK uses an in-memory value and cache continuity ends when the process exits.
 
+## Freshness witness policy
+
+Code and platform freshness witnesses are accepted for seven days by default.
+Configure a different positive maximum age per client:
+
+```go
+client, err := tinfoil.NewClientWithOptions(
+    tinfoil.WithFreshnessMaxAge(14 * 24 * time.Hour),
+)
+```
+
+Import `time` for duration values. Shorter ages require more recently issued
+witnesses; longer ages accept older signed artifacts. The setting applies during
+router selection and re-verification and does not alter the five-minute clock
+skew allowance. Zero or negative explicit options return an error.
+
+Low-level callers can use `client.NewSecureClientWithOptions` or
+`client.VerifyDocumentV3WithOptions` with
+`client.VerificationOptions{FreshnessMaxAge: maxAge}`. An omitted/zero options
+field retains the default. `SetFreshnessMaxAge` changes an existing secure
+client's policy and clears its cached verification; mobile callers can use
+`SetFreshnessMaxAgeSeconds`. Replace previously returned HTTP clients after
+changing verification policy.
+
+The returned `FreshnessExpiresAt` is the earlier authenticated code/platform
+witness timestamp plus the configured age. Re-verifying the same witnesses does
+not extend it. Consumers caching verified documents must reject new requests
+at or after that deadline.
+
 ## API Documentation
 
 This library is a drop-in replacement for the [official OpenAI Go client](https://github.com/openai/openai-go) that can be used with Tinfoil. All methods and types are identical. See the [OpenAI Go client documentation](https://pkg.go.dev/github.com/openai/openai-go/v3) for complete API usage and documentation.

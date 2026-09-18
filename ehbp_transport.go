@@ -7,6 +7,7 @@ import (
 	"net/url"
 	"strings"
 	"sync"
+	"time"
 
 	"log/slog"
 
@@ -48,6 +49,8 @@ type clientConfig struct {
 	baseURLSet         bool
 	userCacheSecret    string
 	userCacheSecretSet bool
+	freshnessMaxAge    time.Duration
+	freshnessMaxAgeSet bool
 	openaiOpts         []option.RequestOption
 }
 
@@ -84,6 +87,15 @@ func WithBaseURL(baseURL string) ClientOption {
 	}
 }
 
+// WithFreshnessMaxAge sets a positive maximum age for both code and platform
+// freshness witnesses. Unset uses seven days. Longer ages accept older witnesses.
+func WithFreshnessMaxAge(maxAge time.Duration) ClientOption {
+	return func(c *clientConfig) {
+		c.freshnessMaxAge = maxAge
+		c.freshnessMaxAgeSet = true
+	}
+}
+
 // WithOpenAIOptions appends options passed through to the underlying OpenAI client.
 func WithOpenAIOptions(opts ...option.RequestOption) ClientOption {
 	return func(c *clientConfig) { c.openaiOpts = append(c.openaiOpts, opts...) }
@@ -114,15 +126,23 @@ func NewClientWithOptions(opts ...ClientOption) (*Client, error) {
 		}
 	}
 
+	if cfg.freshnessMaxAgeSet && cfg.freshnessMaxAge <= 0 {
+		return nil, fmt.Errorf("freshness maximum age must be positive")
+	}
+	verificationOpts := client.VerificationOptions{FreshnessMaxAge: cfg.freshnessMaxAge}
 	var secureClient *client.SecureClient
 	if cfg.enclave == "" {
 		var err error
-		secureClient, err = client.NewDefaultClient()
+		secureClient, err = client.NewDefaultClientWithOptions(verificationOpts)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create secure client: %w", err)
 		}
 	} else {
-		secureClient = client.NewSecureClient(cfg.enclave, cfg.repo)
+		var err error
+		secureClient, err = client.NewSecureClientWithOptions(cfg.enclave, cfg.repo, verificationOpts)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	return createClientFromSecureClient(secureClient, cfg.transport, cfg.baseURL,

@@ -14,10 +14,23 @@ import (
 // preserves the default requirement of an unextended RTMR3.
 type VerificationOptions struct {
 	ExpectedRTMR3 string
+	// FreshnessMaxAge applies to both code and platform witnesses. Zero uses
+	// the seven-day default; negative values reject verification.
+	FreshnessMaxAge time.Duration
 }
 
 func (o VerificationOptions) validate() error {
+	if o.FreshnessMaxAge < 0 {
+		return fmt.Errorf("freshness maximum age must be positive")
+	}
 	return (quote.Options{ExpectedRTMR3: o.ExpectedRTMR3}).Validate()
+}
+
+func (o VerificationOptions) freshnessMaxAge() time.Duration {
+	if o.FreshnessMaxAge == 0 {
+		return provenance.MaxFreshnessAge
+	}
+	return o.FreshnessMaxAge
 }
 
 // VerifiedDocumentV3 is what a verified v3 document proves. The operative
@@ -98,7 +111,7 @@ func VerifyDocumentV3WithOptions(docBytes, nonce []byte, repo string, opts Verif
 		return nil, fmt.Errorf("envelope: %w", err)
 	}
 
-	code, endorsements, freshnessExpiresAt, err := authenticateReferenceValues(doc, repo)
+	code, endorsements, freshnessExpiresAt, err := authenticateReferenceValues(doc, repo, opts.freshnessMaxAge())
 	if err != nil {
 		return nil, fmt.Errorf("reference values: %w", err)
 	}
@@ -122,7 +135,7 @@ func VerifyDocumentV3WithOptions(docBytes, nonce []byte, repo string, opts Verif
 // platform Sigstore artifacts plus the matching freshness proof for each,
 // returning the authenticated code, platform values, and the earlier of their
 // authenticated freshness expiration times.
-func authenticateReferenceValues(doc *envelope.Document, repo string) (*provenance.Code, *provenance.PlatformEndorsements, time.Time, error) {
+func authenticateReferenceValues(doc *envelope.Document, repo string, maxAge time.Duration) (*provenance.Code, *provenance.PlatformEndorsements, time.Time, error) {
 	codeRef, err := doc.ReferenceValuesCollateral(envelope.CollateralSigstoreCodeV1Format)
 	if err != nil {
 		return nil, nil, time.Time{}, err
@@ -136,7 +149,7 @@ func authenticateReferenceValues(doc *envelope.Document, repo string) (*provenan
 		return nil, nil, time.Time{}, err
 	}
 	appraisalTime := time.Now()
-	codeWitnessedAt, err := provenance.AuthenticateFreshness(codeFreshnessRef.SigstoreBundle, &code.AuthenticatedArtifact, appraisalTime)
+	codeWitnessedAt, err := provenance.AuthenticateFreshnessWithMaxAge(codeFreshnessRef.SigstoreBundle, &code.AuthenticatedArtifact, appraisalTime, maxAge)
 	if err != nil {
 		return nil, nil, time.Time{}, fmt.Errorf("verifying code freshness: %w", err)
 	}
@@ -153,18 +166,18 @@ func authenticateReferenceValues(doc *envelope.Document, repo string) (*provenan
 	if err != nil {
 		return nil, nil, time.Time{}, err
 	}
-	platformWitnessedAt, err := provenance.AuthenticateFreshness(freshnessRef.SigstoreBundle, &endorsements.AuthenticatedArtifact, appraisalTime)
+	platformWitnessedAt, err := provenance.AuthenticateFreshnessWithMaxAge(freshnessRef.SigstoreBundle, &endorsements.AuthenticatedArtifact, appraisalTime, maxAge)
 	if err != nil {
 		return nil, nil, time.Time{}, fmt.Errorf("verifying platform freshness: %w", err)
 	}
 
-	return code, endorsements, freshnessExpiration(codeWitnessedAt, platformWitnessedAt), nil
+	return code, endorsements, freshnessExpiration(codeWitnessedAt, platformWitnessedAt, maxAge), nil
 }
 
 // freshnessExpiration uses authenticated witness times, never local verification time.
-func freshnessExpiration(codeWitnessedAt, platformWitnessedAt time.Time) time.Time {
-	expiresAt := codeWitnessedAt.Add(provenance.MaxFreshnessAge)
-	platformExpiresAt := platformWitnessedAt.Add(provenance.MaxFreshnessAge)
+func freshnessExpiration(codeWitnessedAt, platformWitnessedAt time.Time, maxAge time.Duration) time.Time {
+	expiresAt := codeWitnessedAt.Add(maxAge)
+	platformExpiresAt := platformWitnessedAt.Add(maxAge)
 	if platformExpiresAt.Before(expiresAt) {
 		expiresAt = platformExpiresAt
 	}

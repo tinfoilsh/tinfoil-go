@@ -5,8 +5,10 @@ import (
 	_ "embed"
 	"encoding/json"
 	"fmt"
+	"math"
 	"net/http"
 	"sync"
+	"time"
 
 	"github.com/tinfoilsh/tinfoil-go/verifier/measurement"
 	"github.com/tinfoilsh/tinfoil-go/verifier/util"
@@ -71,28 +73,54 @@ func NewSecureClient(enclave, repo string) *SecureClient {
 	}
 }
 
+// NewSecureClientWithOptions creates a client with caller-owned verification
+// policy. A zero options value preserves the defaults.
+func NewSecureClientWithOptions(enclave, repo string, opts VerificationOptions) (*SecureClient, error) {
+	if err := opts.validate(); err != nil {
+		return nil, err
+	}
+	s := NewSecureClient(enclave, repo)
+	s.verificationOptions = opts
+	return s, nil
+}
+
 // NewDefaultClient creates a new secure client with fallback mechanism.
 // It tries to fetch routers from the router service, attempts to verify each one,
 // and falls back to inference.tinfoil.sh if all routers fail.
 func NewDefaultClient() (*SecureClient, error) {
+	return NewDefaultClientWithOptions(VerificationOptions{})
+}
+
+// NewDefaultClientWithOptions applies the same caller policy during router
+// selection and subsequent verification, including the fallback enclave.
+func NewDefaultClientWithOptions(opts VerificationOptions) (*SecureClient, error) {
+	if err := opts.validate(); err != nil {
+		return nil, err
+	}
+	fallback := func() (*SecureClient, error) {
+		return NewSecureClientWithOptions("inference.tinfoil.sh", defaultRouterRepo, opts)
+	}
 	routers, err := fetchRouters()
 	if err != nil {
 		// If we can't get routers, fall back to inference.tinfoil.sh immediately
-		return newFallbackClient(), nil
+		return fallback()
 	}
 
 	// Try each router in sequence
 	for _, routerURL := range routers {
-		client := NewSecureClient(routerURL, defaultRouterRepo)
+		client, err := NewSecureClientWithOptions(routerURL, defaultRouterRepo, opts)
+		if err != nil {
+			return nil, err
+		}
 
 		// Return first working router
-		_, err := client.Verify()
+		_, err = client.Verify()
 		if err == nil {
 			return client, nil
 		}
 	}
 
-	return newFallbackClient(), nil
+	return fallback()
 }
 
 // Enclave returns the enclave URL
@@ -116,6 +144,27 @@ func (s *SecureClient) SetExpectedRTMR3(rtmr3 string) {
 	defer s.verifyMu.Unlock()
 	s.verificationOptions.ExpectedRTMR3 = rtmr3
 	s.invalidateVerification()
+}
+
+// SetFreshnessMaxAge sets a positive maximum witness age and invalidates
+// cached verification. Previously returned HTTP clients retain their transport.
+func (s *SecureClient) SetFreshnessMaxAge(maxAge time.Duration) error {
+	if maxAge <= 0 {
+		return fmt.Errorf("freshness maximum age must be positive")
+	}
+	s.verifyMu.Lock()
+	defer s.verifyMu.Unlock()
+	s.verificationOptions.FreshnessMaxAge = maxAge
+	s.invalidateVerification()
+	return nil
+}
+
+// SetFreshnessMaxAgeSeconds is the mobile-compatible form of SetFreshnessMaxAge.
+func (s *SecureClient) SetFreshnessMaxAgeSeconds(seconds int64) error {
+	if seconds <= 0 || seconds > math.MaxInt64/int64(time.Second) {
+		return fmt.Errorf("freshness maximum age seconds is out of range")
+	}
+	return s.SetFreshnessMaxAge(time.Duration(seconds) * time.Second)
 }
 
 func (s *SecureClient) invalidateVerification() {
