@@ -6,6 +6,7 @@
 package envelope
 
 import (
+	"context"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
@@ -13,12 +14,14 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"net/http"
 	"net/url"
 	"regexp"
 	"slices"
+	"time"
 
 	"github.com/tinfoilsh/tinfoil-go/verifier/internal/strictjson"
-	"github.com/tinfoilsh/tinfoil-go/verifier/util"
 )
 
 // Attestation document v3 (predicate https://tinfoil.sh/predicate/attestation/v3).
@@ -488,6 +491,7 @@ func Check(docBytes []byte, expectedNonce []byte) (*Document, [64]byte, error) {
 
 // Fetch retrieves a v3 attestation document from an enclave host using a
 // fresh challenge nonce, returning the raw response bytes for verification.
+// It uses http.DefaultClient with a 30-second deadline and a 32 MiB body limit.
 func Fetch(host string, nonce []byte) ([]byte, error) {
 	if len(nonce) != NonceSize {
 		return nil, fmt.Errorf("nonce must be %d bytes, got %d", NonceSize, len(nonce))
@@ -498,14 +502,32 @@ func Fetch(host string, nonce []byte) ([]byte, error) {
 		Path:     attestationEndpoint,
 		RawQuery: "nonce=" + hex.EncodeToString(nonce),
 	}
-	body, _, err := util.Get(u.String())
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
 	if err != nil {
 		return nil, err
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode > 299 {
+		return nil, fmt.Errorf("HTTP GET %s: %d %s", u.String(), resp.StatusCode, resp.Status)
+	}
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxAttestationBytes+1))
+	if err != nil {
+		return nil, err
+	}
+	if len(body) > maxAttestationBytes {
+		return nil, fmt.Errorf("attestation document exceeds 32 MiB")
 	}
 	return body, nil
 }
 
 const attestationEndpoint = "/.well-known/tinfoil-attestation"
+const maxAttestationBytes = 32 << 20
 
 // EndorsementCollateral returns the first endorsement-role collateral entry
 // with the given format whose subjects include subject.
