@@ -8,8 +8,10 @@ import (
 	"fmt"
 	"net/http"
 	"sync"
+	"time"
 
 	"github.com/tinfoilsh/tinfoil-go/verifier/measurement"
+	"github.com/tinfoilsh/tinfoil-go/verifier/provenance"
 	"github.com/tinfoilsh/tinfoil-go/verifier/util"
 )
 
@@ -32,7 +34,8 @@ type GroundTruth struct {
 }
 
 type SecureClient struct {
-	enclave, repo string
+	enclave, repo   string
+	freshnessMaxAge time.Duration
 
 	stateMu    sync.RWMutex
 	state      *verificationState
@@ -45,8 +48,8 @@ var (
 	defaultRouterURL  = "https://atc.tinfoil.sh/routers"
 )
 
-func newFallbackClient() *SecureClient {
-	return NewSecureClient("inference.tinfoil.sh", defaultRouterRepo)
+func newFallbackClient(maxAge time.Duration) *SecureClient {
+	return newSecureClient("inference.tinfoil.sh", defaultRouterRepo, maxAge)
 }
 
 func fetchRouters() ([]string, error) {
@@ -65,9 +68,23 @@ func fetchRouters() ([]string, error) {
 
 // NewSecureClient creates a new secure client with a given repo and enclave
 func NewSecureClient(enclave, repo string) *SecureClient {
+	return newSecureClient(enclave, repo, provenance.MaxFreshnessAge)
+}
+
+// NewSecureClientWithOptions copies policy before any verification takes place.
+func NewSecureClientWithOptions(enclave, repo string, options VerificationOptions) (*SecureClient, error) {
+	maxAge, err := options.freshnessMaxAge()
+	if err != nil {
+		return nil, err
+	}
+	return newSecureClient(enclave, repo, maxAge), nil
+}
+
+func newSecureClient(enclave, repo string, maxAge time.Duration) *SecureClient {
 	return &SecureClient{
-		enclave: enclave,
-		repo:    repo,
+		enclave:         enclave,
+		repo:            repo,
+		freshnessMaxAge: maxAge,
 	}
 }
 
@@ -75,15 +92,25 @@ func NewSecureClient(enclave, repo string) *SecureClient {
 // It tries to fetch routers from the router service, attempts to verify each one,
 // and falls back to inference.tinfoil.sh if all routers fail.
 func NewDefaultClient() (*SecureClient, error) {
+	return NewDefaultClientWithOptions(VerificationOptions{})
+}
+
+// NewDefaultClientWithOptions applies the same policy to every router candidate
+// and the fallback, including their initial verification.
+func NewDefaultClientWithOptions(options VerificationOptions) (*SecureClient, error) {
+	maxAge, err := options.freshnessMaxAge()
+	if err != nil {
+		return nil, err
+	}
 	routers, err := fetchRouters()
 	if err != nil {
 		// If we can't get routers, fall back to inference.tinfoil.sh immediately
-		return newFallbackClient(), nil
+		return newFallbackClient(maxAge), nil
 	}
 
 	// Try each router in sequence
 	for _, routerURL := range routers {
-		client := NewSecureClient(routerURL, defaultRouterRepo)
+		client := newSecureClient(routerURL, defaultRouterRepo, maxAge)
 
 		// Return first working router
 		_, err := client.Verify()
@@ -92,7 +119,7 @@ func NewDefaultClient() (*SecureClient, error) {
 		}
 	}
 
-	return newFallbackClient(), nil
+	return newFallbackClient(maxAge), nil
 }
 
 // Enclave returns the enclave URL
