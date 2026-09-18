@@ -26,41 +26,14 @@ type Measurement struct {
 	Registers []string      `json:"registers"`
 }
 
-// Fingerprint computes a fingerprint for a measurement. For single-register
-// measurements, the register value is returned directly. For multi-register
-// measurements, SHA-256 is computed over the type URL concatenated with all
-// register values (no separator).
-func Fingerprint(m *Measurement, hw *HardwareMeasurement, targetType PredicateType) (string, error) {
-	var registers []string
-
-	switch m.Type {
-	case SnpTdxMultiPlatformV1: // Source
-		switch targetType {
-		case SevGuestV2:
-			registers = []string{m.Registers[0]}
-		case TdxGuestV2:
-			if hw == nil {
-				return "", fmt.Errorf("hardware measurement required for TDX guest types")
-			}
-			registers = []string{hw.MRTD, hw.RTMR0, m.Registers[1], m.Registers[2], RTMR3_ZERO}
-		default:
-			return "", fmt.Errorf("unsupported target type %s", targetType)
-		}
-	case TdxGuestV2: // Runtime
-		registers = []string{m.Registers[0], m.Registers[1], m.Registers[2], m.Registers[3], m.Registers[4]}
-	case SevGuestV2:
-		registers = []string{m.Registers[0]}
-	default:
-		return "", fmt.Errorf("unsupported measurement type %s", m.Type)
+// Fingerprint returns the register value of a single-register measurement, or
+// SHA-256 over the type URL and all register values for multi-register ones.
+func (m *Measurement) Fingerprint() string {
+	if len(m.Registers) == 1 {
+		return m.Registers[0]
 	}
-
-	if len(registers) == 1 {
-		return registers[0], nil
-	}
-
-	all := string(m.Type) + strings.Join(registers, "")
-	hash := sha256.Sum256([]byte(all))
-	return fmt.Sprintf("%x", hash), nil
+	hash := sha256.Sum256([]byte(string(m.Type) + strings.Join(m.Registers, "")))
+	return fmt.Sprintf("%x", hash)
 }
 
 func (m *Measurement) String() string {

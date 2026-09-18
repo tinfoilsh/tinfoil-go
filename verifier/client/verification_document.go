@@ -48,23 +48,22 @@ type DocumentEnclaveMeasurement struct {
 
 // VerificationDocument is the Verification Center-compatible result of verification.
 type VerificationDocument struct {
-	SchemaVersion          int                              `json:"schemaVersion"`
-	ConfigRepo             string                           `json:"configRepo"`
-	EnclaveHost            string                           `json:"enclaveHost"`
-	ReleaseTag             string                           `json:"releaseTag,omitempty"`
-	ReleaseDigest          string                           `json:"releaseDigest"`
-	CodeMeasurement        *measurement.Measurement         `json:"codeMeasurement"`
-	EnclaveMeasurement     DocumentEnclaveMeasurement       `json:"enclaveMeasurement"`
-	TLSPublicKey           string                           `json:"tlsPublicKey"`
-	HPKEPublicKey          string                           `json:"hpkePublicKey"`
-	HardwareMeasurement    *measurement.HardwareMeasurement `json:"hardwareMeasurement,omitempty"`
-	CodeFingerprint        string                           `json:"codeFingerprint"`
-	EnclaveFingerprint     string                           `json:"enclaveFingerprint"`
-	SelectedRouterEndpoint string                           `json:"selectedRouterEndpoint"`
-	SecurityVerified       bool                             `json:"securityVerified"`
-	Verifier               SoftwareIdentity                 `json:"verifier"`
-	VerifiedAt             string                           `json:"verifiedAt,omitempty"`
-	Steps                  VerificationSteps                `json:"steps"`
+	SchemaVersion          int                        `json:"schemaVersion"`
+	ConfigRepo             string                     `json:"configRepo"`
+	EnclaveHost            string                     `json:"enclaveHost"`
+	ReleaseTag             string                     `json:"releaseTag,omitempty"`
+	ReleaseDigest          string                     `json:"releaseDigest"`
+	CodeMeasurement        *measurement.Measurement   `json:"codeMeasurement"`
+	EnclaveMeasurement     DocumentEnclaveMeasurement `json:"enclaveMeasurement"`
+	TLSPublicKey           string                     `json:"tlsPublicKey"`
+	HPKEPublicKey          string                     `json:"hpkePublicKey"`
+	CodeFingerprint        string                     `json:"codeFingerprint"`
+	EnclaveFingerprint     string                     `json:"enclaveFingerprint"`
+	SelectedRouterEndpoint string                     `json:"selectedRouterEndpoint"`
+	SecurityVerified       bool                       `json:"securityVerified"`
+	Verifier               SoftwareIdentity           `json:"verifier"`
+	VerifiedAt             string                     `json:"verifiedAt,omitempty"`
+	Steps                  VerificationSteps          `json:"steps"`
 }
 
 func currentVerifierIdentity() SoftwareIdentity {
@@ -129,7 +128,6 @@ func newVerificationDocument(groundTruth *GroundTruth) *VerificationDocument {
 		},
 		TLSPublicKey:           groundTruth.TLSPublicKey,
 		HPKEPublicKey:          groundTruth.HPKEPublicKey,
-		HardwareMeasurement:    groundTruth.HardwareMeasurement,
 		CodeFingerprint:        groundTruth.CodeFingerprint,
 		EnclaveFingerprint:     groundTruth.EnclaveFingerprint,
 		SelectedRouterEndpoint: groundTruth.EnclaveHost,
@@ -164,10 +162,6 @@ func cloneVerificationDocument(document *VerificationDocument) *VerificationDocu
 	cloned := *document
 	cloned.CodeMeasurement = cloneMeasurement(document.CodeMeasurement)
 	cloned.EnclaveMeasurement.Measurement = cloneMeasurement(document.EnclaveMeasurement.Measurement)
-	if document.HardwareMeasurement != nil {
-		hardware := *document.HardwareMeasurement
-		cloned.HardwareMeasurement = &hardware
-	}
 	return &cloned
 }
 
@@ -192,9 +186,5 @@ func cloneGroundTruth(groundTruth *GroundTruth) *GroundTruth {
 	cloned := *groundTruth
 	cloned.CodeMeasurement = cloneMeasurement(groundTruth.CodeMeasurement)
 	cloned.EnclaveMeasurement = cloneMeasurement(groundTruth.EnclaveMeasurement)
-	if groundTruth.HardwareMeasurement != nil {
-		hardware := *groundTruth.HardwareMeasurement
-		cloned.HardwareMeasurement = &hardware
-	}
 	return &cloned
 }

@@ -25,7 +25,7 @@ go get github.com/tinfoilsh/tinfoil-go@latest
 import "github.com/tinfoilsh/tinfoil-go/verifier/client"
 
 // 1. Create a client
-tinfoilClient := client.NewSecureClient("enclave.example.com", "org/repo")
+tinfoilClient := client.NewSecureClient("enclave.example.com", "org/repo", nil)
 
 // 2. Perform HTTP requests – attestation happens automatically
 resp, err := tinfoilClient.Get("/api/data", nil)
@@ -116,7 +116,7 @@ fetches reference values through the old bundle service.
 For an already fetched document, use:
 
 ```go
-verified, err := client.VerifyDocumentV3(documentBytes, expectedNonce, trustedRepo)
+verified, err := client.VerifyDocumentV3(documentBytes, expectedNonce, trustedRepo, nil)
 ```
 
 The repository and nonce are caller-owned expectations. After success, bind
@@ -124,6 +124,18 @@ service traffic to the returned TLS/HPKE material and honor `FreshnessExpiresAt`
 This low-level function does not open a service connection or enforce a cache's
 expiration on the caller's behalf. Swift callers using the removed bundle APIs
 also need to migrate before adopting the v3 framework.
+
+## Pinned registers
+
+To pin a register the release does not determine, such as a sealed RTMR3, set
+it in the enclave's layout; empty registers keep their source:
+
+```go
+secureClient := client.NewSecureClient(enclave, repo, &measurement.Measurement{
+	Type:      measurement.TdxGuestV2,
+	Registers: []string{"", "", "", "", expectedRTMR3},
+})
+```
 
 ## JavaScript / TypeScript / WASM
 

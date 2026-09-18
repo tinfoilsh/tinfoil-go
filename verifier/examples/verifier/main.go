@@ -9,7 +9,7 @@ import (
 )
 
 var (
-	repo    = flag.String("r", "tinfoilsh/confidential-model-router", "config repo")
+	repo    = flag.String("r", "tinfoilsh/confidential-model-router", "config repo, owner/name[@tag][@sha256:digest]")
 	enclave = flag.String("e", "inference.tinfoil.sh", "enclave host")
 )
 
@@ -17,7 +17,7 @@ func main() {
 	flag.Parse()
 
 	slog.Info("verifying enclave", "enclave", *enclave, "repo", *repo)
-	c := client.NewSecureClient(*enclave, *repo)
+	c := client.NewSecureClient(*enclave, *repo, nil)
 	if _, err := c.VerifyV3(); err != nil {
 		slog.Error("verification failed", "error", err)
 		os.Exit(1)

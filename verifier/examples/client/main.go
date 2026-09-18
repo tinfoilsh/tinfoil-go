@@ -9,7 +9,7 @@ import (
 )
 
 func main() {
-	tinfoilClient, err := client.NewDefaultClient()
+	tinfoilClient, err := client.NewDefaultClient(nil)
 	if err != nil {
 		log.Fatalf("failed to create client: %v", err)
 	}
