@@ -35,6 +35,7 @@ jobs:
         run: bash scripts/build-mobile.sh
       - name: Type-check Swift API
         run: |
-          framework="$(find Tinfoil.xcframework -path '*/macos-*/Tinfoil.framework' -type d -print -quit)"
-          test -n "$framework"
+          frameworks=(Tinfoil.xcframework/macos-*/Tinfoil.framework)
+          framework="${frameworks[0]}"
+          test -d "$framework"
           swiftc -typecheck -F "$(dirname "$framework")" tests/mobile/Smoke.swift
