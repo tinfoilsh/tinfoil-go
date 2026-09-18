@@ -17,7 +17,7 @@ func main() {
 	flag.Parse()
 
 	slog.Info("verifying enclave", "enclave", *enclave, "repo", *repo)
-	c := client.NewSecureClient(*enclave, *repo)
+	c := client.NewSecureClient(*enclave, *repo, nil)
 	if _, err := c.VerifyV3(); err != nil {
 		slog.Error("verification failed", "error", err)
 		os.Exit(1)

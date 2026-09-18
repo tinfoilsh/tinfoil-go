@@ -138,7 +138,7 @@ func newClientFromJSON(trustRootJSON []byte, verifierOptions ...verify.VerifierO
 var repoNameRE = regexp.MustCompile(`^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$`)
 
 // refRE matches owner/name[@tag][@sha256:digest]; the tag group is lazy so @sha256: alone is a digest.
-var refRE = regexp.MustCompile(`^([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)(?:@([^@]+))??(?:@sha256:([0-9a-f]{64}))?$`)
+var refRE = regexp.MustCompile(`^([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)(?:@([^@\s~^:?*\[\\]+))??(?:@sha256:([0-9a-f]{64}))?$`)
 
 // Release is a parsed release reference; an empty Tag or Digest pins nothing.
 type Release struct {
@@ -148,7 +148,7 @@ type Release struct {
 // ParseRef parses owner/name[@tag][@sha256:digest].
 func ParseRef(ref string) (Release, error) {
 	m := refRE.FindStringSubmatch(strings.TrimSpace(ref))
-	if m == nil || strings.HasPrefix(m[2], "sha256:") {
+	if m == nil {
 		return Release{}, fmt.Errorf("invalid release reference %q: want owner/name[@tag][@sha256:digest]", ref)
 	}
 	return Release{Repo: m[1], Tag: m[2], Digest: m[3]}, nil

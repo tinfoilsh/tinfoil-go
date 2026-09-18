@@ -44,8 +44,8 @@ var (
 	defaultRouterURL  = "https://atc.tinfoil.sh/routers"
 )
 
-func newFallbackClient() *SecureClient {
-	return NewSecureClient("inference.tinfoil.sh", defaultRouterRepo)
+func newFallbackClient(expected *measurement.Measurement) *SecureClient {
+	return NewSecureClient("inference.tinfoil.sh", defaultRouterRepo, expected)
 }
 
 func fetchRouters() ([]string, error) {
@@ -63,26 +63,27 @@ func fetchRouters() ([]string, error) {
 }
 
 // NewSecureClient creates a new secure client with a given repo and enclave
-func NewSecureClient(enclave, repo string) *SecureClient {
+func NewSecureClient(enclave, repo string, expected *measurement.Measurement) *SecureClient {
 	return &SecureClient{
-		enclave: enclave,
-		repo:    repo,
+		enclave:             enclave,
+		repo:                repo,
+		expectedMeasurement: cloneMeasurement(expected),
 	}
 }
 
 // NewDefaultClient creates a new secure client with fallback mechanism.
 // It tries to fetch routers from the router service, attempts to verify each one,
 // and falls back to inference.tinfoil.sh if all routers fail.
-func NewDefaultClient() (*SecureClient, error) {
+func NewDefaultClient(expected *measurement.Measurement) (*SecureClient, error) {
 	routers, err := fetchRouters()
 	if err != nil {
 		// If we can't get routers, fall back to inference.tinfoil.sh immediately
-		return newFallbackClient(), nil
+		return newFallbackClient(expected), nil
 	}
 
 	// Try each router in sequence
 	for _, routerURL := range routers {
-		client := NewSecureClient(routerURL, defaultRouterRepo)
+		client := NewSecureClient(routerURL, defaultRouterRepo, expected)
 
 		// Return first working router
 		_, err := client.Verify()
@@ -91,7 +92,7 @@ func NewDefaultClient() (*SecureClient, error) {
 		}
 	}
 
-	return newFallbackClient(), nil
+	return newFallbackClient(expected), nil
 }
 
 // Enclave returns the enclave URL
@@ -104,18 +105,6 @@ func (s *SecureClient) Enclave() string {
 // Repo returns the repository URL
 func (s *SecureClient) Repo() string {
 	return s.repo
-}
-
-// SetExpectedMeasurement pins registers the enclave must report, in its own
-// layout; empty registers come from their source. Pass nil to pin nothing.
-func (s *SecureClient) SetExpectedMeasurement(m *measurement.Measurement) {
-	s.verifyMu.Lock()
-	defer s.verifyMu.Unlock()
-	s.expectedMeasurement = cloneMeasurement(m)
-	s.stateMu.Lock()
-	defer s.stateMu.Unlock()
-	s.groundTruth = nil
-	s.verificationDocument = nil
 }
 
 // GroundTruth returns the last verified enclave state
@@ -249,7 +238,7 @@ func parseHeadersJSON(headersJSON string) (map[string]string, error) {
 
 // VerifyJSON verifies an enclave against a repo and returns the verification data as a JSON string
 func VerifyJSON(enclave, repo string) (string, error) {
-	client := NewSecureClient(enclave, repo)
+	client := NewSecureClient(enclave, repo, nil)
 	if _, err := client.Verify(); err != nil {
 		return "", err
 	}
