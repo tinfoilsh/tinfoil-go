@@ -31,10 +31,6 @@ func Assemble(a *policy.Artifact, p *policy.TDXPolicy, required *policy.Shape, q
 		return nil, "", err
 	}
 	body := q.quote.GetTdQuoteBody()
-	if body == nil || len(body.GetRtmrs()) != 4 {
-		return nil, "", fmt.Errorf("TDX quote body must carry exactly 4 RTMRs")
-	}
-
 	name, m, err := a.ResolvePlatformMeasurement(p, required,
 		hex.EncodeToString(body.GetMrTd()),
 		hex.EncodeToString(body.GetRtmrs()[0]))
