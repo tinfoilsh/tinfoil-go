@@ -1,6 +1,7 @@
 package measurement
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -69,4 +70,20 @@ func TestAttestationFingerprint(t *testing.T) {
 			assert.Equal(t, tc.expectedEnclaveFingerprint, enclaveFP)
 		})
 	}
+}
+
+func TestSealedRTMR3Fingerprint(t *testing.T) {
+	m := &Measurement{Type: SnpTdxMultiPlatformV1, Registers: []string{strings.Repeat("ab", 48), strings.Repeat("cd", 48), strings.Repeat("ef", 48)}}
+	hw := &HardwareMeasurement{MRTD: strings.Repeat("12", 48), RTMR0: strings.Repeat("34", 48)}
+	base, err := Fingerprint(m, hw, TdxGuestV2)
+	require.NoError(t, err)
+	zero, err := FingerprintWithRTMR3(m, hw, TdxGuestV2, RTMR3_ZERO)
+	require.NoError(t, err)
+	require.Equal(t, base, zero)
+	sealed, err := FingerprintWithRTMR3(m, hw, TdxGuestV2, strings.Repeat("AB", 48))
+	require.NoError(t, err)
+	require.NotEqual(t, zero, sealed)
+	canonical, err := FingerprintWithRTMR3(m, hw, TdxGuestV2, strings.Repeat("ab", 48))
+	require.NoError(t, err)
+	require.Equal(t, sealed, canonical)
 }

@@ -147,3 +147,20 @@ Please report security vulnerabilities by either:
 - Opening an issue on GitHub on this repository
 
 We aim to respond to (legitimate) security reports within 24 hours.
+
+## Sealed TDX runtime state
+
+A v3 verifier requires an unextended RTMR3 unless the caller supplies a known
+48-byte hexadecimal register value. A release's code measurement cannot predict
+this runtime state. Configure the expectation before verifying:
+
+```go
+secureClient.SetExpectedRTMR3(expectedRTMR3)
+verified, err := secureClient.VerifyV3()
+```
+
+For an already fetched document, use `VerifyDocumentV3WithOptions` with
+`client.VerificationOptions{ExpectedRTMR3: expectedRTMR3}`. Empty means zero;
+malformed values reject, and SEV-SNP rejects any nonzero RTMR3 expectation.
+Changing the expectation clears cached verification but retains the enclave
+identity. Replace previously obtained HTTP clients after changing policy.

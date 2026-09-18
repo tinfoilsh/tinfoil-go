@@ -10,6 +10,16 @@ import (
 	"github.com/tinfoilsh/tinfoil-go/verifier/quote"
 )
 
+// VerificationOptions contains caller-owned verification policy. Its zero value
+// preserves the default requirement of an unextended RTMR3.
+type VerificationOptions struct {
+	ExpectedRTMR3 string
+}
+
+func (o VerificationOptions) validate() error {
+	return (quote.Options{ExpectedRTMR3: o.ExpectedRTMR3}).Validate()
+}
+
 // VerifiedDocumentV3 is what a verified v3 document proves. The operative
 // output is CryptoMaterial — the endorsed keys a caller may bind a channel
 // to; it is the only field that authorizes an action. The remaining fields
@@ -74,6 +84,15 @@ func (v *VerifiedDocumentV3) cryptoMaterialData(id, format string) (string, erro
 // Channel binding (TLS fingerprint / HPKE key) is the caller's
 // responsibility, using the returned endorsed crypto material.
 func VerifyDocumentV3(docBytes, nonce []byte, repo string) (*VerifiedDocumentV3, error) {
+	return VerifyDocumentV3WithOptions(docBytes, nonce, repo, VerificationOptions{})
+}
+
+// VerifyDocumentV3WithOptions verifies a document with caller-owned runtime
+// expectations. Options must come from the caller, never from the document.
+func VerifyDocumentV3WithOptions(docBytes, nonce []byte, repo string, opts VerificationOptions) (*VerifiedDocumentV3, error) {
+	if err := opts.validate(); err != nil {
+		return nil, err
+	}
 	doc, expectedReportData, err := envelope.Check(docBytes, nonce)
 	if err != nil {
 		return nil, fmt.Errorf("envelope: %w", err)
@@ -84,7 +103,7 @@ func VerifyDocumentV3(docBytes, nonce []byte, repo string) (*VerifiedDocumentV3,
 		return nil, fmt.Errorf("reference values: %w", err)
 	}
 
-	_, authenticated, err := quote.Verify(doc, endorsements.Artifact, code.Measurement, code.Shape, expectedReportData)
+	_, authenticated, err := quote.VerifyWithOptions(doc, endorsements.Artifact, code.Measurement, code.Shape, expectedReportData, quote.Options{ExpectedRTMR3: opts.ExpectedRTMR3})
 	if err != nil {
 		return nil, fmt.Errorf("cpu evidence: %w", err)
 	}
@@ -167,6 +186,9 @@ func (s *SecureClient) VerifyV3() (*VerifiedDocumentV3, error) {
 }
 
 func (s *SecureClient) verifyV3() (*VerifiedDocumentV3, error) {
+	if err := s.verificationOptions.validate(); err != nil {
+		return nil, err
+	}
 	nonce, err := envelope.RandomNonce()
 	if err != nil {
 		return nil, err
@@ -176,7 +198,7 @@ func (s *SecureClient) verifyV3() (*VerifiedDocumentV3, error) {
 		return nil, fmt.Errorf("fetching attestation document: %w", err)
 	}
 
-	verified, err := VerifyDocumentV3(docBytes, nonce, s.repo)
+	verified, err := VerifyDocumentV3WithOptions(docBytes, nonce, s.repo, s.verificationOptions)
 	if err != nil {
 		return nil, err
 	}
@@ -202,7 +224,7 @@ func (s *SecureClient) verifyV3() (*VerifiedDocumentV3, error) {
 			RTMR0: verified.EnclaveMeasurement.Registers[1],
 		}
 	}
-	codeFingerprint, err := measurement.Fingerprint(verified.CodeMeasurement, hw, verified.EnclaveMeasurement.Type)
+	codeFingerprint, err := measurement.FingerprintWithRTMR3(verified.CodeMeasurement, hw, verified.EnclaveMeasurement.Type, s.verificationOptions.ExpectedRTMR3)
 	if err != nil {
 		return nil, fmt.Errorf("measurements: failed to compute code fingerprint: %w", err)
 	}

@@ -31,7 +31,8 @@ type GroundTruth struct {
 }
 
 type SecureClient struct {
-	enclave, repo string
+	enclave, repo       string
+	verificationOptions VerificationOptions
 
 	groundTruth          *GroundTruth
 	verificationDocument *VerificationDocument
@@ -104,6 +105,24 @@ func (s *SecureClient) Enclave() string {
 // Repo returns the repository URL
 func (s *SecureClient) Repo() string {
 	return s.repo
+}
+
+// SetExpectedRTMR3 sets the expected 48-byte hexadecimal runtime register.
+// Empty requires an unextended register. Malformed values fail verification.
+// This invalidates cached verification; previously returned HTTP clients keep
+// their existing transport and should be replaced by the caller.
+func (s *SecureClient) SetExpectedRTMR3(rtmr3 string) {
+	s.verifyMu.Lock()
+	defer s.verifyMu.Unlock()
+	s.verificationOptions.ExpectedRTMR3 = rtmr3
+	s.invalidateVerification()
+}
+
+func (s *SecureClient) invalidateVerification() {
+	s.stateMu.Lock()
+	defer s.stateMu.Unlock()
+	s.groundTruth = nil
+	s.verificationDocument = nil
 }
 
 // GroundTruth returns the last verified enclave state
