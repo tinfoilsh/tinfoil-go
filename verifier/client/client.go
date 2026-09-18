@@ -106,6 +106,23 @@ func (s *SecureClient) Repo() string {
 	return s.repo
 }
 
+// SetNoncedAttestation invalidates cached verification. V3 always requests a
+// fresh nonce regardless of enabled; nonce binding cannot be disabled.
+//
+// Deprecated: nonce-bound attestation is mandatory in v3.
+func (s *SecureClient) SetNoncedAttestation(enabled bool) {
+	s.verifyMu.Lock()
+	defer s.verifyMu.Unlock()
+	s.invalidateVerification()
+}
+
+func (s *SecureClient) invalidateVerification() {
+	s.stateMu.Lock()
+	defer s.stateMu.Unlock()
+	s.groundTruth = nil
+	s.verificationDocument = nil
+}
+
 // GroundTruth returns the last verified enclave state
 func (s *SecureClient) GroundTruth() *GroundTruth {
 	s.stateMu.RLock()
@@ -140,9 +157,12 @@ func (s *SecureClient) VerificationDocumentJSON() (string, error) {
 
 // HTTPClient returns an HTTP client that only accepts TLS connections to the verified enclave
 func (s *SecureClient) HTTPClient() (*http.Client, error) {
+	// Keep verification and its snapshot atomic with cache invalidation.
+	s.verifyMu.Lock()
+	defer s.verifyMu.Unlock()
 	groundTruth := s.GroundTruth()
 	if groundTruth == nil {
-		_, err := s.Verify()
+		_, err := s.verifyV3()
 		if err != nil {
 			return nil, fmt.Errorf("failed to verify enclave: %v", err)
 		}
