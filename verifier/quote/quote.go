@@ -96,7 +96,7 @@ func Authenticate(doc *envelope.Document) (*Authenticated, error) {
 // authenticated identity; for TDX, the platform measurement resolved under
 // the required VM shape), the code measurement, and the envelope's
 // REPORT_DATA. A machine absent from the artifact is not endorsed. A
-// register set in expected replaces the value its source would supply.
+// register set in expected fills an empty slot or must equal its source.
 func Assemble(endorsements *policy.Artifact, code, expected *measurement.Measurement, shape *policy.Shape, reportData [64]byte, q *Authenticated) (*AssembledPolicy, error) {
 	if code == nil {
 		return nil, fmt.Errorf("assembling policy: expected code measurement is required")
