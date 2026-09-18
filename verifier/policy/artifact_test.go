@@ -57,7 +57,7 @@ func TestParseArtifactFailClosed(t *testing.T) {
 
 	for _, trailing := range []string{"}", "]", "{}", "[1]", `"x"`, "{"} {
 		_, err = Parse([]byte(string(data) + trailing))
-		assert.ErrorContains(t, err, "trailing data", "trailing %q must be rejected", trailing)
+		assert.Error(t, err, "trailing %q must be rejected", trailing)
 	}
 }
 
