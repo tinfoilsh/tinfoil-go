@@ -1,13 +1,13 @@
 package provenance
 
 import (
+	"encoding/json/v2"
 	"fmt"
 	"regexp"
 	"time"
 
 	"github.com/sigstore/sigstore-go/pkg/bundle"
 	"github.com/sigstore/sigstore-go/pkg/verify"
-	"github.com/tinfoilsh/tinfoil-go/verifier/internal/strictjson"
 )
 
 const (
@@ -134,7 +134,7 @@ func parseFreshnessStatement(bundleJSON []byte) (*freshnessStatement, error) {
 		return nil, fmt.Errorf("freshness bundle has no DSSE envelope")
 	}
 	var statement freshnessStatement
-	if err := strictjson.Unmarshal(envelope.Payload, &statement); err != nil {
+	if err := json.Unmarshal(envelope.Payload, &statement, json.RejectUnknownMembers(true)); err != nil {
 		return nil, fmt.Errorf("parsing freshness statement: %w", err)
 	}
 	return &statement, nil

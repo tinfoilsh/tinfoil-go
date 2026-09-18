@@ -9,6 +9,7 @@ import (
 	_ "embed"
 	"encoding/base64"
 	"encoding/hex"
+	"encoding/json/v2"
 	"encoding/pem"
 	"fmt"
 	"net/url"
@@ -22,7 +23,6 @@ import (
 	"github.com/tinfoilsh/go-sev-guest/verify/trust"
 
 	"github.com/tinfoilsh/tinfoil-go/verifier/envelope"
-	"github.com/tinfoilsh/tinfoil-go/verifier/internal/strictjson"
 	"github.com/tinfoilsh/tinfoil-go/verifier/measurement"
 )
 
@@ -144,7 +144,7 @@ func Authenticate(doc *envelope.Document) (*Quote, error) {
 		return nil, fmt.Errorf("document carries no amd-vcek endorsement collateral for the cpu")
 	}
 	var data envelope.AMDVCEKCollateral
-	if err := strictjson.Unmarshal(entry.Data, &data); err != nil {
+	if err := json.Unmarshal(entry.Data, &data, json.RejectUnknownMembers(true)); err != nil {
 		return nil, fmt.Errorf("parsing amd-vcek collateral entry %q: %w", entry.ID, err)
 	}
 	vcekDER, err := base64.StdEncoding.DecodeString(data.VCEKDERBase64)
@@ -164,7 +164,7 @@ func Authenticate(doc *envelope.Document) (*Quote, error) {
 		return nil, fmt.Errorf("document carries no amd-crl endorsement collateral for the cpu")
 	}
 	var crl envelope.AMDCRLCollateral
-	if err := strictjson.Unmarshal(crlEntry.Data, &crl); err != nil {
+	if err := json.Unmarshal(crlEntry.Data, &crl, json.RejectUnknownMembers(true)); err != nil {
 		return nil, fmt.Errorf("parsing amd-crl collateral entry %q: %w", crlEntry.ID, err)
 	}
 	crlDER, err := base64.StdEncoding.DecodeString(crl.CRLDERBase64)

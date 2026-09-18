@@ -11,13 +11,13 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	jsonv2 "encoding/json/v2"
 	"errors"
 	"fmt"
 	"net/url"
 	"regexp"
 	"slices"
 
-	"github.com/tinfoilsh/tinfoil-go/verifier/internal/strictjson"
 	"github.com/tinfoilsh/tinfoil-go/verifier/util"
 )
 
@@ -301,7 +301,7 @@ func RandomNonce() ([]byte, error) {
 // sections are retained as raw bytes for hashing.
 func Parse(docBytes []byte) (*Document, error) {
 	var doc Document
-	if err := strictjson.Unmarshal(docBytes, &doc); err != nil {
+	if err := jsonv2.Unmarshal(docBytes, &doc, jsonv2.RejectUnknownMembers(true)); err != nil {
 		return nil, fmt.Errorf("parsing attestation document: %w", err)
 	}
 
@@ -342,7 +342,7 @@ func Parse(docBytes []byte) (*Document, error) {
 	}
 
 	var cm CryptoMaterialSection
-	if err := strictjson.Unmarshal(cryptoBytes, &cm); err != nil {
+	if err := jsonv2.Unmarshal(cryptoBytes, &cm, jsonv2.RejectUnknownMembers(true)); err != nil {
 		return nil, fmt.Errorf("parsing crypto_material: %w", err)
 	}
 	if cm.Format != CryptoMaterialV1Format {
@@ -381,7 +381,7 @@ func Parse(docBytes []byte) (*Document, error) {
 	}
 
 	var de DeviceEvidenceSection
-	if err := strictjson.Unmarshal(deviceBytes, &de); err != nil {
+	if err := jsonv2.Unmarshal(deviceBytes, &de, jsonv2.RejectUnknownMembers(true)); err != nil {
 		return nil, fmt.Errorf("parsing device_evidence: %w", err)
 	}
 	if de.Format != DeviceEvidenceV1Format {
@@ -553,7 +553,7 @@ func (d *Document) findCollateral(role, format string, match func(*CollateralEnt
 
 func decodeCollateral[T any](entry *CollateralEntry) (*T, error) {
 	var payload T
-	if err := strictjson.Unmarshal(entry.Data, &payload); err != nil {
+	if err := jsonv2.Unmarshal(entry.Data, &payload, jsonv2.RejectUnknownMembers(true)); err != nil {
 		return nil, fmt.Errorf("parsing %s collateral entry %q: %w", entry.Format, entry.ID, err)
 	}
 	return &payload, nil
