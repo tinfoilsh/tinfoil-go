@@ -62,7 +62,9 @@ func fetchRouters() ([]string, error) {
 	return routers, nil
 }
 
-// NewSecureClient creates a new secure client with a given repo and enclave
+// NewSecureClient creates a new secure client with a given enclave and repo.
+// The repo is a release reference, owner/name[@tag][@sha256:digest]; a pinned
+// tag or digest must be what the enclave's code bundle was signed for.
 func NewSecureClient(enclave, repo string) *SecureClient {
 	return &SecureClient{
 		enclave: enclave,

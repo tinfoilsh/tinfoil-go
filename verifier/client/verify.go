@@ -1,6 +1,7 @@
 package client
 
 import (
+	"cmp"
 	"fmt"
 	"time"
 
@@ -15,8 +16,9 @@ import (
 // to; it is the only field that authorizes an action. The remaining fields
 // feed the client's ground truth.
 type VerifiedDocumentV3 struct {
-	// CodeDigest names the verified code artifact; CodeMeasurement is the
-	// expected measurement applied from it.
+	// CodeRepo, CodeTag, and CodeDigest name the verified code artifact;
+	// CodeMeasurement is the expected measurement applied from it.
+	CodeRepo        string
 	CodeDigest      string
 	CodeTag         string
 	CodeMeasurement *measurement.Measurement
@@ -85,8 +87,10 @@ func (v *VerifiedDocumentV3) transportKeys() (tlsFP, hpkeKey string, err error) 
 //     assemble the complete policy from the reference values, validate in
 //     one call.
 //
-// repo is the code repository the caller trusts (pins the sigstore-code
-// signing identity); the repo named inside the document is not trusted.
+// repo is the code release the caller trusts, owner/name[@tag][@sha256:digest]:
+// the repository pins the sigstore-code signing identity, and a pinned tag or
+// digest rejects a bundle signed for any other. The repo named inside the
+// document is not trusted.
 // Channel binding (TLS fingerprint / HPKE key) is the caller's
 // responsibility, using the returned endorsed crypto material.
 func VerifyDocumentV3(docBytes, nonce []byte, repo string) (*VerifiedDocumentV3, error) {
@@ -106,6 +110,7 @@ func VerifyDocumentV3(docBytes, nonce []byte, repo string) (*VerifiedDocumentV3,
 	}
 
 	return &VerifiedDocumentV3{
+		CodeRepo:           code.Repo,
 		CodeDigest:         code.Digest,
 		CodeTag:            code.Tag,
 		CodeMeasurement:    code.Measurement,
@@ -120,11 +125,16 @@ func VerifyDocumentV3(docBytes, nonce []byte, repo string) (*VerifiedDocumentV3,
 // returning the authenticated code, platform values, and the earlier of their
 // authenticated freshness expiration times.
 func authenticateReferenceValues(doc *envelope.Document, repo string) (*provenance.Code, *provenance.PlatformEndorsements, time.Time, error) {
+	release, err := provenance.ParseRef(repo)
+	if err != nil {
+		return nil, nil, time.Time{}, err
+	}
 	codeRef, err := doc.ReferenceValuesCollateral(envelope.CollateralSigstoreCodeV1Format)
 	if err != nil {
 		return nil, nil, time.Time{}, err
 	}
-	code, err := provenance.AuthenticateCode(codeRef.SigstoreBundle, repo, codeRef.Tag, codeRef.Digest)
+	// A pinned tag or digest wins; Sigstore then rejects a bundle signed for any other.
+	code, err := provenance.AuthenticateCode(codeRef.SigstoreBundle, release.Repo, cmp.Or(release.Tag, codeRef.Tag), cmp.Or(release.Digest, codeRef.Digest))
 	if err != nil {
 		return nil, nil, time.Time{}, fmt.Errorf("verifying code measurement: %w", err)
 	}
@@ -224,7 +234,7 @@ func (s *SecureClient) verifyV3() (*VerifiedDocumentV3, error) {
 	}
 
 	s.setVerifiedState(&GroundTruth{
-		ConfigRepo:          s.repo,
+		ConfigRepo:          verified.CodeRepo,
 		EnclaveHost:         s.enclave,
 		ReleaseTag:          verified.CodeTag,
 		TLSPublicKey:        tlsFP,

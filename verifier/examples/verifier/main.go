@@ -9,7 +9,7 @@ import (
 )
 
 var (
-	repo    = flag.String("r", "tinfoilsh/confidential-model-router", "config repo")
+	repo    = flag.String("r", "tinfoilsh/confidential-model-router", "config repo, owner/name[@tag][@sha256:digest]")
 	enclave = flag.String("e", "inference.tinfoil.sh", "enclave host")
 )
 

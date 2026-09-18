@@ -60,7 +60,8 @@ func WithEnclave(enclave string) ClientOption {
 	return func(c *clientConfig) { c.enclave = enclave }
 }
 
-// WithRepo sets the GitHub repository used for code measurement verification.
+// WithRepo sets the GitHub repository used for code measurement verification,
+// optionally pinned as owner/name[@tag][@sha256:digest].
 func WithRepo(repo string) ClientOption {
 	return func(c *clientConfig) { c.repo = repo }
 }
