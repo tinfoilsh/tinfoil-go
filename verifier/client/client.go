@@ -208,9 +208,12 @@ func (s *SecureClient) VerificationDocumentJSON() (string, error) {
 
 // HTTPClient returns an HTTP client that only accepts TLS connections to the verified enclave
 func (s *SecureClient) HTTPClient() (*http.Client, error) {
+	// Keep verification and its snapshot atomic with policy changes.
+	s.verifyMu.Lock()
+	defer s.verifyMu.Unlock()
 	groundTruth := s.GroundTruth()
 	if groundTruth == nil {
-		_, err := s.Verify()
+		_, err := s.verifyV3()
 		if err != nil {
 			return nil, fmt.Errorf("failed to verify enclave: %v", err)
 		}

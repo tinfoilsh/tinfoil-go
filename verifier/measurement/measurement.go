@@ -10,6 +10,9 @@ import (
 	"strings"
 )
 
+// tdxRegisterSize is the width of a TDX measurement register in bytes.
+const tdxRegisterSize = 48
+
 const RTMR3_ZERO = "000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"
 
 type PredicateType string
@@ -43,8 +46,8 @@ func FingerprintWithRTMR3(m *Measurement, hw *HardwareMeasurement, targetType Pr
 	}
 	if targetType == TdxGuestV2 {
 		decoded, err := hex.DecodeString(expectedRTMR3)
-		if err != nil || len(decoded) != 48 {
-			return "", fmt.Errorf("expected RTMR3 must be a 48-byte hexadecimal register")
+		if err != nil || len(decoded) != tdxRegisterSize {
+			return "", fmt.Errorf("expected RTMR3 must be a %d-byte hexadecimal register", tdxRegisterSize)
 		}
 		expectedRTMR3 = hex.EncodeToString(decoded)
 	}

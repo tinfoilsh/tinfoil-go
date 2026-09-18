@@ -11,6 +11,8 @@ import (
 func TestSetExpectedRTMR3InvalidatesVerification(t *testing.T) {
 	c := NewSecureClient("verified.example", "org/repo")
 	c.setVerifiedState(&GroundTruth{EnclaveHost: "verified.example", TLSPublicKey: "key"})
+	require.NotNil(t, c.GroundTruth())
+	require.NotNil(t, c.VerificationDocument())
 	c.SetExpectedRTMR3(strings.Repeat("ab", 48))
 	require.Nil(t, c.GroundTruth())
 	require.Nil(t, c.VerificationDocument())
@@ -32,6 +34,7 @@ func TestMalformedRTMR3RejectedBeforeDocumentFetch(t *testing.T) {
 
 func TestExpectedRTMR3ConcurrentStateAccess(t *testing.T) {
 	c := NewSecureClient("verified.example", "org/repo")
+	c.setVerifiedState(&GroundTruth{EnclaveHost: "verified.example"})
 	var wg sync.WaitGroup
 	for range 4 {
 		wg.Go(func() {
@@ -42,6 +45,37 @@ func TestExpectedRTMR3ConcurrentStateAccess(t *testing.T) {
 				c.Enclave()
 			}
 		})
+	}
+	wg.Wait()
+	require.Nil(t, c.GroundTruth())
+}
+
+// Cached-state publication models the final, locked stage of VerifyV3. Invalid
+// expectations make cache misses fail locally so the test needs no live service.
+func TestHTTPClientConcurrentPolicyInvalidation(t *testing.T) {
+	c := NewSecureClient("invalid.invalid", "org/repo")
+	c.SetExpectedRTMR3("invalid")
+	var wg sync.WaitGroup
+	wg.Go(func() {
+		for range 500 {
+			c.SetExpectedRTMR3("invalid")
+		}
+	})
+	wg.Go(func() {
+		for range 500 {
+			c.verifyMu.Lock()
+			c.setVerifiedState(&GroundTruth{EnclaveHost: "invalid.invalid", TLSPublicKey: "verified-key"})
+			c.verifyMu.Unlock()
+		}
+	})
+	for range 500 {
+		hc, err := c.HTTPClient()
+		if err != nil {
+			require.ErrorContains(t, err, "expected RTMR3")
+		} else {
+			require.NotNil(t, hc)
+			require.Equal(t, "verified-key", hc.Transport.(*TLSBoundRoundTripper).ExpectedPublicKey)
+		}
 	}
 	wg.Wait()
 }
