@@ -9,8 +9,7 @@ import (
 	_ "embed"
 	"encoding/base64"
 	"encoding/hex"
-	"encoding/json"
-	jsonv2 "encoding/json/v2"
+	"encoding/json/v2"
 	"encoding/pem"
 	"fmt"
 	"net/textproto"
@@ -80,7 +79,7 @@ func Authenticate(doc *envelope.Document) (*Quote, error) {
 		return nil, fmt.Errorf("document carries no intel-pcs endorsement collateral for the cpu")
 	}
 	var data envelope.IntelPCSCollateral
-	if err := jsonv2.Unmarshal(entry.Data, &data, jsonv2.RejectUnknownMembers(true)); err != nil {
+	if err := json.Unmarshal(entry.Data, &data, json.RejectUnknownMembers(true)); err != nil {
 		return nil, fmt.Errorf("parsing intel-pcs collateral entry %q: %w", entry.ID, err)
 	}
 	inner, err := newPCSReplayGetter(data.Responses)
