@@ -105,6 +105,20 @@ timeout. A waiting request can cancel without canceling other waiters.
 A request admitted before expiration may finish, including a streaming response.
 Expiration does not interrupt that request. There is no background refresh.
 
+Use `NewSecureClientWithOptions`, `NewDefaultClientWithOptions`, or
+`VerifyDocumentV3WithOptions` to choose a maximum witness age:
+
+```go
+options := client.VerificationOptions{FreshnessMaxAge: 24 * time.Hour}
+secureClient, err := client.NewSecureClientWithOptions(enclave, repo, options)
+```
+
+The options are copied at construction, before router selection or verification.
+Zero uses seven days; negative ages are rejected. The same age governs both
+witness acceptance and `FreshnessExpiresAt`, calculated from the earlier
+code/platform witness timestamp. Re-verifying unchanged witnesses cannot renew
+that deadline. Direct document-verification callers must enforce it themselves.
+
 ### Migration from v2
 
 The v3 client always requests a nonce-bound v3 document. Enclaves serving only

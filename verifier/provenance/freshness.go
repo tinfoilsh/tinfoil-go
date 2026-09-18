@@ -15,8 +15,9 @@ const (
 	inTotoStatementV1            = "https://in-toto.io/Statement/v1"
 	transparencyLogTimestampType = "Tlog"
 	sha256DigestPrefix           = "sha256:"
-	MaxFreshnessAge              = 7 * 24 * time.Hour
-	MaxFreshnessFutureSkew       = 5 * time.Minute
+	// MaxFreshnessAge is the default maximum witness age.
+	MaxFreshnessAge        = 7 * 24 * time.Hour
+	MaxFreshnessFutureSkew = 5 * time.Minute
 )
 
 type freshnessSubject struct {
@@ -49,14 +50,28 @@ type freshnessStatement struct {
 }
 
 func AuthenticateFreshness(bundleJSON []byte, expected *AuthenticatedArtifact, now time.Time) (time.Time, error) {
+	return AuthenticateFreshnessWithMaxAge(bundleJSON, expected, now, MaxFreshnessAge)
+}
+
+// AuthenticateFreshnessWithMaxAge authenticates a witness with a positive maximum age.
+func AuthenticateFreshnessWithMaxAge(bundleJSON []byte, expected *AuthenticatedArtifact, now time.Time, maxAge time.Duration) (time.Time, error) {
 	c, err := getDefaultClient()
 	if err != nil {
 		return time.Time{}, err
 	}
-	return c.AuthenticateFreshness(bundleJSON, expected, now)
+	return c.AuthenticateFreshnessWithMaxAge(bundleJSON, expected, now, maxAge)
 }
 
 func (c *Client) AuthenticateFreshness(bundleJSON []byte, expected *AuthenticatedArtifact, now time.Time) (time.Time, error) {
+	return c.AuthenticateFreshnessWithMaxAge(bundleJSON, expected, now, MaxFreshnessAge)
+}
+
+// AuthenticateFreshnessWithMaxAge uses maxAge for witness acceptance. The witness
+// expires at the returned authenticated timestamp plus maxAge, exclusively.
+func (c *Client) AuthenticateFreshnessWithMaxAge(bundleJSON []byte, expected *AuthenticatedArtifact, now time.Time, maxAge time.Duration) (time.Time, error) {
+	if maxAge <= 0 {
+		return time.Time{}, fmt.Errorf("freshness max age must be positive")
+	}
 	if err := validateAuthenticatedArtifact(expected); err != nil {
 		return time.Time{}, err
 	}
@@ -80,7 +95,7 @@ func (c *Client) AuthenticateFreshness(bundleJSON []byte, expected *Authenticate
 	if err := validateWitness(statement.Predicate, expected); err != nil {
 		return time.Time{}, err
 	}
-	return validateFreshnessTime(result.VerifiedTimestamps, now)
+	return validateFreshnessTime(result.VerifiedTimestamps, now, maxAge)
 }
 
 func validateAuthenticatedArtifact(expected *AuthenticatedArtifact) error {
@@ -105,7 +120,7 @@ func validateAuthenticatedArtifact(expected *AuthenticatedArtifact) error {
 	return nil
 }
 
-func validateFreshnessTime(timestamps []verify.TimestampVerificationResult, now time.Time) (time.Time, error) {
+func validateFreshnessTime(timestamps []verify.TimestampVerificationResult, now time.Time, maxAge time.Duration) (time.Time, error) {
 	var loggedAt time.Time
 	for _, timestamp := range timestamps {
 		if timestamp.Type == transparencyLogTimestampType && (loggedAt.IsZero() || timestamp.Timestamp.Before(loggedAt)) {
@@ -118,7 +133,7 @@ func validateFreshnessTime(timestamps []verify.TimestampVerificationResult, now 
 	if loggedAt.After(now.Add(MaxFreshnessFutureSkew)) {
 		return time.Time{}, fmt.Errorf("freshness witness timestamp is in the future")
 	}
-	if now.Sub(loggedAt) > MaxFreshnessAge {
+	if !now.Before(loggedAt.Add(maxAge)) {
 		return time.Time{}, fmt.Errorf("freshness witness is stale")
 	}
 	return loggedAt, nil

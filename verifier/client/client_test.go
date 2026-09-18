@@ -154,7 +154,7 @@ func TestClientFetchRouters(t *testing.T) {
 }
 
 func TestClientDefaultClient(t *testing.T) {
-	defaultClient := newFallbackClient()
+	defaultClient := newFallbackClient(7 * 24 * time.Hour)
 	enclave := defaultClient.Enclave()
 	assert.NotEmpty(t, enclave)
 

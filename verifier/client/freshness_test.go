@@ -13,7 +13,6 @@ import (
 func TestFreshnessExpiration(t *testing.T) {
 	issuedAt := time.Date(2026, time.August, 6, 12, 0, 0, 0, time.UTC)
 	later := issuedAt.Add(time.Hour)
-	want := issuedAt.Add(provenance.MaxFreshnessAge)
 	for _, tt := range []struct {
 		name                string
 		codeWitnessedAt     time.Time
@@ -24,7 +23,9 @@ func TestFreshnessExpiration(t *testing.T) {
 		{"same issuance time", issuedAt, issuedAt},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
-			require.Equal(t, want, freshnessExpiration(tt.codeWitnessedAt, tt.platformWitnessedAt))
+			for _, age := range []time.Duration{time.Hour, provenance.MaxFreshnessAge, 14 * 24 * time.Hour} {
+				require.Equal(t, issuedAt.Add(age), freshnessExpiration(tt.codeWitnessedAt, tt.platformWitnessedAt, age))
+			}
 		})
 	}
 }
