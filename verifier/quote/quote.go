@@ -13,6 +13,7 @@
 package quote
 
 import (
+	"cmp"
 	"fmt"
 	"slices"
 
@@ -172,7 +173,7 @@ func layout(code, expected *measurement.Measurement, q *Authenticated) ([]string
 		registers = []string{code.Registers[0]}
 	case code.Type == measurement.SnpTdxMultiPlatformV1:
 		// Registers are [snp_measurement, rtmr1, rtmr2]; RTMR3 is never measured.
-		registers = []string{"", "", code.Registers[1], code.Registers[2], measurement.RTMR3_ZERO}
+		registers = []string{"", "", code.Registers[1], code.Registers[2], ""}
 	case code.Type != q.Measurement.Type:
 		return nil, fmt.Errorf("unsupported code measurement type %q for %s", code.Type, q.Platform)
 	case len(code.Registers) != len(q.Measurement.Registers):
@@ -190,9 +191,10 @@ func layout(code, expected *measurement.Measurement, q *Authenticated) ([]string
 		return nil, fmt.Errorf("expected measurement is %s with %d registers, enclave is %s with %d", expected.Type, len(expected.Registers), q.Measurement.Type, len(registers))
 	}
 	for i, pin := range expected.Registers {
-		if pin != "" {
-			registers[i] = pin
+		if pin != "" && registers[i] != "" && registers[i] != pin {
+			return nil, fmt.Errorf("register %d pinned to %s, release measures %s", i, pin, registers[i])
 		}
+		registers[i] = cmp.Or(registers[i], pin)
 	}
 	return registers, nil
 }

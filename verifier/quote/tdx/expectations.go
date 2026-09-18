@@ -7,6 +7,7 @@ import (
 
 	tdxvalidate "github.com/google/go-tdx-guest/validate"
 
+	"github.com/tinfoilsh/tinfoil-go/verifier/measurement"
 	"github.com/tinfoilsh/tinfoil-go/verifier/policy"
 )
 
@@ -42,6 +43,7 @@ func Assemble(a *policy.Artifact, p *policy.TDXPolicy, required *policy.Shape, q
 	}
 	registers[0] = cmp.Or(registers[0], m.MRTD)
 	registers[1] = cmp.Or(registers[1], m.RTMR0)
+	registers[4] = cmp.Or(registers[4], measurement.RTMR3_ZERO)
 	var decoded [5][]byte
 	for i, label := range [5]string{"mrtd", "rtmr0", "rtmr1", "rtmr2", "rtmr3"} {
 		if decoded[i], err = policy.DecodeHex(label, registers[i], 48); err != nil {
