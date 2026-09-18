@@ -1,3 +1,4 @@
+import Foundation
 import Tinfoil
 
 // Compile the supported Swift-facing API without contacting an enclave.
@@ -8,8 +9,11 @@ func checkClientSurface() throws {
     let _: String = client.enclave()
     let _: String = client.repo()
     let _: String = ClientVersion
-    _ = try client.groundTruthJSON()
-    _ = try client.verificationDocumentJSON()
+    var error: NSError?
+    _ = client.groundTruthJSON(&error)
+    if let error { throw error }
+    _ = client.verificationDocumentJSON(&error)
+    if let error { throw error }
     _ = client.groundTruth()
     _ = client.verificationDocument()
 }
