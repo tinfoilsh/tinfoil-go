@@ -141,7 +141,7 @@ func NewClientWithOptions(opts ...ClientOption) (*Client, error) {
 		var err error
 		secureClient, err = client.NewSecureClientWithOptions(cfg.enclave, cfg.repo, verificationOpts)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("failed to create secure client: %w", err)
 		}
 	}
 
