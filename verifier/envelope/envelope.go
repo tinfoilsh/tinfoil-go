@@ -502,7 +502,7 @@ func Fetch(host string, nonce []byte) ([]byte, error) {
 		Path:     attestationEndpoint,
 		RawQuery: "nonce=" + hex.EncodeToString(nonce),
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), attestationFetchTimeout)
 	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
 	if err != nil {
@@ -521,13 +521,16 @@ func Fetch(host string, nonce []byte) ([]byte, error) {
 		return nil, err
 	}
 	if len(body) > maxAttestationBytes {
-		return nil, fmt.Errorf("attestation document exceeds 32 MiB")
+		return nil, fmt.Errorf("attestation document exceeds %d bytes", maxAttestationBytes)
 	}
 	return body, nil
 }
 
-const attestationEndpoint = "/.well-known/tinfoil-attestation"
-const maxAttestationBytes = 32 << 20
+const (
+	attestationEndpoint     = "/.well-known/tinfoil-attestation"
+	attestationFetchTimeout = 30 * time.Second
+	maxAttestationBytes     = 32 << 20
+)
 
 // EndorsementCollateral returns the first endorsement-role collateral entry
 // with the given format whose subjects include subject.
