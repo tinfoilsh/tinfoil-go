@@ -56,6 +56,22 @@ func (v *VerifiedDocumentV3) cryptoMaterialData(id, format string) (string, erro
 	return "", fmt.Errorf("document endorses no %q crypto material", id)
 }
 
+// transportKeys recovers keys after document verification. TLS is required
+// by SecureClient; HPKE is optional until the caller selects EHBP.
+func (v *VerifiedDocumentV3) transportKeys() (tlsFP, hpkeKey string, err error) {
+	tlsFP, err = v.TLSPublicKeyFP()
+	if err != nil {
+		return "", "", err
+	}
+	for _, item := range v.CryptoMaterial {
+		if item.ID == envelope.CryptoMaterialIDHPKE {
+			hpkeKey, err = v.HPKEPublicKey()
+			return tlsFP, hpkeKey, err
+		}
+	}
+	return tlsFP, "", nil
+}
+
 // VerifyDocumentV3 verifies a v3 attestation document from its transmitted
 // bytes:
 //
@@ -183,11 +199,7 @@ func (s *SecureClient) verifyV3() (*VerifiedDocumentV3, error) {
 
 	// Recover the transport keys bound into the verified CPU report. The
 	// selected transport enforces its key before sending the first request.
-	tlsFP, err := verified.TLSPublicKeyFP()
-	if err != nil {
-		return nil, fmt.Errorf("binding: %w", err)
-	}
-	hpkeKey, err := verified.HPKEPublicKey()
+	tlsFP, hpkeKey, err := verified.transportKeys()
 	if err != nil {
 		return nil, fmt.Errorf("binding: %w", err)
 	}
