@@ -16,6 +16,7 @@ import (
 	"cmp"
 	"fmt"
 	"slices"
+	"strings"
 
 	"github.com/tinfoilsh/tinfoil-go/verifier/envelope"
 	"github.com/tinfoilsh/tinfoil-go/verifier/measurement"
@@ -191,7 +192,7 @@ func layout(code, expected *measurement.Measurement, q *Authenticated) ([]string
 		return nil, fmt.Errorf("expected measurement is %s with %d registers, enclave is %s with %d", expected.Type, len(expected.Registers), q.Measurement.Type, len(registers))
 	}
 	for i, pin := range expected.Registers {
-		if pin != "" && registers[i] != "" && registers[i] != pin {
+		if pin != "" && registers[i] != "" && !strings.EqualFold(registers[i], pin) {
 			return nil, fmt.Errorf("register %d pinned to %s, release measures %s", i, pin, registers[i])
 		}
 		registers[i] = cmp.Or(registers[i], pin)
