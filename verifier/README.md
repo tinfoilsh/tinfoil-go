@@ -127,24 +127,15 @@ also need to migrate before adopting the v3 framework.
 
 ## Pinned registers
 
-A multiplatform release never measures RTMR3, so verification requires it
-unextended unless the caller pins the sealed value. Pin it, or any other
-register, in the enclave's own layout before verifying; registers left empty
-come from their source:
+To pin a register the release does not determine, such as a sealed RTMR3, set
+it in the enclave's layout; empty registers keep their source:
 
 ```go
 secureClient.SetExpectedMeasurement(&measurement.Measurement{
 	Type:      measurement.TdxGuestV2,
 	Registers: []string{"", "", "", "", expectedRTMR3},
 })
-verified, err := secureClient.VerifyV3()
 ```
-
-For an already fetched document, pass the same measurement to
-`VerifyDocumentV3`. Malformed values reject, and pins for one platform reject
-an enclave of the other. Changing the expectation clears cached verification
-but retains the enclave identity. Replace previously obtained HTTP clients
-after changing policy.
 
 ## JavaScript / TypeScript / WASM
 

@@ -63,11 +63,8 @@ func TestValidate(t *testing.T) {
 
 	var reportData [64]byte
 	copy(reportData[:], body.GetReportData())
-	code := Registers{
-		RTMR1: body.GetRtmrs()[1],
-		RTMR2: body.GetRtmrs()[2],
-		RTMR3: body.GetRtmrs()[3],
-	}
+	rtmrs := body.GetRtmrs()
+	code := [5]string{"", "", hex.EncodeToString(rtmrs[1]), hex.EncodeToString(rtmrs[2]), hex.EncodeToString(rtmrs[3])}
 	quote := &Quote{quote: proto, TCBEvaluationDataNumber: 5}
 	shape := &policy.Shape{CPUs: 8, MemoryMB: 65536, Disks: 4}
 
@@ -125,7 +122,7 @@ func TestValidate(t *testing.T) {
 
 	// A workload register differing from code provenance must reject.
 	badCode := code
-	badCode.RTMR1 = make([]byte, 48)
+	badCode[2] = strings.Repeat("00", 48)
 	e, _, err := Assemble(a, matching, shape, quote, badCode, reportData)
 	require.NoError(t, err)
 	assert.Error(t, e.Validate(quote))

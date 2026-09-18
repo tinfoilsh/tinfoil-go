@@ -87,11 +87,9 @@ func (v *VerifiedDocumentV3) transportKeys() (tlsFP, hpkeKey string, err error) 
 //     assemble the complete policy from the reference values, validate in
 //     one call.
 //
-// repo is the code release the caller trusts, owner/name[@tag][@sha256:digest]:
-// the repository pins the sigstore-code signing identity, and a pinned tag or
-// digest rejects a bundle signed for any other. The repo named inside the
-// document is not trusted. expected pins registers the enclave must report;
-// see SecureClient.SetExpectedMeasurement.
+// repo is the code repository the caller trusts (pins the sigstore-code
+// signing identity); the repo named inside the document is not trusted.
+// repo may pin a tag or digest, owner/name[@tag][@sha256:digest]; expected pins registers.
 // Channel binding (TLS fingerprint / HPKE key) is the caller's
 // responsibility, using the returned endorsed crypto material.
 func VerifyDocumentV3(docBytes, nonce []byte, repo string, expected *measurement.Measurement) (*VerifiedDocumentV3, error) {
@@ -134,7 +132,6 @@ func authenticateReferenceValues(doc *envelope.Document, repo string) (*provenan
 	if err != nil {
 		return nil, nil, time.Time{}, err
 	}
-	// A pinned tag or digest wins; Sigstore then rejects a bundle signed for any other.
 	code, err := provenance.AuthenticateCode(codeRef.SigstoreBundle, release.Repo, cmp.Or(release.Tag, codeRef.Tag), cmp.Or(release.Digest, codeRef.Digest))
 	if err != nil {
 		return nil, nil, time.Time{}, fmt.Errorf("verifying code measurement: %w", err)
@@ -214,29 +211,19 @@ func (s *SecureClient) verifyV3() (*VerifiedDocumentV3, error) {
 	if err != nil {
 		return nil, fmt.Errorf("binding: %w", err)
 	}
-	// The TDX platform registers come from the verified quote itself; their
-	// values were already appraised against the endorsed platform measurements.
-	var hw *measurement.HardwareMeasurement
-	if verified.EnclaveMeasurement.Type == measurement.TdxGuestV2 && len(verified.EnclaveMeasurement.Registers) >= 2 {
-		hw = &measurement.HardwareMeasurement{
-			MRTD:  verified.EnclaveMeasurement.Registers[0],
-			RTMR0: verified.EnclaveMeasurement.Registers[1],
-		}
-	}
 	s.setVerifiedState(&GroundTruth{
-		ConfigRepo:          verified.CodeRepo,
-		EnclaveHost:         s.enclave,
-		ReleaseTag:          verified.CodeTag,
-		TLSPublicKey:        tlsFP,
-		HPKEPublicKey:       hpkeKey,
-		Digest:              verified.CodeDigest,
-		CodeMeasurement:     verified.CodeMeasurement,
-		EnclaveMeasurement:  verified.EnclaveMeasurement,
-		HardwareMeasurement: hw,
-		CodeFingerprint:     verified.CodeMeasurement.Fingerprint(),
-		EnclaveFingerprint:  verified.EnclaveMeasurement.Fingerprint(),
-		Verifier:            currentVerifierIdentity(),
-		VerifiedAt:          verificationTime().UTC().Format(time.RFC3339Nano),
+		ConfigRepo:         verified.CodeRepo,
+		EnclaveHost:        s.enclave,
+		ReleaseTag:         verified.CodeTag,
+		TLSPublicKey:       tlsFP,
+		HPKEPublicKey:      hpkeKey,
+		Digest:             verified.CodeDigest,
+		CodeMeasurement:    verified.CodeMeasurement,
+		EnclaveMeasurement: verified.EnclaveMeasurement,
+		CodeFingerprint:    verified.CodeMeasurement.Fingerprint(),
+		EnclaveFingerprint: verified.EnclaveMeasurement.Fingerprint(),
+		Verifier:           currentVerifierIdentity(),
+		VerifiedAt:         verificationTime().UTC().Format(time.RFC3339Nano),
 	})
 	return verified, nil
 }

@@ -14,26 +14,23 @@ import (
 
 // GroundTruth represents the "known good" state of the enclave
 type GroundTruth struct {
-	ConfigRepo          string                           `json:"config_repo,omitempty"`
-	EnclaveHost         string                           `json:"enclave_host,omitempty"`
-	ReleaseTag          string                           `json:"release_tag,omitempty"`
-	TLSPublicKey        string                           `json:"tls_public_key,omitempty"`
-	HPKEPublicKey       string                           `json:"hpke_public_key,omitempty"`
-	Digest              string                           `json:"digest"`
-	CodeMeasurement     *measurement.Measurement         `json:"code_measurement"`
-	EnclaveMeasurement  *measurement.Measurement         `json:"enclave_measurement"`
-	HardwareMeasurement *measurement.HardwareMeasurement `json:"hardware_measurement,omitempty"`
-	CodeFingerprint     string                           `json:"code_fingerprint"`
-	EnclaveFingerprint  string                           `json:"enclave_fingerprint"`
-	Verifier            SoftwareIdentity                 `json:"verifier"`
-	VerifiedAt          string                           `json:"verified_at"`
-	DigestFetched       bool                             `json:"-"`
+	ConfigRepo         string                   `json:"config_repo,omitempty"`
+	EnclaveHost        string                   `json:"enclave_host,omitempty"`
+	ReleaseTag         string                   `json:"release_tag,omitempty"`
+	TLSPublicKey       string                   `json:"tls_public_key,omitempty"`
+	HPKEPublicKey      string                   `json:"hpke_public_key,omitempty"`
+	Digest             string                   `json:"digest"`
+	CodeMeasurement    *measurement.Measurement `json:"code_measurement"`
+	EnclaveMeasurement *measurement.Measurement `json:"enclave_measurement"`
+	CodeFingerprint    string                   `json:"code_fingerprint"`
+	EnclaveFingerprint string                   `json:"enclave_fingerprint"`
+	Verifier           SoftwareIdentity         `json:"verifier"`
+	VerifiedAt         string                   `json:"verified_at"`
+	DigestFetched      bool                     `json:"-"`
 }
 
 type SecureClient struct {
-	enclave, repo string
-	// Registers the enclave must report, in its own layout; empty ones come
-	// from their source.
+	enclave, repo       string
 	expectedMeasurement *measurement.Measurement
 
 	groundTruth          *GroundTruth
@@ -65,9 +62,7 @@ func fetchRouters() ([]string, error) {
 	return routers, nil
 }
 
-// NewSecureClient creates a new secure client with a given enclave and repo.
-// The repo is a release reference, owner/name[@tag][@sha256:digest]; a pinned
-// tag or digest must be what the enclave's code bundle was signed for.
+// NewSecureClient creates a new secure client with a given repo and enclave
 func NewSecureClient(enclave, repo string) *SecureClient {
 	return &SecureClient{
 		enclave: enclave,
@@ -112,11 +107,7 @@ func (s *SecureClient) Repo() string {
 }
 
 // SetExpectedMeasurement pins registers the enclave must report, in its own
-// layout: one register for SEV-SNP, five for TDX. Registers left empty come
-// from their source: the endorsed platform measurement for MRTD and RTMR0, the
-// code release for the rest, and an unextended RTMR3. Pass nil to pin nothing.
-// This invalidates cached verification; previously returned HTTP clients keep
-// their existing transport and should be replaced by the caller.
+// layout; empty registers come from their source. Pass nil to pin nothing.
 func (s *SecureClient) SetExpectedMeasurement(m *measurement.Measurement) {
 	s.verifyMu.Lock()
 	defer s.verifyMu.Unlock()

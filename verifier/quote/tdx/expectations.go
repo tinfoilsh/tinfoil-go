@@ -1,6 +1,7 @@
 package tdx
 
 import (
+	"cmp"
 	"encoding/hex"
 	"fmt"
 
@@ -8,16 +9,6 @@ import (
 
 	"github.com/tinfoilsh/tinfoil-go/verifier/policy"
 )
-
-// Registers are the expected TDX registers. MRTD and RTMR0 come from the
-// endorsed platform measurement unless set.
-type Registers struct {
-	MRTD  []byte
-	RTMR0 []byte
-	RTMR1 []byte
-	RTMR2 []byte
-	RTMR3 []byte
-}
 
 // Expectations is the fully translated TDX expected state, resolved at
 // assembly so that validation performs no translation and no lookups. The
@@ -32,8 +23,8 @@ type Expectations struct {
 // by the quote's authenticated registers under the required VM shape, so a
 // quote outside the endorsed set fails assembly; every register comparison
 // then happens inside the library. The returned name is the resolved
-// measurements-map entry.
-func Assemble(a *policy.Artifact, p *policy.TDXPolicy, required *policy.Shape, q *Quote, registers Registers, reportData [64]byte) (*Expectations, string, error) {
+// measurements-map entry. An empty registers[0] or [1] takes the resolved value.
+func Assemble(a *policy.Artifact, p *policy.TDXPolicy, required *policy.Shape, q *Quote, registers [5]string, reportData [64]byte) (*Expectations, string, error) {
 	opts, err := options(p)
 	if err != nil {
 		return nil, "", err
@@ -49,18 +40,16 @@ func Assemble(a *policy.Artifact, p *policy.TDXPolicy, required *policy.Shape, q
 	if err != nil {
 		return nil, "", err
 	}
-	if registers.MRTD == nil {
-		if registers.MRTD, err = hex.DecodeString(m.MRTD); err != nil {
-			return nil, "", fmt.Errorf("platform measurement mrtd is not hex: %w", err)
+	registers[0] = cmp.Or(registers[0], m.MRTD)
+	registers[1] = cmp.Or(registers[1], m.RTMR0)
+	var decoded [5][]byte
+	for i, label := range [5]string{"mrtd", "rtmr0", "rtmr1", "rtmr2", "rtmr3"} {
+		if decoded[i], err = policy.DecodeHex(label, registers[i], 48); err != nil {
+			return nil, "", err
 		}
 	}
-	if registers.RTMR0 == nil {
-		if registers.RTMR0, err = hex.DecodeString(m.RTMR0); err != nil {
-			return nil, "", fmt.Errorf("platform measurement rtmr0 is not hex: %w", err)
-		}
-	}
-	opts.TdQuoteBodyOptions.MrTd = registers.MRTD
-	opts.TdQuoteBodyOptions.Rtmrs = [][]byte{registers.RTMR0, registers.RTMR1, registers.RTMR2, registers.RTMR3}
+	opts.TdQuoteBodyOptions.MrTd = decoded[0]
+	opts.TdQuoteBodyOptions.Rtmrs = decoded[1:]
 	opts.TdQuoteBodyOptions.ReportData = reportData[:]
 
 	return &Expectations{

@@ -137,36 +137,21 @@ func newClientFromJSON(trustRootJSON []byte, verifierOptions ...verify.VerifierO
 // repoNameRE matches a GitHub "owner/name" repository slug.
 var repoNameRE = regexp.MustCompile(`^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$`)
 
-var digestRE = regexp.MustCompile(`^[0-9a-f]{64}$`)
+// refRE matches owner/name[@tag][@sha256:digest]; the tag group is lazy so @sha256: alone is a digest.
+var refRE = regexp.MustCompile(`^([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)(?:@([^@]+))??(?:@sha256:([0-9a-f]{64}))?$`)
 
-// Release is a parsed release reference. An empty Tag or Digest accepts what
-// the document carries; a set one is a pin.
+// Release is a parsed release reference; an empty Tag or Digest pins nothing.
 type Release struct {
 	Repo, Tag, Digest string
 }
 
 // ParseRef parses owner/name[@tag][@sha256:digest].
 func ParseRef(ref string) (Release, error) {
-	parts := strings.Split(strings.TrimSpace(ref), "@")
-	release := Release{Repo: parts[0]}
-	if !repoNameRE.MatchString(release.Repo) {
-		return Release{}, fmt.Errorf("invalid repository name %q", release.Repo)
-	}
-	if last := len(parts) - 1; last > 0 && strings.HasPrefix(parts[last], "sha256:") {
-		release.Digest = strings.TrimPrefix(parts[last], "sha256:")
-		if !digestRE.MatchString(release.Digest) {
-			return Release{}, fmt.Errorf("invalid digest in %q: want sha256: followed by 64 lowercase hex characters", ref)
-		}
-		parts = parts[:last]
-	}
-	switch {
-	case len(parts) == 1:
-	case len(parts) == 2 && parts[1] != "" && !strings.HasPrefix(parts[1], "sha256:"):
-		release.Tag = parts[1]
-	default:
+	m := refRE.FindStringSubmatch(strings.TrimSpace(ref))
+	if m == nil || strings.HasPrefix(m[2], "sha256:") {
 		return Release{}, fmt.Errorf("invalid release reference %q: want owner/name[@tag][@sha256:digest]", ref)
 	}
-	return release, nil
+	return Release{Repo: m[1], Tag: m[2], Digest: m[3]}, nil
 }
 
 // signingIdentity returns the anchored SAN regex accepted for artifacts
