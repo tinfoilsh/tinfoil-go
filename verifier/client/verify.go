@@ -1,6 +1,7 @@
 package client
 
 import (
+	"context"
 	"fmt"
 	"time"
 
@@ -177,17 +178,23 @@ func freshnessExpiration(codeWitnessedAt, platformWitnessedAt time.Time) time.Ti
 // The enclave fetch is the only network request: all collateral travels in
 // the document and Sigstore verification uses the embedded trust root.
 func (s *SecureClient) VerifyV3() (*VerifiedDocumentV3, error) {
-	s.verifyMu.Lock()
-	defer s.verifyMu.Unlock()
-	return s.verifyV3()
+	state, err := s.verifiedState(context.Background(), nil, true)
+	if err != nil {
+		return nil, err
+	}
+	result := *state.verified
+	result.CodeMeasurement = cloneMeasurement(result.CodeMeasurement)
+	result.EnclaveMeasurement = cloneMeasurement(result.EnclaveMeasurement)
+	result.CryptoMaterial = append([]envelope.CryptoMaterialItem(nil), result.CryptoMaterial...)
+	return &result, nil
 }
 
-func (s *SecureClient) verifyV3() (*VerifiedDocumentV3, error) {
+func (s *SecureClient) fetchVerification(ctx context.Context) (*verificationState, error) {
 	nonce, err := envelope.RandomNonce()
 	if err != nil {
 		return nil, err
 	}
-	docBytes, err := envelope.Fetch(s.enclave, nonce)
+	docBytes, err := envelope.FetchContext(ctx, s.enclave, nonce)
 	if err != nil {
 		return nil, fmt.Errorf("fetching attestation document: %w", err)
 	}
@@ -223,7 +230,7 @@ func (s *SecureClient) verifyV3() (*VerifiedDocumentV3, error) {
 		return nil, fmt.Errorf("measurements: failed to compute enclave fingerprint: %w", err)
 	}
 
-	s.setVerifiedState(&GroundTruth{
+	groundTruth := &GroundTruth{
 		ConfigRepo:          s.repo,
 		EnclaveHost:         s.enclave,
 		ReleaseTag:          verified.CodeTag,
@@ -237,17 +244,19 @@ func (s *SecureClient) verifyV3() (*VerifiedDocumentV3, error) {
 		EnclaveFingerprint:  enclaveFingerprint,
 		Verifier:            currentVerifierIdentity(),
 		VerifiedAt:          verificationTime().UTC().Format(time.RFC3339Nano),
-	})
-	return verified, nil
+	}
+	return &verificationState{
+		verified: verified, groundTruth: groundTruth,
+		document: newVerificationDocument(groundTruth),
+	}, nil
 }
 
 // Verify attests the enclave with the v3 single-request flow and stores the
 // resulting ground truth in the client.
 func (s *SecureClient) Verify() (*GroundTruth, error) {
-	s.verifyMu.Lock()
-	defer s.verifyMu.Unlock()
-	if _, err := s.verifyV3(); err != nil {
+	state, err := s.verifiedState(context.Background(), nil, true)
+	if err != nil {
 		return nil, err
 	}
-	return s.GroundTruth(), nil
+	return cloneGroundTruth(state.groundTruth), nil
 }

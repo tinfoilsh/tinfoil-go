@@ -146,17 +146,6 @@ func newVerificationDocument(groundTruth *GroundTruth) *VerificationDocument {
 	}
 }
 
-func (s *SecureClient) setVerifiedState(groundTruth *GroundTruth) {
-	clonedGroundTruth := cloneGroundTruth(groundTruth)
-	s.stateMu.Lock()
-	if clonedGroundTruth.EnclaveHost != "" {
-		s.enclave = clonedGroundTruth.EnclaveHost
-	}
-	s.groundTruth = clonedGroundTruth
-	s.verificationDocument = newVerificationDocument(clonedGroundTruth)
-	s.stateMu.Unlock()
-}
-
 func cloneVerificationDocument(document *VerificationDocument) *VerificationDocument {
 	if document == nil {
 		return nil

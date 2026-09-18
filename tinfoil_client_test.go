@@ -2,8 +2,6 @@ package tinfoil
 
 import (
 	"context"
-	"crypto/x509"
-	"errors"
 	"os"
 	"strings"
 	"testing"
@@ -11,7 +9,6 @@ import (
 	"github.com/openai/openai-go/v3"
 	"github.com/openai/openai-go/v3/option"
 	"github.com/stretchr/testify/require"
-	"github.com/tinfoilsh/tinfoil-go/verifier/client"
 )
 
 // Load .env before running tests so TINFOIL_API_KEY is available locally
@@ -207,8 +204,8 @@ func TestHTTPClient(t *testing.T) {
 	require.True(t, ok, "HTTPClient transport should be hostBoundRoundTripper")
 	ucs, ok := hostBound.transport.(*userCacheSecretTransport)
 	require.True(t, ok, "inner transport should inject the user cache secret")
-	_, ok = ucs.transport.(*ehbpReVerifyingTransport)
-	require.True(t, ok, "sealing transport should be ehbpReVerifyingTransport")
+	require.NotNil(t, ucs.transport)
+	require.Equal(t, TransportEHBP, client.Transport())
 
 	// Verify it returns the same instance (shared client)
 	httpClient2 := client.HTTPClient()
@@ -239,67 +236,6 @@ func TestClientIntegration_AudioTranscription(t *testing.T) {
 	})
 	require.NoError(t, err)
 	require.Contains(t, strings.ToLower(transcription.Text), "stale smell of old beer")
-}
-
-func TestIsCertificateError(t *testing.T) {
-	tests := []struct {
-		name     string
-		err      error
-		expected bool
-	}{
-		{
-			name:     "nil error",
-			err:      nil,
-			expected: false,
-		},
-		{
-			name:     "generic error",
-			err:      errors.New("some random error"),
-			expected: false,
-		},
-		{
-			name:     "ErrNoTLS",
-			err:      client.ErrNoTLS,
-			expected: true,
-		},
-		{
-			name:     "wrapped ErrNoTLS",
-			err:      errors.Join(errors.New("connection failed"), client.ErrNoTLS),
-			expected: true,
-		},
-		{
-			name:     "ErrCertMismatch",
-			err:      client.ErrCertMismatch,
-			expected: true,
-		},
-		{
-			name:     "wrapped ErrCertMismatch",
-			err:      errors.Join(errors.New("request failed"), client.ErrCertMismatch),
-			expected: true,
-		},
-		{
-			name:     "x509.CertificateInvalidError",
-			err:      x509.CertificateInvalidError{Reason: x509.Expired},
-			expected: true,
-		},
-		{
-			name:     "x509.UnknownAuthorityError",
-			err:      x509.UnknownAuthorityError{},
-			expected: true,
-		},
-		{
-			name:     "x509.HostnameError",
-			err:      x509.HostnameError{Host: "example.com"},
-			expected: true,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result := isCertificateError(tt.err)
-			require.Equal(t, tt.expected, result)
-		})
-	}
 }
 
 // loadDotEnv sets environment variables from a .env file when one exists.
