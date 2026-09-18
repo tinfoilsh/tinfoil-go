@@ -60,7 +60,11 @@ func (c *Client) AuthenticateFreshness(bundleJSON []byte, expected *Authenticate
 	if err := validateAuthenticatedArtifact(expected); err != nil {
 		return time.Time{}, err
 	}
-	result, err := c.verifyBundleWithIdentity(bundleJSON, freshnessWitnessIdentity, expected.Digest)
+	identity, err := freshnessIdentityForBundle(bundleJSON)
+	if err != nil {
+		return time.Time{}, err
+	}
+	result, err := c.verifyBundleWithIdentity(bundleJSON, identity, expected.Digest)
 	if err != nil {
 		return time.Time{}, fmt.Errorf("verifying freshness witness bundle: %w", err)
 	}
@@ -105,23 +109,42 @@ func validateAuthenticatedArtifact(expected *AuthenticatedArtifact) error {
 	return nil
 }
 
+func freshnessIdentityForBundle(bundleJSON []byte) (string, error) {
+	var parsed bundle.Bundle
+	if err := parsed.UnmarshalJSON(bundleJSON); err != nil {
+		return "", fmt.Errorf("parsing freshness bundle: %w", err)
+	}
+	material := parsed.GetVerificationMaterial()
+	if material == nil {
+		return "", fmt.Errorf("freshness bundle has no verification material")
+	}
+	if len(material.GetTlogEntries()) > 0 {
+		return publicFreshnessIdentity, nil
+	}
+	if len(material.GetTimestampVerificationData().GetRfc3161Timestamps()) > 0 {
+		return privateFreshnessIdentity, nil
+	}
+	return "", fmt.Errorf("freshness bundle has no authenticated timestamp")
+}
+
 func validateFreshnessTime(timestamps []verify.TimestampVerificationResult, now time.Time) (time.Time, error) {
-	var loggedAt time.Time
+	var authenticatedAt time.Time
 	for _, timestamp := range timestamps {
-		if timestamp.Type == "Tlog" && (loggedAt.IsZero() || timestamp.Timestamp.Before(loggedAt)) {
-			loggedAt = timestamp.Timestamp
+		if (timestamp.Type == "Tlog" || timestamp.Type == "TimestampAuthority") &&
+			(authenticatedAt.IsZero() || timestamp.Timestamp.Before(authenticatedAt)) {
+			authenticatedAt = timestamp.Timestamp
 		}
 	}
-	if loggedAt.IsZero() {
-		return time.Time{}, fmt.Errorf("freshness witness has no verified transparency-log timestamp")
+	if authenticatedAt.IsZero() {
+		return time.Time{}, fmt.Errorf("freshness witness has no verified authenticated timestamp")
 	}
-	if loggedAt.After(now.Add(MaxFreshnessFutureSkew)) {
+	if authenticatedAt.After(now.Add(MaxFreshnessFutureSkew)) {
 		return time.Time{}, fmt.Errorf("freshness witness timestamp is in the future")
 	}
-	if now.Sub(loggedAt) > MaxFreshnessAge {
+	if now.Sub(authenticatedAt) > MaxFreshnessAge {
 		return time.Time{}, fmt.Errorf("freshness witness is stale")
 	}
-	return loggedAt, nil
+	return authenticatedAt, nil
 }
 
 func parseFreshnessStatement(bundleJSON []byte) (*freshnessStatement, error) {

@@ -44,16 +44,25 @@ const (
 
 var (
 	platformEndorsementsIdentity = githubWorkflowIdentityPattern(platformEndorsementsRepo, `build\.yml`, `refs/tags/v[0-9][^@]*`)
-	freshnessWitnessIdentity     = githubWorkflowIdentityPattern(freshnessWitnessRepo, `freshness\.yml`, `refs/heads/main`)
+	publicFreshnessIdentity      = githubWorkflowIdentityPattern(freshnessWitnessRepo, `freshness\.yml`, `refs/heads/main`)
+	privateFreshnessIdentity     = githubWorkflowIdentityPattern(freshnessWitnessRepo, `private\.yml`, `refs/heads/main`)
 )
 
+type trustProfile struct {
+	root    *root.TrustedRoot
+	options []verify.VerifierOption
+}
+
 type Client struct {
-	trustRoot       *root.TrustedRoot
-	verifierOptions []verify.VerifierOption
+	public  trustProfile
+	private trustProfile
 }
 
 //go:embed trusted_root.json
 var embeddedTrustedRoot []byte
+
+//go:embed github_trusted_root.json
+var embeddedGitHubTrustedRoot []byte
 
 // defaultClient is built once from the embedded trusted root. Verification
 // never fetches trust material over the network; the embedded copy is
@@ -66,7 +75,7 @@ var (
 
 func getDefaultClient() (*Client, error) {
 	defaultClientOnce.Do(func() {
-		defaultClient, defaultClientErr = NewClientFromJSON(embeddedTrustedRoot)
+		defaultClient, defaultClientErr = NewClientFromTrustedRoots(embeddedTrustedRoot, embeddedGitHubTrustedRoot)
 	})
 	return defaultClient, defaultClientErr
 }
@@ -119,19 +128,46 @@ func AuthenticatePlatformEndorsements(bundleJSON []byte, repo, tag, hexDigest st
 // NewClientFromJSON builds a client from a Sigstore trusted-root document;
 // verification normally uses the embedded copy via the package functions.
 func NewClientFromJSON(trustRootJSON []byte) (*Client, error) {
-	return newClientFromJSON(trustRootJSON,
+	profile, err := newTrustProfile(trustRootJSON,
 		verify.WithSignedCertificateTimestamps(1),
 		verify.WithTransparencyLog(1),
 		verify.WithObserverTimestamps(1),
 	)
+	if err != nil {
+		return nil, err
+	}
+	return &Client{public: profile}, nil
 }
 
-func newClientFromJSON(trustRootJSON []byte, verifierOptions ...verify.VerifierOption) (*Client, error) {
+// NewClientFromTrustedRoots builds a verifier supporting both public GitHub
+// attestations (Sigstore public-good Fulcio, CT and Rekor) and private GitHub
+// attestations (GitHub Fulcio and RFC 3161 timestamp authority). The roots are
+// supplied separately so a private bundle can never fall back to the weaker or
+// wrong verification policy.
+func NewClientFromTrustedRoots(publicRootJSON, githubRootJSON []byte) (*Client, error) {
+	publicProfile, err := newTrustProfile(publicRootJSON,
+		verify.WithSignedCertificateTimestamps(1),
+		verify.WithTransparencyLog(1),
+		verify.WithObserverTimestamps(1),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("public trust profile: %w", err)
+	}
+	privateProfile, err := newTrustProfile(githubRootJSON,
+		verify.WithSignedTimestamps(1),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("private GitHub trust profile: %w", err)
+	}
+	return &Client{public: publicProfile, private: privateProfile}, nil
+}
+
+func newTrustProfile(trustRootJSON []byte, verifierOptions ...verify.VerifierOption) (trustProfile, error) {
 	trustRoot, err := root.NewTrustedRootFromJSON(trustRootJSON)
 	if err != nil {
-		return nil, fmt.Errorf("parsing trust root: %w", err)
+		return trustProfile{}, fmt.Errorf("parsing trust root: %w", err)
 	}
-	return &Client{trustRoot: trustRoot, verifierOptions: verifierOptions}, nil
+	return trustProfile{root: trustRoot, options: verifierOptions}, nil
 }
 
 // repoNameRE matches a GitHub "owner/name" repository slug.
@@ -164,10 +200,6 @@ func (c *Client) verifyBundle(bundleJSON []byte, repo, hexDigest string) (*verif
 // verifyBundleWithIdentity verifies a Sigstore bundle against an explicit
 // signing certificate SAN regex.
 func (c *Client) verifyBundleWithIdentity(bundleJSON []byte, sanRegex, hexDigest string) (*verify.VerificationResult, error) {
-	if c.trustRoot == nil {
-		return nil, fmt.Errorf("trust root is not set")
-	}
-
 	var b bundle.Bundle
 	b.Bundle = new(protobundle.Bundle)
 	if err := b.UnmarshalJSON(bundleJSON); err != nil {
@@ -179,10 +211,14 @@ func (c *Client) verifyBundleWithIdentity(bundleJSON []byte, sanRegex, hexDigest
 	if err := requireExactlyOneDSSESignature(b.Bundle); err != nil {
 		return nil, err
 	}
+	profile, err := c.profileForBundle(b.Bundle)
+	if err != nil {
+		return nil, err
+	}
 
 	verifier, err := verify.NewSignedEntityVerifier(
-		c.trustRoot,
-		c.verifierOptions...,
+		profile.root,
+		profile.options...,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("creating signed entity verifier: %w", err)
@@ -245,6 +281,30 @@ func (c *Client) verifyBundleWithIdentity(bundleJSON []byte, sanRegex, hexDigest
 	}
 
 	return result, nil
+}
+
+// profileForBundle selects a trust domain from authenticated-time material.
+// Public GitHub bundles carry Rekor entries. Private GitHub bundles deliberately
+// have no public transparency-log entry and instead carry an RFC 3161 timestamp.
+func (c *Client) profileForBundle(b *protobundle.Bundle) (trustProfile, error) {
+	if b == nil || b.GetVerificationMaterial() == nil {
+		return trustProfile{}, fmt.Errorf("bundle has no verification material")
+	}
+	material := b.GetVerificationMaterial()
+	if len(material.GetTlogEntries()) > 0 {
+		if c.public.root == nil {
+			return trustProfile{}, fmt.Errorf("public Sigstore trust root is not set")
+		}
+		return c.public, nil
+	}
+	timestamps := material.GetTimestampVerificationData().GetRfc3161Timestamps()
+	if len(timestamps) == 0 {
+		return trustProfile{}, fmt.Errorf("bundle has neither a transparency-log entry nor an RFC 3161 timestamp")
+	}
+	if c.private.root == nil {
+		return trustProfile{}, fmt.Errorf("private GitHub trust root is not set")
+	}
+	return c.private, nil
 }
 
 // enforceSubject0Digest applies SPEC §5.4: only the FIRST in-toto subject is

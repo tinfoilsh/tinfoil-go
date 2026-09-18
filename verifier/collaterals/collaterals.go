@@ -23,8 +23,14 @@ const FormatV2 = "https://tinfoil.sh/predicate/attestation-collaterals/v2"
 // AMD KDS parameters (SEV-SNP) or the Intel PCS URLs (TDX) from it, so the
 // enclave does no report parsing.
 type Request struct {
+	// DeploymentID is the opaque control-plane deployment identifier. For
+	// private repositories it lets ATC request the exact repository's bundles
+	// without receiving a GitHub credential. The control plane validates and
+	// resolves it; external verifiers never see it.
+	DeploymentID string `json:"deployment_id,omitempty"`
 	// Repo is the code repository whose Sigstore bundle is returned.
-	// Required: the service never guesses a repo.
+	// Required for the legacy public path; derived from DeploymentID for the
+	// private path.
 	Repo string `json:"repo"`
 	// Tag optionally pins a code release; latest when empty.
 	Tag string `json:"tag,omitempty"`

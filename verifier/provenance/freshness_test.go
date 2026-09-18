@@ -71,10 +71,11 @@ func TestValidateFreshnessTime(t *testing.T) {
 	assert.Equal(t, now.Add(-3*time.Hour), loggedAt)
 
 	_, err = validateFreshnessTime(nil, now)
-	assert.ErrorContains(t, err, "no verified transparency-log timestamp")
+	assert.ErrorContains(t, err, "no verified authenticated timestamp")
 
-	_, err = validateFreshnessTime([]verify.TimestampVerificationResult{{Type: "TimestampAuthority", Timestamp: now.Add(-time.Hour)}}, now)
-	assert.ErrorContains(t, err, "no verified transparency-log timestamp")
+	timestampedAt, err := validateFreshnessTime([]verify.TimestampVerificationResult{{Type: "TimestampAuthority", Timestamp: now.Add(-time.Hour)}}, now)
+	require.NoError(t, err)
+	assert.Equal(t, now.Add(-time.Hour), timestampedAt)
 
 	_, err = validateFreshnessTime([]verify.TimestampVerificationResult{{Type: "Tlog", Timestamp: now.Add(MaxFreshnessFutureSkew + time.Second)}}, now)
 	assert.ErrorContains(t, err, "in the future")
