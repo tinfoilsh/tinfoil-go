@@ -103,8 +103,7 @@ require it must use the direct verification APIs and gate requests themselves.
 
 The v3 client always requests a nonce-bound v3 document. Enclaves serving only
 legacy v2 documents must upgrade before using this verifier.
-`SetNoncedAttestation` remains as a deprecated compatibility method, but neither
-argument disables nonce binding; calling it invalidates cached verification.
+Remove calls to `SetNoncedAttestation`; nonce binding is mandatory in v3.
 
 The old `verifier/attestation`, `verifier/sigstore`, `verifier/github`, and
 `verifier/config` packages are removed. Measurement types now live in
