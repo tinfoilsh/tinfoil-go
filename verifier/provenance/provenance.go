@@ -451,6 +451,6 @@ func authenticatedArtifact(result *verify.VerificationResult, repo, tag, hexDige
 		Tag:         authenticatedTag,
 		Commit:      commit,
 		SubjectName: result.Statement.Subject[0].Name,
-		Digest:      hexDigest,
+		Digest:      strings.ToLower(hexDigest),
 	}, nil
 }

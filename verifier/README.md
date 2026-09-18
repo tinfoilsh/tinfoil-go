@@ -72,45 +72,57 @@ Tinfoil Verifier currently supports two platforms:
 | **AMD SEV-SNP**| VCEK certificates & SNP report validation | [AMD Spec](https://www.amd.com/en/developer/sev.html)  |
 | **Intel TDX** | TDX quote validation & TD report checks   | [Intel Guide](https://www.intel.com/content/www/us/en/developer/tools/trust-domain-extensions/overview.html) |
 
-### Verification Flow
-```mermaid
-sequenceDiagram
-    participant Client
-    participant Enclave
-    participant TrustRoot
-    participant Sigstore
+### V3 verification flow
 
-    Client->>Enclave: Request attestation
-    Enclave-->>Client: Report + TLS pubkey
-    Client->>TrustRoot: Verify signature chain
-    Client->>Sigstore: Fetch reference measurement
-    Client->>Client: Compare measurements & pin cert
-```
+The client generates a fresh nonce and fetches one document from
+`https://<enclave>/.well-known/tinfoil-attestation?nonce=<nonce>`. The document
+carries CPU evidence, attested transport keys, and all required verification
+collateral. Verification then runs offline using the embedded trust roots:
 
-> **Note:** The [Bundled Verification](#bundled-verification) flow aggregates all these steps into a single request via Tinfoil ATC.
+1. Strictly parse the envelope and check the nonce and endorsed-section hashes.
+2. Authenticate code provenance, platform policy, and their freshness witnesses.
+3. Authenticate the CPU quote and enforce the complete code/platform policy.
+4. Use the endorsed TLS key for each HTTPS connection, or the endorsed HPKE key
+   when selecting EHBP. A TLS-only enclave may omit HPKE material.
 
-### Bundled Verification
+The TLS pin runs for direct HTTPS and HTTPS-over-CONNECT connections. Fetching
+the document does not require a separate direct TLS probe. Code and platform
+witnesses have a seven-day maximum age by default; the earliest authenticated
+expiry is exposed by `VerifyV3` and `VerifyDocumentV3` as `FreshnessExpiresAt`.
+Callers using these APIs must retain the deadline and stop authorizing new
+requests at or after it, then verify again before accepting more requests.
+Re-verifying unchanged witnesses does not extend their deadline.
 
-You can fetch a pre-aggregated bundle from Tinfoil ATC (air-traffic-control) that contains all verification data in a single request:
+These age checks run during verification. The cached `SecureClient` HTTP client
+and the high-level OpenAI SDK's TLS/EHBP transports do not retain or enforce
+`FreshnessExpiresAt`, so they can continue sending requests after it. Automatic
+request-time expiration is not provided by these transports; applications that
+require it must use the direct verification APIs and gate requests themselves.
 
-> **Note:** Bundled verification currently supports AMD SEV-SNP only. Intel TDX support is coming soon.
+### Migration from v2
+
+The v3 client always requests a nonce-bound v3 document. Enclaves serving only
+legacy v2 documents must upgrade before using this verifier.
+
+The old `verifier/attestation`, `verifier/sigstore`, `verifier/github`, and
+`verifier/config` packages are removed. Measurement types now live in
+`verifier/measurement`. The legacy `SetAttestationBundleURL`, `VerifyFromBundle`,
+`FetchAndVerifyJSON`, `FetchAndVerifyFromURLJSON`, and `VerifyFromBundleJSON`
+entry points are removed; use an explicit enclave/repository and `VerifyV3`.
+V3 verification obtains collateral from the enclave document, so it no longer
+fetches reference values through the old bundle service.
+
+For an already fetched document, use:
 
 ```go
-// Single-request verification via ATC
-groundTruthJSON, err := client.FetchAndVerifyJSON("org/repo", nil)
-if err != nil {
-    log.Fatal(err)
-}
-
-// Or via your own bundle proxy URL
-groundTruthJSON, err := client.FetchAndVerifyFromURLJSON("https://proxy.example.com", "org/repo", nil)
+verified, err := client.VerifyDocumentV3(documentBytes, expectedNonce, trustedRepo)
 ```
 
-If you've already fetched the bundle yourself:
-```go
-groundTruthJSON, err := client.VerifyFromBundleJSON(bundleJSON, "org/repo", nil)
-```
-
+The repository and nonce are caller-owned expectations. After success, bind
+service traffic to the returned TLS/HPKE material and honor `FreshnessExpiresAt`.
+This low-level function does not open a service connection or enforce a cache's
+expiration on the caller's behalf. Swift callers using the removed bundle APIs
+also need to migrate before adopting the v3 framework.
 
 ## JavaScript / TypeScript / WASM
 
@@ -130,20 +142,10 @@ npm install tinfoil
 See the [tinfoil-js documentation](https://github.com/tinfoilsh/tinfoil-js) for usage examples.
 
 ## Auditing the Verification Code
-1. **Certificate chain** – see [`/attestation/genoa_cert_chain.pem`](attestation/genoa_cert_chain.pem)
-2. **Attestation verification** – platform-specific attestation logic:
-   - [`/attestation/sev.go`](attestation/sev.go) – AMD SEV-SNP attestation
-   - [`/attestation/tdx.go`](attestation/tdx.go) – Intel TDX attestation
-3. **Measurement comparison** – see [`Measurement.Equals()`](attestation/attestation.go#L186) in [`/attestation/attestation.go`](attestation/attestation.go)
-4. **Code provenance verification** – Sigstore/Rekor integration in [`/sigstore/sigstore.go`](sigstore/sigstore.go)
-5. **End-to-end verification flow** – [`client.Verify()`](client/client.go#L142) in [`/client/client.go`](client/client.go)
 
-## Reporting Vulnerabilities
-
-Please report security vulnerabilities by either:
-
-- Emailing [security@tinfoil.sh](mailto:security@tinfoil.sh)
-
-- Opening an issue on GitHub on this repository
-
-We aim to respond to (legitimate) security reports within 24 hours.
+- Envelope parsing and nonce/hash binding: `envelope/envelope.go`.
+- Code, platform and freshness provenance: `provenance/`.
+- Strict platform-policy parsing: `policy/`.
+- CPU authentication and expectation enforcement: `quote/sev/` and `quote/tdx/`.
+- End-to-end verification: `client/verify.go`.
+- Per-connection TLS pinning: `client/roundtrip.go`.
