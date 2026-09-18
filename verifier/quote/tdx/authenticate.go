@@ -9,7 +9,7 @@ import (
 	_ "embed"
 	"encoding/base64"
 	"encoding/hex"
-	"encoding/json"
+	"encoding/json/v2"
 	"encoding/pem"
 	"fmt"
 	"net/textproto"
@@ -23,7 +23,6 @@ import (
 	tdxtrust "github.com/google/go-tdx-guest/verify/trust"
 
 	"github.com/tinfoilsh/tinfoil-go/verifier/envelope"
-	"github.com/tinfoilsh/tinfoil-go/verifier/internal/strictjson"
 	"github.com/tinfoilsh/tinfoil-go/verifier/measurement"
 )
 
@@ -80,7 +79,7 @@ func Authenticate(doc *envelope.Document) (*Quote, error) {
 		return nil, fmt.Errorf("document carries no intel-pcs endorsement collateral for the cpu")
 	}
 	var data envelope.IntelPCSCollateral
-	if err := strictjson.Unmarshal(entry.Data, &data); err != nil {
+	if err := json.Unmarshal(entry.Data, &data, json.RejectUnknownMembers(true)); err != nil {
 		return nil, fmt.Errorf("parsing intel-pcs collateral entry %q: %w", entry.ID, err)
 	}
 	inner, err := newPCSReplayGetter(data.Responses)

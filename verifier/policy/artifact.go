@@ -10,10 +10,9 @@ package policy
 
 import (
 	"encoding/hex"
+	"encoding/json/v2"
 	"fmt"
 	"regexp"
-
-	"github.com/tinfoilsh/tinfoil-go/verifier/internal/strictjson"
 )
 
 // ArtifactFormat is the required format URI of the artifact.
@@ -67,7 +66,7 @@ type Policy struct {
 // member names.
 func Parse(data []byte) (*Artifact, error) {
 	var a Artifact
-	if err := strictjson.Unmarshal(data, &a); err != nil {
+	if err := json.Unmarshal(data, &a, json.RejectUnknownMembers(true)); err != nil {
 		return nil, fmt.Errorf("parsing policy artifact: %w", err)
 	}
 	if a.Format != ArtifactFormat {

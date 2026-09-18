@@ -9,6 +9,8 @@ For complete documentation, see the [Go SDK documentation](https://docs.tinfoil.
 
 ## Installation
 
+Requires Go 1.27.1 or later.
+
 Add the Tinfoil SDK to your project:
 
 ```bash

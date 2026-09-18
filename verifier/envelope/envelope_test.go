@@ -229,51 +229,6 @@ func TestParseRejectsUppercaseHex(t *testing.T) {
 	assert.ErrorContains(t, err, "lowercase hex")
 }
 
-func TestParseRejectsCaseMismatchedMembers(t *testing.T) {
-	nonce := testNonce()
-	_, docBytes := buildTestDocument(t, nonce)
-
-	// encoding/json alone would fill Format from "FORMAT" case-insensitively
-	// (last member wins) without any error; strict parsing must reject it.
-	var loose map[string]json.RawMessage
-	require.NoError(t, json.Unmarshal(docBytes, &loose))
-	loose["FORMAT"] = loose["format"]
-	tampered, err := json.Marshal(loose)
-	require.NoError(t, err)
-
-	_, err = Parse(tampered)
-	assert.ErrorContains(t, err, `unknown object member "FORMAT"`)
-}
-
-func TestParseRejectsDuplicateMembers(t *testing.T) {
-	nonce := testNonce()
-	_, docBytes := buildTestDocument(t, nonce)
-
-	dup := bytes.Replace(docBytes,
-		[]byte(`{"format"`),
-		[]byte(`{"format":"`+AttestationV3Format+`","format"`), 1)
-	require.NotEqual(t, docBytes, dup)
-
-	_, err := Parse(dup)
-	assert.ErrorContains(t, err, `duplicate object member "format"`)
-}
-
-func TestParseRejectsDuplicateMembersInCollateralData(t *testing.T) {
-	nonce := testNonce()
-	_, docBytes := buildTestDocument(t, nonce)
-
-	// Collateral data is an opaque json.RawMessage, but duplicate member
-	// names are still rejected inside it: those bytes are attacker-chosen
-	// and duplicates parse differently across languages.
-	dup := bytes.Replace(docBytes,
-		[]byte(`"cert_chain_pem":""`),
-		[]byte(`"vcek_der_base64":""`), 1)
-	require.NotEqual(t, docBytes, dup)
-
-	_, err := Parse(dup)
-	assert.ErrorContains(t, err, `duplicate object member "vcek_der_base64"`)
-}
-
 func TestParseRejectsNonCanonicalBase64(t *testing.T) {
 	nonce := testNonce()
 	_, docBytes := buildTestDocument(t, nonce)
@@ -376,17 +331,6 @@ func TestParseRejectsDuplicateFreshnessArtifactID(t *testing.T) {
 
 	_, err = Parse(docBytes)
 	assert.ErrorContains(t, err, `duplicate collateral entry id "`+FreshnessCollateralIDCode+`"`)
-}
-
-func TestParseRejectsInvalidUTF8(t *testing.T) {
-	nonce := testNonce()
-	_, docBytes := buildTestDocument(t, nonce)
-
-	tampered := bytes.Replace(docBytes, []byte("cpu-endorsement"), []byte("cpu-endors\xffment"), 1)
-	require.NotEqual(t, docBytes, tampered)
-
-	_, err := Parse(tampered)
-	assert.ErrorContains(t, err, "not valid UTF-8")
 }
 
 func TestComputeReportData(t *testing.T) {

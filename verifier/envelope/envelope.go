@@ -11,7 +11,8 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"io"
@@ -20,8 +21,6 @@ import (
 	"regexp"
 	"slices"
 	"time"
-
-	"github.com/tinfoilsh/tinfoil-go/verifier/internal/strictjson"
 )
 
 // Attestation document v3 (predicate https://tinfoil.sh/predicate/attestation/v3).
@@ -178,22 +177,22 @@ type DeviceEvidenceSection struct {
 // DeviceEvidenceItem is one device's evidence; the item format URI versions
 // the Evidence payload.
 type DeviceEvidenceItem struct {
-	ID       string          `json:"id"`
-	Kind     string          `json:"kind"`
-	Vendor   string          `json:"vendor"`
-	Format   string          `json:"format"`
-	Evidence json.RawMessage `json:"evidence"`
+	ID       string         `json:"id"`
+	Kind     string         `json:"kind"`
+	Vendor   string         `json:"vendor"`
+	Format   string         `json:"format"`
+	Evidence jsontext.Value `json:"evidence"`
 }
 
 // CollateralEntry is one self-describing collateral record. Collateral is
 // unendorsed transport: every entry is authenticated by its own signature
 // chain during verification, so a tampered entry can only cause rejection.
 type CollateralEntry struct {
-	ID       string          `json:"id"`
-	Role     string          `json:"role"`
-	Format   string          `json:"format"`
-	Subjects []string        `json:"subjects,omitempty"`
-	Data     json.RawMessage `json:"data"`
+	ID       string         `json:"id"`
+	Role     string         `json:"role"`
+	Format   string         `json:"format"`
+	Subjects []string       `json:"subjects,omitempty"`
+	Data     jsontext.Value `json:"data"`
 }
 
 // AMDVCEKCollateral is the data of a CollateralAMDVCEKV1Format entry.
@@ -226,16 +225,16 @@ type PCSResponse struct {
 // reference-values entry. Repo and Tag are informational; trust comes from
 // verifying SigstoreBundle against the expected signing identity and Digest.
 type SigstoreCollateral struct {
-	Repo           string          `json:"repo"`
-	Tag            string          `json:"tag"`
-	Digest         string          `json:"digest"`
-	SigstoreBundle json.RawMessage `json:"sigstore_bundle"`
+	Repo           string         `json:"repo"`
+	Tag            string         `json:"tag"`
+	Digest         string         `json:"digest"`
+	SigstoreBundle jsontext.Value `json:"sigstore_bundle"`
 }
 
 // FreshnessCollateral carries the independently signed witness bundle for
 // the Sigstore artifact selected by its collateral entry ID.
 type FreshnessCollateral struct {
-	SigstoreBundle json.RawMessage `json:"sigstore_bundle"`
+	SigstoreBundle jsontext.Value `json:"sigstore_bundle"`
 }
 
 var lowerHexRE = regexp.MustCompile(`^[0-9a-f]*$`)
@@ -304,7 +303,7 @@ func RandomNonce() ([]byte, error) {
 // sections are retained as raw bytes for hashing.
 func Parse(docBytes []byte) (*Document, error) {
 	var doc Document
-	if err := strictjson.Unmarshal(docBytes, &doc); err != nil {
+	if err := json.Unmarshal(docBytes, &doc, json.RejectUnknownMembers(true)); err != nil {
 		return nil, fmt.Errorf("parsing attestation document: %w", err)
 	}
 
@@ -345,7 +344,7 @@ func Parse(docBytes []byte) (*Document, error) {
 	}
 
 	var cm CryptoMaterialSection
-	if err := strictjson.Unmarshal(cryptoBytes, &cm); err != nil {
+	if err := json.Unmarshal(cryptoBytes, &cm, json.RejectUnknownMembers(true)); err != nil {
 		return nil, fmt.Errorf("parsing crypto_material: %w", err)
 	}
 	if cm.Format != CryptoMaterialV1Format {
@@ -384,7 +383,7 @@ func Parse(docBytes []byte) (*Document, error) {
 	}
 
 	var de DeviceEvidenceSection
-	if err := strictjson.Unmarshal(deviceBytes, &de); err != nil {
+	if err := json.Unmarshal(deviceBytes, &de, json.RejectUnknownMembers(true)); err != nil {
 		return nil, fmt.Errorf("parsing device_evidence: %w", err)
 	}
 	if de.Format != DeviceEvidenceV1Format {
@@ -578,7 +577,7 @@ func (d *Document) findCollateral(role, format string, match func(*CollateralEnt
 
 func decodeCollateral[T any](entry *CollateralEntry) (*T, error) {
 	var payload T
-	if err := strictjson.Unmarshal(entry.Data, &payload); err != nil {
+	if err := json.Unmarshal(entry.Data, &payload, json.RejectUnknownMembers(true)); err != nil {
 		return nil, fmt.Errorf("parsing %s collateral entry %q: %w", entry.Format, entry.ID, err)
 	}
 	return &payload, nil
