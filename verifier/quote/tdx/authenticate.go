@@ -97,7 +97,7 @@ func Authenticate(doc *envelope.Document) (*Quote, error) {
 		TrustedRoots:     intelRootCertPool,
 		GetCollateral:    true,
 		CheckRevocations: true,
-		Now:              time.Now(),
+		Now:              timeNow(),
 	}
 	if err := tdxverify.TdxQuote(parsed, opts); err != nil {
 		return nil, fmt.Errorf("verifying TDX quote: %w", err)
@@ -178,7 +178,7 @@ func (g *pcsReplayGetter) Get(requestURL string) (map[string][]string, []byte, e
 	// CRL from a .der URL that does not identify the body as a CRL.
 	crl, crlErr := x509.ParseRevocationList(body)
 	if crlErr == nil {
-		if now := time.Now(); now.Before(crl.ThisUpdate) || now.After(crl.NextUpdate) {
+		if now := timeNow(); now.Before(crl.ThisUpdate) || now.After(crl.NextUpdate) {
 			return nil, nil, fmt.Errorf("captured CRL for %s is outside its validity window", requestURL)
 		}
 	} else if strings.Contains(key, "crl") {
@@ -256,6 +256,10 @@ func (r *tcbEvaluationRecorder) minimum() (int, error) {
 var sgxRootCACertPEM []byte
 
 var intelRootCertPool *x509.CertPool
+
+// timeNow is the validity-window clock; the production default, overridden only
+// by the conformance build to replay a frozen document at its capture time.
+var timeNow = time.Now
 
 func init() {
 	root, _ := pem.Decode(sgxRootCACertPEM)

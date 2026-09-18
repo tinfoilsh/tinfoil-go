@@ -1,0 +1,11 @@
+{
+  "id": "envelope-malformed-json",
+  "stage": "verify-attestation-v3",
+  "input": {
+    "schema_version": "1",
+    "document_b64": "ew==",
+    "nonce_hex": "0000000000000000000000000000000000000000000000000000000000000000",
+    "repo": "tinfoilsh/confidential-inference-proxy"
+  },
+  "expected": { "accepted": false }
+}

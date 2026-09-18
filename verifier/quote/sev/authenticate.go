@@ -34,20 +34,30 @@ var askArkGenoaPEM []byte
 //go:embed turin_cert_chain.pem
 var askArkTurinPEM []byte
 
+// amdRootPEMOverride, when non-nil, replaces the embedded per-product anchor
+// and timeNow is the validity-window clock; production defaults, overridden
+// only by the conformance build (see conformance.go).
+var (
+	amdRootPEMOverride []byte
+	timeNow            = time.Now
+)
+
 // trustedRoots builds the pinned AMD trust anchors from repo-owned copies
 // rather than the library's embedded defaults, so an anchor only changes
 // when its file is deliberately regenerated. A fresh instance is built per
 // authentication: the library caches the CRL it fetched on this object, and
 // document-supplied collateral must never affect other verifications.
 func trustedRoots(productLine string) (map[string][]*trust.AMDRootCerts, error) {
-	var rootPEM []byte
-	switch productLine {
-	case ProductGenoa:
-		rootPEM = askArkGenoaPEM
-	case ProductTurin:
-		rootPEM = askArkTurinPEM
-	default:
-		return nil, fmt.Errorf("unsupported SEV product line %q", productLine)
+	rootPEM := amdRootPEMOverride
+	if rootPEM == nil {
+		switch productLine {
+		case ProductGenoa:
+			rootPEM = askArkGenoaPEM
+		case ProductTurin:
+			rootPEM = askArkTurinPEM
+		default:
+			return nil, fmt.Errorf("unsupported SEV product line %q", productLine)
+		}
 	}
 	roots := new(trust.AMDRootCerts)
 	if err := roots.FromKDSCertBytes(rootPEM); err != nil {
@@ -180,7 +190,7 @@ func Authenticate(doc *envelope.Document) (*Quote, error) {
 	if err != nil {
 		return nil, fmt.Errorf("parsing amd-crl collateral: %w", err)
 	}
-	if now := time.Now(); now.Before(parsedCRL.ThisUpdate) || now.After(parsedCRL.NextUpdate) {
+	if now := timeNow(); now.Before(parsedCRL.ThisUpdate) || now.After(parsedCRL.NextUpdate) {
 		return nil, fmt.Errorf("amd-crl collateral is outside its validity window (this_update %s, next_update %s)",
 			parsedCRL.ThisUpdate.Format(time.RFC3339), parsedCRL.NextUpdate.Format(time.RFC3339))
 	}
@@ -254,7 +264,7 @@ func verifySignature(reportBase64 string, vcekDER, askDER, arkDER, crlDER []byte
 		CheckRevocations: true,
 		TrustedRoots:     roots,
 		Product:          product,
-		Now:              time.Now(),
+		Now:              timeNow(),
 	}
 
 	attestation := &sevsnp.Attestation{
