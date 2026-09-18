@@ -13,7 +13,6 @@
 package quote
 
 import (
-	"bytes"
 	"encoding/hex"
 	"fmt"
 
@@ -26,29 +25,6 @@ import (
 
 // registerSize is the byte length of every measurement register.
 const registerSize = 48
-
-// Options contains caller-owned expectations that a code release cannot predict.
-// The zero value requires an unextended RTMR3.
-type Options struct {
-	ExpectedRTMR3 string
-}
-
-// Validate checks the caller's expectations before acquiring or verifying evidence.
-func (o Options) Validate() error {
-	_, err := o.rtmr3()
-	return err
-}
-
-func (o Options) rtmr3() ([]byte, error) {
-	if o.ExpectedRTMR3 == "" {
-		return make([]byte, registerSize), nil
-	}
-	value, err := decodeRegister(o.ExpectedRTMR3)
-	if err != nil {
-		return nil, fmt.Errorf("expected RTMR3: %w", err)
-	}
-	return value, nil
-}
 
 // Authenticated is a signature-verified quote, not yet compared against
 // any expected value.
@@ -119,19 +95,6 @@ func Authenticate(doc *envelope.Document) (*Authenticated, error) {
 // the required VM shape), the code measurement, and the envelope's
 // REPORT_DATA. A machine absent from the artifact is not endorsed.
 func Assemble(endorsements *policy.Artifact, code *measurement.Measurement, shape *policy.Shape, reportData [64]byte, q *Authenticated) (*AssembledPolicy, error) {
-	return AssembleWithOptions(endorsements, code, shape, reportData, q, Options{})
-}
-
-// AssembleWithOptions assembles code and platform policy with a caller's RTMR3
-// expectation. A nonzero expectation cannot be satisfied by a SEV-SNP platform.
-func AssembleWithOptions(endorsements *policy.Artifact, code *measurement.Measurement, shape *policy.Shape, reportData [64]byte, q *Authenticated, opts Options) (*AssembledPolicy, error) {
-	expectedRTMR3, err := opts.rtmr3()
-	if err != nil {
-		return nil, err
-	}
-	if q.Platform == policy.PlatformSEVSNP && !bytes.Equal(expectedRTMR3, make([]byte, registerSize)) {
-		return nil, fmt.Errorf("SEV-SNP has no RTMR3 to hold the expected value")
-	}
 	if code == nil {
 		return nil, fmt.Errorf("assembling policy: expected code measurement is required")
 	}
@@ -155,7 +118,7 @@ func AssembleWithOptions(endorsements *policy.Artifact, code *measurement.Measur
 		}
 	case policy.PlatformTDX:
 		var registers tdx.CodeRegisters
-		registers, err = tdxCodeRegistersWithRTMR3(code, expectedRTMR3)
+		registers, err = tdxCodeRegisters(code)
 		if err == nil {
 			assembled.tdx, assembled.PlatformMeasurementName, err = tdx.Assemble(
 				endorsements, machinePolicy.TDX, shape, q.tdx, registers, reportData)
@@ -184,19 +147,11 @@ func (p *AssembledPolicy) Validate() error {
 
 // Verify composes Authenticate, Assemble, and Validate.
 func Verify(doc *envelope.Document, endorsements *policy.Artifact, code *measurement.Measurement, shape *policy.Shape, reportData [64]byte) (*AssembledPolicy, *Authenticated, error) {
-	return VerifyWithOptions(doc, endorsements, code, shape, reportData, Options{})
-}
-
-// VerifyWithOptions verifies a quote using caller-owned runtime expectations.
-func VerifyWithOptions(doc *envelope.Document, endorsements *policy.Artifact, code *measurement.Measurement, shape *policy.Shape, reportData [64]byte, opts Options) (*AssembledPolicy, *Authenticated, error) {
-	if err := opts.Validate(); err != nil {
-		return nil, nil, err
-	}
 	q, err := Authenticate(doc)
 	if err != nil {
 		return nil, nil, err
 	}
-	assembled, err := AssembleWithOptions(endorsements, code, shape, reportData, q, opts)
+	assembled, err := Assemble(endorsements, code, shape, reportData, q)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -227,19 +182,15 @@ func sevLaunchDigest(m *measurement.Measurement) ([]byte, error) {
 
 // tdxCodeRegisters maps the expected code measurement onto the TDX
 // workload registers.
-func tdxCodeRegisters(m *measurement.Measurement) (tdx.CodeRegisters, error) {
-	return tdxCodeRegistersWithRTMR3(m, make([]byte, registerSize))
-}
-
-func tdxCodeRegistersWithRTMR3(m *measurement.Measurement, expectedRTMR3 []byte) (code tdx.CodeRegisters, err error) {
-	code.RTMR3 = bytes.Clone(expectedRTMR3)
+func tdxCodeRegisters(m *measurement.Measurement) (code tdx.CodeRegisters, err error) {
 	switch m.Type {
 	case measurement.SnpTdxMultiPlatformV1:
-		// Registers are [snp_measurement, rtmr1, rtmr2]. RTMR3 is a
-		// runtime expectation supplied by the caller, zero by default.
+		// Registers are [snp_measurement, rtmr1, rtmr2]; RTMR3 is never
+		// measured and must be zero.
 		if len(m.Registers) != 3 {
 			return code, fmt.Errorf("multiplatform code measurement carries %d registers, want 3", len(m.Registers))
 		}
+		code.RTMR3 = make([]byte, registerSize)
 		if code.RTMR1, err = decodeRegister(m.Registers[1]); err != nil {
 			return code, err
 		}
@@ -256,9 +207,8 @@ func tdxCodeRegistersWithRTMR3(m *measurement.Measurement, expectedRTMR3 []byte)
 		if code.RTMR2, err = decodeRegister(m.Registers[3]); err != nil {
 			return code, err
 		}
-		// A release cannot predict a runtime extend, even in a TDX-only
-		// measurement. The caller is the authority on RTMR3.
-		return code, nil
+		code.RTMR3, err = decodeRegister(m.Registers[4])
+		return code, err
 	default:
 		return code, fmt.Errorf("unsupported code measurement type %q for TDX", m.Type)
 	}

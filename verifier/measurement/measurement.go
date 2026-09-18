@@ -5,13 +5,9 @@ package measurement
 
 import (
 	"crypto/sha256"
-	"encoding/hex"
 	"fmt"
 	"strings"
 )
-
-// tdxRegisterSize is the width of a TDX measurement register in bytes.
-const tdxRegisterSize = 48
 
 const RTMR3_ZERO = "000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"
 
@@ -35,22 +31,6 @@ type Measurement struct {
 // measurements, SHA-256 is computed over the type URL concatenated with all
 // register values (no separator).
 func Fingerprint(m *Measurement, hw *HardwareMeasurement, targetType PredicateType) (string, error) {
-	return FingerprintWithRTMR3(m, hw, targetType, "")
-}
-
-// FingerprintWithRTMR3 includes a caller's runtime RTMR3 expectation when
-// projecting a multiplatform code measurement to TDX. Empty means zero.
-func FingerprintWithRTMR3(m *Measurement, hw *HardwareMeasurement, targetType PredicateType, expectedRTMR3 string) (string, error) {
-	if expectedRTMR3 == "" {
-		expectedRTMR3 = RTMR3_ZERO
-	}
-	if targetType == TdxGuestV2 {
-		decoded, err := hex.DecodeString(expectedRTMR3)
-		if err != nil || len(decoded) != tdxRegisterSize {
-			return "", fmt.Errorf("expected RTMR3 must be a %d-byte hexadecimal register", tdxRegisterSize)
-		}
-		expectedRTMR3 = hex.EncodeToString(decoded)
-	}
 	var registers []string
 
 	switch m.Type {
@@ -62,7 +42,7 @@ func FingerprintWithRTMR3(m *Measurement, hw *HardwareMeasurement, targetType Pr
 			if hw == nil {
 				return "", fmt.Errorf("hardware measurement required for TDX guest types")
 			}
-			registers = []string{hw.MRTD, hw.RTMR0, m.Registers[1], m.Registers[2], expectedRTMR3}
+			registers = []string{hw.MRTD, hw.RTMR0, m.Registers[1], m.Registers[2], RTMR3_ZERO}
 		default:
 			return "", fmt.Errorf("unsupported target type %s", targetType)
 		}

@@ -1,8 +1,6 @@
 package client
 
 import (
-	"github.com/stretchr/testify/require"
-	"github.com/tinfoilsh/tinfoil-go/verifier/provenance"
 	"io"
 	"math"
 	"net/http"
@@ -10,6 +8,9 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/require"
+	"github.com/tinfoilsh/tinfoil-go/verifier/provenance"
 )
 
 func TestFreshnessExpirationUsesConfiguredAge(t *testing.T) {
@@ -72,15 +73,17 @@ func TestDefaultRouterFallbackRetainsFreshnessPolicy(t *testing.T) {
 
 func TestConcurrentFreshnessPolicyChanges(t *testing.T) {
 	c := NewSecureClient("one.example", "org/repo")
+	c.setVerifiedState(&GroundTruth{EnclaveHost: "one.example"})
+	require.NotNil(t, c.GroundTruth())
 	var wg sync.WaitGroup
 	for range 4 {
 		wg.Go(func() {
 			for range 100 {
 				_ = c.SetFreshnessMaxAge(time.Hour)
-				c.SetExpectedRTMR3("")
 				c.GroundTruth()
 			}
 		})
 	}
 	wg.Wait()
+	require.Nil(t, c.GroundTruth())
 }

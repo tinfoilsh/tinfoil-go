@@ -11,9 +11,8 @@ import (
 )
 
 // VerificationOptions contains caller-owned verification policy. Its zero value
-// preserves the default requirement of an unextended RTMR3.
+// preserves the seven-day default maximum freshness witness age.
 type VerificationOptions struct {
-	ExpectedRTMR3 string
 	// FreshnessMaxAge applies to both code and platform witnesses. Zero uses
 	// the seven-day default; negative values reject verification.
 	FreshnessMaxAge time.Duration
@@ -23,7 +22,7 @@ func (o VerificationOptions) validate() error {
 	if o.FreshnessMaxAge < 0 {
 		return fmt.Errorf("freshness maximum age must be positive")
 	}
-	return (quote.Options{ExpectedRTMR3: o.ExpectedRTMR3}).Validate()
+	return nil
 }
 
 func (o VerificationOptions) freshnessMaxAge() time.Duration {
@@ -100,8 +99,8 @@ func VerifyDocumentV3(docBytes, nonce []byte, repo string) (*VerifiedDocumentV3,
 	return VerifyDocumentV3WithOptions(docBytes, nonce, repo, VerificationOptions{})
 }
 
-// VerifyDocumentV3WithOptions verifies a document with caller-owned runtime
-// expectations. Options must come from the caller, never from the document.
+// VerifyDocumentV3WithOptions verifies a document with caller-owned freshness
+// policy. Options must come from the caller, never from the document.
 func VerifyDocumentV3WithOptions(docBytes, nonce []byte, repo string, opts VerificationOptions) (*VerifiedDocumentV3, error) {
 	if err := opts.validate(); err != nil {
 		return nil, err
@@ -116,7 +115,7 @@ func VerifyDocumentV3WithOptions(docBytes, nonce []byte, repo string, opts Verif
 		return nil, fmt.Errorf("reference values: %w", err)
 	}
 
-	_, authenticated, err := quote.VerifyWithOptions(doc, endorsements.Artifact, code.Measurement, code.Shape, expectedReportData, quote.Options{ExpectedRTMR3: opts.ExpectedRTMR3})
+	_, authenticated, err := quote.Verify(doc, endorsements.Artifact, code.Measurement, code.Shape, expectedReportData)
 	if err != nil {
 		return nil, fmt.Errorf("cpu evidence: %w", err)
 	}
@@ -237,7 +236,7 @@ func (s *SecureClient) verifyV3() (*VerifiedDocumentV3, error) {
 			RTMR0: verified.EnclaveMeasurement.Registers[1],
 		}
 	}
-	codeFingerprint, err := measurement.FingerprintWithRTMR3(verified.CodeMeasurement, hw, verified.EnclaveMeasurement.Type, s.verificationOptions.ExpectedRTMR3)
+	codeFingerprint, err := measurement.Fingerprint(verified.CodeMeasurement, hw, verified.EnclaveMeasurement.Type)
 	if err != nil {
 		return nil, fmt.Errorf("measurements: failed to compute code fingerprint: %w", err)
 	}

@@ -162,10 +162,17 @@ client's policy and clears its cached verification; mobile callers can use
 `SetFreshnessMaxAgeSeconds`. Replace previously returned HTTP clients after
 changing verification policy.
 
-The returned `FreshnessExpiresAt` is the earlier authenticated code/platform
-witness timestamp plus the configured age. Re-verifying the same witnesses does
-not extend it. Consumers caching verified documents must reject new requests
-at or after that deadline.
+`VerifyV3` and `VerifyDocumentV3WithOptions` return `FreshnessExpiresAt`: the
+earlier authenticated code/platform witness timestamp plus the configured age.
+Re-verifying the same witnesses does not extend it. Direct callers must retain
+this deadline and reject new requests at or after it until verification succeeds
+again.
+
+The cached `SecureClient` HTTP client and the high-level SDK's TLS/EHBP
+transports do not retain or enforce this deadline. The configured age is checked
+when verification runs; automatic request-time expiration is not provided by
+these transports. Applications requiring that behavior must use the direct
+verification APIs and gate requests themselves.
 
 ## API Documentation
 

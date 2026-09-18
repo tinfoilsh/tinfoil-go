@@ -135,17 +135,6 @@ func (s *SecureClient) Repo() string {
 	return s.repo
 }
 
-// SetExpectedRTMR3 sets the expected 48-byte hexadecimal runtime register.
-// Empty requires an unextended register. Malformed values fail verification.
-// This invalidates cached verification; previously returned HTTP clients keep
-// their existing transport and should be replaced by the caller.
-func (s *SecureClient) SetExpectedRTMR3(rtmr3 string) {
-	s.verifyMu.Lock()
-	defer s.verifyMu.Unlock()
-	s.verificationOptions.ExpectedRTMR3 = rtmr3
-	s.invalidateVerification()
-}
-
 // SetFreshnessMaxAge sets a positive maximum witness age and invalidates
 // cached verification. Previously returned HTTP clients retain their transport.
 func (s *SecureClient) SetFreshnessMaxAge(maxAge time.Duration) error {

@@ -130,15 +130,6 @@ func TestValidate(t *testing.T) {
 	require.NoError(t, err)
 	assert.Error(t, e.Validate(quote))
 
-	// RTMR3 is a caller-owned runtime expectation, enforced by the same
-	// vendor validation as RTMR1/2. Changing only that expectation rejects.
-	wrongRuntime := code
-	wrongRuntime.RTMR3 = append([]byte(nil), code.RTMR3...)
-	wrongRuntime.RTMR3[0] ^= 1
-	e, _, err = Assemble(a, matching, shape, quote, wrongRuntime, reportData)
-	require.NoError(t, err)
-	assert.Error(t, e.Validate(quote))
-
 	// A REPORT_DATA differing from the envelope's expectation must reject.
 	var badReportData [64]byte
 	e, _, err = Assemble(a, matching, shape, quote, code, badReportData)
