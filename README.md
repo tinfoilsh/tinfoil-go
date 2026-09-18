@@ -113,6 +113,44 @@ if err != nil {
 }
 ```
 
+### Pinning a measurement
+
+By default the client trusts the code measurement proven by the Sigstore code
+provenance carried in the enclave's attestation document. To verify against a
+measurement you obtained out of band instead, pin it explicitly. Only the
+code-provenance check is skipped: the platform endorsements and their freshness
+proof, the CPU quote chain, and channel binding are all still verified. The
+measurement's provenance is your responsibility; the verification document
+reports the skipped steps as `skipped`.
+
+```go
+import (
+	"github.com/tinfoilsh/tinfoil-go/verifier/measurement"
+	"github.com/tinfoilsh/tinfoil-go/verifier/policy"
+)
+
+client, err := tinfoil.NewClientWithOptions(
+	tinfoil.WithEnclave(enclave),
+	tinfoil.WithPinnedMeasurement(&measurement.Measurement{
+		Type:      measurement.SevGuestV2,
+		Registers: []string{"<hex measurement>"},
+	}),
+)
+```
+
+`WithPinnedMeasurement` requires `WithEnclave`. The measurement must carry the
+register layout of its type (1 register for SEV-SNP, 5 for TDX, 3 for
+multi-platform) as 48-byte hex; it is validated and copied when the client is
+created, so a nil or malformed pin is an error rather than a fallback to
+release verification. A five-register TDX pin fixes every register including
+RTMR3. A TDX enclave additionally needs `WithPinnedShape` declaring the VM shape
+the code was built for, since the attestation document's endorsed platform
+measurement is resolved under that shape:
+
+```go
+tinfoil.WithPinnedShape(&policy.Shape{CPUs: 8, MemoryMB: 32768, Disks: 1}),
+```
+
 ## Prompt Cache Scoping
 
 The inference router partitions prompt-prefix caches using both the authenticated API identity and `user_cache_secret`. Cache reuse requires the same identity, secret, model, and matching prompt prefix. Changing the identity or secret selects a different cache namespace, so those requests do not share cache entries or cache-hit timing.

@@ -115,6 +115,11 @@ func newVerificationDocument(groundTruth *GroundTruth) *VerificationDocument {
 	if groundTruth.DigestFetched {
 		fetchDigest = successfulStep()
 	}
+	// A pinned code measurement was never proven by a release, so the
+	// provenance step did not run rather than succeed.
+	if groundTruth.Digest == PinnedNoDigest {
+		verifyCode = skippedStep()
+	}
 	return &VerificationDocument{
 		SchemaVersion:   verificationDocumentSchemaVersion,
 		ConfigRepo:      groundTruth.ConfigRepo,

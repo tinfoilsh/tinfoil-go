@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"strings"
 	"sync"
 	"testing"
 
@@ -15,6 +16,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	ehbpidentity "github.com/tinfoilsh/encrypted-http-body-protocol/identity"
+	"github.com/tinfoilsh/tinfoil-go/verifier/measurement"
+	"github.com/tinfoilsh/tinfoil-go/verifier/policy"
 )
 
 // roundTripFunc adapts a function to an http.RoundTripper.
@@ -64,6 +67,33 @@ func TestProxyClientOptionsApply(t *testing.T) {
 
 	require.Equal(t, "https://proxy.example.com/", cfg.baseURL)
 	require.True(t, cfg.baseURLSet)
+}
+
+// These fail at option validation, before any network access.
+func TestNewClientWithOptionsPinnedMeasurement(t *testing.T) {
+	valid := &measurement.Measurement{
+		Type:      measurement.SevGuestV2,
+		Registers: []string{strings.Repeat("a", 96)},
+	}
+
+	_, err := NewClientWithOptions(WithPinnedMeasurement(valid))
+	require.ErrorContains(t, err, "requires WithEnclave")
+
+	// A supplied nil pin is a policy choice that must fail, not fall back.
+	_, err = NewClientWithOptions(WithEnclave("enclave.example.com"), WithPinnedMeasurement(nil))
+	require.ErrorIs(t, err, measurement.ErrPinnedMeasurementNil)
+
+	_, err = NewClientWithOptions(
+		WithEnclave("enclave.example.com"),
+		WithPinnedMeasurement(&measurement.Measurement{Type: measurement.SevGuestV2, Registers: []string{"abc"}}),
+	)
+	require.ErrorIs(t, err, measurement.ErrPinnedRegisterEncoding)
+
+	_, err = NewClientWithOptions(
+		WithEnclave("enclave.example.com"),
+		WithPinnedShape(&policy.Shape{CPUs: 1}),
+	)
+	require.ErrorContains(t, err, "WithPinnedShape requires WithPinnedMeasurement")
 }
 
 func TestNewClientWithOptionsRejectsInvalidBaseURL(t *testing.T) {
