@@ -32,6 +32,9 @@ type GroundTruth struct {
 
 type SecureClient struct {
 	enclave, repo string
+	// Registers the enclave must report, in its own layout; empty ones come
+	// from their source.
+	expectedMeasurement *measurement.Measurement
 
 	groundTruth          *GroundTruth
 	verificationDocument *VerificationDocument
@@ -106,6 +109,22 @@ func (s *SecureClient) Enclave() string {
 // Repo returns the repository URL
 func (s *SecureClient) Repo() string {
 	return s.repo
+}
+
+// SetExpectedMeasurement pins registers the enclave must report, in its own
+// layout: one register for SEV-SNP, five for TDX. Registers left empty come
+// from their source: the endorsed platform measurement for MRTD and RTMR0, the
+// code release for the rest, and an unextended RTMR3. Pass nil to pin nothing.
+// This invalidates cached verification; previously returned HTTP clients keep
+// their existing transport and should be replaced by the caller.
+func (s *SecureClient) SetExpectedMeasurement(m *measurement.Measurement) {
+	s.verifyMu.Lock()
+	defer s.verifyMu.Unlock()
+	s.expectedMeasurement = cloneMeasurement(m)
+	s.stateMu.Lock()
+	defer s.stateMu.Unlock()
+	s.groundTruth = nil
+	s.verificationDocument = nil
 }
 
 // GroundTruth returns the last verified enclave state

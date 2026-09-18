@@ -90,10 +90,11 @@ func (v *VerifiedDocumentV3) transportKeys() (tlsFP, hpkeKey string, err error) 
 // repo is the code release the caller trusts, owner/name[@tag][@sha256:digest]:
 // the repository pins the sigstore-code signing identity, and a pinned tag or
 // digest rejects a bundle signed for any other. The repo named inside the
-// document is not trusted.
+// document is not trusted. expected pins registers the enclave must report;
+// see SecureClient.SetExpectedMeasurement.
 // Channel binding (TLS fingerprint / HPKE key) is the caller's
 // responsibility, using the returned endorsed crypto material.
-func VerifyDocumentV3(docBytes, nonce []byte, repo string) (*VerifiedDocumentV3, error) {
+func VerifyDocumentV3(docBytes, nonce []byte, repo string, expected *measurement.Measurement) (*VerifiedDocumentV3, error) {
 	doc, expectedReportData, err := envelope.Check(docBytes, nonce)
 	if err != nil {
 		return nil, fmt.Errorf("envelope: %w", err)
@@ -104,7 +105,7 @@ func VerifyDocumentV3(docBytes, nonce []byte, repo string) (*VerifiedDocumentV3,
 		return nil, fmt.Errorf("reference values: %w", err)
 	}
 
-	_, authenticated, err := quote.Verify(doc, endorsements.Artifact, code.Measurement, code.Shape, expectedReportData)
+	_, authenticated, err := quote.Verify(doc, endorsements.Artifact, code.Measurement, expected, code.Shape, expectedReportData)
 	if err != nil {
 		return nil, fmt.Errorf("cpu evidence: %w", err)
 	}
@@ -202,7 +203,7 @@ func (s *SecureClient) verifyV3() (*VerifiedDocumentV3, error) {
 		return nil, fmt.Errorf("fetching attestation document: %w", err)
 	}
 
-	verified, err := VerifyDocumentV3(docBytes, nonce, s.repo)
+	verified, err := VerifyDocumentV3(docBytes, nonce, s.repo, s.expectedMeasurement)
 	if err != nil {
 		return nil, err
 	}
@@ -213,10 +214,8 @@ func (s *SecureClient) verifyV3() (*VerifiedDocumentV3, error) {
 	if err != nil {
 		return nil, fmt.Errorf("binding: %w", err)
 	}
-	// Fingerprints mirror the legacy flow for consumers that display or
-	// compare them. TDX fingerprints incorporate the platform registers,
-	// which in v3 come from the verified quote itself (their values were
-	// already appraised against the endorsed platform measurements).
+	// The TDX platform registers come from the verified quote itself; their
+	// values were already appraised against the endorsed platform measurements.
 	var hw *measurement.HardwareMeasurement
 	if verified.EnclaveMeasurement.Type == measurement.TdxGuestV2 && len(verified.EnclaveMeasurement.Registers) >= 2 {
 		hw = &measurement.HardwareMeasurement{
@@ -224,15 +223,6 @@ func (s *SecureClient) verifyV3() (*VerifiedDocumentV3, error) {
 			RTMR0: verified.EnclaveMeasurement.Registers[1],
 		}
 	}
-	codeFingerprint, err := measurement.Fingerprint(verified.CodeMeasurement, hw, verified.EnclaveMeasurement.Type)
-	if err != nil {
-		return nil, fmt.Errorf("measurements: failed to compute code fingerprint: %w", err)
-	}
-	enclaveFingerprint, err := measurement.Fingerprint(verified.EnclaveMeasurement, hw, verified.EnclaveMeasurement.Type)
-	if err != nil {
-		return nil, fmt.Errorf("measurements: failed to compute enclave fingerprint: %w", err)
-	}
-
 	s.setVerifiedState(&GroundTruth{
 		ConfigRepo:          verified.CodeRepo,
 		EnclaveHost:         s.enclave,
@@ -243,8 +233,8 @@ func (s *SecureClient) verifyV3() (*VerifiedDocumentV3, error) {
 		CodeMeasurement:     verified.CodeMeasurement,
 		EnclaveMeasurement:  verified.EnclaveMeasurement,
 		HardwareMeasurement: hw,
-		CodeFingerprint:     codeFingerprint,
-		EnclaveFingerprint:  enclaveFingerprint,
+		CodeFingerprint:     verified.CodeMeasurement.Fingerprint(),
+		EnclaveFingerprint:  verified.EnclaveMeasurement.Fingerprint(),
 		Verifier:            currentVerifierIdentity(),
 		VerifiedAt:          verificationTime().UTC().Format(time.RFC3339Nano),
 	})

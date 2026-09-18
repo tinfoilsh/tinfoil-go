@@ -63,7 +63,7 @@ func TestValidate(t *testing.T) {
 
 	var reportData [64]byte
 	copy(reportData[:], body.GetReportData())
-	code := CodeRegisters{
+	code := Registers{
 		RTMR1: body.GetRtmrs()[1],
 		RTMR2: body.GetRtmrs()[2],
 		RTMR3: body.GetRtmrs()[3],

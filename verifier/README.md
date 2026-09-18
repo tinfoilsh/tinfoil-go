@@ -116,7 +116,7 @@ fetches reference values through the old bundle service.
 For an already fetched document, use:
 
 ```go
-verified, err := client.VerifyDocumentV3(documentBytes, expectedNonce, trustedRepo)
+verified, err := client.VerifyDocumentV3(documentBytes, expectedNonce, trustedRepo, nil)
 ```
 
 The repository and nonce are caller-owned expectations. After success, bind
@@ -124,6 +124,27 @@ service traffic to the returned TLS/HPKE material and honor `FreshnessExpiresAt`
 This low-level function does not open a service connection or enforce a cache's
 expiration on the caller's behalf. Swift callers using the removed bundle APIs
 also need to migrate before adopting the v3 framework.
+
+## Pinned registers
+
+A multiplatform release never measures RTMR3, so verification requires it
+unextended unless the caller pins the sealed value. Pin it, or any other
+register, in the enclave's own layout before verifying; registers left empty
+come from their source:
+
+```go
+secureClient.SetExpectedMeasurement(&measurement.Measurement{
+	Type:      measurement.TdxGuestV2,
+	Registers: []string{"", "", "", "", expectedRTMR3},
+})
+verified, err := secureClient.VerifyV3()
+```
+
+For an already fetched document, pass the same measurement to
+`VerifyDocumentV3`. Malformed values reject, and pins for one platform reject
+an enclave of the other. Changing the expectation clears cached verification
+but retains the enclave identity. Replace previously obtained HTTP clients
+after changing policy.
 
 ## JavaScript / TypeScript / WASM
 

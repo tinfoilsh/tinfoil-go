@@ -9,9 +9,11 @@ import (
 	"github.com/tinfoilsh/tinfoil-go/verifier/policy"
 )
 
-// CodeRegisters are the expected workload registers from code provenance;
-// RTMR0 is a platform register and comes from the policy artifact instead.
-type CodeRegisters struct {
+// Registers are the expected TDX registers. MRTD and RTMR0 come from the
+// endorsed platform measurement unless set.
+type Registers struct {
+	MRTD  []byte
+	RTMR0 []byte
 	RTMR1 []byte
 	RTMR2 []byte
 	RTMR3 []byte
@@ -31,7 +33,7 @@ type Expectations struct {
 // quote outside the endorsed set fails assembly; every register comparison
 // then happens inside the library. The returned name is the resolved
 // measurements-map entry.
-func Assemble(a *policy.Artifact, p *policy.TDXPolicy, required *policy.Shape, q *Quote, code CodeRegisters, reportData [64]byte) (*Expectations, string, error) {
+func Assemble(a *policy.Artifact, p *policy.TDXPolicy, required *policy.Shape, q *Quote, registers Registers, reportData [64]byte) (*Expectations, string, error) {
 	opts, err := options(p)
 	if err != nil {
 		return nil, "", err
@@ -47,16 +49,18 @@ func Assemble(a *policy.Artifact, p *policy.TDXPolicy, required *policy.Shape, q
 	if err != nil {
 		return nil, "", err
 	}
-	mrtd, err := hex.DecodeString(m.MRTD)
-	if err != nil {
-		return nil, "", fmt.Errorf("platform measurement mrtd is not hex: %w", err)
+	if registers.MRTD == nil {
+		if registers.MRTD, err = hex.DecodeString(m.MRTD); err != nil {
+			return nil, "", fmt.Errorf("platform measurement mrtd is not hex: %w", err)
+		}
 	}
-	rtmr0, err := hex.DecodeString(m.RTMR0)
-	if err != nil {
-		return nil, "", fmt.Errorf("platform measurement rtmr0 is not hex: %w", err)
+	if registers.RTMR0 == nil {
+		if registers.RTMR0, err = hex.DecodeString(m.RTMR0); err != nil {
+			return nil, "", fmt.Errorf("platform measurement rtmr0 is not hex: %w", err)
+		}
 	}
-	opts.TdQuoteBodyOptions.MrTd = mrtd
-	opts.TdQuoteBodyOptions.Rtmrs = [][]byte{rtmr0, code.RTMR1, code.RTMR2, code.RTMR3}
+	opts.TdQuoteBodyOptions.MrTd = registers.MRTD
+	opts.TdQuoteBodyOptions.Rtmrs = [][]byte{registers.RTMR0, registers.RTMR1, registers.RTMR2, registers.RTMR3}
 	opts.TdQuoteBodyOptions.ReportData = reportData[:]
 
 	return &Expectations{

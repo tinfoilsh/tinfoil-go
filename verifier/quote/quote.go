@@ -93,8 +93,13 @@ func Authenticate(doc *envelope.Document) (*Authenticated, error) {
 // its three verified sources: the policy artifact (machine lookup by
 // authenticated identity; for TDX, the platform measurement resolved under
 // the required VM shape), the code measurement, and the envelope's
-// REPORT_DATA. A machine absent from the artifact is not endorsed.
-func Assemble(endorsements *policy.Artifact, code *measurement.Measurement, shape *policy.Shape, reportData [64]byte, q *Authenticated) (*AssembledPolicy, error) {
+// REPORT_DATA. A machine absent from the artifact is not endorsed. A
+// register set in expected replaces the value its source would supply.
+func Assemble(endorsements *policy.Artifact, code, expected *measurement.Measurement, shape *policy.Shape, reportData [64]byte, q *Authenticated) (*AssembledPolicy, error) {
+	pins, err := pinnedRegisters(expected, q.Measurement.Type)
+	if err != nil {
+		return nil, err
+	}
 	if code == nil {
 		return nil, fmt.Errorf("assembling policy: expected code measurement is required")
 	}
@@ -111,14 +116,16 @@ func Assemble(endorsements *policy.Artifact, code *measurement.Measurement, shap
 	}
 	switch q.Platform {
 	case policy.PlatformSEVSNP:
-		var digest []byte
-		digest, err = sevLaunchDigest(code)
+		digest := pins[0]
+		if digest == nil {
+			digest, err = sevLaunchDigest(code)
+		}
 		if err == nil {
 			assembled.sev, err = sev.Assemble(machinePolicy.SEVSNP, q.sev, digest, reportData)
 		}
 	case policy.PlatformTDX:
-		var registers tdx.CodeRegisters
-		registers, err = tdxCodeRegisters(code)
+		var registers tdx.Registers
+		registers, err = tdxRegisters(code, pins)
 		if err == nil {
 			assembled.tdx, assembled.PlatformMeasurementName, err = tdx.Assemble(
 				endorsements, machinePolicy.TDX, shape, q.tdx, registers, reportData)
@@ -146,12 +153,12 @@ func (p *AssembledPolicy) Validate() error {
 }
 
 // Verify composes Authenticate, Assemble, and Validate.
-func Verify(doc *envelope.Document, endorsements *policy.Artifact, code *measurement.Measurement, shape *policy.Shape, reportData [64]byte) (*AssembledPolicy, *Authenticated, error) {
+func Verify(doc *envelope.Document, endorsements *policy.Artifact, code, expected *measurement.Measurement, shape *policy.Shape, reportData [64]byte) (*AssembledPolicy, *Authenticated, error) {
 	q, err := Authenticate(doc)
 	if err != nil {
 		return nil, nil, err
 	}
-	assembled, err := Assemble(endorsements, code, shape, reportData, q)
+	assembled, err := Assemble(endorsements, code, expected, shape, reportData, q)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -159,6 +166,36 @@ func Verify(doc *envelope.Document, endorsements *policy.Artifact, code *measure
 		return nil, nil, err
 	}
 	return assembled, q, nil
+}
+
+// registerCount is the register layout of each enclave measurement type.
+var registerCount = map[measurement.PredicateType]int{measurement.SevGuestV2: 1, measurement.TdxGuestV2: 5}
+
+// pinnedRegisters decodes the registers expected pins, in the layout of
+// enclave, nil where none is pinned. Empty registers come from their source:
+// the endorsed platform measurement for MRTD and RTMR0, the code release for
+// the rest, and an unextended RTMR3.
+func pinnedRegisters(expected *measurement.Measurement, enclave measurement.PredicateType) ([][]byte, error) {
+	pins := make([][]byte, registerCount[enclave])
+	if expected == nil {
+		return pins, nil
+	}
+	if want, ok := registerCount[expected.Type]; !ok || len(expected.Registers) != want {
+		return nil, fmt.Errorf("expected measurement is %s with %d registers, not an enclave layout", expected.Type, len(expected.Registers))
+	}
+	if expected.Type != enclave {
+		return nil, fmt.Errorf("expected measurement is for %s, enclave is %s", expected.Type, enclave)
+	}
+	for i, register := range expected.Registers {
+		if register == "" {
+			continue
+		}
+		var err error
+		if pins[i], err = decodeRegister(register); err != nil {
+			return nil, fmt.Errorf("expected measurement register %d: %w", i, err)
+		}
+	}
+	return pins, nil
 }
 
 // sevLaunchDigest maps the expected code measurement onto the SEV launch
@@ -180,38 +217,47 @@ func sevLaunchDigest(m *measurement.Measurement) ([]byte, error) {
 	}
 }
 
-// tdxCodeRegisters maps the expected code measurement onto the TDX
-// workload registers.
-func tdxCodeRegisters(m *measurement.Measurement) (code tdx.CodeRegisters, err error) {
+// tdxRegisters maps the expected code measurement onto the TDX workload
+// registers, then lets each pin replace its source. MRTD and RTMR0 have no
+// source here.
+func tdxRegisters(m *measurement.Measurement, pins [][]byte) (registers tdx.Registers, err error) {
 	switch m.Type {
 	case measurement.SnpTdxMultiPlatformV1:
 		// Registers are [snp_measurement, rtmr1, rtmr2]; RTMR3 is never
-		// measured and must be zero.
+		// measured and must be zero unless pinned.
 		if len(m.Registers) != 3 {
-			return code, fmt.Errorf("multiplatform code measurement carries %d registers, want 3", len(m.Registers))
+			return registers, fmt.Errorf("multiplatform code measurement carries %d registers, want 3", len(m.Registers))
 		}
-		code.RTMR3 = make([]byte, registerSize)
-		if code.RTMR1, err = decodeRegister(m.Registers[1]); err != nil {
-			return code, err
+		registers.RTMR3 = make([]byte, registerSize)
+		if registers.RTMR1, err = decodeRegister(m.Registers[1]); err != nil {
+			return registers, err
 		}
-		code.RTMR2, err = decodeRegister(m.Registers[2])
-		return code, err
+		if registers.RTMR2, err = decodeRegister(m.Registers[2]); err != nil {
+			return registers, err
+		}
 	case measurement.TdxGuestV2:
 		// Registers are [mrtd, rtmr0, rtmr1, rtmr2, rtmr3].
 		if len(m.Registers) != 5 {
-			return code, fmt.Errorf("TDX code measurement carries %d registers, want 5", len(m.Registers))
+			return registers, fmt.Errorf("TDX code measurement carries %d registers, want 5", len(m.Registers))
 		}
-		if code.RTMR1, err = decodeRegister(m.Registers[2]); err != nil {
-			return code, err
+		if registers.RTMR1, err = decodeRegister(m.Registers[2]); err != nil {
+			return registers, err
 		}
-		if code.RTMR2, err = decodeRegister(m.Registers[3]); err != nil {
-			return code, err
+		if registers.RTMR2, err = decodeRegister(m.Registers[3]); err != nil {
+			return registers, err
 		}
-		code.RTMR3, err = decodeRegister(m.Registers[4])
-		return code, err
+		if registers.RTMR3, err = decodeRegister(m.Registers[4]); err != nil {
+			return registers, err
+		}
 	default:
-		return code, fmt.Errorf("unsupported code measurement type %q for TDX", m.Type)
+		return registers, fmt.Errorf("unsupported code measurement type %q for TDX", m.Type)
 	}
+	for i, pinned := range []*[]byte{&registers.MRTD, &registers.RTMR0, &registers.RTMR1, &registers.RTMR2, &registers.RTMR3} {
+		if pins[i] != nil {
+			*pinned = pins[i]
+		}
+	}
+	return registers, nil
 }
 
 // decodeRegister decodes a 48-byte hex measurement register.
