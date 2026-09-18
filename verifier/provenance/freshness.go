@@ -11,13 +11,13 @@ import (
 )
 
 const (
-	FreshnessPredicateFormat = "https://tinfoil.sh/predicate/freshness-witness/v1"
-	inTotoStatementV1        = "https://in-toto.io/Statement/v1"
-	MaxFreshnessAge          = 7 * 24 * time.Hour
-	MaxFreshnessFutureSkew   = 5 * time.Minute
+	FreshnessPredicateFormat     = "https://tinfoil.sh/predicate/freshness-witness/v1"
+	inTotoStatementV1            = "https://in-toto.io/Statement/v1"
+	transparencyLogTimestampType = "Tlog"
+	sha256DigestPrefix           = "sha256:"
+	MaxFreshnessAge              = 7 * 24 * time.Hour
+	MaxFreshnessFutureSkew       = 5 * time.Minute
 )
-
-var sha256DigestRE = regexp.MustCompile(`^sha256:[0-9a-f]{64}$`)
 
 type freshnessSubject struct {
 	Name   string            `json:"name"`
@@ -108,7 +108,7 @@ func validateAuthenticatedArtifact(expected *AuthenticatedArtifact) error {
 func validateFreshnessTime(timestamps []verify.TimestampVerificationResult, now time.Time) (time.Time, error) {
 	var loggedAt time.Time
 	for _, timestamp := range timestamps {
-		if timestamp.Type == "Tlog" && (loggedAt.IsZero() || timestamp.Timestamp.Before(loggedAt)) {
+		if timestamp.Type == transparencyLogTimestampType && (loggedAt.IsZero() || timestamp.Timestamp.Before(loggedAt)) {
 			loggedAt = timestamp.Timestamp
 		}
 	}
@@ -140,12 +140,10 @@ func parseFreshnessStatement(bundleJSON []byte) (*freshnessStatement, error) {
 	return &statement, nil
 }
 
+// validateWitness binds the witness to an artifact checked by validateAuthenticatedArtifact.
 func validateWitness(witness FreshnessWitness, expected *AuthenticatedArtifact) error {
-	if witness.Endorses.Repo != expected.Repo || witness.Endorses.Tag != expected.Tag || witness.Endorses.Commit != expected.Commit || witness.Endorses.Subject.Name != expected.SubjectName || witness.Endorses.Subject.Digest != "sha256:"+expected.Digest {
+	if witness.Endorses.Repo != expected.Repo || witness.Endorses.Tag != expected.Tag || witness.Endorses.Commit != expected.Commit || witness.Endorses.Subject.Name != expected.SubjectName || witness.Endorses.Subject.Digest != sha256DigestPrefix+expected.Digest {
 		return fmt.Errorf("freshness witness does not match authenticated artifact")
-	}
-	if !sha256DigestRE.MatchString(witness.Endorses.Subject.Digest) {
-		return fmt.Errorf("freshness witness subject digest is malformed")
 	}
 	return nil
 }

@@ -15,6 +15,7 @@ import (
 	"fmt"
 	"net/url"
 	"regexp"
+	"slices"
 
 	"github.com/tinfoilsh/tinfoil-go/verifier/internal/strictjson"
 	"github.com/tinfoilsh/tinfoil-go/verifier/util"
@@ -509,18 +510,10 @@ const attestationEndpoint = "/.well-known/tinfoil-attestation"
 // EndorsementCollateral returns the first endorsement-role collateral entry
 // with the given format whose subjects include subject.
 func (d *Document) EndorsementCollateral(format, subject string) (*CollateralEntry, bool) {
-	for i := range d.Collateral {
-		entry := &d.Collateral[i]
-		if entry.Role != RoleEndorsement || entry.Format != format {
-			continue
-		}
-		for _, s := range entry.Subjects {
-			if s == subject {
-				return entry, true
-			}
-		}
-	}
-	return nil, false
+	entry := d.findCollateral(RoleEndorsement, format, func(entry *CollateralEntry) bool {
+		return slices.Contains(entry.Subjects, subject)
+	})
+	return entry, entry != nil
 }
 
 // ReferenceValuesCollateral returns the first reference-values collateral
@@ -528,40 +521,42 @@ func (d *Document) EndorsementCollateral(format, subject string) (*CollateralEnt
 // document without such an entry returns an error wrapping
 // ErrCollateralNotFound.
 func (d *Document) ReferenceValuesCollateral(format string) (*SigstoreCollateral, error) {
-	for i := range d.Collateral {
-		entry := &d.Collateral[i]
-		if entry.Role != RoleReferenceValues || entry.Format != format {
-			continue
-		}
-		var sc SigstoreCollateral
-		if err := strictjson.Unmarshal(entry.Data, &sc); err != nil {
-			return nil, fmt.Errorf("parsing %s collateral entry %q: %w", format, entry.ID, err)
-		}
-		return &sc, nil
+	entry := d.findCollateral(RoleReferenceValues, format, nil)
+	if entry == nil {
+		return nil, fmt.Errorf("%w: document carries no %s reference-values entry", ErrCollateralNotFound, format)
 	}
-	return nil, fmt.Errorf("%w: document carries no %s reference-values entry", ErrCollateralNotFound, format)
+	return decodeCollateral[SigstoreCollateral](entry)
 }
 
+// FreshnessCollateral returns the reference-values freshness payload with the
+// requested artifact ID. Parse validates collateral ID uniqueness.
 func (d *Document) FreshnessCollateral(id string) (*FreshnessCollateral, error) {
-	var found *FreshnessCollateral
-	for i := range d.Collateral {
-		entry := &d.Collateral[i]
-		if entry.ID != id || entry.Role != RoleReferenceValues || entry.Format != CollateralSigstoreFreshnessV1Format {
-			continue
-		}
-		if found != nil {
-			return nil, fmt.Errorf("document carries duplicate freshness collateral entry %q", id)
-		}
-		var collateral FreshnessCollateral
-		if err := strictjson.Unmarshal(entry.Data, &collateral); err != nil {
-			return nil, fmt.Errorf("parsing freshness collateral entry %q: %w", entry.ID, err)
-		}
-		found = &collateral
-	}
-	if found == nil {
+	entry := d.findCollateral(RoleReferenceValues, CollateralSigstoreFreshnessV1Format, func(entry *CollateralEntry) bool {
+		return entry.ID == id
+	})
+	if entry == nil {
 		return nil, fmt.Errorf("%w: document carries no %s reference-values entry %q", ErrCollateralNotFound, CollateralSigstoreFreshnessV1Format, id)
 	}
-	return found, nil
+	return decodeCollateral[FreshnessCollateral](entry)
+}
+
+// findCollateral selects the first matching entry; Parse validates uniqueness.
+func (d *Document) findCollateral(role, format string, match func(*CollateralEntry) bool) *CollateralEntry {
+	for i := range d.Collateral {
+		entry := &d.Collateral[i]
+		if entry.Role == role && entry.Format == format && (match == nil || match(entry)) {
+			return entry
+		}
+	}
+	return nil
+}
+
+func decodeCollateral[T any](entry *CollateralEntry) (*T, error) {
+	var payload T
+	if err := strictjson.Unmarshal(entry.Data, &payload); err != nil {
+		return nil, fmt.Errorf("parsing %s collateral entry %q: %w", entry.Format, entry.ID, err)
+	}
+	return &payload, nil
 }
 
 // ErrCollateralNotFound reports that a document carries no collateral entry

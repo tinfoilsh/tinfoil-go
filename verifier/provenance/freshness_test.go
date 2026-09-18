@@ -57,6 +57,11 @@ func TestValidateAuthenticatedArtifact(t *testing.T) {
 	bad = *testAuthenticatedArtifact()
 	bad.Commit = "abc"
 	assert.ErrorContains(t, validateAuthenticatedArtifact(&bad), "commit is malformed")
+	for _, digest := range []string{"abc", "sha256:" + testAuthenticatedArtifact().Digest, "ABCDEF" + testAuthenticatedArtifact().Digest[6:]} {
+		bad = *testAuthenticatedArtifact()
+		bad.Digest = digest
+		assert.ErrorContains(t, validateAuthenticatedArtifact(&bad), "digest is malformed")
+	}
 }
 
 func TestValidateFreshnessTime(t *testing.T) {

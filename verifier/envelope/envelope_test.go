@@ -356,21 +356,26 @@ func TestFreshnessCollateralSelectsArtifactID(t *testing.T) {
 	require.NoError(t, err)
 	assert.Contains(t, string(platform.SigstoreBundle), "platform")
 
-	_, err = doc.FreshnessCollateral("missing-freshness")
-	assert.ErrorIs(t, err, ErrCollateralNotFound)
+	for _, id := range []string{"", "missing-freshness"} {
+		_, err = doc.FreshnessCollateral(id)
+		assert.ErrorIs(t, err, ErrCollateralNotFound)
+	}
 }
 
-func TestFreshnessCollateralRejectsDuplicateArtifactID(t *testing.T) {
+func TestParseRejectsDuplicateFreshnessArtifactID(t *testing.T) {
+	doc, _ := buildTestDocument(t, testNonce())
 	entry := CollateralEntry{
 		ID:     FreshnessCollateralIDCode,
 		Role:   RoleReferenceValues,
 		Format: CollateralSigstoreFreshnessV1Format,
 		Data:   json.RawMessage(`{"sigstore_bundle":{}}`),
 	}
-	doc := &Document{Collateral: []CollateralEntry{entry, entry}}
+	doc.Collateral = append(doc.Collateral, entry, entry)
+	docBytes, err := json.Marshal(doc)
+	require.NoError(t, err)
 
-	_, err := doc.FreshnessCollateral(FreshnessCollateralIDCode)
-	assert.ErrorContains(t, err, "duplicate freshness collateral")
+	_, err = Parse(docBytes)
+	assert.ErrorContains(t, err, `duplicate collateral entry id "`+FreshnessCollateralIDCode+`"`)
 }
 
 func TestParseRejectsInvalidUTF8(t *testing.T) {
