@@ -137,10 +137,6 @@ secureClient := client.NewSecureClient(enclave, repo, &measurement.Measurement{
 })
 ```
 
-Setting a pin discards the cached verification. An `http.Client` obtained
-earlier from `HTTPClient()` keeps pinning the TLS key attested under the
-previous expectations, so discard it and obtain a new one.
-
 ## JavaScript / TypeScript / WASM
 
 ### JavaScript / TypeScript SDK
