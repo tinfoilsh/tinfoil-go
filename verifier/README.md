@@ -88,8 +88,16 @@ collateral. Verification then runs offline using the embedded trust roots:
 The TLS pin runs for direct HTTPS and HTTPS-over-CONNECT connections. Fetching
 the document does not require a separate direct TLS probe. Code and platform
 witnesses have a seven-day maximum age by default; the earliest authenticated
-expiry is exposed by `VerifyV3` as `FreshnessExpiresAt`. Consumers caching this
-result must stop authorizing new requests when that deadline is reached.
+expiry is exposed by `VerifyV3` and `VerifyDocumentV3` as `FreshnessExpiresAt`.
+Callers using these APIs must retain the deadline and stop authorizing new
+requests at or after it, then verify again before accepting more requests.
+Re-verifying unchanged witnesses does not extend their deadline.
+
+These age checks run during verification. The cached `SecureClient` HTTP client
+and the high-level OpenAI SDK's TLS/EHBP transports do not retain or enforce
+`FreshnessExpiresAt`, so they can continue sending requests after it. Automatic
+request-time expiration is not provided by these transports; applications that
+require it must use the direct verification APIs and gate requests themselves.
 
 ### Migration from v2
 

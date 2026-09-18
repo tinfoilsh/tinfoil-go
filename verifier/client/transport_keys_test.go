@@ -1,9 +1,10 @@
 package client
 
 import (
+	"testing"
+
 	"github.com/stretchr/testify/require"
 	"github.com/tinfoilsh/tinfoil-go/verifier/envelope"
-	"testing"
 )
 
 func TestVerifiedTransportKeysAllowTLSOnly(t *testing.T) {
