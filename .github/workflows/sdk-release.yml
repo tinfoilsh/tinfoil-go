@@ -29,22 +29,11 @@ jobs:
           xcode-version: latest-stable
 
       - name: Set up gomobile
-        # gomobile/gobind are pinned as tool dependencies in go.mod:
-        # resolving x/mobile at release time (go get -u) broke the build
-        # whenever upstream bumped its golang.org/x dependencies past the
-        # versions recorded in our go.sum.
-        run: |
-          export PATH=$PATH:$(go env GOPATH)/bin
-          go install golang.org/x/mobile/cmd/gomobile
-          go install golang.org/x/mobile/cmd/gobind
-          gomobile init -v
+        run: bash scripts/setup-mobile.sh
 
       - name: Build XCFramework
         run: |
-          export PATH=$PATH:$(go env GOPATH)/bin
-          # verifier/policy is excluded: its API (multi-value returns) is not
-          # representable by gomobile and crashes gobind.
-          gomobile bind -v -target=ios,iossimulator,macos -o Tinfoil.xcframework $(go list ./... | grep -v -E "/examples/|/rootfetch|/verifier/policy" | xargs)
+          bash scripts/build-mobile.sh
           zip -ry Tinfoil.xcframework.zip Tinfoil.xcframework
 
       - name: Generate checksum

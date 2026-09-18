@@ -1,0 +1,40 @@
+name: Mobile SDK
+
+on:
+  pull_request:
+    paths:
+      - 'verifier/**'
+      - 'go.mod'
+      - 'go.sum'
+      - 'scripts/*mobile*'
+      - 'tests/mobile/**'
+      - '.github/workflows/sdk-mobile.yml'
+      - '.github/workflows/sdk-release.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build XCFramework and check Swift API
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+        with:
+          go-version-file: go.mod
+      - uses: maxim-lobanov/setup-xcode@ed7a3b1fda3918c0306d1b724322adc0b8cc0a90 # v1.7.0
+        with:
+          xcode-version: latest-stable
+      - name: Set up gomobile
+        run: bash scripts/setup-mobile.sh
+      - name: Build XCFramework
+        run: bash scripts/build-mobile.sh
+      - name: Type-check Swift API
+        run: |
+          framework="$(find Tinfoil.xcframework -path '*/macos-*/Tinfoil.framework' -type d -print -quit)"
+          test -n "$framework"
+          swiftc -typecheck -F "$(dirname "$framework")" tests/mobile/Smoke.swift
