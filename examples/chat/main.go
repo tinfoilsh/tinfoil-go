@@ -6,14 +6,15 @@ import (
 	"log"
 	"os"
 
+	"log/slog"
+
 	"github.com/openai/openai-go/v3"
 	"github.com/openai/openai-go/v3/option"
-	"github.com/sirupsen/logrus"
 	"github.com/tinfoilsh/tinfoil-go"
 )
 
 func main() {
-	logrus.SetLevel(logrus.DebugLevel)
+	slog.SetLogLoggerLevel(slog.LevelDebug)
 
 	apiKey := os.Getenv("TINFOIL_API_KEY")
 	if apiKey == "" {

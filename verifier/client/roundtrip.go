@@ -1,12 +1,14 @@
 package client
 
 import (
+	"crypto/sha256"
 	"crypto/tls"
+	"crypto/x509"
+	"encoding/hex"
 	"errors"
+	"fmt"
 	"net/http"
 	"sync"
-
-	"github.com/tinfoilsh/tinfoil-go/verifier/attestation"
 )
 
 var (
@@ -43,7 +45,7 @@ func (t *TLSBoundRoundTripper) getTransport() *http.Transport {
 				}
 			}
 
-			certFP, err := attestation.ConnectionCertFP(state)
+			certFP, err := ConnectionCertFP(state)
 			if err != nil {
 				return err
 			}
@@ -69,4 +71,27 @@ func (t *TLSBoundRoundTripper) RoundTrip(r *http.Request) (*http.Response, error
 	}
 
 	return t.getTransport().RoundTrip(r)
+}
+
+// CertPubkeyFP returns the SPKI SHA-256 fingerprint of a certificate's
+// public key (any key type).
+func CertPubkeyFP(cert *x509.Certificate) (string, error) {
+	if cert == nil {
+		return "", fmt.Errorf("no certificate")
+	}
+	spki, err := x509.MarshalPKIXPublicKey(cert.PublicKey)
+	if err != nil {
+		return "", fmt.Errorf("marshaling public key: %w", err)
+	}
+	hash := sha256.Sum256(spki)
+	return hex.EncodeToString(hash[:]), nil
+}
+
+// ConnectionCertFP gets the KeyFP of the public key of a TLS connection state
+func ConnectionCertFP(c tls.ConnectionState) (string, error) {
+	if len(c.PeerCertificates) == 0 {
+		return "", fmt.Errorf("no peer certificates")
+	}
+	cert := c.PeerCertificates[0]
+	return CertPubkeyFP(cert)
 }

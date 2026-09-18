@@ -20,7 +20,6 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
-	"github.com/tinfoilsh/tinfoil-go/verifier/attestation"
 )
 
 func TestTLSBoundRoundTripperRejectsPinnedMismatchThroughHTTPSProxy(t *testing.T) {
@@ -60,7 +59,7 @@ func TestTLSBoundRoundTripperAllowsPinnedHTTPSThroughProxy(t *testing.T) {
 	defer proxy.Close()
 	withDefaultProxyTransport(t, target, proxy)
 
-	certFP, err := attestation.CertPubkeyFP(target.Certificate())
+	certFP, err := CertPubkeyFP(target.Certificate())
 	require.NoError(t, err)
 
 	client := &http.Client{

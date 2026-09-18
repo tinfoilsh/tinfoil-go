@@ -29,31 +29,11 @@ jobs:
           xcode-version: latest-stable
 
       - name: Set up gomobile
-        # gomobile/gobind are pinned as tool dependencies in go.mod:
-        # resolving x/mobile at release time (go get -u) broke the build
-        # whenever upstream bumped its golang.org/x dependencies past the
-        # versions recorded in our go.sum.
-        run: |
-          GOPATH_BIN="$(go env GOPATH)/bin"
-          export PATH="$PATH:$GOPATH_BIN"
-          MOBILE_VERSION="$(go list -m -f '{{.Version}}' golang.org/x/mobile)"
-          go install "golang.org/x/mobile/cmd/gomobile@$MOBILE_VERSION"
-          go install "golang.org/x/mobile/cmd/gobind@$MOBILE_VERSION"
-          gomobile init -v
+        run: bash scripts/setup-mobile.sh
 
       - name: Build XCFramework
         run: |
-          GOPATH_BIN="$(go env GOPATH)/bin"
-          export PATH="$PATH:$GOPATH_BIN"
-          # Bind only packages that form the mobile SDK surface. policy is not
-          # representable by gobind, while sigstore and util are internal
-          # implementation packages whose zero-argument constructors conflict
-          # with NSObject nullability in current Apple SDKs.
-          go list ./... | grep -v -E "/examples/|/rootfetch|/verifier/(policy|sigstore|util)$" | xargs gomobile bind -v -target=ios,iossimulator,macos -o Tinfoil.xcframework
-          if find Tinfoil.xcframework -type f \( -name 'Sigstore.objc.h' -o -name 'Util.objc.h' \) | grep -q .; then
-            echo "internal verifier headers unexpectedly exported" >&2
-            exit 1
-          fi
+          bash scripts/build-mobile.sh
           zip -ry Tinfoil.xcframework.zip Tinfoil.xcframework
 
       - name: Generate checksum

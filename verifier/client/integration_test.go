@@ -81,6 +81,7 @@ func TestBasicChatCompletion(t *testing.T) {
 	}
 
 	resp, err := client.Post("/v1/chat/completions", headers, requestBody)
+	skipIfEnclaveNotV3(t, err)
 	require.NoError(t, err)
 	require.Equal(t, 200, resp.StatusCode, "Expected successful response, got: %s", string(resp.Body))
 
