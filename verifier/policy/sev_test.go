@@ -1,11 +1,43 @@
 package policy
 
 import (
+	"encoding/json/v2"
 	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
+
+func TestSEVSNPPolicyRequiresExplicitBlocks(t *testing.T) {
+	data, err := json.Marshal(validSEVSNPPolicy())
+	require.NoError(t, err)
+	for _, field := range []string{"guest_policy", "platform_info"} {
+		for _, state := range []string{"missing", "null", "empty object"} {
+			t.Run(field+"/"+state, func(t *testing.T) {
+				var fields map[string]any
+				require.NoError(t, json.Unmarshal(data, &fields))
+				switch state {
+				case "missing":
+					delete(fields, field)
+				case "null":
+					fields[field] = nil
+				case "empty object":
+					fields[field] = map[string]any{}
+				}
+				wire, err := json.Marshal(fields)
+				require.NoError(t, err)
+				var p SEVSNPPolicy
+				require.NoError(t, json.Unmarshal(wire, &p))
+				if state == "empty object" {
+					require.NoError(t, p.Validate()) // Explicit all-false expectations are valid.
+				} else {
+					require.ErrorContains(t, p.Validate(), field+" is required")
+				}
+			})
+		}
+	}
+}
 
 func TestSEVSNPPolicyValidateEncodedFields(t *testing.T) {
 	p := validSEVSNPPolicy()
@@ -44,6 +76,8 @@ func validSEVSNPPolicy() *SEVSNPPolicy {
 		MinimumGuestSVN:                &minimumGuestSVN,
 		MinimumTCB:                     tcb,
 		MinimumLaunchTCB:               tcb,
+		GuestPolicy:                    &GuestPolicy{},
+		PlatformInfo:                   &SNPPlatform{},
 		VMPL:                           &vmpl,
 		HostData:                       strings.Repeat("ab", 32),
 		ImageID:                        strings.Repeat("cd", 16),

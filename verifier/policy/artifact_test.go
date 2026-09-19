@@ -1,6 +1,7 @@
 package policy
 
 import (
+	"encoding/json/v2"
 	"os"
 	"strings"
 	"testing"
@@ -29,6 +30,52 @@ func TestParseArtifactFixture(t *testing.T) {
 	assert.Len(t, a.Machines, 12)
 	assert.Len(t, a.Policies, 6)
 	assert.Len(t, a.Measurements, 16)
+}
+
+func TestParsePlatformMeasurementValidation(t *testing.T) {
+	tests := []struct {
+		name   string
+		mutate func(*PlatformMeasurement)
+		want   string
+	}{
+		{"optional GPUs", func(m *PlatformMeasurement) {}, ""},
+		{"zero GPUs", func(m *PlatformMeasurement) { m.Shape.GPUs = new(0) }, ""},
+		{"positive GPUs", func(m *PlatformMeasurement) { m.Shape.GPUs = new(1) }, ""},
+		{"missing shape", func(m *PlatformMeasurement) { m.Shape = nil }, "shape is required"},
+		{"zero CPUs", func(m *PlatformMeasurement) { m.Shape.CPUs = 0 }, "must be positive"},
+		{"negative CPUs", func(m *PlatformMeasurement) { m.Shape.CPUs = -1 }, "must be positive"},
+		{"zero memory", func(m *PlatformMeasurement) { m.Shape.MemoryMB = 0 }, "must be positive"},
+		{"negative memory", func(m *PlatformMeasurement) { m.Shape.MemoryMB = -1 }, "must be positive"},
+		{"zero disks", func(m *PlatformMeasurement) { m.Shape.Disks = 0 }, "must be positive"},
+		{"negative disks", func(m *PlatformMeasurement) { m.Shape.Disks = -1 }, "must be positive"},
+		{"negative GPUs", func(m *PlatformMeasurement) { m.Shape.GPUs = new(-1) }, "gpus must be non-negative"},
+		{"missing MRTD", func(m *PlatformMeasurement) { m.MRTD = "" }, "mrtd"},
+		{"short MRTD", func(m *PlatformMeasurement) { m.MRTD = strings.Repeat("ab", 47) }, "mrtd"},
+		{"long MRTD", func(m *PlatformMeasurement) { m.MRTD += "ab" }, "mrtd"},
+		{"nonhex MRTD", func(m *PlatformMeasurement) { m.MRTD = strings.Repeat("z", 96) }, "mrtd"},
+		{"uppercase MRTD", func(m *PlatformMeasurement) { m.MRTD = strings.ToUpper(m.MRTD) }, "mrtd"},
+		{"missing RTMR0", func(m *PlatformMeasurement) { m.RTMR0 = "" }, "rtmr0"},
+		{"short RTMR0", func(m *PlatformMeasurement) { m.RTMR0 = strings.Repeat("ab", 47) }, "rtmr0"},
+		{"long RTMR0", func(m *PlatformMeasurement) { m.RTMR0 += "ab" }, "rtmr0"},
+		{"nonhex RTMR0", func(m *PlatformMeasurement) { m.RTMR0 = strings.Repeat("z", 96) }, "rtmr0"},
+		{"uppercase RTMR0", func(m *PlatformMeasurement) { m.RTMR0 = strings.ToUpper(m.RTMR0) }, "rtmr0"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m := PlatformMeasurement{MRTD: strings.Repeat("ab", 48), RTMR0: strings.Repeat("cd", 48),
+				Shape: &Shape{CPUs: 1, MemoryMB: 1, Disks: 1}}
+			tt.mutate(&m)
+			// Even an entry unused by any policy must be well formed.
+			data, err := json.Marshal(Artifact{Format: ArtifactFormat, Measurements: map[string]PlatformMeasurement{"test": m}})
+			require.NoError(t, err)
+			_, err = Parse(data)
+			if tt.want == "" {
+				require.NoError(t, err)
+			} else {
+				require.ErrorContains(t, err, tt.want)
+			}
+		})
+	}
 }
 
 func TestParseArtifactFailClosed(t *testing.T) {

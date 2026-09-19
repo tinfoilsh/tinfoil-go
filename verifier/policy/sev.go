@@ -10,32 +10,37 @@ import (
 // required and checked; there are no unchecked report fields. Numeric
 // members are pointers so parsing can tell an absent member from a
 // meaningful zero — Validate rejects any absent member.
+// GuestPolicy and PlatformInfo must be present; omitted bits remain false.
 type SEVSNPPolicy struct {
 	MinimumBuild *uint8 `json:"minimum_build"`
 	// MinimumAPIVersion floors the firmware version; MinimumABIVersion
 	// floors the guest policy's ABI version (both maj.min).
-	MinimumAPIVersion              string      `json:"minimum_api_version"`
-	MinimumABIVersion              string      `json:"minimum_abi_version"`
-	MinimumGuestSVN                *uint32     `json:"minimum_guest_svn"`
-	MinimumTCB                     TCB         `json:"minimum_tcb"`
-	MinimumLaunchTCB               TCB         `json:"minimum_launch_tcb"`
-	GuestPolicy                    GuestPolicy `json:"guest_policy"`
-	PlatformInfo                   SNPPlatform `json:"platform_info"`
-	PermitProvisionalFirmware      bool        `json:"permit_provisional_firmware"`
-	VMPL                           *int        `json:"vmpl"`
-	HostData                       string      `json:"host_data"`
-	ImageID                        string      `json:"image_id"`
-	FamilyID                       string      `json:"family_id"`
-	RequireAuthorKey               bool        `json:"require_author_key,omitempty"`
-	RequireIDBlock                 bool        `json:"require_id_block,omitempty"`
-	MinimumLaunchMitigationVector  *uint64     `json:"minimum_launch_mitigation_vector"`
-	MinimumCurrentMitigationVector *uint64     `json:"minimum_current_mitigation_vector"`
+	MinimumAPIVersion              string       `json:"minimum_api_version"`
+	MinimumABIVersion              string       `json:"minimum_abi_version"`
+	MinimumGuestSVN                *uint32      `json:"minimum_guest_svn"`
+	MinimumTCB                     TCB          `json:"minimum_tcb"`
+	MinimumLaunchTCB               TCB          `json:"minimum_launch_tcb"`
+	GuestPolicy                    *GuestPolicy `json:"guest_policy"`
+	PlatformInfo                   *SNPPlatform `json:"platform_info"`
+	PermitProvisionalFirmware      bool         `json:"permit_provisional_firmware"`
+	VMPL                           *int         `json:"vmpl"`
+	HostData                       string       `json:"host_data"`
+	ImageID                        string       `json:"image_id"`
+	FamilyID                       string       `json:"family_id"`
+	RequireAuthorKey               bool         `json:"require_author_key,omitempty"`
+	RequireIDBlock                 bool         `json:"require_id_block,omitempty"`
+	MinimumLaunchMitigationVector  *uint64      `json:"minimum_launch_mitigation_vector"`
+	MinimumCurrentMitigationVector *uint64      `json:"minimum_current_mitigation_vector"`
 }
 
 // Validate rejects a block with any absent required member or an
 // unsupported setting.
 func (p *SEVSNPPolicy) Validate() error {
 	switch {
+	case p.GuestPolicy == nil:
+		return fmt.Errorf("guest_policy is required")
+	case p.PlatformInfo == nil:
+		return fmt.Errorf("platform_info is required")
 	case p.MinimumBuild == nil:
 		return fmt.Errorf("minimum_build is required")
 	case p.MinimumAPIVersion == "":
