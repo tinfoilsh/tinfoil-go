@@ -46,8 +46,15 @@ func TestInvalidFreshnessAgeFailsBeforeVerification(t *testing.T) {
 }
 
 func TestRouterFallbackRetainsFreshnessPolicy(t *testing.T) {
-	for _, routers := range []string{"unavailable", "[]", `["first.example","second.example"]`} {
-		t.Run(routers, func(t *testing.T) {
+	for _, tc := range []struct {
+		name, routers string
+		wantTried     []string
+	}{
+		{"discovery unavailable", "unavailable", nil},
+		{"no routers", "[]", nil},
+		{"all routers fail", `["first.example","second.example"]`, []string{"first.example", "second.example"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
 			original := http.DefaultClient
 			t.Cleanup(func() { http.DefaultClient = original })
 			var tried []string
@@ -56,18 +63,16 @@ func TestRouterFallbackRetainsFreshnessPolicy(t *testing.T) {
 					tried = append(tried, req.URL.Host)
 					return nil, errors.New("router unavailable")
 				}
-				if routers == "unavailable" {
+				if tc.routers == "unavailable" {
 					return nil, errors.New("router discovery unavailable")
 				}
-				return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(routers))}, nil
+				return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(tc.routers))}, nil
 			})}
 			client, err := NewDefaultClientWithOptions(VerificationOptions{FreshnessMaxAge: time.Hour})
 			require.NoError(t, err)
 			require.Equal(t, "inference.tinfoil.sh", client.Enclave())
 			require.Equal(t, time.Hour, client.freshnessMaxAge)
-			if strings.Contains(routers, "first.example") {
-				require.Equal(t, []string{"first.example", "second.example"}, tried)
-			}
+			require.Equal(t, tc.wantTried, tried)
 		})
 	}
 }

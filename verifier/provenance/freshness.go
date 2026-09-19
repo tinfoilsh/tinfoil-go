@@ -133,6 +133,7 @@ func validateFreshnessTime(timestamps []verify.TimestampVerificationResult, now 
 	if loggedAt.After(now.Add(MaxFreshnessFutureSkew)) {
 		return time.Time{}, fmt.Errorf("freshness witness timestamp is in the future")
 	}
+	// Match request admission: a witness is expired at its deadline, not just after it.
 	if !now.Before(loggedAt.Add(maxAge)) {
 		return time.Time{}, fmt.Errorf("freshness witness is stale")
 	}
