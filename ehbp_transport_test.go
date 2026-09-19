@@ -346,8 +346,13 @@ func TestClientIntegration_LowLevelEHBP(t *testing.T) {
 }
 
 func TestNewClientRejectsInvalidFreshnessAge(t *testing.T) {
-	for _, enclave := range []string{"", "enclave.example"} {
-		_, err := NewClientWithOptions(WithEnclave(enclave), WithFreshnessMaxAge(-time.Second))
-		require.ErrorContains(t, err, "freshness max age")
+	for _, tc := range []struct{ name, enclave string }{
+		{"router selection", ""},
+		{"explicit enclave", "enclave.example"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := NewClientWithOptions(WithEnclave(tc.enclave), WithFreshnessMaxAge(-time.Second))
+			require.ErrorContains(t, err, "freshness max age")
+		})
 	}
 }
