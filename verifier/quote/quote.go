@@ -29,17 +29,20 @@ const registerSize = 48
 // Authenticated is a signature-verified quote, not yet compared against
 // any expected value.
 type Authenticated struct {
-	// Platform is policy.PlatformSEVSNP or policy.PlatformTDX.
-	Platform string
-	// Identity is the machine identifier from authenticated bytes
-	// (SEV CHIP_ID / TDX PPID), lowercase hex.
-	Identity string
-	// Measurement is the launch measurement (SEV) or MRTD+RTMRs (TDX).
+	platform string
+	identity string
+	// Measurement is a detached summary of the launch measurement (SEV) or MRTD+RTMRs (TDX).
 	Measurement *measurement.Measurement
 
 	sev *sev.Quote
 	tdx *tdx.Quote
 }
+
+// Platform is policy.PlatformSEVSNP or policy.PlatformTDX.
+func (q *Authenticated) Platform() string { return q.platform }
+
+// Identity is the authenticated machine identifier (SEV CHIP_ID / TDX PPID), lowercase hex.
+func (q *Authenticated) Identity() string { return q.identity }
 
 // AssembledPolicy is the complete expected state of a quote, fully
 // resolved before validation runs. It captures the quote it was assembled
@@ -51,7 +54,7 @@ type AssembledPolicy struct {
 	// empty for SEV-SNP.
 	PlatformMeasurementName string
 
-	quote *Authenticated
+	quote Authenticated
 	sev   *sev.Expectations
 	tdx   *tdx.Expectations
 }
@@ -68,8 +71,8 @@ func Authenticate(doc *envelope.Document) (*Authenticated, error) {
 			return nil, err
 		}
 		return &Authenticated{
-			Platform:    policy.PlatformSEVSNP,
-			Identity:    q.Identity,
+			platform:    policy.PlatformSEVSNP,
+			identity:    q.Identity(),
 			Measurement: q.Measurement,
 			sev:         q,
 		}, nil
@@ -79,8 +82,8 @@ func Authenticate(doc *envelope.Document) (*Authenticated, error) {
 			return nil, err
 		}
 		return &Authenticated{
-			Platform:    policy.PlatformTDX,
-			Identity:    q.Identity,
+			platform:    policy.PlatformTDX,
+			identity:    q.Identity(),
 			Measurement: q.Measurement,
 			tdx:         q,
 		}, nil
@@ -101,15 +104,15 @@ func Assemble(endorsements *policy.Artifact, code *measurement.Measurement, shap
 	if shape == nil {
 		return nil, fmt.Errorf("assembling policy: the code artifact's VM shape is required")
 	}
-	name, machinePolicy, err := endorsements.PolicyFor(q.Identity, q.Platform)
+	name, machinePolicy, err := endorsements.PolicyFor(q.identity, q.platform)
 	if err != nil {
 		return nil, err
 	}
 	assembled := &AssembledPolicy{
 		PolicyName: name,
-		quote:      q,
+		quote:      *q,
 	}
-	switch q.Platform {
+	switch q.platform {
 	case policy.PlatformSEVSNP:
 		var digest []byte
 		digest, err = sevLaunchDigest(code)
@@ -124,7 +127,7 @@ func Assemble(endorsements *policy.Artifact, code *measurement.Measurement, shap
 				endorsements, machinePolicy.TDX, shape, q.tdx, registers, reportData)
 		}
 	default:
-		return nil, fmt.Errorf("unsupported platform %q", q.Platform)
+		return nil, fmt.Errorf("unsupported platform %q", q.platform)
 	}
 	if err != nil {
 		return nil, err
@@ -135,13 +138,13 @@ func Assemble(endorsements *policy.Artifact, code *measurement.Measurement, shap
 // Validate compares the captured quote against the assembled policy in a
 // single vendor library call: no lookups, no translation.
 func (p *AssembledPolicy) Validate() error {
-	switch p.quote.Platform {
+	switch p.quote.platform {
 	case policy.PlatformSEVSNP:
 		return p.sev.Validate(p.quote.sev)
 	case policy.PlatformTDX:
 		return p.tdx.Validate(p.quote.tdx)
 	default:
-		return fmt.Errorf("unsupported platform %q", p.quote.Platform)
+		return fmt.Errorf("unsupported platform %q", p.quote.platform)
 	}
 }
 

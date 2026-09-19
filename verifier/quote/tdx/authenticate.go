@@ -29,16 +29,18 @@ import (
 // Quote is a signature-verified TDX quote, not yet compared against any
 // expected value.
 type Quote struct {
-	// Identity is the machines-map lookup key (PPID, lowercase hex).
-	Identity string
-	// Measurement carries MRTD followed by the four RTMRs.
+	identity string
+	// Measurement is a detached summary of MRTD followed by the four RTMRs.
 	Measurement *measurement.Measurement
-	// TCBEvaluationDataNumber is the minimum tcbEvaluationDataNumber
+	// tcbEvaluationDataNumber is the minimum tcbEvaluationDataNumber
 	// observed in the verified Intel collateral.
-	TCBEvaluationDataNumber int
+	tcbEvaluationDataNumber int
 
 	quote *tdxpb.QuoteV4
 }
+
+// Identity is the authenticated machines-map lookup key (PPID, lowercase hex).
+func (q *Quote) Identity() string { return q.identity }
 
 // Authenticate verifies the quote's signature chain up to the pinned Intel
 // SGX root, replaying the document's captured PCS collateral — no network
@@ -117,12 +119,12 @@ func Authenticate(doc *envelope.Document) (*Quote, error) {
 		registers = append(registers, hex.EncodeToString(rtmr))
 	}
 	return &Quote{
-		Identity: identity,
+		identity: identity,
 		Measurement: &measurement.Measurement{
 			Type:      measurement.TdxGuestV2,
 			Registers: registers,
 		},
-		TCBEvaluationDataNumber: tcbEvaluationDataNumber,
+		tcbEvaluationDataNumber: tcbEvaluationDataNumber,
 		quote:                   quote,
 	}, nil
 }

@@ -123,16 +123,15 @@ func productFromReport(report *sevsnp.Report) (*sevsnp.SevProduct, error) {
 // Quote is a signature-verified SEV-SNP report, not yet compared against
 // any expected value.
 type Quote struct {
-	// Identity is the machines-map lookup key (CHIP_ID, lowercase hex).
-	Identity string
-	// Measurement is the launch measurement register.
+	identity string
+	// Measurement is a detached summary of the launch measurement register.
 	Measurement *measurement.Measurement
 
 	attestation *sevsnp.Attestation
 }
 
-// Attestation returns the verified attestation for policy assembly.
-func (q *Quote) Attestation() *sevsnp.Attestation { return q.attestation }
+// Identity is the authenticated machines-map lookup key (CHIP_ID, lowercase hex).
+func (q *Quote) Identity() string { return q.identity }
 
 // Authenticate verifies the report's signature chain up to the pinned AMD
 // root and its VCEK against the document-carried CRL — no network fetches.
@@ -200,7 +199,7 @@ func Authenticate(doc *envelope.Document) (*Quote, error) {
 	}
 
 	return &Quote{
-		Identity: identity,
+		identity: identity,
 		Measurement: &measurement.Measurement{
 			Type:      measurement.SevGuestV2,
 			Registers: []string{hex.EncodeToString(report.Measurement)},

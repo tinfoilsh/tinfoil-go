@@ -3,6 +3,7 @@ package tdx
 import (
 	"encoding/hex"
 	"fmt"
+	"slices"
 
 	tdxvalidate "github.com/google/go-tdx-guest/validate"
 
@@ -56,7 +57,7 @@ func Assemble(a *policy.Artifact, p *policy.TDXPolicy, required *policy.Shape, q
 		return nil, "", fmt.Errorf("platform measurement rtmr0 is not hex: %w", err)
 	}
 	opts.TdQuoteBodyOptions.MrTd = mrtd
-	opts.TdQuoteBodyOptions.Rtmrs = [][]byte{rtmr0, code.RTMR1, code.RTMR2, code.RTMR3}
+	opts.TdQuoteBodyOptions.Rtmrs = [][]byte{rtmr0, slices.Clone(code.RTMR1), slices.Clone(code.RTMR2), slices.Clone(code.RTMR3)}
 	opts.TdQuoteBodyOptions.ReportData = reportData[:]
 
 	return &Expectations{
@@ -72,9 +73,9 @@ func (e *Expectations) Validate(q *Quote) error {
 	if err := tdxvalidate.TdxQuote(q.quote, e.opts); err != nil {
 		return err
 	}
-	if q.TCBEvaluationDataNumber < e.minimumTCBEvaluationDataNumber {
+	if q.tcbEvaluationDataNumber < e.minimumTCBEvaluationDataNumber {
 		return fmt.Errorf("tcbEvaluationDataNumber %d is below the policy minimum %d",
-			q.TCBEvaluationDataNumber, e.minimumTCBEvaluationDataNumber)
+			q.tcbEvaluationDataNumber, e.minimumTCBEvaluationDataNumber)
 	}
 	return nil
 }

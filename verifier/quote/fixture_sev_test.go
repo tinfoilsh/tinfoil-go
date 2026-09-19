@@ -79,6 +79,6 @@ func TestVerifyLiveFixtureSEV(t *testing.T) {
 	require.NoError(t, err)
 	assembled, verified, err := Verify(doc, loadEndorsementArtifact(t), q.Measurement, testShape, reportData)
 	require.NoError(t, err)
-	assert.Equal(t, policy.PlatformSEVSNP, verified.Platform)
+	assert.Equal(t, policy.PlatformSEVSNP, verified.Platform())
 	assert.Equal(t, "amd-genoa-dev", assembled.PolicyName)
 }
