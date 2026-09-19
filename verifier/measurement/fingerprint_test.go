@@ -24,22 +24,27 @@ func TestFingerprintCanonicalizesWithoutMutatingInputs(t *testing.T) {
 	}
 	hardware.MRTD = strings.ToUpper(hardware.MRTD)
 	hardware.RTMR0 = strings.ToUpper(hardware.RTMR0)
+	sourceBefore := Measurement{Type: source.Type, Registers: append([]string(nil), source.Registers...)}
+	hardwareBefore := *hardware
 	got, err := Fingerprint(source, hardware, TdxGuestV2)
 	require.NoError(t, err)
 	require.Equal(t, want, got)
-	require.Equal(t, strings.ToUpper(pinRegister('b')), source.Registers[1])
-	require.Equal(t, strings.ToUpper(pinRegister('d')), hardware.MRTD)
+	require.Equal(t, sourceBefore, *source)
+	require.Equal(t, hardwareBefore, *hardware)
 
 	for i := range enclave.Registers {
 		enclave.Registers[i] = strings.ToUpper(enclave.Registers[i])
 	}
+	enclaveBefore := Measurement{Type: enclave.Type, Registers: append([]string(nil), enclave.Registers...)}
 	got, err = Fingerprint(enclave, nil, TdxGuestV2)
 	require.NoError(t, err)
 	require.Equal(t, want, got)
+	require.Equal(t, enclaveBefore, *enclave)
 
 	got, err = Fingerprint(source, nil, SevGuestV2)
 	require.NoError(t, err)
 	require.Equal(t, pinRegister('a'), got)
+	require.Equal(t, sourceBefore, *source)
 }
 
 func TestFingerprintCoversEveryTDXRegister(t *testing.T) {

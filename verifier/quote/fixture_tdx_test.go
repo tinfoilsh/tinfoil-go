@@ -86,7 +86,13 @@ func TestVerifyLiveFixtureTDX(t *testing.T) {
 			wrong.Registers[index] = replacement + wrong.Registers[index][1:]
 			assembled, err := Assemble(artifact, wrong, devShape, reportData, q)
 			require.NoError(t, err)
-			require.Error(t, assembled.Validate())
+			validationError := assembled.Validate()
+			switch name {
+			case "MRTD", "RTMR0":
+				require.ErrorContains(t, validationError, "fingerprints do not match")
+			default:
+				require.Error(t, validationError)
+			}
 		})
 	}
 }
