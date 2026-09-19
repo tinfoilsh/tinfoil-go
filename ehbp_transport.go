@@ -14,6 +14,8 @@ import (
 	ehbpclient "github.com/tinfoilsh/encrypted-http-body-protocol/client"
 	ehbpidentity "github.com/tinfoilsh/encrypted-http-body-protocol/identity"
 	"github.com/tinfoilsh/tinfoil-go/verifier/client"
+	"github.com/tinfoilsh/tinfoil-go/verifier/measurement"
+	"github.com/tinfoilsh/tinfoil-go/verifier/policy"
 )
 
 // enclaveURLHeader tells a proxy which enclave to forward an encrypted request
@@ -41,14 +43,17 @@ const (
 )
 
 type clientConfig struct {
-	enclave            string
-	repo               string
-	transport          TransportMode
-	baseURL            string
-	baseURLSet         bool
-	userCacheSecret    string
-	userCacheSecretSet bool
-	openaiOpts         []option.RequestOption
+	enclave              string
+	repo                 string
+	transport            TransportMode
+	baseURL              string
+	baseURLSet           bool
+	pinnedMeasurement    *measurement.Measurement
+	pinnedMeasurementSet bool
+	pinnedShape          *policy.Shape
+	userCacheSecret      string
+	userCacheSecretSet   bool
+	openaiOpts           []option.RequestOption
 }
 
 // ClientOption configures a Client created with NewClientWithOptions.
@@ -84,6 +89,35 @@ func WithBaseURL(baseURL string) ClientOption {
 	}
 }
 
+// WithPinnedMeasurement verifies the enclave against a caller-supplied code
+// measurement instead of the code provenance carried in its attestation
+// document. Only the code-provenance check is skipped: the platform
+// endorsements, their freshness proof, the CPU quote chain, and channel
+// binding are all still verified. The measurement's provenance must be
+// established out of band.
+//
+// Requires WithEnclave. The measurement must carry the register layout of its
+// type (1 for SEV-SNP, 5 for TDX, 3 for multi-platform) as 48-byte hex; a
+// five-register TDX pin fixes every register including RTMR3. A TDX enclave
+// also requires WithPinnedShape, because v3 resolves the endorsed platform
+// measurement under the VM shape the code artifact would normally declare.
+// The values are validated and copied when the client is created; a nil or
+// malformed pin is an error, not a fallback to release verification.
+func WithPinnedMeasurement(m *measurement.Measurement) ClientOption {
+	return func(c *clientConfig) {
+		c.pinnedMeasurement = m
+		c.pinnedMeasurementSet = true
+	}
+}
+
+// WithPinnedShape declares the VM shape a pinned TDX code measurement was
+// built for. It is only used to appraise TDX enclaves. A non-nil shape requires
+// WithPinnedMeasurement; nil is treated as unset. Supplied dimensions must be
+// non-negative, matching v3 code provenance; the GPU count may be omitted.
+func WithPinnedShape(shape *policy.Shape) ClientOption {
+	return func(c *clientConfig) { c.pinnedShape = shape }
+}
+
 // WithOpenAIOptions appends options passed through to the underlying OpenAI client.
 func WithOpenAIOptions(opts ...option.RequestOption) ClientOption {
 	return func(c *clientConfig) { c.openaiOpts = append(c.openaiOpts, opts...) }
@@ -114,14 +148,30 @@ func NewClientWithOptions(opts ...ClientOption) (*Client, error) {
 		}
 	}
 
+	if cfg.pinnedShape != nil && !cfg.pinnedMeasurementSet {
+		return nil, fmt.Errorf("WithPinnedShape requires WithPinnedMeasurement")
+	}
+
 	var secureClient *client.SecureClient
-	if cfg.enclave == "" {
+	switch {
+	case cfg.pinnedMeasurementSet:
+		if cfg.enclave == "" {
+			return nil, fmt.Errorf("WithPinnedMeasurement requires WithEnclave: a pinned measurement cannot be verified against an auto-selected router")
+		}
+		// A supplied pin is a policy choice; a nil or malformed one must fail
+		// rather than fall back to release-based verification.
+		var err error
+		secureClient, err = client.NewPinnedSecureClient(cfg.enclave, cfg.pinnedMeasurement, cfg.pinnedShape)
+		if err != nil {
+			return nil, fmt.Errorf("WithPinnedMeasurement: %w", err)
+		}
+	case cfg.enclave == "":
 		var err error
 		secureClient, err = client.NewDefaultClient()
 		if err != nil {
 			return nil, fmt.Errorf("failed to create secure client: %w", err)
 		}
-	} else {
+	default:
 		secureClient = client.NewSecureClient(cfg.enclave, cfg.repo)
 	}
 

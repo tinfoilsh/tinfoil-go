@@ -70,6 +70,31 @@ func TestVerifyLiveFixtureTDX(t *testing.T) {
 	require.NotNil(t, verified.Measurement)
 	assert.Equal(t, measurement.TdxGuestV2, verified.Measurement.Type)
 	assert.Len(t, verified.Measurement.Registers, 5)
+
+	// Exercise the composed policy check with each full-pin constraint changed.
+	// MRTD/RTMR0 must still reject when the platform itself remains endorsed.
+	for index, name := range []string{"MRTD", "RTMR0", "RTMR1", "RTMR2", "RTMR3"} {
+		t.Run(name, func(t *testing.T) {
+			wrong := &measurement.Measurement{
+				Type:      measurement.TdxGuestV2,
+				Registers: append([]string(nil), q.Measurement.Registers...),
+			}
+			replacement := "0"
+			if wrong.Registers[index][0] == '0' {
+				replacement = "1"
+			}
+			wrong.Registers[index] = replacement + wrong.Registers[index][1:]
+			assembled, err := Assemble(artifact, wrong, devShape, reportData, q)
+			require.NoError(t, err)
+			validationError := assembled.Validate()
+			switch name {
+			case "MRTD", "RTMR0":
+				require.ErrorContains(t, validationError, "fingerprints do not match")
+			default:
+				require.Error(t, validationError)
+			}
+		})
+	}
 }
 
 // allowObservedShape adds the quote's own MRTD/RTMR0, measured for shape,

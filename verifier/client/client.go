@@ -9,6 +9,7 @@ import (
 	"sync"
 
 	"github.com/tinfoilsh/tinfoil-go/verifier/measurement"
+	"github.com/tinfoilsh/tinfoil-go/verifier/policy"
 	"github.com/tinfoilsh/tinfoil-go/verifier/util"
 )
 
@@ -32,6 +33,10 @@ type GroundTruth struct {
 
 type SecureClient struct {
 	enclave, repo string
+
+	// pin, when set, replaces the document's code provenance with the
+	// caller's measurement. Set only at construction.
+	pin *Pin
 
 	groundTruth          *GroundTruth
 	verificationDocument *VerificationDocument
@@ -68,6 +73,46 @@ func NewSecureClient(enclave, repo string) *SecureClient {
 		enclave: enclave,
 		repo:    repo,
 	}
+}
+
+// NewPinnedSecureClient creates a secure client that verifies the enclave at
+// the given host against a caller-supplied code measurement instead of the
+// latest signed release. The pin is validated and copied; an invalid pin is an
+// error rather than a fallback to release-based verification. shape is
+// required for TDX enclaves and ignored for SEV-SNP. See VerifyDocumentV3Pinned
+// for exactly which checks pinning skips.
+func NewPinnedSecureClient(enclave string, codeMeasurement *measurement.Measurement, shape *policy.Shape) (*SecureClient, error) {
+	pin, err := NewPin(codeMeasurement, shape)
+	if err != nil {
+		return nil, err
+	}
+	return &SecureClient{
+		enclave: enclave,
+		repo:    PinnedNoRepo,
+		pin:     pin,
+	}, nil
+}
+
+// NewPinnedSecureClientJSON is a gomobile-compatible variant of
+// NewPinnedSecureClient. codeMeasurementJSON is a JSON-encoded
+// measurement.Measurement ({"type": ..., "registers": [...]}); shapeJSON is a
+// JSON-encoded policy.Shape ({"cpus": ..., "memory_mb": ..., "disks": ...,
+// "gpus": ...}) or the empty string for SEV-SNP enclaves.
+func NewPinnedSecureClientJSON(enclave, codeMeasurementJSON, shapeJSON string) (*SecureClient, error) {
+	var codeMeasurement *measurement.Measurement
+	if err := json.Unmarshal([]byte(codeMeasurementJSON), &codeMeasurement); err != nil {
+		return nil, fmt.Errorf("failed to parse pinned measurement JSON: %w", err)
+	}
+	var shape *policy.Shape
+	if shapeJSON != "" {
+		if err := json.Unmarshal([]byte(shapeJSON), &shape); err != nil {
+			return nil, fmt.Errorf("failed to parse VM shape JSON: %w", err)
+		}
+		if shape == nil {
+			return nil, fmt.Errorf("failed to parse VM shape JSON: expected an object")
+		}
+	}
+	return NewPinnedSecureClient(enclave, codeMeasurement, shape)
 }
 
 // NewDefaultClient creates a new secure client with fallback mechanism.

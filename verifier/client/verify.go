@@ -6,6 +6,7 @@ import (
 
 	"github.com/tinfoilsh/tinfoil-go/verifier/envelope"
 	"github.com/tinfoilsh/tinfoil-go/verifier/measurement"
+	"github.com/tinfoilsh/tinfoil-go/verifier/policy"
 	"github.com/tinfoilsh/tinfoil-go/verifier/provenance"
 	"github.com/tinfoilsh/tinfoil-go/verifier/quote"
 )
@@ -115,11 +116,111 @@ func VerifyDocumentV3(docBytes, nonce []byte, repo string) (*VerifiedDocumentV3,
 	}, nil
 }
 
+// Pin is a caller-supplied expected code measurement that replaces the
+// document's Sigstore code provenance. Pinning skips only the code-provenance
+// lookup: the platform endorsements, their freshness proof, the CPU quote
+// chain, REPORT_DATA binding, and channel binding are all still verified.
+//
+// The measurement's provenance is the caller's responsibility. A TDX pin
+// (TdxGuestV2 or SnpTdxMultiPlatformV1 targeting a TDX enclave) must also
+// declare the VM shape the code was built for, because v3 resolves the
+// endorsed platform measurement under that shape and the code artifact that
+// normally carries it is not consulted.
+type Pin struct {
+	Measurement *measurement.Measurement
+	// Shape is required when the enclave is TDX; ignored for SEV-SNP.
+	Shape *policy.Shape
+}
+
+// PinnedNoDigest is recorded as the release digest when the code measurement
+// was pinned by the caller rather than proven by a release artifact.
+const PinnedNoDigest = "pinned_no_digest"
+
+// PinnedNoRepo is recorded as the config repository when the code measurement
+// was pinned by the caller and no repository's provenance was consulted.
+const PinnedNoRepo = "pinned_no_repo"
+
+// NewPin validates and copies a caller-supplied measurement and optional VM
+// shape. The returned Pin is independent of the caller's values.
+func NewPin(m *measurement.Measurement, shape *policy.Shape) (*Pin, error) {
+	validated, err := measurement.ValidatePin(m)
+	if err != nil {
+		return nil, fmt.Errorf("invalid pinned measurement: %w", err)
+	}
+	if validated.Type == measurement.TdxGuestV2 && shape == nil {
+		return nil, fmt.Errorf("a TDX pin requires a VM shape")
+	}
+	pin := &Pin{Measurement: validated}
+	if shape != nil {
+		// Match the non-negative dimensions accepted by v3 code provenance.
+		if shape.CPUs < 0 || shape.MemoryMB < 0 || shape.Disks < 0 || (shape.GPUs != nil && *shape.GPUs < 0) {
+			return nil, fmt.Errorf("invalid pinned VM shape: dimensions must be non-negative")
+		}
+		copied := *shape
+		if shape.GPUs != nil {
+			gpus := *shape.GPUs
+			copied.GPUs = &gpus
+		}
+		pin.Shape = &copied
+	}
+	return pin, nil
+}
+
+// VerifyDocumentV3Pinned verifies a v3 attestation document against a
+// caller-pinned code measurement. It performs every check VerifyDocumentV3
+// does except authenticating the sigstore-code reference value: the platform
+// endorsements and their freshness are still authenticated, the quote is
+// still verified against pinned vendor roots, and its registers are compared
+// against the pin. FreshnessExpiresAt reflects the platform witness only.
+func VerifyDocumentV3Pinned(docBytes, nonce []byte, pin *Pin) (*VerifiedDocumentV3, error) {
+	if pin == nil || pin.Measurement == nil {
+		return nil, fmt.Errorf("pinned verification requires a pin")
+	}
+	validated, err := NewPin(pin.Measurement, pin.Shape)
+	if err != nil {
+		return nil, err
+	}
+	pin = validated
+	doc, expectedReportData, err := envelope.Check(docBytes, nonce)
+	if err != nil {
+		return nil, fmt.Errorf("envelope: %w", err)
+	}
+
+	endorsements, platformWitnessedAt, err := authenticatePlatformReferenceValues(doc, time.Now())
+	if err != nil {
+		return nil, fmt.Errorf("reference values: %w", err)
+	}
+
+	// quote.Assemble requires a shape unconditionally; SEV-SNP never reads it,
+	// so a placeholder keeps the SEV path free of an unused caller input while
+	// TDX still fails closed when the caller did not declare one.
+	shape := pin.Shape
+	if shape == nil {
+		if doc.CPUEvidence.Format == envelope.TDXQuoteV1Format {
+			return nil, fmt.Errorf("cpu evidence: a TDX enclave requires the pin to declare the VM shape")
+		}
+		shape = &policy.Shape{}
+	}
+	_, authenticated, err := quote.Verify(doc, endorsements.Artifact, pin.Measurement, shape, expectedReportData)
+	if err != nil {
+		return nil, fmt.Errorf("cpu evidence: %w", err)
+	}
+
+	return &VerifiedDocumentV3{
+		CodeDigest:         PinnedNoDigest,
+		CodeMeasurement:    cloneMeasurement(pin.Measurement),
+		EnclaveMeasurement: authenticated.Measurement,
+		CryptoMaterial:     doc.CryptoMaterialItems(),
+		FreshnessExpiresAt: platformWitnessedAt.Add(provenance.MaxFreshnessAge),
+	}, nil
+}
+
 // authenticateReferenceValues authenticates the document's required code and
 // platform Sigstore artifacts plus the matching freshness proof for each,
 // returning the authenticated code, platform values, and the earlier of their
 // authenticated freshness expiration times.
 func authenticateReferenceValues(doc *envelope.Document, repo string) (*provenance.Code, *provenance.PlatformEndorsements, time.Time, error) {
+	appraisalTime := time.Now()
 	codeRef, err := doc.ReferenceValuesCollateral(envelope.CollateralSigstoreCodeV1Format)
 	if err != nil {
 		return nil, nil, time.Time{}, err
@@ -132,30 +233,41 @@ func authenticateReferenceValues(doc *envelope.Document, repo string) (*provenan
 	if err != nil {
 		return nil, nil, time.Time{}, err
 	}
-	appraisalTime := time.Now()
 	codeWitnessedAt, err := provenance.AuthenticateFreshness(codeFreshnessRef.SigstoreBundle, &code.AuthenticatedArtifact, appraisalTime)
 	if err != nil {
 		return nil, nil, time.Time{}, fmt.Errorf("verifying code freshness: %w", err)
 	}
 
-	platformRef, err := doc.ReferenceValuesCollateral(envelope.CollateralSigstorePlatformV1Format)
+	endorsements, platformWitnessedAt, err := authenticatePlatformReferenceValues(doc, appraisalTime)
 	if err != nil {
 		return nil, nil, time.Time{}, err
-	}
-	endorsements, err := provenance.AuthenticatePlatformEndorsements(platformRef.SigstoreBundle, platformRef.Repo, platformRef.Tag, platformRef.Digest)
-	if err != nil {
-		return nil, nil, time.Time{}, fmt.Errorf("verifying platform endorsements: %w", err)
-	}
-	freshnessRef, err := doc.FreshnessCollateral(envelope.FreshnessCollateralIDPlatform)
-	if err != nil {
-		return nil, nil, time.Time{}, err
-	}
-	platformWitnessedAt, err := provenance.AuthenticateFreshness(freshnessRef.SigstoreBundle, &endorsements.AuthenticatedArtifact, appraisalTime)
-	if err != nil {
-		return nil, nil, time.Time{}, fmt.Errorf("verifying platform freshness: %w", err)
 	}
 
 	return code, endorsements, freshnessExpiration(codeWitnessedAt, platformWitnessedAt), nil
+}
+
+// authenticatePlatformReferenceValues authenticates the document's platform
+// endorsement artifact and its freshness proof. It is the half of reference
+// verification that remains mandatory when the caller pins the code
+// measurement.
+func authenticatePlatformReferenceValues(doc *envelope.Document, appraisalTime time.Time) (*provenance.PlatformEndorsements, time.Time, error) {
+	platformRef, err := doc.ReferenceValuesCollateral(envelope.CollateralSigstorePlatformV1Format)
+	if err != nil {
+		return nil, time.Time{}, err
+	}
+	endorsements, err := provenance.AuthenticatePlatformEndorsements(platformRef.SigstoreBundle, platformRef.Repo, platformRef.Tag, platformRef.Digest)
+	if err != nil {
+		return nil, time.Time{}, fmt.Errorf("verifying platform endorsements: %w", err)
+	}
+	freshnessRef, err := doc.FreshnessCollateral(envelope.FreshnessCollateralIDPlatform)
+	if err != nil {
+		return nil, time.Time{}, err
+	}
+	platformWitnessedAt, err := provenance.AuthenticateFreshness(freshnessRef.SigstoreBundle, &endorsements.AuthenticatedArtifact, appraisalTime)
+	if err != nil {
+		return nil, time.Time{}, fmt.Errorf("verifying platform freshness: %w", err)
+	}
+	return endorsements, platformWitnessedAt, nil
 }
 
 // freshnessExpiration uses authenticated witness times, never local verification time.
@@ -192,7 +304,12 @@ func (s *SecureClient) verifyV3() (*VerifiedDocumentV3, error) {
 		return nil, fmt.Errorf("fetching attestation document: %w", err)
 	}
 
-	verified, err := VerifyDocumentV3(docBytes, nonce, s.repo)
+	var verified *VerifiedDocumentV3
+	if s.pin != nil {
+		verified, err = VerifyDocumentV3Pinned(docBytes, nonce, s.pin)
+	} else {
+		verified, err = VerifyDocumentV3(docBytes, nonce, s.repo)
+	}
 	if err != nil {
 		return nil, err
 	}

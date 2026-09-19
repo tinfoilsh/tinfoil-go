@@ -1,6 +1,6 @@
 // Package measurement defines the measurement value types shared by code
 // provenance and quote verification: register sets keyed by predicate type,
-// their equality semantics, and display fingerprints.
+// their equality semantics, and canonical target-platform fingerprints.
 package measurement
 
 import (
@@ -26,11 +26,18 @@ type Measurement struct {
 	Registers []string      `json:"registers"`
 }
 
-// Fingerprint computes a fingerprint for a measurement. For single-register
-// measurements, the register value is returned directly. For multi-register
-// measurements, SHA-256 is computed over the type URL concatenated with all
-// register values (no separator).
+// Fingerprint computes a canonical target-platform fingerprint. A multiplatform
+// source is expanded to the target's register layout using authenticated
+// hardware measurements for TDX. Equivalent code and enclave measurements
+// produce the same fingerprint regardless of the source predicate type.
+// SEV returns its lowercase register; TDX hashes the target type URL followed
+// by all five lowercase, fixed-width hex registers (no separator).
 func Fingerprint(m *Measurement, hw *HardwareMeasurement, targetType PredicateType) (string, error) {
+	validated, err := ValidatePin(m)
+	if err != nil {
+		return "", fmt.Errorf("invalid measurement: %w", err)
+	}
+	m = validated
 	var registers []string
 
 	switch m.Type {
@@ -47,18 +54,31 @@ func Fingerprint(m *Measurement, hw *HardwareMeasurement, targetType PredicateTy
 			return "", fmt.Errorf("unsupported target type %s", targetType)
 		}
 	case TdxGuestV2: // Runtime
-		registers = []string{m.Registers[0], m.Registers[1], m.Registers[2], m.Registers[3], m.Registers[4]}
+		if targetType != TdxGuestV2 {
+			return "", fmt.Errorf("TDX measurement cannot target %s", targetType)
+		}
+		registers = m.Registers
 	case SevGuestV2:
-		registers = []string{m.Registers[0]}
+		if targetType != SevGuestV2 {
+			return "", fmt.Errorf("SEV measurement cannot target %s", targetType)
+		}
+		registers = m.Registers
 	default:
 		return "", fmt.Errorf("unsupported measurement type %s", m.Type)
 	}
 
+	// This also validates and normalizes the hardware registers used to expand
+	// a multiplatform source, without changing either caller-owned input.
+	runtime, err := ValidatePin(&Measurement{Type: targetType, Registers: registers})
+	if err != nil {
+		return "", fmt.Errorf("invalid target measurement: %w", err)
+	}
+	registers = runtime.Registers
 	if len(registers) == 1 {
 		return registers[0], nil
 	}
 
-	all := string(m.Type) + strings.Join(registers, "")
+	all := string(targetType) + strings.Join(registers, "")
 	hash := sha256.Sum256([]byte(all))
 	return fmt.Sprintf("%x", hash), nil
 }

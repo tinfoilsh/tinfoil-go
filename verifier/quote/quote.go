@@ -9,7 +9,8 @@
 //     distinction ends here. Assembly fails if any entry cannot be
 //     resolved.
 //  3. Validate: one comparison of the quote against the assembled policy,
-//     inside the vendor library's validation options.
+//     using the vendor library's validation options and canonical measurement
+//     fingerprint equality.
 package quote
 
 import (
@@ -39,6 +40,22 @@ type Authenticated struct {
 
 	sev *sev.Quote
 	tdx *tdx.Quote
+
+	// Validation uses these private facts, not the mutable observation fields above.
+	platform    string
+	identity    string
+	measurement *measurement.Measurement
+}
+
+func newAuthenticated(platform, identity string, m *measurement.Measurement) *Authenticated {
+	trusted := *m
+	trusted.Registers = append([]string(nil), m.Registers...)
+	display := trusted
+	display.Registers = append([]string(nil), trusted.Registers...)
+	return &Authenticated{
+		Platform: platform, Identity: identity, Measurement: &display,
+		platform: platform, identity: identity, measurement: &trusted,
+	}
 }
 
 // AssembledPolicy is the complete expected state of a quote, fully
@@ -51,9 +68,10 @@ type AssembledPolicy struct {
 	// empty for SEV-SNP.
 	PlatformMeasurementName string
 
-	quote *Authenticated
-	sev   *sev.Expectations
-	tdx   *tdx.Expectations
+	quote               *Authenticated
+	sev                 *sev.Expectations
+	tdx                 *tdx.Expectations
+	expectedFingerprint string
 }
 
 // Authenticate verifies the quote's signature chain up to the pinned
@@ -67,23 +85,17 @@ func Authenticate(doc *envelope.Document) (*Authenticated, error) {
 		if err != nil {
 			return nil, err
 		}
-		return &Authenticated{
-			Platform:    policy.PlatformSEVSNP,
-			Identity:    q.Identity,
-			Measurement: q.Measurement,
-			sev:         q,
-		}, nil
+		authenticated := newAuthenticated(policy.PlatformSEVSNP, q.Identity, q.Measurement)
+		authenticated.sev = q
+		return authenticated, nil
 	case envelope.TDXQuoteV1Format:
 		q, err := tdx.Authenticate(doc)
 		if err != nil {
 			return nil, err
 		}
-		return &Authenticated{
-			Platform:    policy.PlatformTDX,
-			Identity:    q.Identity,
-			Measurement: q.Measurement,
-			tdx:         q,
-		}, nil
+		authenticated := newAuthenticated(policy.PlatformTDX, q.Identity, q.Measurement)
+		authenticated.tdx = q
+		return authenticated, nil
 	default:
 		return nil, fmt.Errorf("unsupported cpu_evidence format %q", doc.CPUEvidence.Format)
 	}
@@ -101,7 +113,10 @@ func Assemble(endorsements *policy.Artifact, code *measurement.Measurement, shap
 	if shape == nil {
 		return nil, fmt.Errorf("assembling policy: the code artifact's VM shape is required")
 	}
-	name, machinePolicy, err := endorsements.PolicyFor(q.Identity, q.Platform)
+	if q == nil || q.measurement == nil {
+		return nil, fmt.Errorf("assembling policy: an authenticated quote is required")
+	}
+	name, machinePolicy, err := endorsements.PolicyFor(q.identity, q.platform)
 	if err != nil {
 		return nil, err
 	}
@@ -109,7 +124,7 @@ func Assemble(endorsements *policy.Artifact, code *measurement.Measurement, shap
 		PolicyName: name,
 		quote:      q,
 	}
-	switch q.Platform {
+	switch q.platform {
 	case policy.PlatformSEVSNP:
 		var digest []byte
 		digest, err = sevLaunchDigest(code)
@@ -124,25 +139,54 @@ func Assemble(endorsements *policy.Artifact, code *measurement.Measurement, shap
 				endorsements, machinePolicy.TDX, shape, q.tdx, registers, reportData)
 		}
 	default:
-		return nil, fmt.Errorf("unsupported platform %q", q.Platform)
+		return nil, fmt.Errorf("unsupported platform %q", q.platform)
 	}
 	if err != nil {
 		return nil, err
+	}
+	var hw *measurement.HardwareMeasurement
+	if q.platform == policy.PlatformTDX {
+		platform, ok := endorsements.Measurements[assembled.PlatformMeasurementName]
+		if !ok {
+			return nil, fmt.Errorf("resolved platform measurement %q is missing", assembled.PlatformMeasurementName)
+		}
+		hw = &measurement.HardwareMeasurement{MRTD: platform.MRTD, RTMR0: platform.RTMR0}
+	}
+	assembled.expectedFingerprint, err = measurement.Fingerprint(code, hw, q.measurement.Type)
+	if err != nil {
+		return nil, fmt.Errorf("expected measurement fingerprint: %w", err)
 	}
 	return assembled, nil
 }
 
 // Validate compares the captured quote against the assembled policy in a
-// single vendor library call: no lookups, no translation.
+// vendor library call and checks canonical measurement fingerprint equality.
+// All expected values were resolved during assembly.
 func (p *AssembledPolicy) Validate() error {
-	switch p.quote.Platform {
+	var err error
+	switch p.quote.platform {
 	case policy.PlatformSEVSNP:
-		return p.sev.Validate(p.quote.sev)
+		err = p.sev.Validate(p.quote.sev)
 	case policy.PlatformTDX:
-		return p.tdx.Validate(p.quote.tdx)
+		err = p.tdx.Validate(p.quote.tdx)
 	default:
-		return fmt.Errorf("unsupported platform %q", p.quote.Platform)
+		return fmt.Errorf("unsupported platform %q", p.quote.platform)
 	}
+	if err != nil {
+		return err
+	}
+	return p.validateFingerprint()
+}
+
+func (p *AssembledPolicy) validateFingerprint() error {
+	actual, err := measurement.Fingerprint(p.quote.measurement, nil, p.quote.measurement.Type)
+	if err != nil {
+		return fmt.Errorf("enclave measurement fingerprint: %w", err)
+	}
+	if p.expectedFingerprint != actual {
+		return fmt.Errorf("code and enclave measurement fingerprints do not match")
+	}
+	return nil
 }
 
 // Verify composes Authenticate, Assemble, and Validate.
