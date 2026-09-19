@@ -109,6 +109,18 @@ func (a *Artifact) validate() error {
 		if m.Shape == nil {
 			return fmt.Errorf("measurement %q: shape is required", name)
 		}
+		if m.Shape.CPUs <= 0 || m.Shape.MemoryMB <= 0 || m.Shape.Disks <= 0 {
+			return fmt.Errorf("measurement %q: cpus, memory_mb, and disks must be positive", name)
+		}
+		if m.Shape.GPUs != nil && *m.Shape.GPUs < 0 {
+			return fmt.Errorf("measurement %q: gpus must be non-negative", name)
+		}
+		if err := validatePolicyHex("mrtd", m.MRTD, 48); err != nil {
+			return fmt.Errorf("measurement %q: %w", name, err)
+		}
+		if err := validatePolicyHex("rtmr0", m.RTMR0, 48); err != nil {
+			return fmt.Errorf("measurement %q: %w", name, err)
+		}
 	}
 
 	for identifier, policyName := range a.Machines {

@@ -60,6 +60,9 @@ func (p *TDXPolicy) Validate() error {
 }
 
 func validatePolicyHex(name, value string, byteLen int) error {
+	if len(value) != 2*byteLen {
+		return fmt.Errorf("%s must be %d hex chars, got %d", name, 2*byteLen, len(value))
+	}
 	if value != strings.ToLower(value) {
 		return fmt.Errorf("%s must be lowercase hex", name)
 	}
