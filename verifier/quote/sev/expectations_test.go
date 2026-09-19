@@ -4,6 +4,7 @@ import (
 	"encoding/hex"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -169,7 +170,7 @@ func TestValidateBox2TurinAttestation(t *testing.T) {
 	identity, err := Identity(report.GetChipId())
 	require.NoError(t, err)
 	q := &Quote{
-		Identity: identity,
+		identity: identity,
 		attestation: &sevsnp.Attestation{
 			Report: report,
 			CertificateChain: &sevsnp.CertificateChain{
@@ -183,9 +184,12 @@ func TestValidateBox2TurinAttestation(t *testing.T) {
 	a := loadFixture(t)
 	_, p, err := a.PolicyFor(identity, policy.PlatformSEVSNP)
 	require.NoError(t, err)
-	expectations, err := Assemble(p.SEVSNP, q, report.GetMeasurement(), reportData)
+	digest := slices.Clone(report.GetMeasurement())
+	expectations, err := Assemble(p.SEVSNP, q, digest, reportData)
 	require.NoError(t, err)
 	require.NoError(t, expectations.Validate(q))
+	digest[0] ^= 0xff
+	require.NoError(t, expectations.Validate(q), "caller mutation must not change assembled expectations")
 }
 
 func TestIdentity(t *testing.T) {

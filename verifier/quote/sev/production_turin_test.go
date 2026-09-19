@@ -61,7 +61,7 @@ func TestProductionTurinFixtures(t *testing.T) {
 				Product:             product,
 				Now:                 fixture.CapturedAt,
 			}))
-			q := &Quote{Identity: hex.EncodeToString(report.ChipId), attestation: attestation}
+			q := &Quote{identity: hex.EncodeToString(report.ChipId), attestation: attestation}
 			require.Equal(t, ProductTurin, q.ProductLine())
 			require.Equal(t, policy.PlatformSEVSNP, fixture.Policy.Platform)
 			require.NotNil(t, fixture.Policy.SEVSNP)

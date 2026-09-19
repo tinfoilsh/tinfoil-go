@@ -424,27 +424,34 @@ func Parse(docBytes []byte) (*Document, error) {
 	return &doc, nil
 }
 
-// CryptoMaterialItems returns the parsed crypto_material items.
+// CryptoMaterialItems returns a copy of the parsed crypto_material items.
 func (d *Document) CryptoMaterialItems() []CryptoMaterialItem {
 	if d.cryptoMaterial == nil {
 		return nil
 	}
-	return d.cryptoMaterial.Items
+	return slices.Clone(d.cryptoMaterial.Items)
 }
 
-// DeviceEvidenceItems returns the parsed device_evidence items.
+// DeviceEvidenceItems returns a deep copy of the parsed device_evidence items.
 func (d *Document) DeviceEvidenceItems() []DeviceEvidenceItem {
 	if d.deviceEvidence == nil {
 		return nil
 	}
-	return d.deviceEvidence.Items
+	items := slices.Clone(d.deviceEvidence.Items)
+	for i := range items {
+		items[i].Evidence = slices.Clone(items[i].Evidence)
+	}
+	return items
 }
 
-// CryptoMaterialItem returns the crypto_material item with the given id.
+// CryptoMaterialItem returns a copy of the crypto_material item with the given id.
 func (d *Document) CryptoMaterialItem(id string) (*CryptoMaterialItem, bool) {
-	for i := range d.CryptoMaterialItems() {
-		if d.cryptoMaterial.Items[i].ID == id {
-			return &d.cryptoMaterial.Items[i], true
+	if d.cryptoMaterial == nil {
+		return nil, false
+	}
+	for _, item := range d.cryptoMaterial.Items {
+		if item.ID == id {
+			return &item, true
 		}
 	}
 	return nil, false

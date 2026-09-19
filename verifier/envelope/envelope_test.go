@@ -95,8 +95,27 @@ func TestBuildAndVerify(t *testing.T) {
 	tls, ok := doc.CryptoMaterialItem(CryptoMaterialIDTLS)
 	require.True(t, ok)
 	assert.Equal(t, KeySPKIFPSHA256V1Format, tls.Format)
+	original := *tls
+	items[0].Data = "changed"
+	tls.Data = "changed again"
+	assert.Equal(t, original, doc.CryptoMaterialItems()[0])
+	tls, ok = doc.CryptoMaterialItem(CryptoMaterialIDTLS)
+	require.True(t, ok)
+	assert.Equal(t, original, *tls)
 
 	assert.Empty(t, doc.DeviceEvidenceItems())
+}
+
+func TestDeviceEvidenceItemsReturnsCopies(t *testing.T) {
+	doc := &Document{deviceEvidence: &DeviceEvidenceSection{Items: []DeviceEvidenceItem{
+		{ID: "gpu", Evidence: []byte(`{"nonce":"original"}`)},
+	}}}
+	items := doc.DeviceEvidenceItems()
+	items[0].ID = "changed"
+	items[0].Evidence[0] = '!'
+	again := doc.DeviceEvidenceItems()
+	assert.Equal(t, "gpu", again[0].ID)
+	assert.Equal(t, `{"nonce":"original"}`, string(again[0].Evidence))
 }
 
 func TestVerifyNonceMismatch(t *testing.T) {
