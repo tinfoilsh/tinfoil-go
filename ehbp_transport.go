@@ -111,8 +111,9 @@ func WithPinnedMeasurement(m *measurement.Measurement) ClientOption {
 }
 
 // WithPinnedShape declares the VM shape a pinned TDX code measurement was
-// built for. Ignored for SEV-SNP enclaves; has no effect without
-// WithPinnedMeasurement.
+// built for. It is only used to appraise TDX enclaves. A non-nil shape requires
+// WithPinnedMeasurement; nil is treated as unset. Supplied dimensions must be
+// non-negative, matching v3 code provenance; the GPU count may be omitted.
 func WithPinnedShape(shape *policy.Shape) ClientOption {
 	return func(c *clientConfig) { c.pinnedShape = shape }
 }

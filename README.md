@@ -136,6 +136,9 @@ client, err := tinfoil.NewClientWithOptions(
 		Registers: []string{"<hex measurement>"},
 	}),
 )
+if err != nil {
+	return fmt.Errorf("create pinned client: %w", err)
+}
 ```
 
 `WithPinnedMeasurement` requires `WithEnclave`. The measurement must carry the

@@ -100,6 +100,50 @@ func TestNewPinnedSecureClientJSON(t *testing.T) {
 	}
 }
 
+func TestPinShapeValidation(t *testing.T) {
+	tdxPin := &measurement.Measurement{
+		Type:      measurement.TdxGuestV2,
+		Registers: []string{testRegister('a'), testRegister('b'), testRegister('c'), testRegister('d'), measurement.RTMR3_ZERO},
+	}
+	client, err := NewPinnedSecureClient("enclave.test", tdxPin, nil)
+	require.ErrorContains(t, err, "requires a VM shape")
+	require.Nil(t, client)
+	encoded, err := json.Marshal(tdxPin)
+	require.NoError(t, err)
+	_, err = NewPinnedSecureClientJSON("enclave.test", string(encoded), "")
+	require.ErrorContains(t, err, "requires a VM shape")
+
+	negative := -1
+	for name, shape := range map[string]*policy.Shape{
+		"cpu":    {CPUs: -1, MemoryMB: 1, Disks: 1},
+		"memory": {CPUs: 1, MemoryMB: -1, Disks: 1},
+		"disks":  {CPUs: 1, MemoryMB: 1, Disks: -1},
+		"gpus":   {CPUs: 1, MemoryMB: 1, Disks: 1, GPUs: &negative},
+	} {
+		t.Run(name, func(t *testing.T) {
+			client, err := NewPinnedSecureClient("enclave.test", tdxPin, shape)
+			require.ErrorContains(t, err, "dimensions must be non-negative")
+			require.Nil(t, client)
+			// The standalone entry point also validates pins constructed as literals.
+			_, err = VerifyDocumentV3Pinned(nil, nil, &Pin{Measurement: tdxPin, Shape: shape})
+			require.ErrorContains(t, err, "dimensions must be non-negative")
+		})
+	}
+
+	// Zero dimensions follow the existing code-provenance schema; policy
+	// resolution still has to match an endorsed shape at verification time.
+	zeroGPUs := 0
+	for _, shape := range []*policy.Shape{{}, {CPUs: 1, MemoryMB: 1, GPUs: &zeroGPUs}} {
+		pin, err := NewPin(tdxPin, shape)
+		require.NoError(t, err)
+		require.Equal(t, shape, pin.Shape)
+	}
+	_, err = NewPin(&measurement.Measurement{
+		Type: measurement.SnpTdxMultiPlatformV1, Registers: []string{testRegister('a'), testRegister('b'), testRegister('c')},
+	}, nil)
+	require.NoError(t, err, "multiplatform pins may target SEV-SNP without a shape")
+}
+
 // pinnedTestDocument is an envelope-valid v3 document with no reference-values
 // collateral. Pinned verification must reject it at the platform reference
 // step: pinning removes the code-provenance requirement, not the platform one.

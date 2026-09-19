@@ -147,8 +147,15 @@ func NewPin(m *measurement.Measurement, shape *policy.Shape) (*Pin, error) {
 	if err != nil {
 		return nil, fmt.Errorf("invalid pinned measurement: %w", err)
 	}
+	if validated.Type == measurement.TdxGuestV2 && shape == nil {
+		return nil, fmt.Errorf("a TDX pin requires a VM shape")
+	}
 	pin := &Pin{Measurement: validated}
 	if shape != nil {
+		// Match the non-negative dimensions accepted by v3 code provenance.
+		if shape.CPUs < 0 || shape.MemoryMB < 0 || shape.Disks < 0 || (shape.GPUs != nil && *shape.GPUs < 0) {
+			return nil, fmt.Errorf("invalid pinned VM shape: dimensions must be non-negative")
+		}
 		copied := *shape
 		if shape.GPUs != nil {
 			gpus := *shape.GPUs
@@ -169,6 +176,11 @@ func VerifyDocumentV3Pinned(docBytes, nonce []byte, pin *Pin) (*VerifiedDocument
 	if pin == nil || pin.Measurement == nil {
 		return nil, fmt.Errorf("pinned verification requires a pin")
 	}
+	validated, err := NewPin(pin.Measurement, pin.Shape)
+	if err != nil {
+		return nil, err
+	}
+	pin = validated
 	doc, expectedReportData, err := envelope.Check(docBytes, nonce)
 	if err != nil {
 		return nil, fmt.Errorf("envelope: %w", err)
