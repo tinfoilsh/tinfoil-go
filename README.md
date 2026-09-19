@@ -124,20 +124,29 @@ measurement's provenance is your responsibility; the verification document
 reports the skipped steps as `skipped`.
 
 ```go
+package main
+
 import (
+	"log"
+
+	tinfoil "github.com/tinfoilsh/tinfoil-go"
 	"github.com/tinfoilsh/tinfoil-go/verifier/measurement"
-	"github.com/tinfoilsh/tinfoil-go/verifier/policy"
 )
 
-client, err := tinfoil.NewClientWithOptions(
-	tinfoil.WithEnclave(enclave),
-	tinfoil.WithPinnedMeasurement(&measurement.Measurement{
-		Type:      measurement.SevGuestV2,
-		Registers: []string{"<hex measurement>"},
-	}),
-)
-if err != nil {
-	return fmt.Errorf("create pinned client: %w", err)
+func main() {
+	const enclave = "enclave.example.com"
+	const expectedMeasurement = "<hex measurement>"
+	client, err := tinfoil.NewClientWithOptions(
+		tinfoil.WithEnclave(enclave),
+		tinfoil.WithPinnedMeasurement(&measurement.Measurement{
+			Type:      measurement.SevGuestV2,
+			Registers: []string{expectedMeasurement},
+		}),
+	)
+	if err != nil {
+		log.Fatal(err)
+	}
+	log.Printf("Verified enclave: %s", client.Enclave())
 }
 ```
 
@@ -148,7 +157,9 @@ created, so a nil or malformed pin is an error rather than a fallback to
 release verification. A five-register TDX pin fixes every register including
 RTMR3. A TDX enclave additionally needs `WithPinnedShape` declaring the VM shape
 the code was built for, since the attestation document's endorsed platform
-measurement is resolved under that shape:
+measurement is resolved under that shape. Import
+`github.com/tinfoilsh/tinfoil-go/verifier/policy` and add this option to the
+`NewClientWithOptions` call for TDX:
 
 ```go
 tinfoil.WithPinnedShape(&policy.Shape{CPUs: 8, MemoryMB: 32768, Disks: 1}),
