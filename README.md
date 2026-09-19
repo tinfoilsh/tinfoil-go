@@ -146,6 +146,12 @@ This library is a drop-in replacement for the [official OpenAI Go client](https:
 
 [![Go Reference](https://pkg.go.dev/badge/github.com/openai/openai-go/v3.svg)](https://pkg.go.dev/github.com/openai/openai-go/v3)
 
+## Tests
+
+Run `go test -race ./...`. The suite includes live tests that need network access.
+Set `TINFOIL_API_KEY` for authenticated inference tests, and `TINFOIL_ENCLAVE` and
+`TINFOIL_REPO` for live verifier tests. Tests do not load `.env` files automatically.
+
 ## Reporting Vulnerabilities
 
 Please report security vulnerabilities by emailing [security@tinfoil.sh](mailto:security@tinfoil.sh).
