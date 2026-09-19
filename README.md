@@ -151,6 +151,10 @@ measurement is resolved under that shape:
 tinfoil.WithPinnedShape(&policy.Shape{CPUs: 8, MemoryMB: 32768, Disks: 1}),
 ```
 
+Successful verification requires equal code and enclave fingerprints, computed
+from the same canonical target-platform measurement. For TDX this covers all
+five registers; it does not replace platform-policy or quote verification.
+
 ## Prompt Cache Scoping
 
 The inference router partitions prompt-prefix caches using both the authenticated API identity and `user_cache_secret`. Cache reuse requires the same identity, secret, model, and matching prompt prefix. Changing the identity or secret selects a different cache namespace, so those requests do not share cache entries or cache-hit timing.

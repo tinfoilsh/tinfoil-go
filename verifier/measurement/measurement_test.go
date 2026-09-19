@@ -26,7 +26,7 @@ func TestAttestationFingerprint(t *testing.T) {
 		expectedEnclaveFingerprint string
 	}{
 		{
-			name:              "TDX multi-register: type URL included in hash, source != enclave",
+			name:              "TDX multi-register: target type URL included in hash, source == enclave",
 			sourceMeasurement: routerMpMeasurement,
 			enclaveMeasurement: &Measurement{
 				Type: TdxGuestV2,
@@ -42,7 +42,7 @@ func TestAttestationFingerprint(t *testing.T) {
 				MRTD:  "7357a10d2e2724dffe68813e3cc4cfcde6814d749f2fb62e3953e54f6e0b50a219786afe2cd478f684b52c61837e1114",
 				RTMR0: "304a1788d349864a75d7e76d54c8d0223207f990e84ad087d28787fff0a7b7cff14c5cb9a96f91ca02e8b32884d9fa81",
 			},
-			expectedSourceFingerprint:  "02e628595f1bbd914799fdf0eab30ab954b0dda6ca96fcdbcbc3ff71cad44e40",
+			expectedSourceFingerprint:  "d4c613f1c2919502eee6c8395527086d57e0cf3d7b1c4fda6ba70d421f6a5e08",
 			expectedEnclaveFingerprint: "d4c613f1c2919502eee6c8395527086d57e0cf3d7b1c4fda6ba70d421f6a5e08",
 		}, {
 			name:              "SEV single-register: raw value returned directly, source == enclave",
@@ -67,6 +67,7 @@ func TestAttestationFingerprint(t *testing.T) {
 
 			assert.Equal(t, tc.expectedSourceFingerprint, sourceFP)
 			assert.Equal(t, tc.expectedEnclaveFingerprint, enclaveFP)
+			assert.Equal(t, sourceFP, enclaveFP)
 		})
 	}
 }
