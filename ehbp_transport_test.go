@@ -11,6 +11,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/openai/openai-go/v3"
 	"github.com/openai/openai-go/v3/option"
@@ -49,6 +50,7 @@ func TestClientOptionsApply(t *testing.T) {
 		WithEnclave("enclave.example.com"),
 		WithRepo("org/repo"),
 		WithTransport(TransportTLS),
+		WithFreshnessMaxAge(24 * time.Hour),
 		WithOpenAIOptions(option.WithAPIKey("k1"), option.WithAPIKey("k2")),
 	} {
 		opt(cfg)
@@ -57,6 +59,7 @@ func TestClientOptionsApply(t *testing.T) {
 	require.Equal(t, "enclave.example.com", cfg.enclave)
 	require.Equal(t, "org/repo", cfg.repo)
 	require.Equal(t, TransportTLS, cfg.transport)
+	require.Equal(t, 24*time.Hour, cfg.freshnessMaxAge)
 	require.Len(t, cfg.openaiOpts, 2)
 }
 
@@ -338,6 +341,18 @@ func TestClientIntegration_LowLevelEHBP(t *testing.T) {
 			data, err := io.ReadAll(postResp.Body)
 			require.NoError(t, err)
 			require.Contains(t, string(data), "choices")
+		})
+	}
+}
+
+func TestNewClientRejectsInvalidFreshnessAge(t *testing.T) {
+	for _, tc := range []struct{ name, enclave string }{
+		{"router selection", ""},
+		{"explicit enclave", "enclave.example"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := NewClientWithOptions(WithEnclave(tc.enclave), WithFreshnessMaxAge(-time.Second))
+			require.ErrorContains(t, err, "freshness max age")
 		})
 	}
 }

@@ -80,6 +80,21 @@ if err != nil {
 // see https://pkg.go.dev/github.com/openai/openai-go/v3 for API documentation
 ```
 
+Freshness witnesses expire after seven days by default. Choose a fixed policy
+when creating a client (with `time` imported):
+
+```go
+client, err := tinfoil.NewClientWithOptions(
+    tinfoil.WithFreshnessMaxAge(24 * time.Hour),
+    tinfoil.WithOpenAIOptions(option.WithAPIKey(os.Getenv("TINFOIL_API_KEY"))),
+)
+```
+
+Zero keeps the seven-day default; negative ages are rejected. The option applies
+before initial router verification and to every refresh. TLS and EHBP check
+freshness before each new request; requests already admitted may finish,
+including streams. Create a new client to change its policy.
+
 ## Verification document
 
 The client retains the result used by its active secure transport:

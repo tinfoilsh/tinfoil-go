@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"time"
 
 	"github.com/openai/openai-go/v3/option"
 	ehbpclient "github.com/tinfoilsh/encrypted-http-body-protocol/client"
@@ -38,6 +39,7 @@ const (
 )
 
 type clientConfig struct {
+	freshnessMaxAge    time.Duration
 	enclave            string
 	repo               string
 	transport          TransportMode
@@ -65,6 +67,13 @@ func WithRepo(repo string) ClientOption {
 // WithTransport selects the transport mode. Defaults to TransportEHBP.
 func WithTransport(mode TransportMode) ClientOption {
 	return func(c *clientConfig) { c.transport = mode }
+}
+
+// WithFreshnessMaxAge sets the maximum authenticated witness age for this client.
+// Zero uses the seven-day default; negative values are invalid. The policy is
+// fixed at construction and applies to router selection, refreshes and requests.
+func WithFreshnessMaxAge(maxAge time.Duration) ClientOption {
+	return func(c *clientConfig) { c.freshnessMaxAge = maxAge }
 }
 
 // WithBaseURL routes requests through the given base URL (for example your own
@@ -112,14 +121,15 @@ func NewClientWithOptions(opts ...ClientOption) (*Client, error) {
 	}
 
 	var secureClient *client.SecureClient
+	var err error
+	verificationOptions := client.VerificationOptions{FreshnessMaxAge: cfg.freshnessMaxAge}
 	if cfg.enclave == "" {
-		var err error
-		secureClient, err = client.NewDefaultClient()
-		if err != nil {
-			return nil, fmt.Errorf("failed to create secure client: %w", err)
-		}
+		secureClient, err = client.NewDefaultClientWithOptions(verificationOptions)
 	} else {
-		secureClient = client.NewSecureClient(cfg.enclave, cfg.repo)
+		secureClient, err = client.NewSecureClientWithOptions(cfg.enclave, cfg.repo, verificationOptions)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("failed to create secure client: %w", err)
 	}
 
 	return createClientFromSecureClient(secureClient, cfg.transport, cfg.baseURL,

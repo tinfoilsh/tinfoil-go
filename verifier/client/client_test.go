@@ -10,6 +10,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/tinfoilsh/tinfoil-go/verifier/measurement"
+	"github.com/tinfoilsh/tinfoil-go/verifier/provenance"
 )
 
 func TestVerify(t *testing.T) {
@@ -154,7 +155,7 @@ func TestClientFetchRouters(t *testing.T) {
 }
 
 func TestClientDefaultClient(t *testing.T) {
-	defaultClient := newFallbackClient()
+	defaultClient := newFallbackClient(provenance.MaxFreshnessAge)
 	enclave := defaultClient.Enclave()
 	assert.NotEmpty(t, enclave)
 
