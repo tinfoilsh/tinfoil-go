@@ -93,11 +93,16 @@ Callers using these APIs must retain the deadline and stop authorizing new
 requests at or after it, then verify again before accepting more requests.
 Re-verifying unchanged witnesses does not extend their deadline.
 
-These age checks run during verification. The cached `SecureClient` HTTP client
-and the high-level OpenAI SDK's TLS/EHBP transports do not retain or enforce
-`FreshnessExpiresAt`, so they can continue sending requests after it. Automatic
-request-time expiration is not provided by these transports; applications that
-require it must use the direct verification APIs and gate requests themselves.
+The cached `SecureClient` HTTP clients and the OpenAI SDK's TLS/EHBP transports
+check this deadline before admitting each request, including redirects and
+key-rotation retries. Expired or missing verification blocks new requests until
+refresh succeeds; refresh errors never authorize requests with expired keys.
+All clients returned by one `SecureClient` share verification state and one
+refresh attempt, including explicit `Verify()` calls. Refresh is bounded to 30
+seconds, and a waiting request can cancel without canceling other waiters.
+
+A request admitted before expiration may finish, including a streaming response.
+Expiration does not interrupt that request. There is no background refresh.
 
 ### Migration from v2
 

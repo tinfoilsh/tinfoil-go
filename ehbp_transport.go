@@ -6,9 +6,6 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
-	"sync"
-
-	"log/slog"
 
 	"github.com/openai/openai-go/v3/option"
 	ehbpclient "github.com/tinfoilsh/encrypted-http-body-protocol/client"
@@ -129,30 +126,19 @@ func NewClientWithOptions(opts ...ClientOption) (*Client, error) {
 		resolveUserCacheSecret(cfg.userCacheSecret, cfg.userCacheSecretSet), cfg.openaiOpts...)
 }
 
-type verifiedTransport interface {
-	verifyAndReplace() (*client.GroundTruth, error)
-	verificationDocument() *client.VerificationDocument
-}
-
-type securedHTTPClient struct {
-	client    *http.Client
-	transport verifiedTransport
-}
-
-// secureHTTPClient builds an HTTP client and its verification-state owner for
+// secureHTTPClient builds an HTTP client sharing the SecureClient verification for
 // the requested transport mode. The HTTP client is bound to the verified
 // enclave and configured proxy, if any.
-func secureHTTPClient(secureClient *client.SecureClient, mode TransportMode, baseURL, userCacheSecret string) (*securedHTTPClient, error) {
+func secureHTTPClient(secureClient *client.SecureClient, mode TransportMode, baseURL, userCacheSecret string) (*http.Client, error) {
 	var (
-		httpClient    *http.Client
-		verifiedState verifiedTransport
-		err           error
+		httpClient *http.Client
+		err        error
 	)
 	switch mode {
 	case TransportTLS:
-		httpClient, verifiedState, err = tlsPinnedHTTPClient(secureClient)
+		httpClient, err = secureClient.HTTPClient()
 	case TransportEHBP, "":
-		httpClient, verifiedState, err = ehbpHTTPClient(secureClient, baseURL)
+		httpClient, err = ehbpHTTPClient(secureClient, baseURL)
 	default:
 		return nil, fmt.Errorf("unknown transport mode: %q", mode)
 	}
@@ -185,10 +171,7 @@ func secureHTTPClient(secureClient *client.SecureClient, mode TransportMode, bas
 		enclave:        secureClient.Enclave(),
 		transport:      transport,
 	}
-	return &securedHTTPClient{
-		client:    httpClient,
-		transport: verifiedState,
-	}, nil
+	return httpClient, nil
 }
 
 // allowedOrigins returns the set of origins a secured request may target: the
@@ -230,22 +213,8 @@ func (t *hostBoundRoundTripper) RoundTrip(req *http.Request) (*http.Response, er
 	return t.transport.RoundTrip(req)
 }
 
-// tlsPinnedHTTPClient returns the enclave-pinned HTTP client that re-verifies
-// attestation when the server's TLS certificate rotates.
-func tlsPinnedHTTPClient(secureClient *client.SecureClient) (*http.Client, *reVerifyingTransport, error) {
-	httpClient, err := secureClient.HTTPClient()
-	if err != nil {
-		return nil, nil, fmt.Errorf("failed to create HTTP client: %w", err)
-	}
-
-	// Wrap with re-verifying transport to handle certificate rotation
-	transport := &reVerifyingTransport{
-		secureClient: secureClient,
-		transport:    httpClient.Transport,
-		document:     secureClient.VerificationDocument(),
-	}
-	httpClient.Transport = transport
-	return httpClient, transport, nil
+type transportVerifier interface {
+	NewTransport(func(*client.GroundTruth) (http.RoundTripper, error), func(error) bool) (http.RoundTripper, error)
 }
 
 // ehbpHTTPClient returns an HTTP client whose request bodies are encrypted to
@@ -253,43 +222,21 @@ func tlsPinnedHTTPClient(secureClient *client.SecureClient) (*http.Client, *reVe
 // the server rotates its HPKE key. When baseURL routes requests through a proxy
 // whose origin differs from the enclave's, the client adds the
 // X-Tinfoil-Enclave-Url header so the proxy can forward to the verified enclave.
-func ehbpHTTPClient(secureClient *client.SecureClient, baseURL string) (*http.Client, *ehbpReVerifyingTransport, error) {
-	groundTruth := secureClient.GroundTruth()
-	if groundTruth == nil {
-		var err error
-		groundTruth, err = secureClient.Verify()
-		if err != nil {
-			return nil, nil, fmt.Errorf("failed to verify enclave: %w", err)
-		}
-	}
-
-	// buildTransport builds an EHBP transport for an attested HPKE key, wrapping
-	// it with the enclave-URL header when requests route through a proxy. The
-	// enclave host is captured here rather than read per request: re-verification
-	// rebuilds the transport with the then-current enclave, which keeps the
-	// header correct (including on the retry that follows a key rotation) without
-	// an unsynchronized read of the client's mutable state.
-	buildTransport := func(hpkePublicKeyHex string) (http.RoundTripper, error) {
-		inner, err := buildEHBPTransport(hpkePublicKeyHex)
+func ehbpHTTPClient(secureClient transportVerifier, baseURL string) (*http.Client, error) {
+	transport, err := secureClient.NewTransport(func(groundTruth *client.GroundTruth) (http.RoundTripper, error) {
+		inner, err := buildEHBPTransport(groundTruth.HPKEPublicKey)
 		if err != nil {
 			return nil, err
 		}
-		if headerValue, ok := enclaveURLHeaderValue(baseURL, secureClient.Enclave()); ok {
-			return &enclaveURLHeaderTransport{
-				enclaveURL: headerValue,
-				transport:  inner,
-			}, nil
+		if headerValue, ok := enclaveURLHeaderValue(baseURL, groundTruth.EnclaveHost); ok {
+			return &enclaveURLHeaderTransport{enclaveURL: headerValue, transport: inner}, nil
 		}
 		return inner, nil
-	}
-
-	inner, err := buildTransport(groundTruth.HPKEPublicKey)
+	}, ehbpidentity.IsKeyConfigError)
 	if err != nil {
-		return nil, nil, err
+		return nil, fmt.Errorf("creating EHBP transport: %w", err)
 	}
-
-	transport := newEHBPReVerifyingTransport(secureClient, inner, buildTransport)
-	return &http.Client{Transport: transport}, transport, nil
+	return &http.Client{Transport: transport}, nil
 }
 
 // enclaveURLHeaderValue returns the X-Tinfoil-Enclave-Url header value and
@@ -401,157 +348,4 @@ func buildEHBPTransport(hpkePublicKeyHex string) (http.RoundTripper, error) {
 		return nil, fmt.Errorf("failed to create EHBP transport: %w", err)
 	}
 	return transport, nil
-}
-
-// ehbpReVerifyingTransport wraps an EHBP round tripper and re-verifies
-// attestation when the enclave rotates its HPKE key, mirroring the certificate
-// rotation handling of the TLS transport.
-type ehbpReVerifyingTransport struct {
-	secureClient *client.SecureClient
-	mu           sync.RWMutex
-	transport    http.RoundTripper
-	document     *client.VerificationDocument
-	generation   uint64
-
-	// reverifyMu serializes re-verification. Re-verification mutates shared
-	// attestation state on the SecureClient, which is not safe for concurrent
-	// use, so concurrent RoundTrip calls that observe the same key rotation
-	// must not run it simultaneously.
-	reverifyMu sync.Mutex
-
-	// reverify re-runs attestation and returns an EHBP transport built from the
-	// freshly attested HPKE key.
-	reverify              func() (http.RoundTripper, error)
-	build                 func(string) (http.RoundTripper, error)
-	documentAfterReverify func() *client.VerificationDocument
-}
-
-func newEHBPReVerifyingTransport(secureClient *client.SecureClient, inner http.RoundTripper, build func(hpkePublicKeyHex string) (http.RoundTripper, error)) *ehbpReVerifyingTransport {
-	return &ehbpReVerifyingTransport{
-		secureClient:          secureClient,
-		transport:             inner,
-		document:              secureClient.VerificationDocument(),
-		build:                 build,
-		documentAfterReverify: secureClient.VerificationDocument,
-		reverify: func() (http.RoundTripper, error) {
-			groundTruth, err := secureClient.Verify()
-			if err != nil {
-				return nil, err
-			}
-			return build(groundTruth.HPKEPublicKey)
-		},
-	}
-}
-
-func (t *ehbpReVerifyingTransport) RoundTrip(req *http.Request) (*http.Response, error) {
-	t.mu.RLock()
-	transport := t.transport
-	generation := t.generation
-	t.mu.RUnlock()
-
-	resp, err := transport.RoundTrip(req)
-	if err == nil || !ehbpidentity.IsKeyConfigError(err) {
-		return resp, err
-	}
-
-	// HPKE key configuration mismatch: the request was rejected before being
-	// processed, so re-verify attestation, rebuild the transport from the new
-	// key, and retry the request once.
-	retryReq, bodyErr := resetRequestBody(req)
-	if bodyErr != nil {
-		return nil, err
-	}
-
-	newTransport, reverifyErr := t.reverifyOnce(generation)
-	if reverifyErr != nil {
-		// Re-verification failed; surface the original key mismatch error.
-		return nil, err
-	}
-
-	return newTransport.RoundTrip(retryReq)
-}
-
-// reverifyOnce re-verifies attestation and installs an EHBP transport built
-// from the freshly attested HPKE key. Re-verification is serialized so that
-// concurrent RoundTrip calls triggered by the same key rotation do not race on
-// the shared SecureClient; callers that arrive after another goroutine has
-// already rebuilt the transport reuse the freshly installed one instead of
-// re-verifying again.
-func (t *ehbpReVerifyingTransport) reverifyOnce(seenGeneration uint64) (http.RoundTripper, error) {
-	t.reverifyMu.Lock()
-	defer t.reverifyMu.Unlock()
-
-	t.mu.RLock()
-	current, currentGeneration := t.transport, t.generation
-	t.mu.RUnlock()
-	if currentGeneration != seenGeneration {
-		return current, nil
-	}
-
-	newTransport, err := t.reverify()
-	if err != nil {
-		return nil, err
-	}
-
-	t.mu.Lock()
-	t.transport = newTransport
-	if t.documentAfterReverify != nil {
-		t.document = t.documentAfterReverify()
-	}
-	t.generation++
-	t.mu.Unlock()
-
-	slog.Info("tinfoil: HPKE key rotation detected, re-verified attestation")
-	return newTransport, nil
-}
-
-func (t *ehbpReVerifyingTransport) replace(transport http.RoundTripper, document *client.VerificationDocument) {
-	t.mu.Lock()
-	t.transport = transport
-	t.document = document
-	t.generation++
-	t.mu.Unlock()
-}
-
-func (t *ehbpReVerifyingTransport) verificationDocument() *client.VerificationDocument {
-	t.mu.RLock()
-	defer t.mu.RUnlock()
-	return t.document.Clone()
-}
-
-func (t *ehbpReVerifyingTransport) verifyAndReplace() (*client.GroundTruth, error) {
-	t.reverifyMu.Lock()
-	defer t.reverifyMu.Unlock()
-
-	groundTruth, err := t.secureClient.Verify()
-	if err != nil {
-		return nil, err
-	}
-	newTransport, err := t.build(groundTruth.HPKEPublicKey)
-	if err != nil {
-		return nil, err
-	}
-	t.replace(newTransport, t.secureClient.VerificationDocument())
-	return groundTruth, nil
-}
-
-// resetRequestBody returns a request whose body can be sent again. EHBP
-// encryption consumes the body on the first attempt, so a retry needs a fresh
-// copy obtained through GetBody.
-func resetRequestBody(req *http.Request) (*http.Request, error) {
-	if req.Body == nil || req.Body == http.NoBody {
-		return req, nil
-	}
-	if req.GetBody == nil {
-		return nil, fmt.Errorf("cannot retry request after key rotation: body is not replayable")
-	}
-
-	body, err := req.GetBody()
-	if err != nil {
-		return nil, fmt.Errorf("cannot retry request after key rotation: %w", err)
-	}
-
-	retry := req.Clone(req.Context())
-	retry.Body = body
-	return retry, nil
 }

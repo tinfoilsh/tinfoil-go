@@ -43,7 +43,7 @@ func TestClientGroundTruthJSON(t *testing.T) {
 		EnclaveMeasurement: enclaveMeasurement,
 	}
 	client := &SecureClient{
-		groundTruth: gt,
+		state: &verificationState{groundTruth: gt},
 	}
 
 	encoded, err := client.GroundTruthJSON()
@@ -72,8 +72,7 @@ func TestVerificationDocumentJSON(t *testing.T) {
 		VerifiedAt:         verifiedAt,
 	}
 	client := &SecureClient{
-		groundTruth:          groundTruth,
-		verificationDocument: newVerificationDocument(groundTruth),
+		state: &verificationState{groundTruth: groundTruth, document: newVerificationDocument(groundTruth)},
 	}
 
 	encoded, err := client.VerificationDocumentJSON()
