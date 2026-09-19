@@ -151,7 +151,7 @@ func (s *SecureClient) HTTPClient() (*http.Client, error) {
 		return &TLSBoundRoundTripper{ExpectedPublicKey: groundTruth.TLSPublicKey}, nil
 	}, isCertificateError)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("creating TLS transport: %w", err)
 	}
 	return &http.Client{Transport: transport}, nil
 }

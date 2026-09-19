@@ -51,8 +51,19 @@ func (t *refreshingTransport) admit(ctx context.Context) (http.RoundTripper, *ve
 				t.mu.Unlock()
 				return nil, nil, err
 			}
-			closeIdleConnections(t.transport)
+			// Verification may have advanced while we waited or built. Install
+			// only the current snapshot, serialized with refresh publication.
+			t.client.stateMu.RLock()
+			if t.client.state != state {
+				t.client.stateMu.RUnlock()
+				t.mu.Unlock()
+				closeIdleConnections(transport)
+				continue
+			}
+			previous := t.transport
 			t.state, t.transport = state, transport
+			t.client.stateMu.RUnlock()
+			closeIdleConnections(previous)
 		}
 		transport := t.transport
 		t.mu.Unlock()
@@ -137,7 +148,7 @@ func isCertificateError(err error) bool {
 	var unknownAuthErr x509.UnknownAuthorityError
 	var hostnameErr x509.HostnameError
 	var certVerifyErr *tls.CertificateVerificationError
-	return errors.Is(err, ErrNoTLS) || errors.Is(err, ErrCertMismatch) ||
+	return errors.Is(err, ErrCertMismatch) ||
 		errors.As(err, &certInvalidErr) || errors.As(err, &unknownAuthErr) ||
 		errors.As(err, &hostnameErr) || errors.As(err, &certVerifyErr)
 }

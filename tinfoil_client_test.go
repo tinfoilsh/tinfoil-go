@@ -198,14 +198,14 @@ func TestHTTPClient(t *testing.T) {
 	require.NotNil(t, httpClient, "HTTPClient() should return a non-nil client")
 
 	// The outermost transport binds requests to the enclave/proxy host; the
-	// user-cache-secret layer injects into the body before the EHBP
-	// re-verifying transport (the default mode) seals it.
+	// user-cache-secret layer injects into the body before shared freshness
+	// admission and EHBP sealing. The EHBP builder's admission and proxy-header
+	// behavior is covered by TestEHBPClientPreservesAdmissionAndRebuildsProxyHeader.
 	hostBound, ok := httpClient.Transport.(*hostBoundRoundTripper)
 	require.True(t, ok, "HTTPClient transport should be hostBoundRoundTripper")
 	ucs, ok := hostBound.transport.(*userCacheSecretTransport)
 	require.True(t, ok, "inner transport should inject the user cache secret")
 	require.NotNil(t, ucs.transport)
-	require.Equal(t, TransportEHBP, client.Transport())
 
 	// Verify it returns the same instance (shared client)
 	httpClient2 := client.HTTPClient()

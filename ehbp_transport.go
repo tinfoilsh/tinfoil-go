@@ -213,12 +213,16 @@ func (t *hostBoundRoundTripper) RoundTrip(req *http.Request) (*http.Response, er
 	return t.transport.RoundTrip(req)
 }
 
+type transportVerifier interface {
+	NewTransport(func(*client.GroundTruth) (http.RoundTripper, error), func(error) bool) (http.RoundTripper, error)
+}
+
 // ehbpHTTPClient returns an HTTP client whose request bodies are encrypted to
 // the enclave's attested HPKE public key and that re-verifies attestation when
 // the server rotates its HPKE key. When baseURL routes requests through a proxy
 // whose origin differs from the enclave's, the client adds the
 // X-Tinfoil-Enclave-Url header so the proxy can forward to the verified enclave.
-func ehbpHTTPClient(secureClient *client.SecureClient, baseURL string) (*http.Client, error) {
+func ehbpHTTPClient(secureClient transportVerifier, baseURL string) (*http.Client, error) {
 	transport, err := secureClient.NewTransport(func(groundTruth *client.GroundTruth) (http.RoundTripper, error) {
 		inner, err := buildEHBPTransport(groundTruth.HPKEPublicKey)
 		if err != nil {
@@ -230,7 +234,7 @@ func ehbpHTTPClient(secureClient *client.SecureClient, baseURL string) (*http.Cl
 		return inner, nil
 	}, ehbpidentity.IsKeyConfigError)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("creating EHBP transport: %w", err)
 	}
 	return &http.Client{Transport: transport}, nil
 }

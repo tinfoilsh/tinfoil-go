@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptrace"
+	"net/url"
 	"sync/atomic"
 	"testing"
 	"testing/synctest"
@@ -374,17 +375,6 @@ func TestHTTPClientChecksExpirationOnReusedTLSConnections(t *testing.T) {
 			defer target.Close()
 			roots := x509.NewCertPool()
 			roots.AddCert(target.Certificate())
-			base := http.DefaultTransport.(*http.Transport).Clone()
-			base.Proxy = nil
-			base.TLSClientConfig = &tls.Config{RootCAs: roots}
-			original := http.DefaultTransport
-			http.DefaultTransport = base
-			t.Cleanup(func() { http.DefaultTransport = original })
-			if useProxy {
-				proxy := newConnectProxy()
-				defer proxy.Close()
-				withDefaultProxyTransport(t, target, proxy)
-			}
 			key, err := CertPubkeyFP(target.Certificate())
 			require.NoError(t, err)
 			s := &SecureClient{state: testState(time.Now().Add(time.Hour), key), verify: func(context.Context) (*verificationState, error) {
@@ -393,6 +383,17 @@ func TestHTTPClientChecksExpirationOnReusedTLSConnections(t *testing.T) {
 			hc, err := s.HTTPClient()
 			require.NoError(t, err)
 			defer hc.CloseIdleConnections()
+			// Configure this client's cloned transport before its first request.
+			base := hc.Transport.(*refreshingTransport).transport.(*TLSBoundRoundTripper).getTransport()
+			base.Proxy = nil
+			base.TLSClientConfig.RootCAs = roots
+			if useProxy {
+				proxy := newConnectProxy()
+				defer proxy.Close()
+				proxyURL, err := url.Parse(proxy.URL)
+				require.NoError(t, err)
+				base.Proxy = http.ProxyURL(proxyURL)
+			}
 			for i := range 2 {
 				var reused bool
 				req, _ := http.NewRequest(http.MethodGet, target.URL, nil)
@@ -433,12 +434,12 @@ func TestIsCertificateError(t *testing.T) {
 		{
 			name:     "ErrNoTLS",
 			err:      ErrNoTLS,
-			expected: true,
+			expected: false,
 		},
 		{
 			name:     "wrapped ErrNoTLS",
 			err:      errors.Join(errors.New("connection failed"), ErrNoTLS),
-			expected: true,
+			expected: false,
 		},
 		{
 			name:     "ErrCertMismatch",
@@ -463,6 +464,11 @@ func TestIsCertificateError(t *testing.T) {
 		{
 			name:     "x509.HostnameError",
 			err:      x509.HostnameError{Host: "example.com"},
+			expected: true,
+		},
+		{
+			name:     "tls.CertificateVerificationError",
+			err:      &tls.CertificateVerificationError{Err: errors.New("verification failed")},
 			expected: true,
 		},
 	}

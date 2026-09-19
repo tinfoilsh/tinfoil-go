@@ -3,15 +3,20 @@ package tinfoil
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
+	"net/http/httptest"
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/openai/openai-go/v3"
 	"github.com/openai/openai-go/v3/option"
 	"github.com/stretchr/testify/require"
+	ehbpidentity "github.com/tinfoilsh/encrypted-http-body-protocol/identity"
+	"github.com/tinfoilsh/tinfoil-go/verifier/client"
 )
 
 // roundTripFunc adapts a function to an http.RoundTripper.
@@ -211,6 +216,48 @@ func TestBuildEHBPTransportRequiresKey(t *testing.T) {
 	_, err := buildEHBPTransport("")
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "HPKE public key")
+}
+
+type transportVerifierFunc func(func(*client.GroundTruth) (http.RoundTripper, error), func(error) bool) (http.RoundTripper, error)
+
+func (f transportVerifierFunc) NewTransport(build func(*client.GroundTruth) (http.RoundTripper, error), isKeyError func(error) bool) (http.RoundTripper, error) {
+	return f(build, isKeyError)
+}
+
+func TestEHBPClientPreservesAdmissionAndRebuildsProxyHeader(t *testing.T) {
+	seen := make(chan string, 2)
+	proxy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		seen <- r.Header.Get(enclaveURLHeader)
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer proxy.Close()
+	var rebuild func(*client.GroundTruth) (http.RoundTripper, error)
+	verifier := transportVerifierFunc(func(build func(*client.GroundTruth) (http.RoundTripper, error), isKeyError func(error) bool) (http.RoundTripper, error) {
+		rebuild = build
+		require.True(t, isKeyError(ehbpidentity.NewKeyConfigError(errors.New("rotated"))))
+		return roundTripFunc(func(*http.Request) (*http.Response, error) {
+			return nil, client.ErrFreshnessExpired
+		}), nil
+	})
+	hc, err := ehbpHTTPClient(verifier, proxy.URL)
+	require.NoError(t, err)
+	_, err = hc.Get(proxy.URL)
+	require.ErrorIs(t, err, client.ErrFreshnessExpired, "keep the verifier's admission layer around EHBP")
+	require.Empty(t, seen, "failed admission must not reach the proxy")
+
+	// Exercise the real builder supplied to shared refresh coordination with
+	// both snapshots, including the actual header and EHBP transport layers.
+	for _, host := range []string{"old.example", "new.example"} {
+		transport, err := rebuild(&client.GroundTruth{EnclaveHost: host, HPKEPublicKey: strings.Repeat("01", 32)})
+		require.NoError(t, err)
+		req, err := http.NewRequest(http.MethodGet, proxy.URL, nil)
+		require.NoError(t, err)
+		resp, err := transport.RoundTrip(req)
+		require.NoError(t, err)
+		resp.Body.Close()
+		require.Equal(t, "https://"+host, <-seen)
+		require.Empty(t, req.Header.Get(enclaveURLHeader), "do not mutate the caller's request")
+	}
 }
 
 // TestClientIntegration_TransportModes exercises NewClientWithOptions against a

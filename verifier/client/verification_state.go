@@ -75,9 +75,6 @@ func (s *SecureClient) refresh(call *verificationCall, cancel context.CancelFunc
 	state, err := verify(call.ctx)
 	s.stateMu.Lock()
 	defer s.stateMu.Unlock()
-	if call.ctx.Err() != nil {
-		err = call.ctx.Err()
-	}
 	if err == nil && !time.Now().Before(state.verified.FreshnessExpiresAt) {
 		err = ErrFreshnessExpired
 	}
@@ -86,6 +83,14 @@ func (s *SecureClient) refresh(call *verificationCall, cancel context.CancelFunc
 		if s.state != nil {
 			state.generation = s.state.generation + 1
 		}
+	}
+	// Check at publication, including when the context's timer has not run yet.
+	if ctxErr := call.ctx.Err(); ctxErr != nil {
+		err = ctxErr
+	} else if deadline, ok := call.ctx.Deadline(); ok && !time.Now().Before(deadline) {
+		err = context.DeadlineExceeded
+	}
+	if err == nil {
 		s.state = state
 		call.state = state
 	}
