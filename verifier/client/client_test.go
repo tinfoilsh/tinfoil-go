@@ -21,7 +21,6 @@ func TestVerify(t *testing.T) {
 
 	client := NewSecureClient(enclave, repo)
 	_, err := client.Verify()
-	skipIfEnclaveNotV3(t, err)
 	assert.NoError(t, err)
 }
 
@@ -142,7 +141,6 @@ func TestNewDefaultSecureClient(t *testing.T) {
 	assert.NotEmpty(t, enclave)
 
 	_, err = client.Verify()
-	skipIfEnclaveNotV3(t, err)
 	assert.NoError(t, err)
 }
 
@@ -159,15 +157,5 @@ func TestClientDefaultClient(t *testing.T) {
 	assert.NotEmpty(t, enclave)
 
 	_, err := defaultClient.Verify()
-	skipIfEnclaveNotV3(t, err)
 	assert.NoError(t, err)
-}
-
-// skipIfEnclaveNotV3 skips a live-enclave test while the fleet still serves a
-// pre-v3 attestation document, which the v3 verifier rejects at parse time.
-func skipIfEnclaveNotV3(t *testing.T, err error) {
-	t.Helper()
-	if err != nil && strings.Contains(err.Error(), "unknown object member") {
-		t.Skipf("live enclave does not serve a v3 attestation document yet: %v", err)
-	}
 }

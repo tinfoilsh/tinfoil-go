@@ -41,7 +41,6 @@ func TestVerifyV3FreshnessExpiration(t *testing.T) {
 	raw, err := envelope.Fetch(host, nonce)
 	require.NoError(t, err)
 	verified, err := VerifyDocumentV3(raw, nonce, repo)
-	skipIfEnclaveNotV3(t, err)
 	require.NoError(t, err)
 	doc, err := envelope.Parse(raw)
 	require.NoError(t, err)
