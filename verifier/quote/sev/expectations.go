@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"encoding/hex"
 	"fmt"
-	"slices"
 	"strconv"
 	"strings"
 
@@ -35,19 +34,20 @@ type Expectations struct {
 // the quote: validation options carrying every policy field, the expected
 // launch measurement, the expected REPORT_DATA, and the endorsed CHIP_ID
 // the policy was selected by.
-func Assemble(p *policy.SEVSNPPolicy, q *Quote, launchDigest []byte, reportData [64]byte) (*Expectations, error) {
+func Assemble(p *policy.SEVSNPPolicy, q *Quote, launchDigest string, reportData [64]byte) (*Expectations, error) {
 	opts, err := options(p, q.ProductLine())
 	if err != nil {
 		return nil, err
 	}
-	if len(launchDigest) != 48 {
-		return nil, fmt.Errorf("expected launch digest must be 48 bytes, got %d", len(launchDigest))
+	digest, err := policy.DecodeHex("launch digest", launchDigest, 48)
+	if err != nil {
+		return nil, err
 	}
 	chipID, err := hex.DecodeString(q.identity)
 	if err != nil {
 		return nil, fmt.Errorf("decoding platform identity: %w", err)
 	}
-	opts.Measurement = slices.Clone(launchDigest)
+	opts.Measurement = digest
 	opts.ReportData = reportData[:]
 	opts.ChipID = chipID
 	return &Expectations{

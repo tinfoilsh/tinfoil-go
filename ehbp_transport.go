@@ -39,15 +39,15 @@ const (
 )
 
 type clientConfig struct {
-	enclave             string
-	repo                string
-	expectedMeasurement *measurement.Measurement
-	transport           TransportMode
-	baseURL             string
-	baseURLSet          bool
-	userCacheSecret     string
-	userCacheSecretSet  bool
-	openaiOpts          []option.RequestOption
+	enclave            string
+	repo               string
+	expected           *measurement.Measurement
+	transport          TransportMode
+	baseURL            string
+	baseURLSet         bool
+	userCacheSecret    string
+	userCacheSecretSet bool
+	openaiOpts         []option.RequestOption
 }
 
 // ClientOption configures a Client created with NewClientWithOptions.
@@ -65,7 +65,7 @@ func WithRepo(repo string) ClientOption {
 }
 
 func WithExpectedMeasurement(m *measurement.Measurement) ClientOption {
-	return func(c *clientConfig) { c.expectedMeasurement = m }
+	return func(c *clientConfig) { c.expected = m }
 }
 
 // WithTransport selects the transport mode. Defaults to TransportEHBP.
@@ -120,12 +120,12 @@ func NewClientWithOptions(opts ...ClientOption) (*Client, error) {
 	var secureClient *client.SecureClient
 	if cfg.enclave == "" {
 		var err error
-		secureClient, err = client.NewDefaultClient(cfg.expectedMeasurement)
+		secureClient, err = client.NewDefaultClient(cfg.expected)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create secure client: %w", err)
 		}
 	} else {
-		secureClient = client.NewSecureClient(cfg.enclave, cfg.repo, cfg.expectedMeasurement)
+		secureClient = client.NewSecureClient(cfg.enclave, cfg.repo, cfg.expected)
 	}
 
 	return createClientFromSecureClient(secureClient, cfg.transport, cfg.baseURL,

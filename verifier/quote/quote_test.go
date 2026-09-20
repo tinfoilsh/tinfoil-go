@@ -209,7 +209,7 @@ func TestVerifyUnknownFormat(t *testing.T) {
 }
 
 func TestLayoutRequiresCanonicalRegisterCount(t *testing.T) {
-	register := strings.Repeat("ab", registerSize)
+	register := strings.Repeat("ab", 48)
 	sev := &Authenticated{Platform: policy.PlatformSEVSNP, Measurement: &measurement.Measurement{Type: measurement.SevGuestV2, Registers: []string{register}}}
 	tests := []struct {
 		name        string

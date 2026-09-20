@@ -24,7 +24,7 @@ type Expectations struct {
 // by the quote's authenticated registers under the required VM shape, so a
 // quote outside the endorsed set fails assembly; every register comparison
 // then happens inside the library. The returned name is the resolved
-// measurements-map entry. An empty registers[0] or [1] takes the resolved value.
+// measurements-map entry.
 func Assemble(a *policy.Artifact, p *policy.TDXPolicy, required *policy.Shape, q *Quote, registers [5]string, reportData [64]byte) (*Expectations, string, error) {
 	opts, err := options(p)
 	if err != nil {

@@ -1,7 +1,6 @@
 package client
 
 import (
-	"cmp"
 	"context"
 	"fmt"
 	"time"
@@ -17,9 +16,8 @@ import (
 // to; it is the only field that authorizes an action. The remaining fields
 // feed the client's ground truth.
 type VerifiedDocumentV3 struct {
-	// CodeRepo, CodeTag, and CodeDigest name the verified code artifact;
-	// CodeMeasurement is the expected measurement applied from it.
-	CodeRepo        string
+	// CodeDigest names the verified code artifact; CodeMeasurement is the
+	// expected measurement applied from it.
 	CodeDigest      string
 	CodeTag         string
 	CodeMeasurement *measurement.Measurement
@@ -110,7 +108,6 @@ func VerifyDocumentV3(docBytes, nonce []byte, repo string, expected *measurement
 	}
 
 	return &VerifiedDocumentV3{
-		CodeRepo:           code.Repo,
 		CodeDigest:         code.Digest,
 		CodeTag:            code.Tag,
 		CodeMeasurement:    code.Measurement,
@@ -125,15 +122,11 @@ func VerifyDocumentV3(docBytes, nonce []byte, repo string, expected *measurement
 // returning the authenticated code, platform values, and the earlier of their
 // authenticated freshness expiration times.
 func authenticateReferenceValues(doc *envelope.Document, repo string) (*provenance.Code, *provenance.PlatformEndorsements, time.Time, error) {
-	release, err := provenance.ParseRef(repo)
-	if err != nil {
-		return nil, nil, time.Time{}, err
-	}
 	codeRef, err := doc.ReferenceValuesCollateral(envelope.CollateralSigstoreCodeV1Format)
 	if err != nil {
 		return nil, nil, time.Time{}, err
 	}
-	code, err := provenance.AuthenticateCode(codeRef.SigstoreBundle, release.Repo, cmp.Or(release.Tag, codeRef.Tag), cmp.Or(release.Digest, codeRef.Digest))
+	code, err := provenance.AuthenticateCode(codeRef.SigstoreBundle, repo, codeRef.Tag, codeRef.Digest)
 	if err != nil {
 		return nil, nil, time.Time{}, fmt.Errorf("verifying code measurement: %w", err)
 	}
@@ -207,7 +200,7 @@ func (s *SecureClient) fetchVerification() (*verificationState, error) {
 		return nil, fmt.Errorf("fetching attestation document: %w", err)
 	}
 
-	verified, err := VerifyDocumentV3(docBytes, nonce, s.repo, s.expectedMeasurement)
+	verified, err := VerifyDocumentV3(docBytes, nonce, s.repo, s.expected)
 	if err != nil {
 		return nil, err
 	}
@@ -219,7 +212,7 @@ func (s *SecureClient) fetchVerification() (*verificationState, error) {
 		return nil, fmt.Errorf("binding: %w", err)
 	}
 	groundTruth := &GroundTruth{
-		ConfigRepo:         verified.CodeRepo,
+		ConfigRepo:         s.repo,
 		EnclaveHost:        s.enclave,
 		ReleaseTag:         verified.CodeTag,
 		TLSPublicKey:       tlsFP,

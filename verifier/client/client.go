@@ -30,8 +30,8 @@ type GroundTruth struct {
 }
 
 type SecureClient struct {
-	enclave, repo       string
-	expectedMeasurement *measurement.Measurement
+	enclave, repo string
+	expected      *measurement.Measurement
 
 	stateMu    sync.RWMutex
 	state      *verificationState
@@ -65,9 +65,9 @@ func fetchRouters() ([]string, error) {
 // NewSecureClient creates a new secure client with a given repo and enclave
 func NewSecureClient(enclave, repo string, expected *measurement.Measurement) *SecureClient {
 	return &SecureClient{
-		enclave:             enclave,
-		repo:                repo,
-		expectedMeasurement: cloneMeasurement(expected),
+		enclave:  enclave,
+		repo:     repo,
+		expected: cloneMeasurement(expected),
 	}
 }
 

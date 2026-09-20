@@ -25,9 +25,6 @@ import (
 	"github.com/tinfoilsh/tinfoil-go/verifier/quote/tdx"
 )
 
-// registerSize is the byte length of every measurement register.
-const registerSize = 48
-
 // Authenticated is a signature-verified quote, not yet compared against
 // any expected value.
 type Authenticated struct {
@@ -121,11 +118,7 @@ func Assemble(endorsements *policy.Artifact, code, expected *measurement.Measure
 	}
 	switch q.platform {
 	case policy.PlatformSEVSNP:
-		var digest []byte
-		digest, err = policy.DecodeHex("launch digest", registers[0], registerSize)
-		if err == nil {
-			assembled.sev, err = sev.Assemble(machinePolicy.SEVSNP, q.sev, digest, reportData)
-		}
+		assembled.sev, err = sev.Assemble(machinePolicy.SEVSNP, q.sev, registers[0], reportData)
 	case policy.PlatformTDX:
 		assembled.tdx, assembled.PlatformMeasurementName, err = tdx.Assemble(
 			endorsements, machinePolicy.TDX, shape, q.tdx, [5]string(registers), reportData)
@@ -176,7 +169,7 @@ func layout(code, expected *measurement.Measurement, q *Authenticated) ([]string
 	case code.Type == measurement.SnpTdxMultiPlatformV1 && q.platform == policy.PlatformSEVSNP:
 		registers = []string{code.Registers[0]}
 	case code.Type == measurement.SnpTdxMultiPlatformV1:
-		// Registers are [snp_measurement, rtmr1, rtmr2]; RTMR3 is never measured.
+		// Registers are [snp_measurement, rtmr1, rtmr2].
 		registers = []string{"", "", code.Registers[1], code.Registers[2], ""}
 	case code.Type != q.Measurement.Type:
 		return nil, fmt.Errorf("unsupported code measurement type %q for %s", code.Type, q.platform)

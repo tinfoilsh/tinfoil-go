@@ -5,6 +5,7 @@
 package provenance
 
 import (
+	"cmp"
 	_ "embed"
 	"encoding/hex"
 	"fmt"
@@ -72,14 +73,18 @@ func getDefaultClient() (*Client, error) {
 }
 
 // AuthenticateCode authenticates a code-provenance bundle against the
-// embedded trust root and the repo's pinned signing identity, returning
-// the verified content.
-func AuthenticateCode(bundleJSON []byte, repo, tag, hexDigest string) (*Code, error) {
+// embedded trust root and the signing identity pinned by ref,
+// owner/name[@tag][@sha256:digest], returning the verified content.
+func AuthenticateCode(bundleJSON []byte, ref, tag, hexDigest string) (*Code, error) {
+	m := refRE.FindStringSubmatch(ref)
+	if m == nil {
+		return nil, fmt.Errorf("invalid release reference %q: want owner/name[@tag][@sha256:digest]", ref)
+	}
 	c, err := getDefaultClient()
 	if err != nil {
 		return nil, err
 	}
-	return c.AuthenticateCode(bundleJSON, repo, tag, hexDigest)
+	return c.AuthenticateCode(bundleJSON, m[1], cmp.Or(m[2], tag), cmp.Or(m[3], hexDigest))
 }
 
 // AuthenticateEndorsements authenticates a platform-endorsements bundle
@@ -141,20 +146,6 @@ var sha256DigestRE = regexp.MustCompile(`^[0-9a-f]{64}$`)
 
 // refRE matches owner/name[@tag][@sha256:digest]; the tag group is lazy so @sha256: alone is a digest.
 var refRE = regexp.MustCompile(`^([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)(?:@([^@\s~^:?*\[\\]+))??(?:@sha256:([0-9a-f]{64}))?$`)
-
-// Release is a parsed release reference; an empty Tag or Digest pins nothing.
-type Release struct {
-	Repo, Tag, Digest string
-}
-
-// ParseRef parses owner/name[@tag][@sha256:digest].
-func ParseRef(ref string) (Release, error) {
-	m := refRE.FindStringSubmatch(strings.TrimSpace(ref))
-	if m == nil {
-		return Release{}, fmt.Errorf("invalid release reference %q: want owner/name[@tag][@sha256:digest]", ref)
-	}
-	return Release{Repo: m[1], Tag: m[2], Digest: m[3]}, nil
-}
 
 // signingIdentity returns the anchored SAN regex accepted for artifacts
 // signed from repo: one workflow file directly under the repository's

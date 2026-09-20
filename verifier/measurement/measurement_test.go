@@ -13,17 +13,6 @@ func TestAttestationFingerprint(t *testing.T) {
 		fingerprint string
 	}{
 		{
-			name: "multi-register: SHA-256 over the type URL and all registers",
-			measurement: &Measurement{
-				Type: SnpTdxMultiPlatformV1,
-				Registers: []string{
-					"33162608e171154bae88886365341dad7eb5821ba87785041f7f2f6281511a65b01069894cfebad5370939e05a0a1ca1",
-					"896d8b9138548e63779a121b8c2b1a087ddaa39901e1fd096319ff0005b9699fe04dd13adb33063a1d65dd4bcdc2f5b1",
-					"fbe40d6adb70ef8047dbfbd9be05fcf39d9dd32d5b88c70dd5c06024d3a8d79a5d2e9e9723d3b3cb206bfd887eddcdec",
-				},
-			},
-			fingerprint: "cb959547ad2a88884f9a37032aa2ff84af2f014187009f0f7a41e947dc757ab1",
-		}, {
 			name: "TDX multi-register",
 			measurement: &Measurement{
 				Type: TdxGuestV2,
