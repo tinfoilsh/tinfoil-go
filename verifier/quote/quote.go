@@ -95,8 +95,8 @@ func Authenticate(doc *envelope.Document) (*Authenticated, error) {
 // authenticated identity; for TDX, the platform measurement resolved under
 // the required VM shape), the code measurement, and the envelope's
 // REPORT_DATA. A machine absent from the artifact is not endorsed. A
-// register set in expected fills an empty slot or must equal its source.
-func Assemble(endorsements *policy.Artifact, code, expected *measurement.Measurement, shape *policy.Shape, reportData [64]byte, q *Authenticated) (*AssembledPolicy, error) {
+// register set in pins fills an empty slot or must equal its source.
+func Assemble(endorsements *policy.Artifact, code, pins *measurement.Measurement, shape *policy.Shape, reportData [64]byte, q *Authenticated) (*AssembledPolicy, error) {
 	if code == nil {
 		return nil, fmt.Errorf("assembling policy: expected code measurement is required")
 	}
@@ -111,7 +111,7 @@ func Assemble(endorsements *policy.Artifact, code, expected *measurement.Measure
 		PolicyName: name,
 		quote:      *q,
 	}
-	registers, err := layout(code, expected, q)
+	registers, err := layout(code, pins, q)
 	if err != nil {
 		return nil, err
 	}
@@ -144,12 +144,12 @@ func (p *AssembledPolicy) Validate() error {
 }
 
 // Verify composes Authenticate, Assemble, and Validate.
-func Verify(doc *envelope.Document, endorsements *policy.Artifact, code, expected *measurement.Measurement, shape *policy.Shape, reportData [64]byte) (*AssembledPolicy, *Authenticated, error) {
+func Verify(doc *envelope.Document, endorsements *policy.Artifact, code, pins *measurement.Measurement, shape *policy.Shape, reportData [64]byte) (*AssembledPolicy, *Authenticated, error) {
 	q, err := Authenticate(doc)
 	if err != nil {
 		return nil, nil, err
 	}
-	assembled, err := Assemble(endorsements, code, expected, shape, reportData, q)
+	assembled, err := Assemble(endorsements, code, pins, shape, reportData, q)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -160,7 +160,7 @@ func Verify(doc *envelope.Document, endorsements *policy.Artifact, code, expecte
 }
 
 // layout lays code out in the enclave's registers, "" for platform-supplied ones, then applies pins.
-func layout(code, expected *measurement.Measurement, q *Authenticated) ([]string, error) {
+func layout(code, pins *measurement.Measurement, q *Authenticated) ([]string, error) {
 	if code.Type != measurement.SnpTdxMultiPlatformV1 || len(code.Registers) != 3 {
 		return nil, fmt.Errorf("code measurement is %s with %d registers, want %s with 3", code.Type, len(code.Registers), measurement.SnpTdxMultiPlatformV1)
 	}
@@ -169,13 +169,13 @@ func layout(code, expected *measurement.Measurement, q *Authenticated) ([]string
 	if q.platform == policy.PlatformTDX {
 		registers = []string{"", "", code.Registers[1], code.Registers[2], ""}
 	}
-	if expected == nil {
+	if pins == nil {
 		return registers, nil
 	}
-	if expected.Type != q.Measurement.Type || len(expected.Registers) != len(registers) {
-		return nil, fmt.Errorf("expected measurement is %s with %d registers, enclave is %s with %d", expected.Type, len(expected.Registers), q.Measurement.Type, len(registers))
+	if pins.Type != q.Measurement.Type || len(pins.Registers) != len(registers) {
+		return nil, fmt.Errorf("pinned measurement is %s with %d registers, enclave is %s with %d", pins.Type, len(pins.Registers), q.Measurement.Type, len(registers))
 	}
-	for i, pin := range expected.Registers {
+	for i, pin := range pins.Registers {
 		if pin != "" && registers[i] != "" && !strings.EqualFold(registers[i], pin) {
 			return nil, fmt.Errorf("register %d pinned to %s, release measures %s", i, pin, registers[i])
 		}

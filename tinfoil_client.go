@@ -20,13 +20,13 @@ type Client struct {
 
 // NewClientWithParams creates a new secure OpenAI client with explicit enclave and repo parameters
 func NewClientWithParams(enclave, repo string, openaiOpts ...option.RequestOption) (*Client, error) {
-	secureClient := client.NewSecureClient(enclave, repo, nil)
+	secureClient := client.NewSecureClient(enclave, repo)
 	return createClientFromSecureClient(secureClient, defaultTransportMode, "", resolveUserCacheSecret("", false), openaiOpts...)
 }
 
 // NewClient creates a new secure OpenAI client using default parameters
 func NewClient(openaiOpts ...option.RequestOption) (*Client, error) {
-	secureClient, err := client.NewDefaultClient(nil)
+	secureClient, err := client.NewDefaultClient()
 	if err != nil {
 		return nil, fmt.Errorf("failed to create secure client: %w", err)
 	}

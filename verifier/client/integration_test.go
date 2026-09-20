@@ -58,7 +58,7 @@ func TestBasicChatCompletion(t *testing.T) {
 	enclave, repo, apiKey := skipIfMissingEnvVars(t)
 
 	// Create secure client
-	client := NewSecureClient(enclave, repo, nil)
+	client := NewSecureClient(enclave, repo)
 
 	// Prepare chat completion request
 	request := ChatCompletionRequest{

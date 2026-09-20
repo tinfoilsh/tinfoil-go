@@ -88,10 +88,11 @@ func (v *VerifiedDocumentV3) transportKeys() (tlsFP, hpkeKey string, err error) 
 //
 // repo is the code repository the caller trusts (pins the sigstore-code
 // signing identity); the repo named inside the document is not trusted.
-// repo may pin a tag or digest, owner/name[@tag][@sha256:digest]; expected pins registers.
+// repo may pin a tag or digest, owner/name[@tag][@sha256:digest]. pins are
+// enclave registers to pin; empty ones keep their source.
 // Channel binding (TLS fingerprint / HPKE key) is the caller's
 // responsibility, using the returned endorsed crypto material.
-func VerifyDocumentV3(docBytes, nonce []byte, repo string, expected *measurement.Measurement) (*VerifiedDocumentV3, error) {
+func VerifyDocumentV3(docBytes, nonce []byte, repo string, pins *measurement.Measurement) (*VerifiedDocumentV3, error) {
 	doc, expectedReportData, err := envelope.Check(docBytes, nonce)
 	if err != nil {
 		return nil, fmt.Errorf("envelope: %w", err)
@@ -102,7 +103,7 @@ func VerifyDocumentV3(docBytes, nonce []byte, repo string, expected *measurement
 		return nil, fmt.Errorf("reference values: %w", err)
 	}
 
-	_, authenticated, err := quote.Verify(doc, endorsements.Artifact, code.Measurement, expected, code.Shape, expectedReportData)
+	_, authenticated, err := quote.Verify(doc, endorsements.Artifact, code.Measurement, pins, code.Shape, expectedReportData)
 	if err != nil {
 		return nil, fmt.Errorf("cpu evidence: %w", err)
 	}
@@ -200,7 +201,7 @@ func (s *SecureClient) fetchVerification() (*verificationState, error) {
 		return nil, fmt.Errorf("fetching attestation document: %w", err)
 	}
 
-	verified, err := VerifyDocumentV3(docBytes, nonce, s.repo, s.expected)
+	verified, err := VerifyDocumentV3(docBytes, nonce, s.repo, s.pins)
 	if err != nil {
 		return nil, err
 	}

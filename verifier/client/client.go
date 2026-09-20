@@ -31,7 +31,7 @@ type GroundTruth struct {
 
 type SecureClient struct {
 	enclave, repo string
-	expected      *measurement.Measurement
+	pins          *measurement.Measurement
 
 	stateMu    sync.RWMutex
 	state      *verificationState
@@ -44,8 +44,8 @@ var (
 	defaultRouterURL  = "https://atc.tinfoil.sh/routers"
 )
 
-func newFallbackClient(expected *measurement.Measurement) *SecureClient {
-	return NewSecureClient("inference.tinfoil.sh", defaultRouterRepo, expected)
+func newFallbackClient() *SecureClient {
+	return NewSecureClient("inference.tinfoil.sh", defaultRouterRepo)
 }
 
 func fetchRouters() ([]string, error) {
@@ -63,27 +63,34 @@ func fetchRouters() ([]string, error) {
 }
 
 // NewSecureClient creates a new secure client with a given repo and enclave
-func NewSecureClient(enclave, repo string, expected *measurement.Measurement) *SecureClient {
+func NewSecureClient(enclave, repo string) *SecureClient {
 	return &SecureClient{
-		enclave:  enclave,
-		repo:     repo,
-		expected: cloneMeasurement(expected),
+		enclave: enclave,
+		repo:    repo,
 	}
+}
+
+// NewPinnedClient is NewSecureClient with pinned enclave registers; empty
+// registers keep their source.
+func NewPinnedClient(enclave, repo string, pins *measurement.Measurement) *SecureClient {
+	c := NewSecureClient(enclave, repo)
+	c.pins = cloneMeasurement(pins)
+	return c
 }
 
 // NewDefaultClient creates a new secure client with fallback mechanism.
 // It tries to fetch routers from the router service, attempts to verify each one,
 // and falls back to inference.tinfoil.sh if all routers fail.
-func NewDefaultClient(expected *measurement.Measurement) (*SecureClient, error) {
+func NewDefaultClient() (*SecureClient, error) {
 	routers, err := fetchRouters()
 	if err != nil {
 		// If we can't get routers, fall back to inference.tinfoil.sh immediately
-		return newFallbackClient(expected), nil
+		return newFallbackClient(), nil
 	}
 
 	// Try each router in sequence
 	for _, routerURL := range routers {
-		client := NewSecureClient(routerURL, defaultRouterRepo, expected)
+		client := NewSecureClient(routerURL, defaultRouterRepo)
 
 		// Return first working router
 		_, err := client.Verify()
@@ -92,7 +99,7 @@ func NewDefaultClient(expected *measurement.Measurement) (*SecureClient, error) 
 		}
 	}
 
-	return newFallbackClient(expected), nil
+	return newFallbackClient(), nil
 }
 
 // Enclave returns the enclave URL
@@ -236,7 +243,7 @@ func parseHeadersJSON(headersJSON string) (map[string]string, error) {
 
 // VerifyJSON verifies an enclave against a repo and returns the verification data as a JSON string
 func VerifyJSON(enclave, repo string) (string, error) {
-	client := NewSecureClient(enclave, repo, nil)
+	client := NewSecureClient(enclave, repo)
 	if _, err := client.Verify(); err != nil {
 		return "", err
 	}

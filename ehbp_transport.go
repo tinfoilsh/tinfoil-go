@@ -41,7 +41,7 @@ const (
 type clientConfig struct {
 	enclave            string
 	repo               string
-	expected           *measurement.Measurement
+	pins               *measurement.Measurement
 	transport          TransportMode
 	baseURL            string
 	baseURLSet         bool
@@ -64,10 +64,10 @@ func WithRepo(repo string) ClientOption {
 	return func(c *clientConfig) { c.repo = repo }
 }
 
-// WithExpectedMeasurement pins enclave registers in addition to the release's
-// code measurement; empty registers keep their source. nil pins nothing.
-func WithExpectedMeasurement(m *measurement.Measurement) ClientOption {
-	return func(c *clientConfig) { c.expected = m }
+// WithPinnedRegisters pins enclave registers in addition to the release's code
+// measurement; empty registers keep their source. Requires WithEnclave.
+func WithPinnedRegisters(m *measurement.Measurement) ClientOption {
+	return func(c *clientConfig) { c.pins = m }
 }
 
 // WithTransport selects the transport mode. Defaults to TransportEHBP.
@@ -118,16 +118,19 @@ func NewClientWithOptions(opts ...ClientOption) (*Client, error) {
 			return nil, fmt.Errorf("invalid base URL: %w", err)
 		}
 	}
+	if cfg.pins != nil && cfg.enclave == "" {
+		return nil, fmt.Errorf("pinned registers require an enclave")
+	}
 
 	var secureClient *client.SecureClient
 	if cfg.enclave == "" {
 		var err error
-		secureClient, err = client.NewDefaultClient(cfg.expected)
+		secureClient, err = client.NewDefaultClient()
 		if err != nil {
 			return nil, fmt.Errorf("failed to create secure client: %w", err)
 		}
 	} else {
-		secureClient = client.NewSecureClient(cfg.enclave, cfg.repo, cfg.expected)
+		secureClient = client.NewPinnedClient(cfg.enclave, cfg.repo, cfg.pins)
 	}
 
 	return createClientFromSecureClient(secureClient, cfg.transport, cfg.baseURL,

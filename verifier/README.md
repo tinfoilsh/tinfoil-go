@@ -25,7 +25,7 @@ go get github.com/tinfoilsh/tinfoil-go@latest
 import "github.com/tinfoilsh/tinfoil-go/verifier/client"
 
 // 1. Create a client
-tinfoilClient := client.NewSecureClient("enclave.example.com", "org/repo", nil)
+tinfoilClient := client.NewSecureClient("enclave.example.com", "org/repo")
 
 // 2. Perform HTTP requests – attestation happens automatically
 resp, err := tinfoilClient.Get("/api/data", nil)
@@ -141,7 +141,7 @@ registers keep their source:
 ```go
 import "github.com/tinfoilsh/tinfoil-go/verifier/measurement"
 
-secureClient := client.NewSecureClient("enclave.example.com", "org/repo", &measurement.Measurement{Type: measurement.TdxGuestV2, Registers: []string{"", "", "", "", rtmr3}})
+secureClient := client.NewPinnedClient("enclave.example.com", "org/repo", &measurement.Measurement{Type: measurement.TdxGuestV2, Registers: []string{"", "", "", "", rtmr3}})
 ```
 
 ## JavaScript / TypeScript / WASM
