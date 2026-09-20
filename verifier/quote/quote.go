@@ -15,7 +15,6 @@ package quote
 import (
 	"cmp"
 	"fmt"
-	"slices"
 	"strings"
 
 	"github.com/tinfoilsh/tinfoil-go/verifier/envelope"
@@ -162,24 +161,13 @@ func Verify(doc *envelope.Document, endorsements *policy.Artifact, code, expecte
 
 // layout lays code out in the enclave's registers, "" for platform-supplied ones, then applies pins.
 func layout(code, expected *measurement.Measurement, q *Authenticated) ([]string, error) {
-	var registers []string
-	switch {
-	case code.Type == measurement.SnpTdxMultiPlatformV1 && len(code.Registers) != 3:
-		return nil, fmt.Errorf("multiplatform code measurement carries %d registers, want 3", len(code.Registers))
-	case code.Type == measurement.SnpTdxMultiPlatformV1 && q.platform == policy.PlatformSEVSNP:
-		registers = []string{code.Registers[0]}
-	case code.Type == measurement.SnpTdxMultiPlatformV1:
-		// Registers are [snp_measurement, rtmr1, rtmr2].
+	if code.Type != measurement.SnpTdxMultiPlatformV1 || len(code.Registers) != 3 {
+		return nil, fmt.Errorf("code measurement is %s with %d registers, want %s with 3", code.Type, len(code.Registers), measurement.SnpTdxMultiPlatformV1)
+	}
+	// Registers are [snp_measurement, rtmr1, rtmr2].
+	registers := []string{code.Registers[0]}
+	if q.platform == policy.PlatformTDX {
 		registers = []string{"", "", code.Registers[1], code.Registers[2], ""}
-	case code.Type != q.Measurement.Type:
-		return nil, fmt.Errorf("unsupported code measurement type %q for %s", code.Type, q.platform)
-	case len(code.Registers) != len(q.Measurement.Registers):
-		return nil, fmt.Errorf("%s code measurement carries %d registers, want %d", q.platform, len(code.Registers), len(q.Measurement.Registers))
-	case q.platform == policy.PlatformTDX:
-		// Registers are [mrtd, rtmr0, rtmr1, rtmr2, rtmr3].
-		registers = append([]string{"", ""}, code.Registers[2:]...)
-	default:
-		registers = slices.Clone(code.Registers)
 	}
 	if expected == nil {
 		return registers, nil

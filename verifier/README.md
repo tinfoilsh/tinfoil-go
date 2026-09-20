@@ -135,14 +135,11 @@ also need to migrate before adopting the v3 framework.
 
 ## Pinned registers
 
-To pin a register the release does not determine, such as a sealed RTMR3, set
-it in the enclave's layout; empty registers keep their source:
+Pin a register the release does not determine, such as a sealed RTMR3; empty
+registers keep their source:
 
 ```go
-secureClient := client.NewSecureClient(enclave, repo, &measurement.Measurement{
-	Type:      measurement.TdxGuestV2,
-	Registers: []string{"", "", "", "", expectedRTMR3},
-})
+secureClient := client.NewSecureClient(enclave, repo, &measurement.Measurement{Type: measurement.TdxGuestV2, Registers: []string{"", "", "", "", rtmr3}})
 ```
 
 ## JavaScript / TypeScript / WASM

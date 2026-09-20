@@ -133,7 +133,7 @@ func TestVerifySEV(t *testing.T) {
 	// exercised, and the mismatch case is covered below.
 	q, err := Authenticate(doc)
 	require.NoError(t, err)
-	assembled, verified, err := Verify(doc, artifact, q.Measurement, nil, testShape, reportData)
+	assembled, verified, err := Verify(doc, artifact, asCode(q.Measurement), nil, testShape, reportData)
 	require.NoError(t, err)
 	assert.Equal(t, policy.PlatformSEVSNP, verified.Platform())
 	assert.Equal(t, "amd-genoa-prod", assembled.PolicyName)
@@ -146,14 +146,12 @@ func TestVerifySEV(t *testing.T) {
 	// Wrong REPORT_DATA must reject even with a valid signature.
 	wrongReportData := reportData
 	wrongReportData[0] ^= 0xff
-	_, _, err = Verify(doc, artifact, q.Measurement, nil, testShape, wrongReportData)
+	_, _, err = Verify(doc, artifact, asCode(q.Measurement), nil, testShape, wrongReportData)
 	assert.ErrorContains(t, err, "REPORT_DATA")
 
 	// A launch measurement differing from the code expectation must reject.
-	wrongMeasurement := &measurement.Measurement{
-		Type:      measurement.SevGuestV2,
-		Registers: []string{strings.Repeat("ab", 48)},
-	}
+	wrongMeasurement := asCode(q.Measurement)
+	wrongMeasurement.Registers[0] = strings.Repeat("ab", 48)
 	_, _, err = Verify(doc, artifact, wrongMeasurement, nil, testShape, reportData)
 	assert.Error(t, err)
 
@@ -162,26 +160,26 @@ func TestVerifySEV(t *testing.T) {
 	assert.ErrorContains(t, err, "code measurement is required")
 
 	// An assembly without the required VM shape must reject.
-	_, err = Assemble(artifact, q.Measurement, nil, nil, reportData, q)
+	_, err = Assemble(artifact, asCode(q.Measurement), nil, nil, reportData, q)
 	assert.ErrorContains(t, err, "VM shape is required")
 
 	// A machine absent from the artifact must reject.
 	unendorsed := *artifact
 	unendorsed.Machines = map[string]string{}
-	_, _, err = Verify(doc, &unendorsed, q.Measurement, nil, testShape, reportData)
+	_, _, err = Verify(doc, &unendorsed, asCode(q.Measurement), nil, testShape, reportData)
 	assert.ErrorContains(t, err, "not endorsed")
 
 	// v3 is single-request: a document without its endorsement collateral is
 	// rejected, never patched up with a network fetch.
 	noVCEK := *doc
 	noVCEK.Collateral = nil
-	_, _, err = Verify(&noVCEK, artifact, q.Measurement, nil, testShape, reportData)
+	_, _, err = Verify(&noVCEK, artifact, asCode(q.Measurement), nil, testShape, reportData)
 	assert.ErrorContains(t, err, "no amd-vcek endorsement collateral")
 
 	// A document without the CRL collateral must reject.
 	noCRL := *doc
 	noCRL.Collateral = doc.Collateral[:1]
-	_, _, err = Verify(&noCRL, artifact, q.Measurement, nil, testShape, reportData)
+	_, _, err = Verify(&noCRL, artifact, asCode(q.Measurement), nil, testShape, reportData)
 	assert.ErrorContains(t, err, "no amd-crl endorsement collateral")
 }
 
@@ -210,34 +208,16 @@ func TestVerifyUnknownFormat(t *testing.T) {
 
 func TestLayoutRequiresCanonicalRegisterCount(t *testing.T) {
 	register := strings.Repeat("ab", 48)
-	sev := &Authenticated{Platform: policy.PlatformSEVSNP, Measurement: &measurement.Measurement{Type: measurement.SevGuestV2, Registers: []string{register}}}
-	tests := []struct {
-		name        string
-		measurement *measurement.Measurement
-		wantError   string
-	}{
-		{
-			name: "SEV guest",
-			measurement: &measurement.Measurement{
-				Type:      measurement.SevGuestV2,
-				Registers: []string{register, register},
-			},
-			wantError: "sev-snp code measurement carries 2 registers, want 1",
-		},
-		{
-			name: "multiplatform",
-			measurement: &measurement.Measurement{
-				Type:      measurement.SnpTdxMultiPlatformV1,
-				Registers: []string{register},
-			},
-			wantError: "multiplatform code measurement carries 1 registers, want 3",
-		},
-	}
+	sev := &Authenticated{platform: policy.PlatformSEVSNP, Measurement: &measurement.Measurement{Type: measurement.SevGuestV2, Registers: []string{register}}}
+	code := &measurement.Measurement{Type: measurement.SnpTdxMultiPlatformV1, Registers: []string{register}}
+	_, err := layout(code, nil, sev)
+	assert.ErrorContains(t, err, "code measurement is https://tinfoil.sh/predicate/snp-tdx-multiplatform/v1 with 1 registers")
+}
 
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			_, err := layout(test.measurement, nil, sev)
-			assert.ErrorContains(t, err, test.wantError)
-		})
+// asCode wraps a guest measurement as the multiplatform code measurement that produces it.
+func asCode(m *measurement.Measurement) *measurement.Measurement {
+	if m.Type == measurement.TdxGuestV2 {
+		return &measurement.Measurement{Type: measurement.SnpTdxMultiPlatformV1, Registers: []string{"", m.Registers[2], m.Registers[3]}}
 	}
+	return &measurement.Measurement{Type: measurement.SnpTdxMultiPlatformV1, Registers: []string{m.Registers[0], "", ""}}
 }
