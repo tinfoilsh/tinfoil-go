@@ -3,13 +3,14 @@ package main
 //go:generate go run ../../rootfetch/main.go -o ../../provenance/trusted_root.json
 
 import (
+	"encoding/json"
 	"log"
 
 	"github.com/tinfoilsh/tinfoil-go/verifier/client"
 )
 
 func main() {
-	tinfoilClient, err := client.NewDefaultClient()
+	tinfoilClient, err := client.NewDefaultClient(nil)
 	if err != nil {
 		log.Fatalf("failed to create client: %v", err)
 	}
@@ -23,7 +24,8 @@ func main() {
 		"Authorization": "Bearer <TINFOIL_API_KEY>",
 	}
 
-	resp, err := tinfoilClient.Post("/v1/chat/completions", headers, body)
+	headersJSON, _ := json.Marshal(headers)
+	resp, err := tinfoilClient.Request("POST", "/v1/chat/completions", string(headersJSON), body)
 	if err != nil {
 		log.Fatalf("request failed: %v", err)
 	}

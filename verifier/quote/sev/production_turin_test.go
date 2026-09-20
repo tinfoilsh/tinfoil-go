@@ -70,7 +70,7 @@ func TestProductionTurinFixtures(t *testing.T) {
 			}, expectedPlatformInfo(fixture.Policy.SEVSNP))
 			var reportData [64]byte
 			copy(reportData[:], report.ReportData)
-			expected, err := Assemble(fixture.Policy.SEVSNP, q, report.Measurement, reportData)
+			expected, err := Assemble(fixture.Policy.SEVSNP, q, hex.EncodeToString(report.Measurement), reportData)
 			require.NoError(t, err)
 			require.NoError(t, expected.Validate(q))
 
@@ -78,7 +78,7 @@ func TestProductionTurinFixtures(t *testing.T) {
 			// reject that expectation: this bit is exact policy, not a permission.
 			wrongPolicy := *fixture.Policy.SEVSNP
 			wrongPolicy.PlatformInfo.ECCEnabled = false
-			expected, err = Assemble(&wrongPolicy, q, report.Measurement, reportData)
+			expected, err = Assemble(&wrongPolicy, q, hex.EncodeToString(report.Measurement), reportData)
 			require.NoError(t, err)
 			require.Error(t, expected.Validate(q))
 		})

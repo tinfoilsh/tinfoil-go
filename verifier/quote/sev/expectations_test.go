@@ -4,7 +4,6 @@ import (
 	"encoding/hex"
 	"os"
 	"path/filepath"
-	"slices"
 	"strings"
 	"testing"
 
@@ -184,11 +183,10 @@ func TestValidateBox2TurinAttestation(t *testing.T) {
 	a := loadFixture(t)
 	_, p, err := a.PolicyFor(identity, policy.PlatformSEVSNP)
 	require.NoError(t, err)
-	digest := slices.Clone(report.GetMeasurement())
-	expectations, err := Assemble(p.SEVSNP, q, digest, reportData)
+	expectations, err := Assemble(p.SEVSNP, q, hex.EncodeToString(report.GetMeasurement()), reportData)
 	require.NoError(t, err)
 	require.NoError(t, expectations.Validate(q))
-	digest[0] ^= 0xff
+	reportData[0] ^= 0xff
 	require.NoError(t, expectations.Validate(q), "caller mutation must not change assembled expectations")
 }
 

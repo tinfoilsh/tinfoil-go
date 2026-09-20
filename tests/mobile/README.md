@@ -8,6 +8,11 @@ On macOS, run `bash scripts/setup-mobile.sh`, then
 Apple targets and type-checks `Smoke.swift` against the macOS framework. It
 creates no release and contacts no enclave.
 
+`ParseVerificationOptionsJSON` accepts `pinned_registers` and integer
+`freshness_max_age_ns` options. Pass the result to constructors or verification;
+`nil` uses defaults. See [Smoke.swift](Smoke.swift)
+for client construction and offline verification examples.
+
 V3 removes the old attestation-bundle discovery/verification APIs. Swift callers
 using `setAttestationBundleURL` or package-level bundle helpers must migrate to
 the v3 enclave document flow before adopting this framework. The smoke test

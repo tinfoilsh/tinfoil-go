@@ -5,6 +5,7 @@
 package provenance
 
 import (
+	"cmp"
 	_ "embed"
 	"encoding/hex"
 	"fmt"
@@ -71,15 +72,14 @@ func getDefaultClient() (*Client, error) {
 	return defaultClient, defaultClientErr
 }
 
-// AuthenticateCode authenticates a code-provenance bundle against the
-// embedded trust root and the repo's pinned signing identity, returning
-// the verified content.
-func AuthenticateCode(bundleJSON []byte, repo, tag, hexDigest string) (*Code, error) {
+// AuthenticateCode verifies code provenance using the embedded trust root and
+// the caller's owner/name[@tag][@sha256:digest] reference.
+func AuthenticateCode(bundleJSON []byte, ref, tag, hexDigest string) (*Code, error) {
 	c, err := getDefaultClient()
 	if err != nil {
 		return nil, err
 	}
-	return c.AuthenticateCode(bundleJSON, repo, tag, hexDigest)
+	return c.AuthenticateCode(bundleJSON, ref, tag, hexDigest)
 }
 
 // AuthenticateEndorsements authenticates a platform-endorsements bundle
@@ -138,6 +138,9 @@ func newClientFromJSON(trustRootJSON []byte, verifierOptions ...verify.VerifierO
 var repoNameRE = regexp.MustCompile(`^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$`)
 var gitCommitRE = regexp.MustCompile(`^[0-9a-f]{40}$`)
 var sha256DigestRE = regexp.MustCompile(`^[0-9a-f]{64}$`)
+
+// refRE matches owner/name[@tag][@sha256:digest]; the tag group is lazy so @sha256: alone is a digest.
+var refRE = regexp.MustCompile(`^([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)(?:@([^@\s~^:?*\[\\]+))??(?:@sha256:([0-9a-f]{64}))?$`)
 
 // signingIdentity returns the anchored SAN regex accepted for artifacts
 // signed from repo: one workflow file directly under the repository's
@@ -240,9 +243,6 @@ func (c *Client) verifyBundleWithIdentity(bundleJSON []byte, sanRegex, hexDigest
 		return nil, nil, err
 	}
 
-	// SPEC §5.4: WithArtifactDigest matched the digest against ANY subject in
-	// the in-toto statement; narrow that to subject[0] only, matching the SPEC
-	// and the rs/py/js SDKs.
 	if err := enforceSubject0Digest(result, hexDigest); err != nil {
 		return nil, nil, err
 	}
@@ -283,11 +283,16 @@ type Code struct {
 	Shape *policy.Shape
 }
 
-// AuthenticateCode authenticates a code-provenance bundle against the
-// repo's signing identity and the expected artifact digest, and returns
-// the verified code measurement plus the VM shape the artifact declares
-// (required).
-func (c *Client) AuthenticateCode(bundleJSON []byte, repo, tag, hexDigest string) (*Code, error) {
+// AuthenticateCode verifies code provenance against owner/name[@tag][@sha256:digest].
+// Pins in ref take precedence over the document's tag and digest hints.
+func (c *Client) AuthenticateCode(bundleJSON []byte, ref, tag, hexDigest string) (*Code, error) {
+	match := refRE.FindStringSubmatch(ref)
+	if match == nil {
+		return nil, fmt.Errorf("invalid release reference %q: want owner/name[@tag][@sha256:digest]", ref)
+	}
+	repo := match[1]
+	tag = cmp.Or(match[2], tag)
+	hexDigest = cmp.Or(match[3], hexDigest)
 	result, err := c.verifyBundle(bundleJSON, repo, hexDigest)
 	if err != nil {
 		return nil, fmt.Errorf("verifying bundle: %w", err)
@@ -307,7 +312,6 @@ func (c *Client) AuthenticateCode(bundleJSON []byte, repo, tag, hexDigest string
 	return &Code{AuthenticatedArtifact: authenticated, Measurement: m, Shape: shape}, nil
 }
 
-// shapeFromPredicate parses the required vm_shape predicate member.
 func shapeFromPredicate(fields map[string]*structpb.Value) (*policy.Shape, error) {
 	v, ok := fields["vm_shape"]
 	if !ok {

@@ -80,13 +80,13 @@ if err != nil {
 // see https://pkg.go.dev/github.com/openai/openai-go/v3 for API documentation
 ```
 
-## Verification document
+## Verification result
 
 The client retains the result used by its active secure transport:
 
 ```go
-document := client.VerificationDocument()
-fmt.Println(document.ConfigRepo, document.ReleaseTag, document.ReleaseDigest)
+document := client.Verification()
+fmt.Println(document.ConfigRepo, document.CodeTag, document.CodeDigest)
 fmt.Println(document.Verifier.Name, document.Verifier.Version)
 fmt.Println(document.VerifiedAt)
 ```
@@ -97,9 +97,12 @@ guarantee.
 
 ## Advanced Functionality
 
+Use `WithVerificationOptions` to configure
+[register pins and freshness](verifier/README.md#verification-options).
+
 ```go
 // Create a secure client with explicit enclave and repo parameters
-client, err := tinfoil.NewClientWithParams(enclave, repo)
+client, err := tinfoil.NewClientWithOptions(tinfoil.WithEnclave(enclave), tinfoil.WithRepo(repo))
 if err != nil {
 	return fmt.Errorf("Failed to create client: %v", err)
 }

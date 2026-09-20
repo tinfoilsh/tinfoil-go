@@ -71,19 +71,25 @@ func TestValidateFreshnessTime(t *testing.T) {
 		{Type: "Tlog", Timestamp: now.Add(-2 * time.Hour)},
 		{Type: "Tlog", Timestamp: now.Add(-3 * time.Hour)},
 	}
-	loggedAt, err := validateFreshnessTime(timestamps, now)
+	loggedAt, err := validateFreshnessTime(timestamps, now, MaxFreshnessAge)
 	require.NoError(t, err)
 	assert.Equal(t, now.Add(-3*time.Hour), loggedAt)
 
-	_, err = validateFreshnessTime(nil, now)
+	_, err = validateFreshnessTime(nil, now, MaxFreshnessAge)
 	assert.ErrorContains(t, err, "no verified transparency-log timestamp")
 
-	_, err = validateFreshnessTime([]verify.TimestampVerificationResult{{Type: "TimestampAuthority", Timestamp: now.Add(-time.Hour)}}, now)
+	_, err = validateFreshnessTime([]verify.TimestampVerificationResult{{Type: "TimestampAuthority", Timestamp: now.Add(-time.Hour)}}, now, MaxFreshnessAge)
 	assert.ErrorContains(t, err, "no verified transparency-log timestamp")
 
-	_, err = validateFreshnessTime([]verify.TimestampVerificationResult{{Type: "Tlog", Timestamp: now.Add(MaxFreshnessFutureSkew + time.Second)}}, now)
+	_, err = validateFreshnessTime([]verify.TimestampVerificationResult{{Type: "Tlog", Timestamp: now.Add(MaxFreshnessFutureSkew + time.Second)}}, now, MaxFreshnessAge)
 	assert.ErrorContains(t, err, "in the future")
 
-	_, err = validateFreshnessTime([]verify.TimestampVerificationResult{{Type: "Tlog", Timestamp: now.Add(-MaxFreshnessAge - time.Second)}}, now)
+	_, err = validateFreshnessTime([]verify.TimestampVerificationResult{{Type: "Tlog", Timestamp: now.Add(-MaxFreshnessAge - time.Second)}}, now, MaxFreshnessAge)
 	assert.ErrorContains(t, err, "stale")
+
+	dayOld := []verify.TimestampVerificationResult{{Type: "Tlog", Timestamp: now.Add(-25 * time.Hour)}}
+	_, err = validateFreshnessTime(dayOld, now, 24*time.Hour)
+	assert.ErrorContains(t, err, "stale")
+	_, err = validateFreshnessTime(dayOld, now, 30*24*time.Hour)
+	assert.NoError(t, err)
 }

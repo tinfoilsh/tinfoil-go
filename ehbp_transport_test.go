@@ -17,9 +17,9 @@ import (
 	"github.com/stretchr/testify/require"
 	ehbpidentity "github.com/tinfoilsh/encrypted-http-body-protocol/identity"
 	"github.com/tinfoilsh/tinfoil-go/verifier/client"
+	"github.com/tinfoilsh/tinfoil-go/verifier/envelope"
 )
 
-// roundTripFunc adapts a function to an http.RoundTripper.
 type roundTripFunc func(*http.Request) (*http.Response, error)
 
 func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
@@ -75,6 +75,18 @@ func TestNewClientWithOptionsRejectsInvalidBaseURL(t *testing.T) {
 			require.Error(t, err)
 			require.Contains(t, err.Error(), "invalid base URL")
 		})
+	}
+}
+
+func TestNewClientWithOptionsRequiresEnclaveForCustomRepo(t *testing.T) {
+	for _, opt := range []ClientOption{
+		WithRepo("org/repo"),
+		WithRepo(defaultConfigRepo + "@v1"),
+		WithRepo(defaultConfigRepo + "@sha256:" + strings.Repeat("ab", 32)),
+	} {
+		c, err := NewClientWithOptions(opt)
+		require.Nil(t, c)
+		require.ErrorContains(t, err, "requires an enclave")
 	}
 }
 
@@ -218,9 +230,9 @@ func TestBuildEHBPTransportRequiresKey(t *testing.T) {
 	require.Contains(t, err.Error(), "HPKE public key")
 }
 
-type transportVerifierFunc func(func(*client.GroundTruth) (http.RoundTripper, error), func(error) bool) (http.RoundTripper, error)
+type transportVerifierFunc func(func(*client.VerifiedDocumentV3) (http.RoundTripper, error), func(error) bool) (http.RoundTripper, error)
 
-func (f transportVerifierFunc) NewTransport(build func(*client.GroundTruth) (http.RoundTripper, error), isKeyError func(error) bool) (http.RoundTripper, error) {
+func (f transportVerifierFunc) NewTransport(build func(*client.VerifiedDocumentV3) (http.RoundTripper, error), isKeyError func(error) bool) (http.RoundTripper, error) {
 	return f(build, isKeyError)
 }
 
@@ -231,8 +243,8 @@ func TestEHBPClientPreservesAdmissionAndRebuildsProxyHeader(t *testing.T) {
 		w.WriteHeader(http.StatusNoContent)
 	}))
 	defer proxy.Close()
-	var rebuild func(*client.GroundTruth) (http.RoundTripper, error)
-	verifier := transportVerifierFunc(func(build func(*client.GroundTruth) (http.RoundTripper, error), isKeyError func(error) bool) (http.RoundTripper, error) {
+	var rebuild func(*client.VerifiedDocumentV3) (http.RoundTripper, error)
+	verifier := transportVerifierFunc(func(build func(*client.VerifiedDocumentV3) (http.RoundTripper, error), isKeyError func(error) bool) (http.RoundTripper, error) {
 		rebuild = build
 		require.True(t, isKeyError(ehbpidentity.NewKeyConfigError(errors.New("rotated"))))
 		return roundTripFunc(func(*http.Request) (*http.Response, error) {
@@ -245,10 +257,8 @@ func TestEHBPClientPreservesAdmissionAndRebuildsProxyHeader(t *testing.T) {
 	require.ErrorIs(t, err, client.ErrFreshnessExpired, "keep the verifier's admission layer around EHBP")
 	require.Empty(t, seen, "failed admission must not reach the proxy")
 
-	// Exercise the real builder supplied to shared refresh coordination with
-	// both snapshots, including the actual header and EHBP transport layers.
 	for _, host := range []string{"old.example", "new.example"} {
-		transport, err := rebuild(&client.GroundTruth{EnclaveHost: host, HPKEPublicKey: strings.Repeat("01", 32)})
+		transport, err := rebuild(&client.VerifiedDocumentV3{EnclaveHost: host, CryptoMaterial: []envelope.CryptoMaterialItem{{ID: envelope.CryptoMaterialIDHPKE, Format: envelope.KeyX25519HPKEV1Format, Data: strings.Repeat("01", 32)}}})
 		require.NoError(t, err)
 		req, err := http.NewRequest(http.MethodGet, proxy.URL, nil)
 		require.NoError(t, err)
@@ -260,8 +270,6 @@ func TestEHBPClientPreservesAdmissionAndRebuildsProxyHeader(t *testing.T) {
 	}
 }
 
-// TestClientIntegration_TransportModes exercises NewClientWithOptions against a
-// live enclave for both transport modes.
 func TestClientIntegration_TransportModesWithCacheSecret(t *testing.T) {
 	const testUserCacheSecret = "go-live-integration-cache-secret"
 

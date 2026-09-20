@@ -15,7 +15,7 @@ import (
 // bind its transport to the supplied attested keys. isKeyError identifies an
 // error safe to retry after re-verification; nil disables key-rotation retries.
 // All transports from this client share its verification and refresh state.
-func (s *SecureClient) NewTransport(build func(*GroundTruth) (http.RoundTripper, error), isKeyError func(error) bool) (http.RoundTripper, error) {
+func (s *SecureClient) NewTransport(build func(*VerifiedDocumentV3) (http.RoundTripper, error), isKeyError func(error) bool) (http.RoundTripper, error) {
 	if build == nil {
 		return nil, fmt.Errorf("transport builder is required")
 	}
@@ -28,14 +28,14 @@ func (s *SecureClient) NewTransport(build func(*GroundTruth) (http.RoundTripper,
 
 type refreshingTransport struct {
 	client     *SecureClient
-	build      func(*GroundTruth) (http.RoundTripper, error)
+	build      func(*VerifiedDocumentV3) (http.RoundTripper, error)
 	isKeyError func(error) bool
 	mu         sync.Mutex
-	state      *verificationState
+	state      *VerifiedDocumentV3
 	transport  http.RoundTripper
 }
 
-func (t *refreshingTransport) admit(ctx context.Context) (http.RoundTripper, *verificationState, error) {
+func (t *refreshingTransport) admit(ctx context.Context) (http.RoundTripper, *VerifiedDocumentV3, error) {
 	for {
 		state, err := t.client.verifiedState(ctx, nil, false)
 		if err != nil {
@@ -43,7 +43,7 @@ func (t *refreshingTransport) admit(ctx context.Context) (http.RoundTripper, *ve
 		}
 		t.mu.Lock()
 		if t.state != state {
-			transport, err := t.build(cloneGroundTruth(state.groundTruth))
+			transport, err := t.build(cloneVerification(state))
 			if transport == nil && err == nil {
 				err = fmt.Errorf("transport builder returned nil")
 			}
@@ -72,7 +72,7 @@ func (t *refreshingTransport) admit(ctx context.Context) (http.RoundTripper, *ve
 		}
 		// Construction/lock contention may have crossed the deadline. Admission
 		// is the last check before delegation, even on a reused connection.
-		if time.Now().Before(state.verified.FreshnessExpiresAt) {
+		if time.Now().Before(state.FreshnessExpiresAt) {
 			return transport, state, nil
 		}
 	}

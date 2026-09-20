@@ -2,6 +2,7 @@ package provenance
 
 import (
 	"regexp"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -76,10 +77,40 @@ func TestAuthenticateCode(t *testing.T) {
 	assert.Equal(t, 3, code.Shape.Disks)
 	require.NotNil(t, code.Shape.GPUs)
 	assert.Equal(t, 0, *code.Shape.GPUs)
+
+	for _, tt := range []struct {
+		ref, tagHint, digestHint string
+		valid                    bool
+	}{
+		{repo, tag, hexDigest, true},
+		{repo + "@" + tag, "untrusted-tag", hexDigest, true},
+		{repo + "@sha256:" + hexDigest, tag, "untrusted-digest", true},
+		{repo + "@" + tag + "@sha256:" + hexDigest, "untrusted-tag", "untrusted-digest", true},
+		{repo + "@wrong-tag", tag, hexDigest, false},
+		{repo + "@sha256:" + strings.Repeat("00", 32), tag, hexDigest, false},
+		{repo + "@wrong-tag@sha256:" + hexDigest, tag, hexDigest, false},
+	} {
+		t.Run(tt.ref, func(t *testing.T) {
+			got, err := client.AuthenticateCode(bundle, tt.ref, tt.tagHint, tt.digestHint)
+			if tt.valid {
+				require.NoError(t, err)
+				require.Equal(t, code, got)
+			} else {
+				require.Error(t, err)
+				require.Nil(t, got)
+			}
+		})
+	}
 }
 
-// testClient builds a client from the SDK's embedded trusted root, exactly
-// as production verification does.
+func TestAuthenticateCodeRejectsInvalidReference(t *testing.T) {
+	client := testClient(t)
+	for _, ref := range []string{"", "org/repo@", "org/repo@sha256:bad", "org/repo@v1@v2", "org/repo/extra", "org/(repo|other)"} {
+		_, err := client.AuthenticateCode(nil, ref, "", "")
+		require.ErrorContains(t, err, "invalid release reference")
+	}
+}
+
 func testClient(t *testing.T) *Client {
 	t.Helper()
 	client, err := getDefaultClient()

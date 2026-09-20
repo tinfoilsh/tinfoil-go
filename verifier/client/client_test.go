@@ -9,8 +9,27 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"github.com/tinfoilsh/tinfoil-go/verifier/measurement"
 )
+
+func TestClientOptionsCopyPinnedRegisters(t *testing.T) {
+	register := strings.Repeat("ab", 48)
+	pins := &measurement.Measurement{Type: measurement.TdxGuestV2, Registers: []string{4: register}}
+	opts := VerificationOptions{PinnedRegisters: pins, FreshnessMaxAge: time.Hour}
+	first, err := NewSecureClient("enclave.example", "org/repo", &opts)
+	require.NoError(t, err)
+	second, err := NewSecureClient("enclave.example", "org/repo", &opts)
+	require.NoError(t, err)
+	opts.FreshnessMaxAge = time.Minute
+	pins.Type = measurement.SevGuestV2
+	pins.Registers[4] = "changed"
+	assert.Equal(t, measurement.TdxGuestV2, first.options.PinnedRegisters.Type)
+	assert.Equal(t, register, first.options.PinnedRegisters.Registers[4])
+	first.options.PinnedRegisters.Registers[4] = "changed again"
+	assert.Equal(t, register, second.options.PinnedRegisters.Registers[4])
+	assert.Equal(t, time.Hour, second.options.FreshnessMaxAge)
+}
 
 func TestVerify(t *testing.T) {
 	enclave := os.Getenv("TINFOIL_ENCLAVE")
@@ -19,12 +38,13 @@ func TestVerify(t *testing.T) {
 		t.Skip("TINFOIL_ENCLAVE or TINFOIL_REPO not set")
 	}
 
-	client := NewSecureClient(enclave, repo)
-	_, err := client.Verify()
+	client, err := NewSecureClient(enclave, repo, nil)
+	require.NoError(t, err)
+	_, err = client.Verify()
 	assert.NoError(t, err)
 }
 
-func TestClientGroundTruthJSON(t *testing.T) {
+func TestClientVerificationJSON(t *testing.T) {
 	codeMeasurement := &measurement.Measurement{
 		Type:      measurement.SnpTdxMultiPlatformV1,
 		Registers: []string{"a", "b"},
@@ -34,83 +54,30 @@ func TestClientGroundTruthJSON(t *testing.T) {
 		Registers: []string{"a"},
 	}
 
-	gt := &GroundTruth{
-		TLSPublicKey:       "pubkey",
-		HPKEPublicKey:      "hpkekey",
-		Digest:             "feabcd",
+	verified := &VerifiedDocumentV3{
+		CodeDigest:         "feabcd",
+		CryptoMaterial:     testState(time.Time{}, "key").CryptoMaterial,
 		CodeMeasurement:    codeMeasurement,
 		EnclaveMeasurement: enclaveMeasurement,
 	}
 	client := &SecureClient{
-		state: &verificationState{groundTruth: gt},
+		state: verified,
 	}
 
-	encoded, err := client.GroundTruthJSON()
+	encoded, err := client.VerificationJSON()
 	assert.NoError(t, err)
 
-	// Decode and compare
-	var gt2 GroundTruth
-	assert.NoError(t, json.Unmarshal([]byte(encoded), &gt2))
-	assert.Equal(t, gt, &gt2)
+	var decoded VerifiedDocumentV3
+	assert.NoError(t, json.Unmarshal([]byte(encoded), &decoded))
+	assert.Equal(t, verified, &decoded)
+	view := client.Verification()
+	view.CodeMeasurement.Registers[0] = "changed"
+	view.CryptoMaterial[0].Data = "changed"
+	view.EnclaveMeasurement.Registers[0] = "changed"
+	assert.Equal(t, &decoded, client.Verification(), "returned measurements must not alias cached verification")
 }
 
-func TestVerificationDocumentJSON(t *testing.T) {
-	verifiedAt := time.Date(2026, time.August, 4, 12, 30, 0, 0, time.UTC).Format(time.RFC3339Nano)
-	groundTruth := &GroundTruth{
-		ConfigRepo:         "tinfoilsh/confidential-model-router",
-		EnclaveHost:        "router.example",
-		ReleaseTag:         "v1.2.3",
-		TLSPublicKey:       "tls-fingerprint",
-		HPKEPublicKey:      "hpke-key",
-		Digest:             "release-digest",
-		CodeMeasurement:    &measurement.Measurement{Type: measurement.SevGuestV2, Registers: []string{"code"}},
-		EnclaveMeasurement: &measurement.Measurement{Type: measurement.SevGuestV2, Registers: []string{"enclave"}},
-		CodeFingerprint:    "code-fingerprint",
-		EnclaveFingerprint: "enclave-fingerprint",
-		Verifier:           SoftwareIdentity{Name: verifierName, Version: "v1.0.0"},
-		VerifiedAt:         verifiedAt,
-	}
-	client := &SecureClient{
-		state: &verificationState{groundTruth: groundTruth, document: newVerificationDocument(groundTruth)},
-	}
-
-	encoded, err := client.VerificationDocumentJSON()
-	assert.NoError(t, err)
-
-	var document VerificationDocument
-	assert.NoError(t, json.Unmarshal([]byte(encoded), &document))
-	assert.Equal(t, verificationDocumentSchemaVersion, document.SchemaVersion)
-	assert.Equal(t, "tinfoilsh/confidential-model-router", document.ConfigRepo)
-	assert.Equal(t, "v1.2.3", document.ReleaseTag)
-	assert.Equal(t, "release-digest", document.ReleaseDigest)
-	assert.Equal(t, verifierName, document.Verifier.Name)
-	assert.Equal(t, "v1.0.0", document.Verifier.Version)
-	assert.Equal(t, verifiedAt, document.VerifiedAt)
-	assert.Equal(t, "tls-fingerprint", document.EnclaveMeasurement.TLSPublicKeyFingerprint)
-	assert.True(t, document.SecurityVerified)
-}
-
-func TestVerificationDocumentStepStates(t *testing.T) {
-	tests := []struct {
-		name        string
-		groundTruth *GroundTruth
-		fetchDigest string
-		verifyCode  string
-	}{
-		{name: "direct release", groundTruth: &GroundTruth{ReleaseTag: "v1.2.3", Digest: "digest", DigestFetched: true}, fetchDigest: "success", verifyCode: "success"},
-		{name: "caller supplied bundle", groundTruth: &GroundTruth{ReleaseTag: "v1.2.3", Digest: "digest"}, fetchDigest: "skipped", verifyCode: "success"},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			document := newVerificationDocument(tt.groundTruth)
-			assert.Equal(t, tt.fetchDigest, document.Steps.FetchDigest.Status)
-			assert.Equal(t, tt.verifyCode, document.Steps.VerifyCode.Status)
-		})
-	}
-}
-
-func TestCurrentVerifierVersion(t *testing.T) {
+func TestVerifierVersion(t *testing.T) {
 	tests := []struct {
 		name    string
 		info    *debug.BuildInfo
@@ -133,7 +100,7 @@ func TestCurrentVerifierVersion(t *testing.T) {
 }
 
 func TestNewDefaultSecureClient(t *testing.T) {
-	client, err := NewDefaultClient()
+	client, err := NewDefaultClient(nil)
 	assert.NoError(t, err)
 	assert.NotNil(t, client)
 
@@ -151,11 +118,12 @@ func TestClientFetchRouters(t *testing.T) {
 	assert.True(t, strings.HasSuffix(routers[0], ".tinfoil.sh"))
 }
 
-func TestClientDefaultClient(t *testing.T) {
-	defaultClient := newFallbackClient()
+func TestClientFallbackEnclave(t *testing.T) {
+	defaultClient, err := NewSecureClient("inference.tinfoil.sh", defaultRouterRepo, nil)
+	require.NoError(t, err)
 	enclave := defaultClient.Enclave()
 	assert.NotEmpty(t, enclave)
 
-	_, err := defaultClient.Verify()
+	_, err = defaultClient.Verify()
 	assert.NoError(t, err)
 }

@@ -40,6 +40,7 @@ const (
 type clientConfig struct {
 	enclave            string
 	repo               string
+	verification       client.VerificationOptions
 	transport          TransportMode
 	baseURL            string
 	baseURLSet         bool
@@ -57,9 +58,16 @@ func WithEnclave(enclave string) ClientOption {
 	return func(c *clientConfig) { c.enclave = enclave }
 }
 
-// WithRepo sets the GitHub repository used for code measurement verification.
+// WithRepo sets the trusted repository reference, owner/name[@tag][@sha256:digest].
+// A reference other than the default repository requires WithEnclave.
 func WithRepo(repo string) ClientOption {
 	return func(c *clientConfig) { c.repo = repo }
+}
+
+// WithVerificationOptions sets the policy applied to enclave verification.
+// The client copies opts and its pins at construction, including for router discovery.
+func WithVerificationOptions(opts client.VerificationOptions) ClientOption {
+	return func(c *clientConfig) { c.verification = opts }
 }
 
 // WithTransport selects the transport mode. Defaults to TransportEHBP.
@@ -110,25 +118,25 @@ func NewClientWithOptions(opts ...ClientOption) (*Client, error) {
 			return nil, fmt.Errorf("invalid base URL: %w", err)
 		}
 	}
+	if cfg.enclave == "" && cfg.repo != defaultConfigRepo {
+		return nil, fmt.Errorf("custom repository requires an enclave")
+	}
 
 	var secureClient *client.SecureClient
+	var err error
 	if cfg.enclave == "" {
-		var err error
-		secureClient, err = client.NewDefaultClient()
-		if err != nil {
-			return nil, fmt.Errorf("failed to create secure client: %w", err)
-		}
+		secureClient, err = client.NewDefaultClient(&cfg.verification)
 	} else {
-		secureClient = client.NewSecureClient(cfg.enclave, cfg.repo)
+		secureClient, err = client.NewSecureClient(cfg.enclave, cfg.repo, &cfg.verification)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("failed to create secure client: %w", err)
 	}
 
 	return createClientFromSecureClient(secureClient, cfg.transport, cfg.baseURL,
 		resolveUserCacheSecret(cfg.userCacheSecret, cfg.userCacheSecretSet), cfg.openaiOpts...)
 }
 
-// secureHTTPClient builds an HTTP client sharing the SecureClient verification for
-// the requested transport mode. The HTTP client is bound to the verified
-// enclave and configured proxy, if any.
 func secureHTTPClient(secureClient *client.SecureClient, mode TransportMode, baseURL, userCacheSecret string) (*http.Client, error) {
 	var (
 		httpClient *http.Client
@@ -174,8 +182,6 @@ func secureHTTPClient(secureClient *client.SecureClient, mode TransportMode, bas
 	return httpClient, nil
 }
 
-// allowedOrigins returns the set of origins a secured request may target: the
-// verified enclave and, when set, the proxy base URL.
 func allowedOrigins(enclave, baseURL string) (map[string]struct{}, error) {
 	origins := make(map[string]struct{}, 2)
 	if enclave != "" {
@@ -214,21 +220,20 @@ func (t *hostBoundRoundTripper) RoundTrip(req *http.Request) (*http.Response, er
 }
 
 type transportVerifier interface {
-	NewTransport(func(*client.GroundTruth) (http.RoundTripper, error), func(error) bool) (http.RoundTripper, error)
+	NewTransport(func(*client.VerifiedDocumentV3) (http.RoundTripper, error), func(error) bool) (http.RoundTripper, error)
 }
 
-// ehbpHTTPClient returns an HTTP client whose request bodies are encrypted to
-// the enclave's attested HPKE public key and that re-verifies attestation when
-// the server rotates its HPKE key. When baseURL routes requests through a proxy
-// whose origin differs from the enclave's, the client adds the
-// X-Tinfoil-Enclave-Url header so the proxy can forward to the verified enclave.
 func ehbpHTTPClient(secureClient transportVerifier, baseURL string) (*http.Client, error) {
-	transport, err := secureClient.NewTransport(func(groundTruth *client.GroundTruth) (http.RoundTripper, error) {
-		inner, err := buildEHBPTransport(groundTruth.HPKEPublicKey)
+	transport, err := secureClient.NewTransport(func(verified *client.VerifiedDocumentV3) (http.RoundTripper, error) {
+		key, err := verified.HPKEPublicKey()
+		if err != nil {
+			return nil, fmt.Errorf("%w; cannot use the EHBP transport (use WithTransport(TransportTLS))", err)
+		}
+		inner, err := buildEHBPTransport(key)
 		if err != nil {
 			return nil, err
 		}
-		if headerValue, ok := enclaveURLHeaderValue(baseURL, groundTruth.EnclaveHost); ok {
+		if headerValue, ok := enclaveURLHeaderValue(baseURL, verified.EnclaveHost); ok {
 			return &enclaveURLHeaderTransport{enclaveURL: headerValue, transport: inner}, nil
 		}
 		return inner, nil
@@ -239,9 +244,6 @@ func ehbpHTTPClient(secureClient transportVerifier, baseURL string) (*http.Clien
 	return &http.Client{Transport: transport}, nil
 }
 
-// enclaveURLHeaderValue returns the X-Tinfoil-Enclave-Url header value and
-// whether it should be injected. The header is only needed when requests are
-// routed through a proxy whose origin differs from the verified enclave's.
 func enclaveURLHeaderValue(baseURL, enclave string) (string, bool) {
 	if baseURL == "" || enclave == "" {
 		return "", false
@@ -331,13 +333,7 @@ func (t *enclaveURLHeaderTransport) RoundTrip(req *http.Request) (*http.Response
 	return t.transport.RoundTrip(req)
 }
 
-// buildEHBPTransport creates an EHBP round tripper bound to a hex-encoded HPKE
-// public key obtained through attestation verification.
 func buildEHBPTransport(hpkePublicKeyHex string) (http.RoundTripper, error) {
-	if hpkePublicKeyHex == "" {
-		return nil, fmt.Errorf("enclave did not expose an HPKE public key; cannot use the EHBP transport (use WithTransport(TransportTLS))")
-	}
-
 	serverIdentity, err := ehbpidentity.FromPublicKeyHex(hpkePublicKeyHex)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse HPKE public key: %w", err)

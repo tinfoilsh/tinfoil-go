@@ -9,18 +9,18 @@ import (
 )
 
 func TestTransportDiscardsSnapshotRefreshedDuringBuild(t *testing.T) {
-	s := &SecureClient{state: testState(time.Now().Add(time.Hour), "old"), verify: func() (*verificationState, error) {
+	s := &SecureClient{state: testState(time.Now().Add(time.Hour), "old"), verify: func() (*VerifiedDocumentV3, error) {
 		return testState(time.Now().Add(time.Hour), "new"), nil
 	}}
 	var built, sent []string
-	transport, err := s.NewTransport(func(gt *GroundTruth) (http.RoundTripper, error) {
-		built = append(built, gt.TLSPublicKey)
-		if gt.TLSPublicKey == "old" {
+	transport, err := s.NewTransport(func(verified *VerifiedDocumentV3) (http.RoundTripper, error) {
+		built = append(built, verified.CryptoMaterial[0].Data)
+		if verified.CryptoMaterial[0].Data == "old" {
 			_, err := s.Verify()
 			require.NoError(t, err)
 		}
 		return roundTripFunc(func(*http.Request) (*http.Response, error) {
-			sent = append(sent, gt.TLSPublicKey)
+			sent = append(sent, verified.CryptoMaterial[0].Data)
 			return testResponse(), nil
 		}), nil
 	}, nil)
@@ -33,7 +33,7 @@ func TestTransportDiscardsSnapshotRefreshedDuringBuild(t *testing.T) {
 }
 
 func TestPlaintextRequestDoesNotRefresh(t *testing.T) {
-	s := &SecureClient{state: testState(time.Now().Add(time.Hour), "key"), verify: func() (*verificationState, error) {
+	s := &SecureClient{state: testState(time.Now().Add(time.Hour), "key"), verify: func() (*VerifiedDocumentV3, error) {
 		t.Error("re-verification cannot make a plaintext URL acceptable")
 		return nil, ErrNoTLS
 	}}
