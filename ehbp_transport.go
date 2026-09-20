@@ -64,6 +64,8 @@ func WithRepo(repo string) ClientOption {
 	return func(c *clientConfig) { c.repo = repo }
 }
 
+// WithExpectedMeasurement pins enclave registers in addition to the release's
+// code measurement; empty registers keep their source. nil pins nothing.
 func WithExpectedMeasurement(m *measurement.Measurement) ClientOption {
 	return func(c *clientConfig) { c.expected = m }
 }
