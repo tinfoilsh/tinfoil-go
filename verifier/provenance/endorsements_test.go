@@ -9,18 +9,13 @@ import (
 
 // TestLatestPlatformEndorsements is a live test against the published
 // artifact (GitHub proxy + Sigstore TUF/Rekor). Run with -short to exclude
-// it offline. It also skips until the publisher's first release carrying the
-// tinfoil.hash + attestation is reachable through the proxy.
+// it offline.
 func TestLatestPlatformEndorsements(t *testing.T) {
 	if testing.Short() {
 		t.Skip("live external services test; skipped with -short")
 	}
 	digest, err := fetchLatestDigest(platformEndorsementsRepo)
-	if err != nil {
-		// The proxy surfaces missing release assets as 4xx; skip until the
-		// first release carrying the endorsement assets is tagged.
-		t.Skipf("platform-endorsements digest not fetchable (asset not published yet?): %v", err)
-	}
+	require.NoError(t, err)
 
 	client := testClient(t)
 

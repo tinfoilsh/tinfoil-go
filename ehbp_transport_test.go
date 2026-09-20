@@ -277,7 +277,6 @@ func TestClientIntegration_TransportModesWithCacheSecret(t *testing.T) {
 				WithUserCacheSecret(testUserCacheSecret),
 				WithOpenAIOptions(option.WithAPIKey(apiKey)),
 			)
-			skipIfEnclaveNotV3(t, err)
 			require.NoError(t, err)
 			require.Equal(t, mode, c.Transport())
 
@@ -311,7 +310,6 @@ func TestClientIntegration_LowLevelEHBP(t *testing.T) {
 				WithTransport(mode),
 				WithOpenAIOptions(option.WithAPIKey(apiKey)),
 			)
-			skipIfEnclaveNotV3(t, err)
 			require.NoError(t, err)
 
 			httpClient := c.HTTPClient()
