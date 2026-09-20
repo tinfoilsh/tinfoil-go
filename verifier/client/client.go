@@ -33,10 +33,10 @@ type GroundTruth struct {
 type SecureClient struct {
 	enclave, repo string
 
-	groundTruth          *GroundTruth
-	verificationDocument *VerificationDocument
-	stateMu              sync.RWMutex
-	verifyMu             sync.Mutex
+	stateMu    sync.RWMutex
+	state      *verificationState
+	refreshing *verificationCall
+	verify     func() (*verificationState, error)
 }
 
 var (
@@ -110,7 +110,10 @@ func (s *SecureClient) Repo() string {
 func (s *SecureClient) GroundTruth() *GroundTruth {
 	s.stateMu.RLock()
 	defer s.stateMu.RUnlock()
-	return cloneGroundTruth(s.groundTruth)
+	if s.state == nil {
+		return nil
+	}
+	return cloneGroundTruth(s.state.groundTruth)
 }
 
 // GroundTruthJSON returns the ground truth as a JSON string
@@ -126,7 +129,10 @@ func (s *SecureClient) GroundTruthJSON() (string, error) {
 func (s *SecureClient) VerificationDocument() *VerificationDocument {
 	s.stateMu.RLock()
 	defer s.stateMu.RUnlock()
-	return cloneVerificationDocument(s.verificationDocument)
+	if s.state == nil {
+		return nil
+	}
+	return cloneVerificationDocument(s.state.document)
 }
 
 // VerificationDocumentJSON returns the verification document as JSON.
@@ -140,21 +146,13 @@ func (s *SecureClient) VerificationDocumentJSON() (string, error) {
 
 // HTTPClient returns an HTTP client that only accepts TLS connections to the verified enclave
 func (s *SecureClient) HTTPClient() (*http.Client, error) {
-	// Serialize verification and transport-key selection with Verify and VerifyV3.
-	s.verifyMu.Lock()
-	defer s.verifyMu.Unlock()
-	groundTruth := s.GroundTruth()
-	if groundTruth == nil {
-		_, err := s.verifyV3()
-		if err != nil {
-			return nil, fmt.Errorf("failed to verify enclave: %v", err)
-		}
-		groundTruth = s.GroundTruth()
+	transport, err := s.NewTransport(func(groundTruth *GroundTruth) (http.RoundTripper, error) {
+		return &TLSBoundRoundTripper{ExpectedPublicKey: groundTruth.TLSPublicKey}, nil
+	}, isCertificateError)
+	if err != nil {
+		return nil, fmt.Errorf("creating TLS transport: %w", err)
 	}
-
-	return &http.Client{
-		Transport: &TLSBoundRoundTripper{ExpectedPublicKey: groundTruth.TLSPublicKey},
-	}, nil
+	return &http.Client{Transport: transport}, nil
 }
 
 func (s *SecureClient) makeRequest(req *http.Request) (*Response, error) {

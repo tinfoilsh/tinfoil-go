@@ -73,6 +73,10 @@ func (t *TLSBoundRoundTripper) RoundTrip(r *http.Request) (*http.Response, error
 	return t.getTransport().RoundTrip(r)
 }
 
+func (t *TLSBoundRoundTripper) CloseIdleConnections() {
+	t.getTransport().CloseIdleConnections()
+}
+
 // CertPubkeyFP returns the SPKI SHA-256 fingerprint of a certificate's
 // public key (any key type).
 func CertPubkeyFP(cert *x509.Certificate) (string, error) {

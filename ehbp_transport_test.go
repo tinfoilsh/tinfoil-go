@@ -3,18 +3,20 @@ package tinfoil
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
+	"net/http/httptest"
 	"os"
-	"sync"
+	"strings"
 	"testing"
 
 	"github.com/openai/openai-go/v3"
 	"github.com/openai/openai-go/v3/option"
-	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	ehbpidentity "github.com/tinfoilsh/encrypted-http-body-protocol/identity"
+	"github.com/tinfoilsh/tinfoil-go/verifier/client"
 )
 
 // roundTripFunc adapts a function to an http.RoundTripper.
@@ -156,45 +158,6 @@ func TestEnclaveURLHeaderTransportInjectsHeader(t *testing.T) {
 	require.Empty(t, req.Header.Get(enclaveURLHeader), "the original request must not be mutated")
 }
 
-// TestEHBPReVerifyingTransportRefreshesEnclaveHeaderOnRotation verifies that
-// after a key rotation triggers re-verification, the retried request carries the
-// header for the newly verified enclave rather than a stale one. The header
-// transport is the inner layer that reverify rebuilds, so the retry flows
-// through the refreshed value.
-func TestEHBPReVerifyingTransportRefreshesEnclaveHeaderOnRotation(t *testing.T) {
-	keyErr := ehbpidentity.NewKeyConfigError(fmt.Errorf("key configuration mismatch"))
-
-	var firstHeader, retryHeader string
-	firstInner := roundTripFunc(func(req *http.Request) (*http.Response, error) {
-		firstHeader = req.Header.Get(enclaveURLHeader)
-		return nil, keyErr
-	})
-	secondInner := roundTripFunc(func(req *http.Request) (*http.Response, error) {
-		retryHeader = req.Header.Get(enclaveURLHeader)
-		return newResponse(http.StatusOK, "recovered"), nil
-	})
-
-	first := &enclaveURLHeaderTransport{enclaveURL: "https://old.example.com", transport: firstInner}
-	second := &enclaveURLHeaderTransport{enclaveURL: "https://new.example.com", transport: secondInner}
-
-	transport := &ehbpReVerifyingTransport{transport: first}
-	transport.reverify = func() (http.RoundTripper, error) {
-		transport.mu.Lock()
-		transport.transport = second
-		transport.mu.Unlock()
-		return second, nil
-	}
-
-	req, err := http.NewRequest(http.MethodPost, "https://proxy.example.com/v1/x", bytes.NewBufferString("payload"))
-	require.NoError(t, err)
-
-	resp, err := transport.RoundTrip(req)
-	require.NoError(t, err)
-	require.Equal(t, http.StatusOK, resp.StatusCode)
-	require.Equal(t, "https://old.example.com", firstHeader, "first attempt carries the original enclave header")
-	require.Equal(t, "https://new.example.com", retryHeader, "retry must carry the refreshed enclave header after re-verification")
-}
-
 func TestHostBoundRoundTripperAllowsEnclaveAndProxy(t *testing.T) {
 	origins, err := allowedOrigins("enclave.example.com", "http://proxy.example.com/v1/")
 	require.NoError(t, err)
@@ -255,186 +218,46 @@ func TestBuildEHBPTransportRequiresKey(t *testing.T) {
 	require.Contains(t, err.Error(), "HPKE public key")
 }
 
-func TestEHBPReVerifyingTransportPassesThrough(t *testing.T) {
-	var calls int
-	inner := roundTripFunc(func(req *http.Request) (*http.Response, error) {
-		calls++
-		return newResponse(http.StatusOK, "ok"), nil
+type transportVerifierFunc func(func(*client.GroundTruth) (http.RoundTripper, error), func(error) bool) (http.RoundTripper, error)
+
+func (f transportVerifierFunc) NewTransport(build func(*client.GroundTruth) (http.RoundTripper, error), isKeyError func(error) bool) (http.RoundTripper, error) {
+	return f(build, isKeyError)
+}
+
+func TestEHBPClientPreservesAdmissionAndRebuildsProxyHeader(t *testing.T) {
+	seen := make(chan string, 2)
+	proxy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		seen <- r.Header.Get(enclaveURLHeader)
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer proxy.Close()
+	var rebuild func(*client.GroundTruth) (http.RoundTripper, error)
+	verifier := transportVerifierFunc(func(build func(*client.GroundTruth) (http.RoundTripper, error), isKeyError func(error) bool) (http.RoundTripper, error) {
+		rebuild = build
+		require.True(t, isKeyError(ehbpidentity.NewKeyConfigError(errors.New("rotated"))))
+		return roundTripFunc(func(*http.Request) (*http.Response, error) {
+			return nil, client.ErrFreshnessExpired
+		}), nil
 	})
+	hc, err := ehbpHTTPClient(verifier, proxy.URL)
+	require.NoError(t, err)
+	_, err = hc.Get(proxy.URL)
+	require.ErrorIs(t, err, client.ErrFreshnessExpired, "keep the verifier's admission layer around EHBP")
+	require.Empty(t, seen, "failed admission must not reach the proxy")
 
-	transport := &ehbpReVerifyingTransport{
-		transport: inner,
-		reverify: func() (http.RoundTripper, error) {
-			t.Fatalf("reverify should not be called on success")
-			return nil, nil
-		},
+	// Exercise the real builder supplied to shared refresh coordination with
+	// both snapshots, including the actual header and EHBP transport layers.
+	for _, host := range []string{"old.example", "new.example"} {
+		transport, err := rebuild(&client.GroundTruth{EnclaveHost: host, HPKEPublicKey: strings.Repeat("01", 32)})
+		require.NoError(t, err)
+		req, err := http.NewRequest(http.MethodGet, proxy.URL, nil)
+		require.NoError(t, err)
+		resp, err := transport.RoundTrip(req)
+		require.NoError(t, err)
+		resp.Body.Close()
+		require.Equal(t, "https://"+host, <-seen)
+		require.Empty(t, req.Header.Get(enclaveURLHeader), "do not mutate the caller's request")
 	}
-
-	req, err := http.NewRequest(http.MethodGet, "https://enclave.example.com/v1/models", nil)
-	require.NoError(t, err)
-
-	resp, err := transport.RoundTrip(req)
-	require.NoError(t, err)
-	require.Equal(t, http.StatusOK, resp.StatusCode)
-	require.Equal(t, 1, calls)
-}
-
-func TestEHBPReVerifyingTransportIgnoresOtherErrors(t *testing.T) {
-	otherErr := fmt.Errorf("connection refused")
-	inner := roundTripFunc(func(req *http.Request) (*http.Response, error) {
-		return nil, otherErr
-	})
-
-	transport := &ehbpReVerifyingTransport{
-		transport: inner,
-		reverify: func() (http.RoundTripper, error) {
-			t.Fatalf("reverify should not be called for non key-config errors")
-			return nil, nil
-		},
-	}
-
-	req, err := http.NewRequest(http.MethodGet, "https://enclave.example.com/v1/models", nil)
-	require.NoError(t, err)
-
-	_, err = transport.RoundTrip(req)
-	require.ErrorIs(t, err, otherErr)
-}
-
-func TestEHBPReVerifyingTransportRetriesOnKeyRotation(t *testing.T) {
-	keyErr := ehbpidentity.NewKeyConfigError(fmt.Errorf("key configuration mismatch"))
-
-	var firstBody, retryBody string
-	firstTransport := roundTripFunc(func(req *http.Request) (*http.Response, error) {
-		b, _ := io.ReadAll(req.Body)
-		firstBody = string(b)
-		return nil, keyErr
-	})
-	retryTransport := roundTripFunc(func(req *http.Request) (*http.Response, error) {
-		b, _ := io.ReadAll(req.Body)
-		retryBody = string(b)
-		return newResponse(http.StatusOK, "recovered"), nil
-	})
-
-	var reverifyCalls int
-	transport := &ehbpReVerifyingTransport{transport: firstTransport}
-	transport.reverify = func() (http.RoundTripper, error) {
-		reverifyCalls++
-		transport.mu.Lock()
-		transport.transport = retryTransport
-		transport.mu.Unlock()
-		return retryTransport, nil
-	}
-
-	req, err := http.NewRequest(http.MethodPost, "https://enclave.example.com/v1/chat/completions", bytes.NewBufferString("payload"))
-	require.NoError(t, err)
-
-	resp, err := transport.RoundTrip(req)
-	require.NoError(t, err)
-	require.Equal(t, http.StatusOK, resp.StatusCode)
-	require.Equal(t, 1, reverifyCalls)
-	require.Equal(t, "payload", firstBody)
-	require.Equal(t, "payload", retryBody, "the request body must be replayed on retry")
-}
-
-// TestEHBPReVerifyingTransportSerializesReverify drives many concurrent
-// RoundTrip calls through a transport that always reports a key rotation,
-// asserting that re-verification (which mutates shared, unsynchronized
-// SecureClient state) runs exactly once. Run with -race to detect any data
-// race on that shared state.
-func TestEHBPReVerifyingTransportSerializesReverify(t *testing.T) {
-	keyErr := ehbpidentity.NewKeyConfigError(fmt.Errorf("key configuration mismatch"))
-	rotated := roundTripFunc(func(req *http.Request) (*http.Response, error) {
-		return newResponse(http.StatusOK, "ok"), nil
-	})
-
-	transport := &ehbpReVerifyingTransport{
-		transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
-			return nil, keyErr
-		}),
-	}
-
-	// sharedState models the unsynchronized writes SecureClient.Verify performs.
-	// reverifyOnce must serialize and coalesce calls so this is touched once.
-	var sharedState int
-	transport.reverify = func() (http.RoundTripper, error) {
-		sharedState++
-		return rotated, nil
-	}
-
-	const goroutines = 64
-	var wg sync.WaitGroup
-	wg.Add(goroutines)
-	for i := 0; i < goroutines; i++ {
-		go func() {
-			defer wg.Done()
-			req, err := http.NewRequest(http.MethodGet, "https://enclave.example.com/v1/models", nil)
-			if !assert.NoError(t, err) {
-				return
-			}
-			resp, err := transport.RoundTrip(req)
-			if !assert.NoError(t, err) {
-				return
-			}
-			assert.Equal(t, http.StatusOK, resp.StatusCode)
-		}()
-	}
-	wg.Wait()
-
-	require.Equal(t, 1, sharedState, "re-verification should be coalesced to a single run")
-}
-
-func TestEHBPReVerifyingTransportSurfacesOriginalErrorWhenReverifyFails(t *testing.T) {
-	keyErr := ehbpidentity.NewKeyConfigError(fmt.Errorf("key configuration mismatch"))
-	inner := roundTripFunc(func(req *http.Request) (*http.Response, error) {
-		return nil, keyErr
-	})
-
-	transport := &ehbpReVerifyingTransport{
-		transport: inner,
-		reverify: func() (http.RoundTripper, error) {
-			return nil, fmt.Errorf("attestation failed")
-		},
-	}
-
-	req, err := http.NewRequest(http.MethodPost, "https://enclave.example.com/v1/chat/completions", bytes.NewBufferString("payload"))
-	require.NoError(t, err)
-
-	_, err = transport.RoundTrip(req)
-	require.True(t, ehbpidentity.IsKeyConfigError(err), "should surface the original key-config error")
-}
-
-func TestResetRequestBody(t *testing.T) {
-	req, err := http.NewRequest(http.MethodPost, "https://enclave.example.com/v1/chat/completions", bytes.NewBufferString("payload"))
-	require.NoError(t, err)
-
-	// Consume the body as the first attempt would.
-	_, err = io.ReadAll(req.Body)
-	require.NoError(t, err)
-
-	retry, err := resetRequestBody(req)
-	require.NoError(t, err)
-
-	b, err := io.ReadAll(retry.Body)
-	require.NoError(t, err)
-	require.Equal(t, "payload", string(b))
-}
-
-func TestResetRequestBodyNotReplayable(t *testing.T) {
-	req, err := http.NewRequest(http.MethodPost, "https://enclave.example.com/v1/chat/completions", io.NopCloser(bytes.NewBufferString("payload")))
-	require.NoError(t, err)
-	req.GetBody = nil
-
-	_, err = resetRequestBody(req)
-	require.Error(t, err)
-}
-
-func TestResetRequestBodyNoBody(t *testing.T) {
-	req, err := http.NewRequest(http.MethodGet, "https://enclave.example.com/v1/models", nil)
-	require.NoError(t, err)
-
-	retry, err := resetRequestBody(req)
-	require.NoError(t, err)
-	require.Same(t, req, retry)
 }
 
 // TestClientIntegration_TransportModes exercises NewClientWithOptions against a
