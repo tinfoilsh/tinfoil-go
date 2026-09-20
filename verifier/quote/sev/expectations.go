@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/hex"
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -42,11 +43,11 @@ func Assemble(p *policy.SEVSNPPolicy, q *Quote, launchDigest []byte, reportData 
 	if len(launchDigest) != 48 {
 		return nil, fmt.Errorf("expected launch digest must be 48 bytes, got %d", len(launchDigest))
 	}
-	chipID, err := hex.DecodeString(q.Identity)
+	chipID, err := hex.DecodeString(q.identity)
 	if err != nil {
 		return nil, fmt.Errorf("decoding platform identity: %w", err)
 	}
-	opts.Measurement = launchDigest
+	opts.Measurement = slices.Clone(launchDigest)
 	opts.ReportData = reportData[:]
 	opts.ChipID = chipID
 	return &Expectations{

@@ -4,6 +4,7 @@ import (
 	"encoding/hex"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -64,11 +65,11 @@ func TestValidate(t *testing.T) {
 	var reportData [64]byte
 	copy(reportData[:], body.GetReportData())
 	code := CodeRegisters{
-		RTMR1: body.GetRtmrs()[1],
-		RTMR2: body.GetRtmrs()[2],
-		RTMR3: body.GetRtmrs()[3],
+		RTMR1: slices.Clone(body.GetRtmrs()[1]),
+		RTMR2: slices.Clone(body.GetRtmrs()[2]),
+		RTMR3: slices.Clone(body.GetRtmrs()[3]),
 	}
-	quote := &Quote{quote: proto, TCBEvaluationDataNumber: 5}
+	quote := &Quote{quote: proto, tcbEvaluationDataNumber: 5}
 	shape := &policy.Shape{CPUs: 8, MemoryMB: 65536, Disks: 4}
 
 	minTCBEval := 5
@@ -106,7 +107,7 @@ func TestValidate(t *testing.T) {
 
 	// A collateral floor above the observed number must reject.
 	stale := *quote
-	stale.TCBEvaluationDataNumber = 4
+	stale.tcbEvaluationDataNumber = 4
 	assert.ErrorContains(t, assemble(a, matching).Validate(&stale), "below the policy minimum")
 
 	// A quote whose MRTD/RTMR0 resolve no endorsed measurement fails at
@@ -135,4 +136,10 @@ func TestValidate(t *testing.T) {
 	e, _, err = Assemble(a, matching, shape, quote, code, badReportData)
 	require.NoError(t, err)
 	assert.Error(t, e.Validate(quote))
+
+	e = assemble(a, matching)
+	for _, register := range [][]byte{code.RTMR1, code.RTMR2, code.RTMR3} {
+		register[0] ^= 0xff
+	}
+	require.NoError(t, e.Validate(quote), "caller mutation must not change assembled expectations")
 }

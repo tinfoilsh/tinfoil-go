@@ -135,11 +135,13 @@ func TestVerifySEV(t *testing.T) {
 	require.NoError(t, err)
 	assembled, verified, err := Verify(doc, artifact, q.Measurement, testShape, reportData)
 	require.NoError(t, err)
-	assert.Equal(t, policy.PlatformSEVSNP, verified.Platform)
+	assert.Equal(t, policy.PlatformSEVSNP, verified.Platform())
 	assert.Equal(t, "amd-genoa-prod", assembled.PolicyName)
-	assert.NotEmpty(t, verified.Identity)
+	assert.NotEmpty(t, verified.Identity())
 	require.NotNil(t, verified.Measurement)
 	assert.Equal(t, measurement.SevGuestV2, verified.Measurement.Type)
+	*verified = Authenticated{}
+	require.NoError(t, assembled.Validate(), "assembly must retain its original authenticated quote")
 
 	// Wrong REPORT_DATA must reject even with a valid signature.
 	wrongReportData := reportData

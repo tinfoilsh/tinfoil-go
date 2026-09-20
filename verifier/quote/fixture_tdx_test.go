@@ -64,12 +64,14 @@ func TestVerifyLiveFixtureTDX(t *testing.T) {
 	require.NoError(t, allowObservedShape(doc, artifact, devShape))
 	assembled, verified, err := Verify(doc, artifact, q.Measurement, devShape, reportData)
 	require.NoError(t, err)
-	assert.Equal(t, policy.PlatformTDX, verified.Platform)
+	assert.Equal(t, policy.PlatformTDX, verified.Platform())
 	assert.Equal(t, tdxFixturePolicy(t), assembled.PolicyName)
 	assert.Equal(t, "dev-shape", assembled.PlatformMeasurementName)
 	require.NotNil(t, verified.Measurement)
 	assert.Equal(t, measurement.TdxGuestV2, verified.Measurement.Type)
 	assert.Len(t, verified.Measurement.Registers, 5)
+	*verified = Authenticated{}
+	require.NoError(t, assembled.Validate(), "assembly must retain its original authenticated quote")
 }
 
 // allowObservedShape adds the quote's own MRTD/RTMR0, measured for shape,
