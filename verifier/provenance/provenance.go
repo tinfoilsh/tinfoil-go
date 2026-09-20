@@ -136,6 +136,8 @@ func newClientFromJSON(trustRootJSON []byte, verifierOptions ...verify.VerifierO
 
 // repoNameRE matches a GitHub "owner/name" repository slug.
 var repoNameRE = regexp.MustCompile(`^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$`)
+var gitCommitRE = regexp.MustCompile(`^[0-9a-f]{40}$`)
+var sha256DigestRE = regexp.MustCompile(`^[0-9a-f]{64}$`)
 
 // signingIdentity returns the anchored SAN regex accepted for artifacts
 // signed from repo: one workflow file directly under the repository's
@@ -158,26 +160,27 @@ func (c *Client) verifyBundle(bundleJSON []byte, repo, hexDigest string) (*verif
 	if err != nil {
 		return nil, err
 	}
-	return c.verifyBundleWithIdentity(bundleJSON, sanRegex, hexDigest)
+	result, _, err := c.verifyBundleWithIdentity(bundleJSON, sanRegex, hexDigest)
+	return result, err
 }
 
 // verifyBundleWithIdentity verifies a Sigstore bundle against an explicit
-// signing certificate SAN regex.
-func (c *Client) verifyBundleWithIdentity(bundleJSON []byte, sanRegex, hexDigest string) (*verify.VerificationResult, error) {
+// signing certificate SAN regex and returns the original signed payload.
+func (c *Client) verifyBundleWithIdentity(bundleJSON []byte, sanRegex, hexDigest string) (*verify.VerificationResult, []byte, error) {
 	if c.trustRoot == nil {
-		return nil, fmt.Errorf("trust root is not set")
+		return nil, nil, fmt.Errorf("trust root is not set")
 	}
 
 	var b bundle.Bundle
 	b.Bundle = new(protobundle.Bundle)
 	if err := b.UnmarshalJSON(bundleJSON); err != nil {
-		return nil, fmt.Errorf("parsing bundle: %w", err)
+		return nil, nil, fmt.Errorf("parsing bundle: %w", err)
 	}
 	if err := rejectLegacyBundleFormat(b.Bundle); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if err := requireExactlyOneDSSESignature(b.Bundle); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	verifier, err := verify.NewSignedEntityVerifier(
@@ -185,16 +188,16 @@ func (c *Client) verifyBundleWithIdentity(bundleJSON []byte, sanRegex, hexDigest
 		c.verifierOptions...,
 	)
 	if err != nil {
-		return nil, fmt.Errorf("creating signed entity verifier: %w", err)
+		return nil, nil, fmt.Errorf("creating signed entity verifier: %w", err)
 	}
 
 	sanMatcher, err := verify.NewSANMatcher("", sanRegex)
 	if err != nil {
-		return nil, fmt.Errorf("creating SAN matcher: %w", err)
+		return nil, nil, fmt.Errorf("creating SAN matcher: %w", err)
 	}
 	issuerMatcher, err := verify.NewIssuerMatcher(oidcIssuer, "")
 	if err != nil {
-		return nil, fmt.Errorf("creating issuer matcher: %w", err)
+		return nil, nil, fmt.Errorf("creating issuer matcher: %w", err)
 	}
 	// runner_environment comes from the OIDC token, so a workflow retargeted
 	// to self-hosted (operator-controlled) infrastructure cannot claim
@@ -205,12 +208,12 @@ func (c *Client) verifyBundleWithIdentity(bundleJSON []byte, sanRegex, hexDigest
 		certificate.Extensions{RunnerEnvironment: "github-hosted"},
 	)
 	if err != nil {
-		return nil, fmt.Errorf("creating certificate identity: %w", err)
+		return nil, nil, fmt.Errorf("creating certificate identity: %w", err)
 	}
 
 	digest, err := hex.DecodeString(hexDigest)
 	if err != nil {
-		return nil, fmt.Errorf("decoding hex digest: %w", err)
+		return nil, nil, fmt.Errorf("decoding hex digest: %w", err)
 	}
 	result, err := verifier.Verify(
 		&b,
@@ -220,7 +223,7 @@ func (c *Client) verifyBundleWithIdentity(bundleJSON []byte, sanRegex, hexDigest
 		),
 	)
 	if err != nil {
-		return nil, fmt.Errorf("verifying: %w", err)
+		return nil, nil, fmt.Errorf("verifying: %w", err)
 	}
 
 	// SPEC §5.2: reject duplicate-log SCTs. sigstore-go dedups SCTs by log ID
@@ -234,17 +237,17 @@ func (c *Client) verifyBundleWithIdentity(bundleJSON []byte, sanRegex, hexDigest
 		leafCertDER = chain.GetCertificates()[0].GetRawBytes()
 	}
 	if err := checkDuplicateSCTLogs(leafCertDER); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	// SPEC §5.4: WithArtifactDigest matched the digest against ANY subject in
 	// the in-toto statement; narrow that to subject[0] only, matching the SPEC
 	// and the rs/py/js SDKs.
 	if err := enforceSubject0Digest(result, hexDigest); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
-	return result, nil
+	return result, b.GetDsseEnvelope().GetPayload(), nil
 }
 
 // enforceSubject0Digest applies SPEC §5.4: only the FIRST in-toto subject is
@@ -396,7 +399,7 @@ func (c *Client) AuthenticateEndorsements(bundleJSON []byte, hexDigest string) (
 }
 
 func (c *Client) AuthenticatePlatformEndorsements(bundleJSON []byte, repo, tag, hexDigest string) (*PlatformEndorsements, error) {
-	result, err := c.verifyBundleWithIdentity(bundleJSON, platformEndorsementsIdentity, hexDigest)
+	result, _, err := c.verifyBundleWithIdentity(bundleJSON, platformEndorsementsIdentity, hexDigest)
 	if err != nil {
 		return nil, fmt.Errorf("verifying platform endorsements bundle: %w", err)
 	}
@@ -440,7 +443,7 @@ func authenticatedArtifact(result *verify.VerificationResult, repo, tag, hexDige
 		return AuthenticatedArtifact{}, fmt.Errorf("%s source ref %q does not match tag %q", label, certificate.SourceRepositoryRef, tag)
 	}
 	commit := certificate.SourceRepositoryDigest
-	if !regexp.MustCompile(`^[0-9a-f]{40}$`).MatchString(commit) {
+	if !gitCommitRE.MatchString(commit) {
 		return AuthenticatedArtifact{}, fmt.Errorf("%s source digest is not a lowercase Git commit", label)
 	}
 	if result.Statement == nil || len(result.Statement.Subject) == 0 || result.Statement.Subject[0].Name == "" {

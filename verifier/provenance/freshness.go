@@ -3,10 +3,8 @@ package provenance
 import (
 	"encoding/json/v2"
 	"fmt"
-	"regexp"
 	"time"
 
-	"github.com/sigstore/sigstore-go/pkg/bundle"
 	"github.com/sigstore/sigstore-go/pkg/verify"
 )
 
@@ -60,11 +58,11 @@ func (c *Client) AuthenticateFreshness(bundleJSON []byte, expected *Authenticate
 	if err := validateAuthenticatedArtifact(expected); err != nil {
 		return time.Time{}, err
 	}
-	result, err := c.verifyBundleWithIdentity(bundleJSON, freshnessWitnessIdentity, expected.Digest)
+	result, payload, err := c.verifyBundleWithIdentity(bundleJSON, freshnessWitnessIdentity, expected.Digest)
 	if err != nil {
 		return time.Time{}, fmt.Errorf("verifying freshness witness bundle: %w", err)
 	}
-	statement, err := parseFreshnessStatement(bundleJSON)
+	statement, err := parseFreshnessStatement(payload)
 	if err != nil {
 		return time.Time{}, err
 	}
@@ -93,13 +91,13 @@ func validateAuthenticatedArtifact(expected *AuthenticatedArtifact) error {
 	if expected.Tag == "" {
 		return fmt.Errorf("authenticated artifact tag is empty")
 	}
-	if !regexp.MustCompile(`^[0-9a-f]{40}$`).MatchString(expected.Commit) {
+	if !gitCommitRE.MatchString(expected.Commit) {
 		return fmt.Errorf("authenticated artifact commit is malformed")
 	}
 	if expected.SubjectName == "" {
 		return fmt.Errorf("authenticated artifact subject name is empty")
 	}
-	if !regexp.MustCompile(`^[0-9a-f]{64}$`).MatchString(expected.Digest) {
+	if !sha256DigestRE.MatchString(expected.Digest) {
 		return fmt.Errorf("authenticated artifact digest is malformed")
 	}
 	return nil
@@ -124,17 +122,9 @@ func validateFreshnessTime(timestamps []verify.TimestampVerificationResult, now 
 	return loggedAt, nil
 }
 
-func parseFreshnessStatement(bundleJSON []byte) (*freshnessStatement, error) {
-	var parsed bundle.Bundle
-	if err := parsed.UnmarshalJSON(bundleJSON); err != nil {
-		return nil, fmt.Errorf("parsing freshness bundle: %w", err)
-	}
-	envelope := parsed.GetDsseEnvelope()
-	if envelope == nil {
-		return nil, fmt.Errorf("freshness bundle has no DSSE envelope")
-	}
+func parseFreshnessStatement(payload []byte) (*freshnessStatement, error) {
 	var statement freshnessStatement
-	if err := json.Unmarshal(envelope.Payload, &statement, json.RejectUnknownMembers(true)); err != nil {
+	if err := json.Unmarshal(payload, &statement, json.RejectUnknownMembers(true)); err != nil {
 		return nil, fmt.Errorf("parsing freshness statement: %w", err)
 	}
 	return &statement, nil
