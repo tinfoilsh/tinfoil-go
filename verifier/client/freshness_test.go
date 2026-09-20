@@ -90,6 +90,7 @@ func TestVerifyFreshnessExpiration(t *testing.T) {
 		require.NoError(t, err)
 		var mobileResult VerifiedDocumentV3
 		require.NoError(t, json.Unmarshal([]byte(resultJSON), &mobileResult))
+		custom.FreshnessExpiresAt, mobileResult.FreshnessExpiresAt = custom.FreshnessExpiresAt.UTC(), mobileResult.FreshnessExpiresAt.UTC()
 		require.Equal(t, *custom, mobileResult, "mobile callers receive the same keys, measurements, and expiry")
 	}
 	badPins := cloneMeasurement(verified.EnclaveMeasurement)
