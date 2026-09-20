@@ -25,10 +25,11 @@ go get github.com/tinfoilsh/tinfoil-go@latest
 import "github.com/tinfoilsh/tinfoil-go/verifier/client"
 
 // 1. Create a client
-tinfoilClient := client.NewSecureClient("enclave.example.com", "org/repo")
+tinfoilClient, err := client.NewSecureClient("enclave.example.com", "org/repo", nil)
+if err != nil { log.Fatal(err) }
 
 // 2. Perform HTTP requests – attestation happens automatically
-resp, err := tinfoilClient.Get("/api/data", nil)
+resp, err := tinfoilClient.Request("GET", "/api/data", "", nil)
 if err != nil {
     log.Fatal(err)
 }
@@ -42,21 +43,25 @@ if err != nil {
     log.Fatal(err)
 }
 // Access verified measurements and keys
-log.Printf("TLS Cert Fingerprint: %s", groundTruth.TLSPublicKey)
-log.Printf("HPKE Public Key: %s", groundTruth.HPKEPublicKey)
+tlsKey, err := groundTruth.TLSPublicKeyFP()
+if err != nil { log.Fatal(err) }
+log.Printf("TLS Cert Fingerprint: %s", tlsKey)
+hpkeKey, err := groundTruth.HPKEPublicKey()
+if err != nil { log.Fatal(err) }
+log.Printf("HPKE Public Key: %s", hpkeKey)
 ```
 
 ## Secure HTTP Client
 The `client` package wraps `net/http` and adds:
 1. **Attestation gate** – the first request verifies the enclave.
 2. **TLS pinning** – the enclave-generated certificate fingerprint is pinned for the session.
-3. **Round-tripping helpers** – convenience `Get`, `Post` methods.
+3. **Round-tripping helpers** – a mobile-compatible `Request` method.
 
 ```go
-headers := map[string]string{"Content-Type": "application/json"}
+headers := `{"Content-Type":"application/json"}`
 body    := []byte(`{"key": "value"}`)
 
-resp, err := tinfoilClient.Post("/api/submit", headers, body)
+resp, err := tinfoilClient.Request("POST", "/api/submit", headers, body)
 ```
 
 For advanced usage retrieve the underlying `*http.Client`:
@@ -88,7 +93,7 @@ collateral. Verification then runs offline using the embedded trust roots:
 The TLS pin runs for direct HTTPS and HTTPS-over-CONNECT connections. Fetching
 the document does not require a separate direct TLS probe. Code and platform
 witnesses have a seven-day maximum age by default; the earliest authenticated
-expiry is exposed by `VerifyV3` and `VerifyDocumentV3` as `FreshnessExpiresAt`.
+expiry is exposed by `Verify` and `VerifyDocumentV3` as `FreshnessExpiresAt`.
 Callers using these APIs must retain the deadline and stop authorizing new
 requests at or after it, then verify again before accepting more requests.
 Re-verifying unchanged witnesses does not extend their deadline.
@@ -117,14 +122,14 @@ The old `verifier/attestation`, `verifier/sigstore`, `verifier/github`, and
 `verifier/config` packages are removed. Measurement types now live in
 `verifier/measurement`. The legacy `SetAttestationBundleURL`, `VerifyFromBundle`,
 `FetchAndVerifyJSON`, `FetchAndVerifyFromURLJSON`, and `VerifyFromBundleJSON`
-entry points are removed; use an explicit enclave/repository and `VerifyV3`.
+entry points are removed; use an explicit enclave/repository and `Verify`.
 V3 verification obtains collateral from the enclave document, so it no longer
 fetches reference values through the old bundle service.
 
 For an already fetched document, use:
 
 ```go
-verified, err := client.VerifyDocumentV3(documentBytes, expectedNonce, trustedRepo)
+verified, err := client.VerifyDocumentV3(documentBytes, expectedNonce, trustedRepo, nil)
 ```
 
 The repository and nonce are caller-owned expectations. After success, bind
@@ -135,7 +140,7 @@ also need to migrate before adopting the v3 framework.
 
 ## Verification options
 
-Pass `client.VerificationOptions` to the `*WithOptions` APIs to set register pins
+Pass `*client.VerificationOptions` to the constructors and verification APIs to set register pins
 or `FreshnessMaxAge`. Empty pin entries retain defaults; TDX order is
 `[MRTD, RTMR0, RTMR1, RTMR2, RTMR3]`. Pins cannot override release or platform measurements.
 
@@ -148,7 +153,7 @@ opts := client.VerificationOptions{
         Registers: []string{4: rtmr3},
     },
 }
-secureClient, err := client.NewSecureClientWithOptions("enclave.example.com", "org/repo", opts)
+secureClient, err := client.NewSecureClient("enclave.example.com", "org/repo", &opts)
 ```
 
 ## JavaScript / TypeScript / WASM

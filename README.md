@@ -41,7 +41,7 @@ import (
 func main() {
 	// Create a client
 	client, err := tinfoil.NewClient(
-		option.WithAPIKey("<YOUR_API_KEY>"),
+		tinfoil.WithOpenAIOptions(option.WithAPIKey("<YOUR_API_KEY>")),
 	)
 	if err != nil {
 		log.Fatalf("Failed to create client: %v", err)
@@ -69,7 +69,7 @@ func main() {
 ```go
 // 1. Create a client
 client, err := tinfoil.NewClient(
-	option.WithAPIKey(os.Getenv("TINFOIL_API_KEY")),
+	tinfoil.WithOpenAIOptions(option.WithAPIKey(os.Getenv("TINFOIL_API_KEY"))),
 )
 if err != nil {
 	log.Printf("Failed to create client: %v", err)
@@ -80,13 +80,13 @@ if err != nil {
 // see https://pkg.go.dev/github.com/openai/openai-go/v3 for API documentation
 ```
 
-## Verification document
+## Verification result
 
 The client retains the result used by its active secure transport:
 
 ```go
-document := client.VerificationDocument()
-fmt.Println(document.ConfigRepo, document.ReleaseTag, document.ReleaseDigest)
+document := client.Verification()
+fmt.Println(document.ConfigRepo, document.CodeTag, document.CodeDigest)
 fmt.Println(document.Verifier.Name, document.Verifier.Version)
 fmt.Println(document.VerifiedAt)
 ```
@@ -102,7 +102,7 @@ Use `WithVerificationOptions` to configure
 
 ```go
 // Create a secure client with explicit enclave and repo parameters
-client, err := tinfoil.NewClientWithParams(enclave, repo)
+client, err := tinfoil.NewClient(tinfoil.WithEnclave(enclave), tinfoil.WithRepo(repo))
 if err != nil {
 	return fmt.Errorf("Failed to create client: %v", err)
 }
@@ -126,7 +126,7 @@ By default, the SDK generates a random secret and persists it at `~/.tinfoil/use
 
 ```go
 // Pin a stable, non-empty, opaque secret for this client.
-client, err := tinfoil.NewClientWithOptions(
+client, err := tinfoil.NewClient(
 	tinfoil.WithUserCacheSecret(secret),
 )
 

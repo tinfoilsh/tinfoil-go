@@ -13,14 +13,14 @@ func TestTransportDiscardsSnapshotRefreshedDuringBuild(t *testing.T) {
 		return testState(time.Now().Add(time.Hour), "new"), nil
 	}}
 	var built, sent []string
-	transport, err := s.NewTransport(func(gt *GroundTruth) (http.RoundTripper, error) {
-		built = append(built, gt.TLSPublicKey)
-		if gt.TLSPublicKey == "old" {
+	transport, err := s.NewTransport(func(gt *VerifiedDocumentV3) (http.RoundTripper, error) {
+		built = append(built, gt.CryptoMaterial[0].Data)
+		if gt.CryptoMaterial[0].Data == "old" {
 			_, err := s.Verify()
 			require.NoError(t, err)
 		}
 		return roundTripFunc(func(*http.Request) (*http.Response, error) {
-			sent = append(sent, gt.TLSPublicKey)
+			sent = append(sent, gt.CryptoMaterial[0].Data)
 			return testResponse(), nil
 		}), nil
 	}, nil)

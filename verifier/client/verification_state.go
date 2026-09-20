@@ -12,8 +12,7 @@ var ErrFreshnessExpired = errors.New("attestation freshness witnesses have expir
 // Each successful verification publishes a new immutable snapshot. Keys, their
 // deadline and the displayed result always come from the same verification attempt.
 type verificationState struct {
-	verified    *VerifiedDocumentV3
-	groundTruth *GroundTruth
+	verified *VerifiedDocumentV3
 }
 
 type verificationCall struct {

@@ -8,8 +8,9 @@ On macOS, run `bash scripts/setup-mobile.sh`, then
 Apple targets and type-checks `Smoke.swift` against the macOS framework. It
 creates no release and contacts no enclave.
 
-The `*WithOptionsJSON` functions accept `pinned_registers` and integer
-`freshness_max_age_ns` options; `{}` uses defaults. See [Smoke.swift](Smoke.swift)
+`ParseVerificationOptionsJSON` accepts `pinned_registers` and integer
+`freshness_max_age_ns` options. Pass the result to constructors or verification;
+`nil` uses defaults. See [Smoke.swift](Smoke.swift)
 for client construction and offline verification examples.
 
 V3 removes the old attestation-bundle discovery/verification APIs. Swift callers

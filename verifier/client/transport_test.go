@@ -17,6 +17,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 	ehbpidentity "github.com/tinfoilsh/encrypted-http-body-protocol/identity"
+	"github.com/tinfoilsh/tinfoil-go/verifier/envelope"
 )
 
 type roundTripFunc func(*http.Request) (*http.Response, error)
@@ -24,11 +25,13 @@ type roundTripFunc func(*http.Request) (*http.Response, error)
 func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
 
 func testState(deadline time.Time, key string) *verificationState {
-	gt := &GroundTruth{TLSPublicKey: key, HPKEPublicKey: key, ReleaseTag: key}
-	return &verificationState{
-		verified:    &VerifiedDocumentV3{FreshnessExpiresAt: deadline},
-		groundTruth: gt,
-	}
+	return &verificationState{verified: &VerifiedDocumentV3{
+		CodeTag: key, FreshnessExpiresAt: deadline,
+		CryptoMaterial: []envelope.CryptoMaterialItem{
+			{ID: envelope.CryptoMaterialIDTLS, Format: envelope.KeySPKIFPSHA256V1Format, Data: key},
+			{ID: envelope.CryptoMaterialIDHPKE, Format: envelope.KeyX25519HPKEV1Format, Data: key},
+		},
+	}}
 }
 
 func testResponse() *http.Response {
@@ -39,14 +42,14 @@ func TestTransportExpirationAndUnchangedWitness(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		witnessedAt := time.Now()
 		var verifications, requests int
-		s, err := NewSecureClientWithOptions("enclave.example", "org/repo", VerificationOptions{FreshnessMaxAge: time.Minute})
+		s, err := NewSecureClient("enclave.example", "org/repo", &VerificationOptions{FreshnessMaxAge: time.Minute})
 		require.NoError(t, err)
 		deadline := witnessedAt.Add(time.Minute)
 		s.verify = func() (*verificationState, error) {
 			verifications++
 			return testState(freshnessExpiration(witnessedAt, witnessedAt.Add(time.Hour), s.options.FreshnessMaxAge), "key"), nil
 		}
-		transport, err := s.NewTransport(func(*GroundTruth) (http.RoundTripper, error) {
+		transport, err := s.NewTransport(func(*VerifiedDocumentV3) (http.RoundTripper, error) {
 			return roundTripFunc(func(*http.Request) (*http.Response, error) {
 				requests++
 				return testResponse(), nil
@@ -83,10 +86,10 @@ func TestRefreshCoalescesRequestsAndExplicitVerify(t *testing.T) {
 					<-release
 					return testState(time.Now().Add(time.Hour), "new"), refreshErr
 				}
-				transport, err := s.NewTransport(func(gt *GroundTruth) (http.RoundTripper, error) {
+				transport, err := s.NewTransport(func(gt *VerifiedDocumentV3) (http.RoundTripper, error) {
 					return roundTripFunc(func(*http.Request) (*http.Response, error) {
 						requests.Add(1)
-						if gt.TLSPublicKey != "new" {
+						if gt.CryptoMaterial[0].Data != "new" {
 							return nil, errors.New("used old key")
 						}
 						return testResponse(), nil
@@ -148,7 +151,7 @@ func TestRefreshWaitersCancelIndependentlyWithoutVerificationTimeout(t *testing.
 		}
 		close(release)
 		require.NoError(t, <-waiting)
-		require.NotNil(t, s.GroundTruth())
+		require.NotNil(t, s.Verification())
 	})
 }
 
@@ -161,7 +164,9 @@ func TestVerificationFetchStillTimesOut(t *testing.T) {
 			return nil, req.Context().Err()
 		})}
 		start := time.Now()
-		_, err := NewSecureClient("enclave.example", "org/repo").Verify()
+		client, err := NewSecureClient("enclave.example", "org/repo", nil)
+		require.NoError(t, err)
+		_, err = client.Verify()
 		require.ErrorIs(t, err, context.DeadlineExceeded)
 		require.Equal(t, 30*time.Second, time.Since(start))
 	})
@@ -177,10 +182,10 @@ func TestPreviouslyReturnedTransportsUseExplicitVerification(t *testing.T) {
 		}
 		return testState(time.Now().Add(time.Hour), key), nil
 	}}
-	build := func(gt *GroundTruth) (http.RoundTripper, error) {
+	build := func(gt *VerifiedDocumentV3) (http.RoundTripper, error) {
 		return roundTripFunc(func(*http.Request) (*http.Response, error) {
 			resp := testResponse()
-			resp.Header.Set("Key", gt.HPKEPublicKey)
+			resp.Header.Set("Key", gt.CryptoMaterial[1].Data)
 			return resp, nil
 		}), nil
 	}
@@ -190,15 +195,15 @@ func TestPreviouslyReturnedTransportsUseExplicitVerification(t *testing.T) {
 	require.NoError(t, err)
 	gt, err := s.Verify()
 	require.NoError(t, err)
-	gt.HPKEPublicKey = "caller mutation"
+	gt.CryptoMaterial[1].Data = "caller mutation"
 	for _, transport := range []http.RoundTripper{first, second} {
 		req, _ := http.NewRequest(http.MethodGet, "https://enclave.example", nil)
 		resp, err := transport.RoundTrip(req)
 		require.NoError(t, err)
 		require.Equal(t, "new", resp.Header.Get("Key"))
 	}
-	require.Equal(t, "new", s.GroundTruth().HPKEPublicKey)
-	require.Equal(t, "new", s.VerificationDocument().ReleaseTag)
+	require.Equal(t, "new", s.Verification().CryptoMaterial[1].Data)
+	require.Equal(t, "new", s.Verification().CodeTag)
 	require.Equal(t, 2, attempts)
 }
 
@@ -221,7 +226,7 @@ func TestKeyRotationRetriesShareRefresh(t *testing.T) {
 					<-release
 					return testState(time.Now().Add(time.Hour), "new"), nil
 				}
-				transport, err := s.NewTransport(func(gt *GroundTruth) (http.RoundTripper, error) {
+				transport, err := s.NewTransport(func(gt *VerifiedDocumentV3) (http.RoundTripper, error) {
 					return roundTripFunc(func(req *http.Request) (*http.Response, error) {
 						defer req.Body.Close()
 						body, err := io.ReadAll(req.Body)
@@ -229,7 +234,7 @@ func TestKeyRotationRetriesShareRefresh(t *testing.T) {
 							return nil, errors.New("body was not replayed")
 						}
 						sends.Add(1)
-						if gt.HPKEPublicKey == "old" {
+						if gt.CryptoMaterial[1].Data == "old" {
 							return nil, mode.keyErr
 						}
 						return testResponse(), nil
@@ -281,7 +286,7 @@ func TestKeyRotationRetryLimits(t *testing.T) {
 				refreshes++
 				return testState(time.Now().Add(time.Hour), "new"), tc.refreshErr
 			}}
-			transport, err := s.NewTransport(func(*GroundTruth) (http.RoundTripper, error) {
+			transport, err := s.NewTransport(func(*VerifiedDocumentV3) (http.RoundTripper, error) {
 				return roundTripFunc(func(req *http.Request) (*http.Response, error) {
 					req.Body.Close()
 					sends++
@@ -311,7 +316,7 @@ func TestExpirationDoesNotInterruptStream(t *testing.T) {
 			return testState(deadline, "key"), nil
 		}}
 		reader, writer := io.Pipe()
-		transport, err := s.NewTransport(func(*GroundTruth) (http.RoundTripper, error) {
+		transport, err := s.NewTransport(func(*VerifiedDocumentV3) (http.RoundTripper, error) {
 			return roundTripFunc(func(*http.Request) (*http.Response, error) {
 				resp := testResponse()
 				resp.Body = reader
@@ -340,7 +345,7 @@ func TestRedirectChecksExpiration(t *testing.T) {
 		s := &SecureClient{state: testState(deadline, "key"), verify: func() (*verificationState, error) {
 			return testState(deadline, "key"), nil
 		}}
-		transport, err := s.NewTransport(func(*GroundTruth) (http.RoundTripper, error) {
+		transport, err := s.NewTransport(func(*VerifiedDocumentV3) (http.RoundTripper, error) {
 			return roundTripFunc(func(*http.Request) (*http.Response, error) {
 				sends++
 				resp := testResponse()

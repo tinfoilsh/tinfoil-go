@@ -29,12 +29,14 @@ func TestMobileVerificationOptions(t *testing.T) {
 			VerificationOptions{FreshnessMaxAge: time.Hour, PinnedRegisters: &measurement.Measurement{Type: measurement.TdxGuestV2, Registers: []string{4: register}}},
 		},
 	} {
-		goClient, err := NewSecureClientWithOptions("enclave.example", "org/repo", tt.opts)
+		goClient, err := NewSecureClient("enclave.example", "org/repo", &tt.opts)
 		require.NoError(t, err)
-		mobileClient, err := NewSecureClientWithOptionsJSON("enclave.example", "org/repo", tt.raw)
+		parsed, err := ParseVerificationOptionsJSON(tt.raw)
+		require.NoError(t, err)
+		mobileClient, err := NewSecureClient("enclave.example", "org/repo", parsed)
 		require.NoError(t, err)
 		require.Equal(t, goClient.options, mobileClient.options)
-		fallback, err := NewDefaultClientWithOptionsJSON(tt.raw)
+		fallback, err := NewDefaultClient(parsed)
 		require.NoError(t, err)
 		require.Equal(t, goClient.options, fallback.options)
 		require.Equal(t, "inference.tinfoil.sh", fallback.Enclave())
@@ -53,15 +55,11 @@ func TestMobileVerificationOptionsRejectInvalidPolicy(t *testing.T) {
 		`{"pinned_registers":{"register":[]}}`,
 	} {
 		t.Run(raw, func(t *testing.T) {
-			direct, directErr := NewSecureClientWithOptionsJSON("enclave.example", "org/repo", raw)
-			require.Nil(t, direct)
-			require.Error(t, directErr)
-			fallback, err := NewDefaultClientWithOptionsJSON(raw)
-			require.Nil(t, fallback)
-			require.EqualError(t, err, directErr.Error())
-			result, err := VerifyDocumentV3WithOptionsJSON(nil, nil, "org/repo", raw)
-			require.Empty(t, result)
-			require.EqualError(t, err, directErr.Error())
+			opts, err := ParseVerificationOptionsJSON(raw)
+			if err == nil {
+				_, err = NewSecureClient("enclave.example", "org/repo", opts)
+			}
+			require.Error(t, err)
 		})
 	}
 }

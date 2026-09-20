@@ -17,17 +17,6 @@ type Client struct {
 	transport    TransportMode
 }
 
-// NewClientWithParams uses an explicit enclave and repository.
-func NewClientWithParams(enclave, repo string, openaiOpts ...option.RequestOption) (*Client, error) {
-	secureClient := client.NewSecureClient(enclave, repo)
-	return createClientFromSecureClient(secureClient, defaultTransportMode, "", resolveUserCacheSecret("", false), openaiOpts...)
-}
-
-// NewClient discovers a router and uses EHBP.
-func NewClient(openaiOpts ...option.RequestOption) (*Client, error) {
-	return NewClientWithOptions(WithOpenAIOptions(openaiOpts...))
-}
-
 func createClientFromSecureClient(secureClient *client.SecureClient, mode TransportMode, baseURL, userCacheSecret string, openaiOpts ...option.RequestOption) (*Client, error) {
 	httpClient, err := secureHTTPClient(secureClient, mode, baseURL, userCacheSecret)
 	if err != nil {
@@ -68,13 +57,13 @@ func (c *Client) Transport() TransportMode {
 }
 
 // Verify refreshes attestation and returns the verified state.
-func (c *Client) Verify() (*client.GroundTruth, error) {
+func (c *Client) Verify() (*client.VerifiedDocumentV3, error) {
 	return c.secureClient.Verify()
 }
 
-// VerificationDocument returns a copy of the last successful verification report.
-func (c *Client) VerificationDocument() *client.VerificationDocument {
-	return c.secureClient.VerificationDocument()
+// Verification returns a copy of the last successful verification.
+func (c *Client) Verification() *client.VerifiedDocumentV3 {
+	return c.secureClient.Verification()
 }
 
 // HTTPClient returns an HTTP client restricted to the enclave and configured proxy.

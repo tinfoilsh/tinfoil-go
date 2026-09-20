@@ -58,7 +58,8 @@ func TestBasicChatCompletion(t *testing.T) {
 	enclave, repo, apiKey := skipIfMissingEnvVars(t)
 
 	// Create secure client
-	client := NewSecureClient(enclave, repo)
+	client, err := NewSecureClient(enclave, repo, nil)
+	require.NoError(t, err)
 
 	// Prepare chat completion request
 	request := ChatCompletionRequest{
@@ -80,7 +81,9 @@ func TestBasicChatCompletion(t *testing.T) {
 		"Authorization": "Bearer " + apiKey,
 	}
 
-	resp, err := client.Post("/v1/chat/completions", headers, requestBody)
+	headersJSON, err := json.Marshal(headers)
+	require.NoError(t, err)
+	resp, err := client.Request("POST", "/v1/chat/completions", string(headersJSON), requestBody)
 	require.NoError(t, err)
 	require.Equal(t, 200, resp.StatusCode, "Expected successful response, got: %s", string(resp.Body))
 

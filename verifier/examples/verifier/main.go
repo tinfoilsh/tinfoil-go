@@ -17,13 +17,17 @@ func main() {
 	flag.Parse()
 
 	slog.Info("verifying enclave", "enclave", *enclave, "repo", *repo)
-	c := client.NewSecureClient(*enclave, *repo)
-	if _, err := c.VerifyV3(); err != nil {
+	c, err := client.NewSecureClient(*enclave, *repo, nil)
+	if err != nil {
+		slog.Error("creating client", "error", err)
+		os.Exit(1)
+	}
+	if _, err := c.Verify(); err != nil {
 		slog.Error("verification failed", "error", err)
 		os.Exit(1)
 	}
 
-	groundTruth, err := c.GroundTruthJSON()
+	groundTruth, err := c.VerificationJSON()
 	if err != nil {
 		slog.Error("failed to encode ground truth", "error", err)
 		os.Exit(1)

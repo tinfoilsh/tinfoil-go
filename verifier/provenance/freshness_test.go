@@ -99,7 +99,7 @@ func TestValidateFreshnessTime(t *testing.T) {
 
 func TestAuthenticateFreshnessRejectsInvalidMaxAge(t *testing.T) {
 	for _, maxAge := range []time.Duration{-time.Nanosecond, -time.Hour} {
-		_, err := AuthenticateFreshnessWithMaxAge(nil, nil, time.Now(), maxAge)
+		_, err := AuthenticateFreshness(nil, nil, time.Now(), maxAge)
 		require.ErrorContains(t, err, "freshness maximum age must not be negative")
 	}
 }

@@ -5,13 +5,13 @@ import (
 	"strings"
 	"time"
 
+	"github.com/tinfoilsh/tinfoil-go/verifier/envelope"
 	"github.com/tinfoilsh/tinfoil-go/verifier/measurement"
 )
 
 const (
-	verificationDocumentSchemaVersion = 1
-	verifierName                      = "tinfoil-go"
-	verifierModulePath                = "github.com/tinfoilsh/tinfoil-go"
+	verifierName       = "tinfoil-go"
+	verifierModulePath = "github.com/tinfoilsh/tinfoil-go"
 	// Version is the Tinfoil Go SDK release version.
 	Version = "0.15.0"
 )
@@ -22,48 +22,6 @@ var verificationTime = time.Now
 type SoftwareIdentity struct {
 	Name    string `json:"name"`
 	Version string `json:"version"`
-}
-
-// VerificationStepState describes one verification step.
-type VerificationStepState struct {
-	Status string `json:"status"`
-	Error  string `json:"error,omitempty"`
-}
-
-// VerificationSteps describes the checks represented by a verification document.
-type VerificationSteps struct {
-	FetchDigest         VerificationStepState `json:"fetchDigest"`
-	VerifyCode          VerificationStepState `json:"verifyCode"`
-	VerifyEnclave       VerificationStepState `json:"verifyEnclave"`
-	CompareMeasurements VerificationStepState `json:"compareMeasurements"`
-	VerifyCertificate   VerificationStepState `json:"verifyCertificate"`
-}
-
-// DocumentEnclaveMeasurement contains the observed measurement and attested keys.
-type DocumentEnclaveMeasurement struct {
-	Measurement             *measurement.Measurement `json:"measurement"`
-	TLSPublicKeyFingerprint string                   `json:"tlsPublicKeyFingerprint,omitempty"`
-	HPKEPublicKey           string                   `json:"hpkePublicKey,omitempty"`
-}
-
-// VerificationDocument is the Verification Center-compatible result of verification.
-type VerificationDocument struct {
-	SchemaVersion          int                        `json:"schemaVersion"`
-	ConfigRepo             string                     `json:"configRepo"`
-	EnclaveHost            string                     `json:"enclaveHost"`
-	ReleaseTag             string                     `json:"releaseTag,omitempty"`
-	ReleaseDigest          string                     `json:"releaseDigest"`
-	CodeMeasurement        *measurement.Measurement   `json:"codeMeasurement"`
-	EnclaveMeasurement     DocumentEnclaveMeasurement `json:"enclaveMeasurement"`
-	TLSPublicKey           string                     `json:"tlsPublicKey"`
-	HPKEPublicKey          string                     `json:"hpkePublicKey"`
-	CodeFingerprint        string                     `json:"codeFingerprint"`
-	EnclaveFingerprint     string                     `json:"enclaveFingerprint"`
-	SelectedRouterEndpoint string                     `json:"selectedRouterEndpoint"`
-	SecurityVerified       bool                       `json:"securityVerified"`
-	Verifier               SoftwareIdentity           `json:"verifier"`
-	VerifiedAt             string                     `json:"verifiedAt,omitempty"`
-	Steps                  VerificationSteps          `json:"steps"`
 }
 
 func currentVerifierIdentity() SoftwareIdentity {
@@ -100,55 +58,6 @@ func buildModuleVersion(module *debug.Module) string {
 	return version
 }
 
-func successfulStep() VerificationStepState {
-	return VerificationStepState{Status: "success"}
-}
-
-func newVerificationDocument(groundTruth *GroundTruth) *VerificationDocument {
-	if groundTruth == nil {
-		return nil
-	}
-	return &VerificationDocument{
-		SchemaVersion:   verificationDocumentSchemaVersion,
-		ConfigRepo:      groundTruth.ConfigRepo,
-		EnclaveHost:     groundTruth.EnclaveHost,
-		ReleaseTag:      groundTruth.ReleaseTag,
-		ReleaseDigest:   groundTruth.Digest,
-		CodeMeasurement: groundTruth.CodeMeasurement,
-		EnclaveMeasurement: DocumentEnclaveMeasurement{
-			Measurement:             groundTruth.EnclaveMeasurement,
-			TLSPublicKeyFingerprint: groundTruth.TLSPublicKey,
-			HPKEPublicKey:           groundTruth.HPKEPublicKey,
-		},
-		TLSPublicKey:           groundTruth.TLSPublicKey,
-		HPKEPublicKey:          groundTruth.HPKEPublicKey,
-		CodeFingerprint:        groundTruth.CodeFingerprint,
-		EnclaveFingerprint:     groundTruth.EnclaveFingerprint,
-		SelectedRouterEndpoint: groundTruth.EnclaveHost,
-		SecurityVerified:       true,
-		Verifier:               groundTruth.Verifier,
-		VerifiedAt:             groundTruth.VerifiedAt,
-		Steps: VerificationSteps{
-			FetchDigest:         VerificationStepState{Status: "skipped"},
-			VerifyCode:          successfulStep(),
-			VerifyEnclave:       successfulStep(),
-			CompareMeasurements: successfulStep(),
-			VerifyCertificate:   successfulStep(),
-		},
-	}
-}
-
-// Clone returns a deep copy of the verification document.
-func (document *VerificationDocument) Clone() *VerificationDocument {
-	if document == nil {
-		return nil
-	}
-	cloned := *document
-	cloned.CodeMeasurement = cloneMeasurement(document.CodeMeasurement)
-	cloned.EnclaveMeasurement.Measurement = cloneMeasurement(document.EnclaveMeasurement.Measurement)
-	return &cloned
-}
-
 func cloneMeasurement(value *measurement.Measurement) *measurement.Measurement {
 	if value == nil {
 		return nil
@@ -158,11 +67,12 @@ func cloneMeasurement(value *measurement.Measurement) *measurement.Measurement {
 	return &cloned
 }
 
-func cloneGroundTruth(groundTruth *GroundTruth) *GroundTruth {
+func cloneVerification(groundTruth *VerifiedDocumentV3) *VerifiedDocumentV3 {
 	if groundTruth == nil {
 		return nil
 	}
 	cloned := *groundTruth
+	cloned.CryptoMaterial = append([]envelope.CryptoMaterialItem(nil), groundTruth.CryptoMaterial...)
 	cloned.CodeMeasurement = cloneMeasurement(groundTruth.CodeMeasurement)
 	cloned.EnclaveMeasurement = cloneMeasurement(groundTruth.EnclaveMeasurement)
 	return &cloned

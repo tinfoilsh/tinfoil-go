@@ -18,6 +18,7 @@ import (
 	"github.com/stretchr/testify/require"
 	ehbpidentity "github.com/tinfoilsh/encrypted-http-body-protocol/identity"
 	"github.com/tinfoilsh/tinfoil-go/verifier/client"
+	"github.com/tinfoilsh/tinfoil-go/verifier/envelope"
 	"github.com/tinfoilsh/tinfoil-go/verifier/measurement"
 )
 
@@ -69,20 +70,20 @@ func TestProxyClientOptionsApply(t *testing.T) {
 	require.True(t, cfg.baseURLSet)
 }
 
-func TestNewClientWithOptionsRejectsInvalidBaseURL(t *testing.T) {
+func TestNewClientRejectsInvalidBaseURL(t *testing.T) {
 	for _, baseURL := range []string{"", "proxy.example.com", "ftp://proxy.example.com", "://"} {
 		t.Run(baseURL, func(t *testing.T) {
-			_, err := NewClientWithOptions(WithBaseURL(baseURL))
+			_, err := NewClient(WithBaseURL(baseURL))
 			require.Error(t, err)
 			require.Contains(t, err.Error(), "invalid base URL")
 		})
 	}
 }
 
-func TestNewClientWithOptionsRejectsInvalidFreshnessMaxAge(t *testing.T) {
+func TestNewClientRejectsInvalidFreshnessMaxAge(t *testing.T) {
 	for _, enclave := range []string{"", "enclave.example"} {
 		for _, maxAge := range []time.Duration{-time.Nanosecond, -time.Hour} {
-			c, err := NewClientWithOptions(WithEnclave(enclave), WithVerificationOptions(client.VerificationOptions{
+			c, err := NewClient(WithEnclave(enclave), WithVerificationOptions(client.VerificationOptions{
 				FreshnessMaxAge: maxAge,
 				PinnedRegisters: &measurement.Measurement{Type: measurement.TdxGuestV2, Registers: []string{4: strings.Repeat("ab", 48)}},
 			}))
@@ -104,15 +105,15 @@ func TestClientFreshnessMaxAge(t *testing.T) {
 				if enclave != "" {
 					opts = append(opts, WithRepo(repo))
 				}
-				c, err := NewClientWithOptions(opts...)
+				c, err := NewClient(opts...)
 				require.Nil(t, c)
 				require.ErrorContains(t, err, "freshness witness is stale")
-				c, err = NewClientWithOptions(append(opts, WithVerificationOptions(client.VerificationOptions{}))...)
+				c, err = NewClient(append(opts, WithVerificationOptions(client.VerificationOptions{}))...)
 				require.NoError(t, err)
 				require.NotNil(t, c)
-				pins := c.VerificationDocument().EnclaveMeasurement.Measurement
+				pins := c.Verification().EnclaveMeasurement
 				pins.Registers[0] = strings.Repeat("ab", 48)
-				c, err = NewClientWithOptions(append(opts, WithVerificationOptions(client.VerificationOptions{PinnedRegisters: pins}))...)
+				c, err = NewClient(append(opts, WithVerificationOptions(client.VerificationOptions{PinnedRegisters: pins}))...)
 				require.Nil(t, c)
 				require.ErrorContains(t, err, "cpu evidence")
 			})
@@ -120,13 +121,13 @@ func TestClientFreshnessMaxAge(t *testing.T) {
 	}
 }
 
-func TestNewClientWithOptionsRequiresEnclaveForCustomRepo(t *testing.T) {
+func TestNewClientRequiresEnclaveForCustomRepo(t *testing.T) {
 	for _, opt := range []ClientOption{
 		WithRepo("org/repo"),
 		WithRepo(defaultConfigRepo + "@v1"),
 		WithRepo(defaultConfigRepo + "@sha256:" + strings.Repeat("ab", 32)),
 	} {
-		c, err := NewClientWithOptions(opt)
+		c, err := NewClient(opt)
 		require.Nil(t, c)
 		require.ErrorContains(t, err, "requires an enclave")
 	}
@@ -272,9 +273,9 @@ func TestBuildEHBPTransportRequiresKey(t *testing.T) {
 	require.Contains(t, err.Error(), "HPKE public key")
 }
 
-type transportVerifierFunc func(func(*client.GroundTruth) (http.RoundTripper, error), func(error) bool) (http.RoundTripper, error)
+type transportVerifierFunc func(func(*client.VerifiedDocumentV3) (http.RoundTripper, error), func(error) bool) (http.RoundTripper, error)
 
-func (f transportVerifierFunc) NewTransport(build func(*client.GroundTruth) (http.RoundTripper, error), isKeyError func(error) bool) (http.RoundTripper, error) {
+func (f transportVerifierFunc) NewTransport(build func(*client.VerifiedDocumentV3) (http.RoundTripper, error), isKeyError func(error) bool) (http.RoundTripper, error) {
 	return f(build, isKeyError)
 }
 
@@ -285,8 +286,8 @@ func TestEHBPClientPreservesAdmissionAndRebuildsProxyHeader(t *testing.T) {
 		w.WriteHeader(http.StatusNoContent)
 	}))
 	defer proxy.Close()
-	var rebuild func(*client.GroundTruth) (http.RoundTripper, error)
-	verifier := transportVerifierFunc(func(build func(*client.GroundTruth) (http.RoundTripper, error), isKeyError func(error) bool) (http.RoundTripper, error) {
+	var rebuild func(*client.VerifiedDocumentV3) (http.RoundTripper, error)
+	verifier := transportVerifierFunc(func(build func(*client.VerifiedDocumentV3) (http.RoundTripper, error), isKeyError func(error) bool) (http.RoundTripper, error) {
 		rebuild = build
 		require.True(t, isKeyError(ehbpidentity.NewKeyConfigError(errors.New("rotated"))))
 		return roundTripFunc(func(*http.Request) (*http.Response, error) {
@@ -300,7 +301,7 @@ func TestEHBPClientPreservesAdmissionAndRebuildsProxyHeader(t *testing.T) {
 	require.Empty(t, seen, "failed admission must not reach the proxy")
 
 	for _, host := range []string{"old.example", "new.example"} {
-		transport, err := rebuild(&client.GroundTruth{EnclaveHost: host, HPKEPublicKey: strings.Repeat("01", 32)})
+		transport, err := rebuild(&client.VerifiedDocumentV3{EnclaveHost: host, CryptoMaterial: []envelope.CryptoMaterialItem{{ID: envelope.CryptoMaterialIDHPKE, Format: envelope.KeyX25519HPKEV1Format, Data: strings.Repeat("01", 32)}}})
 		require.NoError(t, err)
 		req, err := http.NewRequest(http.MethodGet, proxy.URL, nil)
 		require.NoError(t, err)
@@ -322,7 +323,7 @@ func TestClientIntegration_TransportModesWithCacheSecret(t *testing.T) {
 
 	for _, mode := range []TransportMode{TransportEHBP, TransportTLS} {
 		t.Run(string(mode), func(t *testing.T) {
-			c, err := NewClientWithOptions(
+			c, err := NewClient(
 				WithTransport(mode),
 				WithUserCacheSecret(testUserCacheSecret),
 				WithOpenAIOptions(option.WithAPIKey(apiKey)),
@@ -353,7 +354,7 @@ func TestClientIntegration_LowLevelEHBP(t *testing.T) {
 
 	for _, mode := range []TransportMode{TransportEHBP, TransportTLS} {
 		t.Run(string(mode), func(t *testing.T) {
-			c, err := NewClientWithOptions(
+			c, err := NewClient(
 				WithTransport(mode),
 				WithOpenAIOptions(option.WithAPIKey(apiKey)),
 			)

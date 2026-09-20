@@ -36,16 +36,18 @@ func TestFreshnessExpiration(t *testing.T) {
 }
 
 func TestClientFreshnessMaxAge(t *testing.T) {
-	require.Equal(t, 7*24*time.Hour, NewSecureClient("enclave.example", "org/repo").options.FreshnessMaxAge)
+	defaults, err := NewSecureClient("enclave.example", "org/repo", nil)
+	require.NoError(t, err)
+	require.Equal(t, 7*24*time.Hour, defaults.options.FreshnessMaxAge)
 	for _, maxAge := range []time.Duration{-time.Nanosecond, -time.Hour} {
 		opts := VerificationOptions{FreshnessMaxAge: maxAge}
-		s, err := NewSecureClientWithOptions("enclave.example", "org/repo", opts)
+		s, err := NewSecureClient("enclave.example", "org/repo", &opts)
 		require.Nil(t, s)
 		require.ErrorContains(t, err, "freshness maximum age must not be negative")
-		s, err = NewDefaultClientWithOptions(opts)
+		s, err = NewDefaultClient(&opts)
 		require.Nil(t, s)
 		require.ErrorContains(t, err, "freshness maximum age must not be negative")
-		_, err = VerifyDocumentV3WithOptions(nil, nil, "org/repo", opts)
+		_, err = VerifyDocumentV3(nil, nil, "org/repo", &opts)
 		require.ErrorContains(t, err, "freshness maximum age must not be negative")
 	}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte("[]")) }))
@@ -55,7 +57,7 @@ func TestClientFreshnessMaxAge(t *testing.T) {
 	t.Cleanup(func() { defaultRouterURL = originalURL })
 	for _, maxAge := range []time.Duration{0, 24 * time.Hour, 30 * 24 * time.Hour} {
 		opts := VerificationOptions{FreshnessMaxAge: maxAge, PinnedRegisters: &measurement.Measurement{Type: measurement.TdxGuestV2, Registers: []string{4: measurement.RTMR3_ZERO}}}
-		s, err := NewDefaultClientWithOptions(opts)
+		s, err := NewDefaultClient(&opts)
 		require.NoError(t, err)
 		require.Equal(t, "inference.tinfoil.sh", s.Enclave())
 		require.Equal(t, cmp.Or(maxAge, 7*24*time.Hour), s.options.FreshnessMaxAge)
@@ -72,17 +74,19 @@ func TestVerifyV3FreshnessExpiration(t *testing.T) {
 	require.NoError(t, err)
 	raw, err := envelope.Fetch(host, nonce)
 	require.NoError(t, err)
-	verified, err := VerifyDocumentV3(raw, nonce, repo)
+	verified, err := VerifyDocumentV3(raw, nonce, repo, nil)
 	require.NoError(t, err)
 	const maxAge = 30 * 24 * time.Hour
 	for _, age := range []time.Duration{0, maxAge} {
 		opts := VerificationOptions{FreshnessMaxAge: age, PinnedRegisters: verified.EnclaveMeasurement}
-		custom, err := VerifyDocumentV3WithOptions(raw, nonce, repo, opts)
+		custom, err := VerifyDocumentV3(raw, nonce, repo, &opts)
 		require.NoError(t, err)
 		require.Equal(t, verified.FreshnessExpiresAt.Add(cmp.Or(age, provenance.MaxFreshnessAge)-provenance.MaxFreshnessAge), custom.FreshnessExpiresAt)
 		optionsJSON, err := json.Marshal(opts)
 		require.NoError(t, err)
-		resultJSON, err := VerifyDocumentV3WithOptionsJSON(raw, nonce, repo, string(optionsJSON))
+		parsed, err := ParseVerificationOptionsJSON(string(optionsJSON))
+		require.NoError(t, err)
+		resultJSON, err := VerifyDocumentV3JSON(raw, nonce, repo, parsed)
 		require.NoError(t, err)
 		var mobileResult VerifiedDocumentV3
 		require.NoError(t, json.Unmarshal([]byte(resultJSON), &mobileResult))
@@ -90,9 +94,9 @@ func TestVerifyV3FreshnessExpiration(t *testing.T) {
 	}
 	badPins := cloneMeasurement(verified.EnclaveMeasurement)
 	badPins.Registers[0] = "bad"
-	_, err = VerifyDocumentV3WithOptions(raw, nonce, repo, VerificationOptions{PinnedRegisters: badPins})
+	_, err = VerifyDocumentV3(raw, nonce, repo, &VerificationOptions{PinnedRegisters: badPins})
 	require.ErrorContains(t, err, "cpu evidence")
-	s, err := NewDefaultClientWithOptions(VerificationOptions{PinnedRegisters: badPins, FreshnessMaxAge: maxAge})
+	s, err := NewDefaultClient(&VerificationOptions{PinnedRegisters: badPins, FreshnessMaxAge: maxAge})
 	require.NoError(t, err)
 	_, err = s.Verify()
 	require.ErrorContains(t, err, "cpu evidence")
@@ -113,15 +117,15 @@ func TestVerifyV3FreshnessExpiration(t *testing.T) {
 	} {
 		collateral, err := doc.FreshnessCollateral(id)
 		require.NoError(t, err)
-		loggedAt, err := provenance.AuthenticateFreshness(collateral.SigstoreBundle, artifact, time.Now())
+		loggedAt, err := provenance.AuthenticateFreshness(collateral.SigstoreBundle, artifact, time.Now(), 0)
 		require.NoError(t, err)
-		_, err = provenance.AuthenticateFreshness(collateral.SigstoreBundle, artifact, loggedAt.Add(8*24*time.Hour))
+		_, err = provenance.AuthenticateFreshness(collateral.SigstoreBundle, artifact, loggedAt.Add(8*24*time.Hour), 0)
 		require.ErrorContains(t, err, "stale")
-		_, err = provenance.AuthenticateFreshnessWithMaxAge(collateral.SigstoreBundle, artifact, loggedAt.Add(8*24*time.Hour), maxAge)
+		_, err = provenance.AuthenticateFreshness(collateral.SigstoreBundle, artifact, loggedAt.Add(8*24*time.Hour), maxAge)
 		require.NoError(t, err)
-		_, err = provenance.AuthenticateFreshnessWithMaxAge(collateral.SigstoreBundle, artifact, loggedAt.Add(7*24*time.Hour), 0)
+		_, err = provenance.AuthenticateFreshness(collateral.SigstoreBundle, artifact, loggedAt.Add(7*24*time.Hour), 0)
 		require.NoError(t, err)
-		_, err = provenance.AuthenticateFreshnessWithMaxAge(collateral.SigstoreBundle, artifact, loggedAt.Add(7*24*time.Hour+time.Nanosecond), 0)
+		_, err = provenance.AuthenticateFreshness(collateral.SigstoreBundle, artifact, loggedAt.Add(7*24*time.Hour+time.Nanosecond), 0)
 		require.ErrorContains(t, err, "stale")
 		expiresAt := loggedAt.Add(provenance.MaxFreshnessAge)
 		require.False(t, verified.FreshnessExpiresAt.After(expiresAt), "%s witness expires before public deadline", id)

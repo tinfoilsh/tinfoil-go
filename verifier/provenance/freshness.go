@@ -47,23 +47,15 @@ type freshnessStatement struct {
 	Predicate     FreshnessWitness   `json:"predicate"`
 }
 
-func AuthenticateFreshness(bundleJSON []byte, expected *AuthenticatedArtifact, now time.Time) (time.Time, error) {
-	return AuthenticateFreshnessWithMaxAge(bundleJSON, expected, now, MaxFreshnessAge)
-}
-
-func AuthenticateFreshnessWithMaxAge(bundleJSON []byte, expected *AuthenticatedArtifact, now time.Time, maxAge time.Duration) (time.Time, error) {
+func AuthenticateFreshness(bundleJSON []byte, expected *AuthenticatedArtifact, now time.Time, maxAge time.Duration) (time.Time, error) {
 	c, err := getDefaultClient()
 	if err != nil {
 		return time.Time{}, err
 	}
-	return c.AuthenticateFreshnessWithMaxAge(bundleJSON, expected, now, maxAge)
+	return c.AuthenticateFreshness(bundleJSON, expected, now, maxAge)
 }
 
-func (c *Client) AuthenticateFreshness(bundleJSON []byte, expected *AuthenticatedArtifact, now time.Time) (time.Time, error) {
-	return c.AuthenticateFreshnessWithMaxAge(bundleJSON, expected, now, MaxFreshnessAge)
-}
-
-func (c *Client) AuthenticateFreshnessWithMaxAge(bundleJSON []byte, expected *AuthenticatedArtifact, now time.Time, maxAge time.Duration) (time.Time, error) {
+func (c *Client) AuthenticateFreshness(bundleJSON []byte, expected *AuthenticatedArtifact, now time.Time, maxAge time.Duration) (time.Time, error) {
 	if maxAge < 0 {
 		return time.Time{}, fmt.Errorf("freshness maximum age must not be negative")
 	}

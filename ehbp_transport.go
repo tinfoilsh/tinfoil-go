@@ -47,7 +47,7 @@ type clientConfig struct {
 	openaiOpts         []option.RequestOption
 }
 
-// ClientOption configures a Client created with NewClientWithOptions.
+// ClientOption configures a Client created with NewClient.
 type ClientOption func(*clientConfig)
 
 // WithEnclave sets the enclave host to verify and connect to. When unset, a
@@ -88,9 +88,9 @@ func WithOpenAIOptions(opts ...option.RequestOption) ClientOption {
 	return func(c *clientConfig) { c.openaiOpts = append(c.openaiOpts, opts...) }
 }
 
-// NewClientWithOptions creates an OpenAI client with attestation verification.
+// NewClient creates an OpenAI client with attestation verification.
 // Defaults are router discovery, tinfoilsh/confidential-model-router, and EHBP.
-func NewClientWithOptions(opts ...ClientOption) (*Client, error) {
+func NewClient(opts ...ClientOption) (*Client, error) {
 	cfg := &clientConfig{
 		repo:      defaultConfigRepo,
 		transport: defaultTransportMode,
@@ -118,9 +118,9 @@ func NewClientWithOptions(opts ...ClientOption) (*Client, error) {
 	var secureClient *client.SecureClient
 	var err error
 	if cfg.enclave == "" {
-		secureClient, err = client.NewDefaultClientWithOptions(cfg.verification)
+		secureClient, err = client.NewDefaultClient(&cfg.verification)
 	} else {
-		secureClient, err = client.NewSecureClientWithOptions(cfg.enclave, cfg.repo, cfg.verification)
+		secureClient, err = client.NewSecureClient(cfg.enclave, cfg.repo, &cfg.verification)
 	}
 	if err != nil {
 		return nil, fmt.Errorf("failed to create secure client: %w", err)
@@ -209,12 +209,16 @@ func (t *hostBoundRoundTripper) RoundTrip(req *http.Request) (*http.Response, er
 }
 
 type transportVerifier interface {
-	NewTransport(func(*client.GroundTruth) (http.RoundTripper, error), func(error) bool) (http.RoundTripper, error)
+	NewTransport(func(*client.VerifiedDocumentV3) (http.RoundTripper, error), func(error) bool) (http.RoundTripper, error)
 }
 
 func ehbpHTTPClient(secureClient transportVerifier, baseURL string) (*http.Client, error) {
-	transport, err := secureClient.NewTransport(func(groundTruth *client.GroundTruth) (http.RoundTripper, error) {
-		inner, err := buildEHBPTransport(groundTruth.HPKEPublicKey)
+	transport, err := secureClient.NewTransport(func(groundTruth *client.VerifiedDocumentV3) (http.RoundTripper, error) {
+		key, err := groundTruth.HPKEPublicKey()
+		if err != nil {
+			return nil, err
+		}
+		inner, err := buildEHBPTransport(key)
 		if err != nil {
 			return nil, err
 		}

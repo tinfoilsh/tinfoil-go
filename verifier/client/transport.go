@@ -15,7 +15,7 @@ import (
 // bind its transport to the supplied attested keys. isKeyError identifies an
 // error safe to retry after re-verification; nil disables key-rotation retries.
 // All transports from this client share its verification and refresh state.
-func (s *SecureClient) NewTransport(build func(*GroundTruth) (http.RoundTripper, error), isKeyError func(error) bool) (http.RoundTripper, error) {
+func (s *SecureClient) NewTransport(build func(*VerifiedDocumentV3) (http.RoundTripper, error), isKeyError func(error) bool) (http.RoundTripper, error) {
 	if build == nil {
 		return nil, fmt.Errorf("transport builder is required")
 	}
@@ -28,7 +28,7 @@ func (s *SecureClient) NewTransport(build func(*GroundTruth) (http.RoundTripper,
 
 type refreshingTransport struct {
 	client     *SecureClient
-	build      func(*GroundTruth) (http.RoundTripper, error)
+	build      func(*VerifiedDocumentV3) (http.RoundTripper, error)
 	isKeyError func(error) bool
 	mu         sync.Mutex
 	state      *verificationState
@@ -43,7 +43,7 @@ func (t *refreshingTransport) admit(ctx context.Context) (http.RoundTripper, *ve
 		}
 		t.mu.Lock()
 		if t.state != state {
-			transport, err := t.build(cloneGroundTruth(state.groundTruth))
+			transport, err := t.build(cloneVerification(state.verified))
 			if transport == nil && err == nil {
 				err = fmt.Errorf("transport builder returned nil")
 			}
