@@ -1,6 +1,15 @@
-// Package quote authenticates CPU evidence using document-carried collateral and
-// pinned vendor roots. It then assembles and checks expectations from platform
-// policy, code measurements, caller pins, and REPORT_DATA.
+// Package quote verifies a v3 document's CPU evidence in three phases:
+//
+//  1. Authenticate: verify the quote's signature chain up to the pinned
+//     vendor root, from document-carried collateral only. Authenticated,
+//     not yet appraised.
+//  2. Assemble: resolve the complete policy — every value the quote must
+//     attest, as one object. Entries differ only in which verified source
+//     resolves them (policy artifact, code provenance, envelope); that
+//     distinction ends here. Assembly fails if any entry cannot be
+//     resolved.
+//  3. Validate: one comparison of the quote against the assembled policy,
+//     inside the vendor library's validation options.
 package quote
 
 import (
@@ -33,8 +42,9 @@ func (q *Authenticated) Platform() string { return q.platform }
 // Identity is the authenticated machine identifier (SEV CHIP_ID / TDX PPID), lowercase hex.
 func (q *Authenticated) Identity() string { return q.identity }
 
-// AssembledPolicy holds the policy checks and a copy of the authenticated quote
-// to which they apply.
+// AssembledPolicy is the complete expected state of a quote, fully
+// resolved before validation runs. It captures the quote it was assembled
+// for, so it cannot be applied to any other quote.
 type AssembledPolicy struct {
 	// PolicyName is the matched policy name.
 	PolicyName string
@@ -47,9 +57,10 @@ type AssembledPolicy struct {
 	tdx   *tdx.Expectations
 }
 
-// Authenticate verifies the quote's signature chain against the pinned vendor
-// root using document-carried collateral. Callers must also assemble and validate
-// a policy before trusting the platform. No network requests are made.
+// Authenticate verifies the quote's signature chain up to the pinned
+// vendor root, from the document's own endorsement collateral — no network
+// fetches. Callers must assemble a policy and validate before trusting the
+// platform.
 func Authenticate(doc *envelope.Document) (*Authenticated, error) {
 	switch doc.CPUEvidence.Format {
 	case envelope.SEVSNPReportV1Format:
@@ -117,7 +128,8 @@ func Assemble(endorsements *policy.Artifact, code, pins *measurement.Measurement
 	return assembled, nil
 }
 
-// Validate checks the captured quote against the assembled policy.
+// Validate compares the captured quote against the assembled policy in a
+// single vendor library call: no lookups, no translation.
 func (p *AssembledPolicy) Validate() error {
 	switch p.quote.platform {
 	case policy.PlatformSEVSNP:
@@ -150,7 +162,6 @@ func layout(code, pins *measurement.Measurement, q *Authenticated) ([]string, er
 	if code.Type != measurement.SnpTdxMultiPlatformV1 || len(code.Registers) != 3 {
 		return nil, fmt.Errorf("code measurement is %s with %d registers, want %s with 3", code.Type, len(code.Registers), measurement.SnpTdxMultiPlatformV1)
 	}
-	// Registers are [snp_measurement, rtmr1, rtmr2].
 	registers := []string{code.Registers[0]}
 	enclaveType := measurement.SevGuestV2
 	if q.platform == policy.PlatformTDX {

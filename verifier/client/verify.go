@@ -21,9 +21,10 @@ type VerifiedDocumentV3 struct {
 	CodeDigest      string
 	CodeTag         string
 	CodeMeasurement *measurement.Measurement
-	// EnclaveMeasurement contains the authenticated registers after policy checks.
+	// EnclaveMeasurement carries the quote's authenticated registers,
+	// proven to match the expectations.
 	EnclaveMeasurement *measurement.Measurement
-	// CryptoMaterial contains keys bound to the quote by REPORT_DATA.
+	// CryptoMaterial holds the endorsed key items (hash-bound into the quote).
 	CryptoMaterial []envelope.CryptoMaterialItem
 	// FreshnessExpiresAt is the earlier authenticated code/platform witness
 	// deadline. Cached verification must not authorize new requests at or
@@ -31,12 +32,14 @@ type VerifiedDocumentV3 struct {
 	FreshnessExpiresAt time.Time
 }
 
-// TLSPublicKeyFP returns the attested TLS key fingerprint, or an error if absent.
+// TLSPublicKeyFP returns the endorsed TLS key fingerprint (the id=tls
+// crypto_material entry), or an error if the document does not endorse one.
 func (v *VerifiedDocumentV3) TLSPublicKeyFP() (string, error) {
 	return v.cryptoMaterialData(envelope.CryptoMaterialIDTLS, envelope.KeySPKIFPSHA256V1Format)
 }
 
-// HPKEPublicKey returns the attested HPKE public key, or an error if absent.
+// HPKEPublicKey returns the endorsed HPKE public key (the id=hpke
+// crypto_material entry), or an error if the document does not endorse one.
 func (v *VerifiedDocumentV3) HPKEPublicKey() (string, error) {
 	return v.cryptoMaterialData(envelope.CryptoMaterialIDHPKE, envelope.KeyX25519HPKEV1Format)
 }
@@ -54,7 +57,6 @@ func (v *VerifiedDocumentV3) cryptoMaterialData(id, format string) (string, erro
 	return "", fmt.Errorf("document endorses no %q crypto material", id)
 }
 
-// SecureClient requires TLS; EHBP also requires HPKE.
 func (v *VerifiedDocumentV3) validateTransportKeys() error {
 	if _, err := v.TLSPublicKeyFP(); err != nil {
 		return err
@@ -140,11 +142,14 @@ func authenticateReferenceValues(doc *envelope.Document, repo string, maxAge tim
 	return code, endorsements, freshnessExpiration(codeWitnessedAt, platformWitnessedAt, maxAge), nil
 }
 
+// freshnessExpiration uses authenticated witness times, never local verification time.
 func freshnessExpiration(codeWitnessedAt, platformWitnessedAt time.Time, maxAge time.Duration) time.Time {
-	if platformWitnessedAt.Before(codeWitnessedAt) {
-		codeWitnessedAt = platformWitnessedAt
+	expiresAt := codeWitnessedAt.Add(maxAge)
+	platformExpiresAt := platformWitnessedAt.Add(maxAge)
+	if platformExpiresAt.Before(expiresAt) {
+		expiresAt = platformExpiresAt
 	}
-	return codeWitnessedAt.Add(maxAge)
+	return expiresAt
 }
 
 func (s *SecureClient) fetchVerification() (*VerifiedDocumentV3, error) {

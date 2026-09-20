@@ -20,8 +20,10 @@ const (
 	ProductTurin = "Turin"
 )
 
-// Expectations holds library options plus exact guest policy and platform info
-// checks. The library alone treats those fields as bounds.
+// Expectations is the fully translated SEV-SNP expected state, resolved at
+// assembly so that validation performs no translation and no lookups. The
+// want* fields are compared by strict equality — the library options only
+// bound them.
 type Expectations struct {
 	opts             *sevvalidate.Options
 	wantGuestPolicy  sevabi.SnpPolicy
@@ -52,7 +54,10 @@ func Assemble(p *policy.SEVSNPPolicy, q *Quote, launchDigest string, reportData 
 	}, nil
 }
 
-// Validate applies library options and exact guest policy and platform info checks.
+// Validate compares a quote against the assembled expected state: the
+// library validation options plus the strict-equality companions. It is
+// the only SEV enforcement entry point, so no subset of the policy can be
+// applied.
 func (e *Expectations) Validate(q *Quote) error {
 	if err := sevvalidate.SnpAttestation(q.attestation, e.opts); err != nil {
 		return err

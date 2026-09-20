@@ -1,5 +1,7 @@
-// Package provenance verifies Sigstore code and platform artifacts against
-// pinned Tinfoil workflow identities.
+// Package provenance verifies Sigstore-signed reference values against the
+// pinned Tinfoil workflow identities, producing verified value types: the
+// code measurement (with its declared VM shape) and the
+// platform-endorsements artifact.
 package provenance
 
 import (
@@ -30,12 +32,18 @@ import (
 const (
 	oidcIssuer = "https://token.actions.githubusercontent.com"
 
+	// platformEndorsementsRepo publishes the platform-endorsements artifact.
 	platformEndorsementsRepo = "tinfoilsh/platform-endorsements"
 	freshnessWitnessRepo     = "tinfoilsh/freshness-witness"
+
+	// platformEndorsementsIdentity is the only signing certificate identity
+	// accepted for the platform-endorsements artifact: the tag-triggered
+	// build workflow of the publisher repo. Dots are escaped and the pattern
+	// is anchored at both ends so no other workflow path, ref type, or
+	// trailing SAN content can match.
 )
 
 var (
-	// Platform endorsements must come from build.yml on a version tag.
 	platformEndorsementsIdentity = githubWorkflowIdentityPattern(platformEndorsementsRepo, `build\.yml`, `refs/tags/v[0-9][^@]*`)
 	freshnessWitnessIdentity     = githubWorkflowIdentityPattern(freshnessWitnessRepo, `freshness\.yml`, `refs/heads/main`)
 )
@@ -48,8 +56,9 @@ type Client struct {
 //go:embed trusted_root.json
 var embeddedTrustedRoot []byte
 
-// Verification uses the embedded trust root without network fetches.
-// The rootfetch tool updates the embedded copy.
+// defaultClient is built once from the embedded trusted root. Verification
+// never fetches trust material over the network; the embedded copy is
+// refreshed by the rootfetch tool.
 var (
 	defaultClient     *Client
 	defaultClientErr  error
@@ -193,8 +202,9 @@ func (c *Client) verifyBundleWithIdentity(bundleJSON []byte, sanRegex, hexDigest
 	if err != nil {
 		return nil, nil, fmt.Errorf("creating issuer matcher: %w", err)
 	}
-	// runner_environment is an OIDC claim. Switching to a self-hosted runner
-	// fails this check.
+	// runner_environment comes from the OIDC token, so a workflow retargeted
+	// to self-hosted (operator-controlled) infrastructure cannot claim
+	// github-hosted.
 	certID, err := verify.NewCertificateIdentity(
 		sanMatcher,
 		issuerMatcher,
@@ -219,7 +229,9 @@ func (c *Client) verifyBundleWithIdentity(bundleJSON []byte, sanRegex, hexDigest
 		return nil, nil, fmt.Errorf("verifying: %w", err)
 	}
 
-	// SPEC §5.2 requires rejecting duplicate-log SCTs; sigstore-go only deduplicates them.
+	// SPEC §5.2: reject duplicate-log SCTs. sigstore-go dedups SCTs by log ID
+	// rather than rejecting, so a leaf cert carrying two SCTs from the same CT
+	// log would pass; reject it here, matching the rs/js SDKs.
 	vm := b.Bundle.GetVerificationMaterial()
 	var leafCertDER []byte
 	if c := vm.GetCertificate(); c != nil && len(c.GetRawBytes()) > 0 {
@@ -238,8 +250,13 @@ func (c *Client) verifyBundleWithIdentity(bundleJSON []byte, sanRegex, hexDigest
 	return result, b.GetDsseEnvelope().GetPayload(), nil
 }
 
-// enforceSubject0Digest restricts sigstore-go's any-subject digest match to
-// subject[0], as required by SPEC §5.4. Digests are case-insensitive per §7.3.
+// enforceSubject0Digest applies SPEC §5.4: only the FIRST in-toto subject is
+// checked against the expected artifact digest. sigstore-go's WithArtifactDigest
+// matches the digest against ANY subject in the statement (valid generic in-toto
+// semantics — a Statement's subject array may legitimately list several
+// artifacts), so we re-check subject[0] specifically here to honor the SPEC and
+// match the other Tinfoil SDKs (rs/py/js), which all key on subject[0]. Digests
+// are compared case-insensitively (lowercase-normalized per SPEC §7.3).
 func enforceSubject0Digest(result *verify.VerificationResult, expectedDigest string) error {
 	if result == nil || result.Statement == nil {
 		return fmt.Errorf("verification result has no in-toto statement")
@@ -260,7 +277,7 @@ func enforceSubject0Digest(result *verify.VerificationResult, expectedDigest str
 // Code is the verified content of a code-provenance bundle.
 type Code struct {
 	AuthenticatedArtifact
-	// Measurement contains the release's expected registers.
+	// Measurement is the attested launch measurement.
 	Measurement *measurement.Measurement
 	// Shape is the VM shape the artifact declares.
 	Shape *policy.Shape

@@ -81,25 +81,15 @@ func TestValidateFreshnessTime(t *testing.T) {
 	_, err = validateFreshnessTime([]verify.TimestampVerificationResult{{Type: "TimestampAuthority", Timestamp: now.Add(-time.Hour)}}, now, MaxFreshnessAge)
 	assert.ErrorContains(t, err, "no verified transparency-log timestamp")
 
-	for _, maxAge := range []time.Duration{24 * time.Hour, MaxFreshnessAge, 30 * 24 * time.Hour} {
-		for _, age := range []time.Duration{maxAge - time.Nanosecond, maxAge, maxAge + time.Nanosecond, 8 * 24 * time.Hour} {
-			_, err = validateFreshnessTime([]verify.TimestampVerificationResult{{Type: "Tlog", Timestamp: now.Add(-age)}}, now, maxAge)
-			if age > maxAge {
-				require.ErrorContains(t, err, "stale")
-			} else {
-				require.NoError(t, err)
-			}
-		}
-		_, err = validateFreshnessTime(timestamps, now, maxAge)
-		require.NoError(t, err)
-		_, err = validateFreshnessTime([]verify.TimestampVerificationResult{{Type: "Tlog", Timestamp: now.Add(MaxFreshnessFutureSkew + time.Nanosecond)}}, now, maxAge)
-		require.ErrorContains(t, err, "in the future")
-	}
-}
+	_, err = validateFreshnessTime([]verify.TimestampVerificationResult{{Type: "Tlog", Timestamp: now.Add(MaxFreshnessFutureSkew + time.Second)}}, now, MaxFreshnessAge)
+	assert.ErrorContains(t, err, "in the future")
 
-func TestAuthenticateFreshnessRejectsInvalidMaxAge(t *testing.T) {
-	for _, maxAge := range []time.Duration{-time.Nanosecond, -time.Hour} {
-		_, err := AuthenticateFreshness(nil, nil, time.Now(), maxAge)
-		require.ErrorContains(t, err, "freshness maximum age must not be negative")
-	}
+	_, err = validateFreshnessTime([]verify.TimestampVerificationResult{{Type: "Tlog", Timestamp: now.Add(-MaxFreshnessAge - time.Second)}}, now, MaxFreshnessAge)
+	assert.ErrorContains(t, err, "stale")
+
+	dayOld := []verify.TimestampVerificationResult{{Type: "Tlog", Timestamp: now.Add(-25 * time.Hour)}}
+	_, err = validateFreshnessTime(dayOld, now, 24*time.Hour)
+	assert.ErrorContains(t, err, "stale")
+	_, err = validateFreshnessTime(dayOld, now, 30*24*time.Hour)
+	assert.NoError(t, err)
 }

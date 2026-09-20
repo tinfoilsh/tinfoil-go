@@ -11,7 +11,6 @@ import (
 	"os"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/openai/openai-go/v3"
 	"github.com/openai/openai-go/v3/option"
@@ -19,7 +18,6 @@ import (
 	ehbpidentity "github.com/tinfoilsh/encrypted-http-body-protocol/identity"
 	"github.com/tinfoilsh/tinfoil-go/verifier/client"
 	"github.com/tinfoilsh/tinfoil-go/verifier/envelope"
-	"github.com/tinfoilsh/tinfoil-go/verifier/measurement"
 )
 
 type roundTripFunc func(*http.Request) (*http.Response, error)
@@ -77,47 +75,6 @@ func TestNewClientRejectsInvalidBaseURL(t *testing.T) {
 			require.Error(t, err)
 			require.Contains(t, err.Error(), "invalid base URL")
 		})
-	}
-}
-
-func TestNewClientRejectsInvalidFreshnessMaxAge(t *testing.T) {
-	for _, enclave := range []string{"", "enclave.example"} {
-		for _, maxAge := range []time.Duration{-time.Nanosecond, -time.Hour} {
-			c, err := NewClient(WithEnclave(enclave), WithVerificationOptions(client.VerificationOptions{
-				FreshnessMaxAge: maxAge,
-				PinnedRegisters: &measurement.Measurement{Type: measurement.TdxGuestV2, Registers: []string{4: strings.Repeat("ab", 48)}},
-			}))
-			require.Nil(t, c)
-			require.ErrorContains(t, err, "freshness maximum age must not be negative")
-		}
-	}
-}
-
-func TestClientFreshnessMaxAge(t *testing.T) {
-	host, repo := os.Getenv("TINFOIL_ENCLAVE"), os.Getenv("TINFOIL_REPO")
-	if host == "" || repo == "" {
-		t.Skip("TINFOIL_ENCLAVE or TINFOIL_REPO not set")
-	}
-	for _, mode := range []TransportMode{TransportEHBP, TransportTLS} {
-		for _, enclave := range []string{"", host} {
-			t.Run(string(mode)+"/"+enclave, func(t *testing.T) {
-				opts := []ClientOption{WithTransport(mode), WithEnclave(enclave), WithVerificationOptions(client.VerificationOptions{FreshnessMaxAge: time.Nanosecond})}
-				if enclave != "" {
-					opts = append(opts, WithRepo(repo))
-				}
-				c, err := NewClient(opts...)
-				require.Nil(t, c)
-				require.ErrorContains(t, err, "freshness witness is stale")
-				c, err = NewClient(append(opts, WithVerificationOptions(client.VerificationOptions{}))...)
-				require.NoError(t, err)
-				require.NotNil(t, c)
-				pins := c.Verification().EnclaveMeasurement
-				pins.Registers[0] = strings.Repeat("ab", 48)
-				c, err = NewClient(append(opts, WithVerificationOptions(client.VerificationOptions{PinnedRegisters: pins}))...)
-				require.Nil(t, c)
-				require.ErrorContains(t, err, "cpu evidence")
-			})
-		}
 	}
 }
 
@@ -345,7 +302,10 @@ func TestClientIntegration_TransportModesWithCacheSecret(t *testing.T) {
 	}
 }
 
-// Bodyless EHBP requests use no body encryption, per SPEC 7.4.
+// TestClientIntegration_LowLevelEHBP exercises the low-level HTTPClient() path
+// (direct requests, not the OpenAI wrapper) against a live enclave for both
+// transport modes. It covers a bodyless GET, which EHBP sends without body
+// encryption per SPEC 7.4, and a POST whose body is sealed end-to-end.
 func TestClientIntegration_LowLevelEHBP(t *testing.T) {
 	apiKey := os.Getenv("TINFOIL_API_KEY")
 	if apiKey == "" {

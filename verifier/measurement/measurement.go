@@ -1,9 +1,8 @@
-// Package measurement defines register sets and display fingerprints for code
-// provenance and quote verification.
+// Package measurement defines the measurement value types shared by code
+// provenance and quote verification: register sets keyed by predicate type.
 package measurement
 
 import (
-	"crypto/sha256"
 	"fmt"
 	"strings"
 )
@@ -22,16 +21,6 @@ const (
 type Measurement struct {
 	Type      PredicateType `json:"type"`
 	Registers []string      `json:"registers"`
-}
-
-// Fingerprint returns the register value of a single-register measurement, or
-// SHA-256 over the type URL and all register values for multi-register ones.
-func (m *Measurement) Fingerprint() string {
-	if len(m.Registers) == 1 {
-		return m.Registers[0]
-	}
-	hash := sha256.Sum256([]byte(string(m.Type) + strings.Join(m.Registers, "")))
-	return fmt.Sprintf("%x", hash)
 }
 
 func (m *Measurement) String() string {

@@ -93,7 +93,7 @@ func NewDefaultClient(opts *VerificationOptions) (*SecureClient, error) {
 	return fallback, nil
 }
 
-// Enclave returns the enclave host.
+// Enclave returns the enclave URL
 func (s *SecureClient) Enclave() string {
 	return s.enclave
 }
@@ -159,7 +159,8 @@ func (s *SecureClient) Request(method, url, headersJSON string, body []byte) (*R
 		req.URL.Host = s.Enclave()
 	}
 
-	// Require HTTPS to protect request headers as well as the body.
+	// Request headers (which may carry the API key) are not encrypted, so never
+	// send them over a plaintext connection.
 	if req.URL.Scheme != "https" {
 		return nil, fmt.Errorf("refusing to send request over non-https URL %q", req.URL.String())
 	}

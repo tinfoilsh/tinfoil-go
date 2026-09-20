@@ -407,7 +407,8 @@ func TestHTTPClientChecksExpirationOnReusedTLSConnections(t *testing.T) {
 				resp.Body.Close()
 				require.Equal(t, i == 1, reused)
 			}
-			// Expire the client state while the transport still holds the old snapshot.
+			// Publish an expired snapshot without modifying the immutable snapshot
+			// held by the already-returned HTTP client and its open connection.
 			s.stateMu.Lock()
 			s.state = testState(time.Now().Add(-time.Second), key)
 			s.stateMu.Unlock()

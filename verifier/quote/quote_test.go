@@ -93,7 +93,8 @@ func loadSEVFixture(t *testing.T) (*envelope.Document, [64]byte) {
 	return doc, reportData
 }
 
-// appendLiveCRL fetches the AMD CRL missing from older fixtures.
+// appendLiveCRL adds the required amd-crl collateral entry, fetching the
+// CRL exactly as the builder does.
 func appendLiveCRL(t *testing.T, doc *envelope.Document) {
 	t.Helper()
 	crlBytes, _, err := util.Get("https://kdsintf.amd.com/vcek/v1/Genoa/crl")
@@ -124,7 +125,9 @@ func TestVerifySEV(t *testing.T) {
 	doc, reportData := loadSEVFixture(t)
 	artifact := loadEndorsementArtifact(t)
 
-	// The fixture has no code provenance, so use its observed launch measurement.
+	// The fixture predates per-release code provenance, so the expected
+	// launch measurement is the quote's own; the equality path is still
+	// exercised, and the mismatch case is covered below.
 	q, err := Authenticate(doc)
 	require.NoError(t, err)
 	assembled, verified, err := Verify(doc, artifact, asCode(q.Measurement), nil, testShape, reportData)

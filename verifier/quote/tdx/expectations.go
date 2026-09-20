@@ -11,7 +11,9 @@ import (
 	"github.com/tinfoilsh/tinfoil-go/verifier/policy"
 )
 
-// Expectations holds TDX validation options and the collateral TCB floor.
+// Expectations is the fully translated TDX expected state, resolved at
+// assembly so that validation performs no translation and no lookups. The
+// collateral floor is separate because it is not a quote field.
 type Expectations struct {
 	opts                           *tdxvalidate.Options
 	minimumTCBEvaluationDataNumber int
@@ -51,7 +53,9 @@ func Assemble(a *policy.Artifact, p *policy.TDXPolicy, required *policy.Shape, q
 	}, name, nil
 }
 
-// Validate checks quote fields and the collateral TCB floor.
+// Validate compares a quote against the assembled expected state: the
+// library validation options plus the collateral floor. It is the only TDX
+// enforcement entry point, so no subset of the policy can be applied.
 func (e *Expectations) Validate(q *Quote) error {
 	if err := tdxvalidate.TdxQuote(q.quote, e.opts); err != nil {
 		return err

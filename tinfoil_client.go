@@ -9,7 +9,7 @@ import (
 	"github.com/tinfoilsh/tinfoil-go/verifier/client"
 )
 
-// Client is an OpenAI client with enclave verification.
+// Client wraps the OpenAI client to provide secure inference through Tinfoil
 type Client struct {
 	*openai.Client
 	secureClient *client.SecureClient
@@ -28,7 +28,7 @@ func createClientFromSecureClient(secureClient *client.SecureClient, mode Transp
 		resolvedBaseURL = fmt.Sprintf("https://%s/v1/", secureClient.Enclave())
 	}
 
-	// Apply these last so constructor options cannot replace the verified transport.
+	// Add our HTTP client and base URL to the options
 	allOpts := append(openaiOpts,
 		option.WithHTTPClient(httpClient),
 		option.WithBaseURL(resolvedBaseURL),
@@ -66,8 +66,11 @@ func (c *Client) Verification() *client.VerifiedDocumentV3 {
 	return c.secureClient.Verification()
 }
 
-// HTTPClient returns an HTTP client restricted to the enclave and configured proxy.
-// It re-verifies before new requests when witnesses expire or the enclave rotates its key.
+// HTTPClient returns the underlying HTTP client used to reach the enclave. It
+// re-verifies before new requests when witnesses expire or the enclave rotates its key.
+// It is bound to the verified enclave (and the configured proxy, if any):
+// requests to any other origin are refused to avoid disclosing sensitive
+// headers. This can be used for secure, direct HTTP requests to the enclave.
 func (c *Client) HTTPClient() *http.Client {
 	return c.httpClient
 }

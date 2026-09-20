@@ -26,7 +26,9 @@ const (
 	// so it works through proxies. This is the default.
 	TransportEHBP TransportMode = "ehbp"
 
-	// TransportTLS pins the enclave's TLS public key, including for HTTPS-over-CONNECT.
+	// TransportTLS pins the enclave's TLS certificate. All traffic is encrypted
+	// and terminated at the verified enclave, which requires a direct
+	// connection (requests through a proxy will fail).
 	TransportTLS TransportMode = "tls"
 )
 
@@ -73,9 +75,13 @@ func WithTransport(mode TransportMode) ClientOption {
 	return func(c *clientConfig) { c.transport = mode }
 }
 
-// WithBaseURL routes requests through a proxy. EHBP encrypts bodies to the
-// enclave and adds X-Tinfoil-Enclave-Url when the proxy's origin differs.
-// TLS requires the verified enclave's HTTPS origin.
+// WithBaseURL routes requests through the given base URL (for example your own
+// proxy) instead of sending them directly to the enclave. Request bodies stay
+// encrypted end-to-end to the verified enclave; when the base URL's origin
+// differs from the enclave's, the SDK adds the X-Tinfoil-Enclave-Url header so
+// the proxy can forward the encrypted request to the right enclave. Only
+// supported with the EHBP transport unless it uses the verified enclave's
+// HTTPS origin.
 func WithBaseURL(baseURL string) ClientOption {
 	return func(c *clientConfig) {
 		c.baseURL = baseURL
@@ -152,7 +158,9 @@ func secureHTTPClient(secureClient *client.SecureClient, mode TransportMode, bas
 		}
 	}
 
-	// Inject the cache secret before EHBP encryption or transmission over pinned TLS.
+	// The cache-secret layer sits above the sealing transport, so the field it
+	// injects is encrypted with the rest of the body (EHBP) or sent over the
+	// pinned connection (TLS).
 	transport := httpClient.Transport
 	if userCacheSecret != "" {
 		transport = &userCacheSecretTransport{
@@ -192,8 +200,10 @@ func allowedOrigins(enclave, baseURL string) (map[string]struct{}, error) {
 	return origins, nil
 }
 
-// hostBoundRoundTripper restricts requests to the enclave and configured proxy
-// to prevent sending credentials to other origins.
+// hostBoundRoundTripper rejects requests to any origin other than the verified
+// enclave or the configured proxy. This guards the escape-hatch HTTP client
+// (and the OpenAI client) from disclosing sensitive request headers, such as the
+// API key, to an arbitrary host.
 type hostBoundRoundTripper struct {
 	allowedOrigins map[string]struct{}
 	enclave        string
@@ -267,7 +277,9 @@ func originOf(rawURL string) (string, error) {
 	return normalizedOrigin(u), nil
 }
 
-// Treat https://host and https://host:443 as the same origin.
+// normalizedOrigin lowercases the scheme and host and drops an explicit
+// default port so that origins compare equal regardless of how the URL spells
+// them (for example https://host and https://host:443).
 func normalizedOrigin(u *url.URL) string {
 	scheme := strings.ToLower(u.Scheme)
 	hostname := strings.ToLower(u.Hostname())
@@ -303,7 +315,12 @@ func validateTLSBaseURL(baseURL, enclave string) error {
 	return nil
 }
 
-// The header and HPKE key come from the same verification snapshot.
+// enclaveURLHeaderTransport injects the X-Tinfoil-Enclave-Url header before
+// delegating to the wrapped transport. EHBP leaves request headers in
+// plaintext, so the header reaches the proxy while the body stays sealed to the
+// enclave's HPKE key. The value is captured when the transport is built; a
+// re-verification that swaps in a different enclave rebuilds this transport with
+// the new value, which also keeps every retry pointed at the right enclave.
 type enclaveURLHeaderTransport struct {
 	enclaveURL string
 	transport  http.RoundTripper
