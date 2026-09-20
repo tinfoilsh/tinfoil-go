@@ -45,6 +45,8 @@ func TestOptions(t *testing.T) {
 	assert.Equal(t, mustHex(t, "939a7233f79c4ca9940a0db3957f0607"), opts.HeaderOptions.QeVendorID)
 	assert.Equal(t, make([]byte, 48), opts.TdQuoteBodyOptions.MrConfigID)
 	assert.Equal(t, mustHex(t, "0000001000000000"), opts.TdQuoteBodyOptions.TdAttributes)
+	assert.Equal(t, mustHex(t, p.TDX.MinimumTEETCBSVN), opts.TdQuoteBodyOptions.MinimumTeeTcbSvn)
+	assert.Equal(t, mustHex(t, p.TDX.XFAM), opts.TdQuoteBodyOptions.Xfam)
 	require.NotEmpty(t, p.TDX.MRSeam)
 	assert.Equal(t, mustHex(t, p.TDX.MRSeam), opts.TdQuoteBodyOptions.MrSeam)
 }
@@ -97,9 +99,23 @@ func TestValidate(t *testing.T) {
 
 	require.NoError(t, assemble(a, matching).Validate(quote))
 
-	badSeam := *matching
-	badSeam.MRSeam = strings.Repeat("00", 48)
-	assert.Error(t, assemble(a, &badSeam).Validate(quote))
+	for _, field := range []string{"mr_seam", "qe_vendor_id", "xfam", "td_attributes"} {
+		t.Run(field, func(t *testing.T) {
+			bad := *matching
+			target := map[string]*string{
+				"mr_seam":       &bad.MRSeam,
+				"qe_vendor_id":  &bad.QEVendorID,
+				"xfam":          &bad.XFAM,
+				"td_attributes": &bad.TDAttributes,
+			}[field]
+			changed := mustHex(t, *target)
+			changed[0] ^= 1
+			*target = hex.EncodeToString(changed)
+			e, _, err := Assemble(a, &bad, shape, quote, code, reportData)
+			require.NoError(t, err)
+			assert.ErrorContains(t, e.Validate(quote), strings.ToUpper(field))
+		})
+	}
 
 	// A collateral floor above the observed number must reject.
 	stale := *quote
@@ -108,27 +124,28 @@ func TestValidate(t *testing.T) {
 
 	// A quote whose MRTD/RTMR0 resolve no endorsed measurement fails at
 	// assembly, before any validation runs.
+	badMRTD := mustHex(t, a.Measurements["sample"].MRTD)
+	badMRTD[0] ^= 1
 	badMeasurements := &policy.Artifact{
 		Measurements: map[string]policy.PlatformMeasurement{
-			"sample": {MRTD: strings.Repeat("ff", 48), RTMR0: strings.Repeat("ff", 48), Shape: shape},
+			"sample": {MRTD: hex.EncodeToString(badMRTD), RTMR0: a.Measurements["sample"].RTMR0, Shape: shape},
 		},
 	}
 	_, _, err = Assemble(badMeasurements, matching, shape, quote, code, reportData)
 	assert.ErrorContains(t, err, "do not match any allowed configuration")
 
-	badOpts := *matching
-	badOpts.TDAttributes = strings.Repeat("42", 8)
-	assert.Error(t, assemble(a, &badOpts).Validate(quote))
-
 	// A workload register differing from code provenance must reject.
 	badCode := code
-	badCode[2] = strings.Repeat("00", 48)
+	badRTMR1 := mustHex(t, code[2])
+	badRTMR1[0] ^= 1
+	badCode[2] = hex.EncodeToString(badRTMR1)
 	e, _, err := Assemble(a, matching, shape, quote, badCode, reportData)
 	require.NoError(t, err)
 	assert.Error(t, e.Validate(quote))
 
 	// A REPORT_DATA differing from the envelope's expectation must reject.
-	var badReportData [64]byte
+	badReportData := reportData
+	badReportData[0] ^= 1
 	e, _, err = Assemble(a, matching, shape, quote, code, badReportData)
 	require.NoError(t, err)
 	assert.Error(t, e.Validate(quote))

@@ -67,7 +67,7 @@ func TestValidateAuthenticatedArtifact(t *testing.T) {
 func TestValidateFreshnessTime(t *testing.T) {
 	now := time.Date(2026, 8, 6, 0, 0, 0, 0, time.UTC)
 	timestamps := []verify.TimestampVerificationResult{
-		{Type: "TimestampAuthority", Timestamp: now.Add(-time.Hour)},
+		{Type: "TimestampAuthority", Timestamp: now.Add(-4 * time.Hour)},
 		{Type: "Tlog", Timestamp: now.Add(-2 * time.Hour)},
 		{Type: "Tlog", Timestamp: now.Add(-3 * time.Hour)},
 	}
@@ -81,11 +81,29 @@ func TestValidateFreshnessTime(t *testing.T) {
 	_, err = validateFreshnessTime([]verify.TimestampVerificationResult{{Type: "TimestampAuthority", Timestamp: now.Add(-time.Hour)}}, now, MaxFreshnessAge)
 	assert.ErrorContains(t, err, "no verified transparency-log timestamp")
 
-	_, err = validateFreshnessTime([]verify.TimestampVerificationResult{{Type: "Tlog", Timestamp: now.Add(MaxFreshnessFutureSkew + time.Second)}}, now, MaxFreshnessAge)
-	assert.ErrorContains(t, err, "in the future")
-
-	_, err = validateFreshnessTime([]verify.TimestampVerificationResult{{Type: "Tlog", Timestamp: now.Add(-MaxFreshnessAge - time.Second)}}, now, MaxFreshnessAge)
-	assert.ErrorContains(t, err, "stale")
+	for _, tt := range []struct {
+		name   string
+		offset time.Duration
+		err    string
+	}{
+		{"age inside", -MaxFreshnessAge + time.Nanosecond, ""},
+		{"age boundary", -MaxFreshnessAge, ""},
+		{"age outside", -MaxFreshnessAge - time.Nanosecond, "stale"},
+		{"future inside", MaxFreshnessFutureSkew - time.Nanosecond, ""},
+		{"future boundary", MaxFreshnessFutureSkew, ""},
+		{"future outside", MaxFreshnessFutureSkew + time.Nanosecond, "in the future"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			want := now.Add(tt.offset)
+			got, err := validateFreshnessTime([]verify.TimestampVerificationResult{{Type: "Tlog", Timestamp: want}}, now, MaxFreshnessAge)
+			if tt.err != "" {
+				require.ErrorContains(t, err, tt.err)
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, want, got)
+		})
+	}
 
 	dayOld := []verify.TimestampVerificationResult{{Type: "Tlog", Timestamp: now.Add(-25 * time.Hour)}}
 	_, err = validateFreshnessTime(dayOld, now, 24*time.Hour)
