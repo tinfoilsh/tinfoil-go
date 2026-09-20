@@ -11,10 +11,10 @@ import (
 func ParseVerificationOptionsJSON(raw string) (*VerificationOptions, error) {
 	var opts *VerificationOptions
 	if err := json.Unmarshal([]byte(raw), &opts, json.RejectUnknownMembers(true), jsonv1.FormatDurationAsNano(true)); err != nil {
-		return nil, fmt.Errorf("parsing verification options: %w", err)
+		return nil, &ConfigurationError{Err: fmt.Errorf("parsing verification options: %w", err)}
 	}
 	if opts == nil {
-		return nil, fmt.Errorf("verification options must be a JSON object")
+		return nil, &ConfigurationError{Err: fmt.Errorf("verification options must be a JSON object")}
 	}
 	return opts, nil
 }

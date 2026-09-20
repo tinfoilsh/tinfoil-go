@@ -155,9 +155,9 @@ func TestLiveVerifySEV(t *testing.T) {
 	_, err = Assemble(artifact, nil, nil, testShape, reportData, q)
 	assert.ErrorContains(t, err, "code measurement is required")
 
-	// An assembly without the required VM shape must reject.
+	// SEV assembly does not consume the code artifact's VM shape.
 	_, err = Assemble(artifact, asCode(q.Measurement), nil, nil, reportData, q)
-	assert.ErrorContains(t, err, "VM shape is required")
+	require.NoError(t, err)
 
 	// A machine absent from the artifact must reject.
 	unendorsed := *artifact

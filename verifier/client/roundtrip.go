@@ -47,10 +47,10 @@ func (t *TLSBoundRoundTripper) getTransport() *http.Transport {
 
 			certFP, err := ConnectionCertFP(state)
 			if err != nil {
-				return err
+				return &AttestationError{Err: err}
 			}
 			if certFP != t.ExpectedPublicKey {
-				return ErrCertMismatch
+				return &AttestationError{Err: ErrCertMismatch}
 			}
 			return nil
 		}
@@ -63,11 +63,11 @@ func (t *TLSBoundRoundTripper) getTransport() *http.Transport {
 
 func (t *TLSBoundRoundTripper) RoundTrip(r *http.Request) (*http.Response, error) {
 	if len(t.ExpectedPublicKey) == 0 {
-		return nil, ErrNoValidCertificate
+		return nil, &ConfigurationError{Err: ErrNoValidCertificate}
 	}
 
 	if r.URL == nil || r.URL.Scheme != "https" {
-		return nil, ErrNoTLS
+		return nil, &ConfigurationError{Err: ErrNoTLS}
 	}
 
 	return t.getTransport().RoundTrip(r)

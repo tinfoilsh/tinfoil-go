@@ -104,7 +104,7 @@ Use `WithVerificationOptions` to configure
 // Create a secure client with explicit enclave and repo parameters
 client, err := tinfoil.NewClientWithOptions(tinfoil.WithEnclave(enclave), tinfoil.WithRepo(repo))
 if err != nil {
-	return fmt.Errorf("Failed to create client: %v", err)
+	return fmt.Errorf("Failed to create client: %w", err)
 }
 
 // For direct HTTP access, use the underlying HTTPClient
@@ -112,9 +112,32 @@ httpClient := client.HTTPClient()
 endpoint := fmt.Sprintf("https://%s/health", enclave)
 resp, err := httpClient.Get(endpoint)
 if err != nil {
-	return fmt.Errorf("Request failed: %v", err)
+	return fmt.Errorf("Request failed: %w", err)
 }
 ```
+
+## Error handling
+
+Use the standard library's `errors.As` to handle SDK failures:
+
+```go
+var config *tinfoil.ConfigurationError
+var fetch *tinfoil.FetchError
+var attestation *tinfoil.AttestationError
+switch {
+case errors.As(err, &config):
+	// Fix invalid arguments or client configuration.
+case errors.As(err, &fetch):
+	// Attestation material could not be fetched; retry may help.
+case errors.As(err, &attestation):
+	// Verification or channel binding failed; do not trust this result.
+}
+```
+
+All three implement `tinfoil.Error` and preserve causes for `errors.Is` and
+`errors.As`. The same types are available from `verifier/client`. Upstream
+OpenAI errors pass through. The prefixes `configuration error:`, `fetch error:`,
+and `attestation error:` are stable for the Swift/gomobile bridge.
 
 ## Prompt Cache Scoping
 

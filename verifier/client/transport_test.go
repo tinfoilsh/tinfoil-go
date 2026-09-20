@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/http/httptrace"
 	"net/url"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"testing/synctest"
@@ -168,6 +169,9 @@ func TestVerificationFetchStillTimesOut(t *testing.T) {
 		require.NoError(t, err)
 		_, err = client.Verify()
 		require.ErrorIs(t, err, context.DeadlineExceeded)
+		var fetch *FetchError
+		require.ErrorAs(t, err, &fetch)
+		require.True(t, strings.HasPrefix(err.Error(), "fetch error: "), "gomobile prefix contract")
 		require.Equal(t, 30*time.Second, time.Since(start))
 	})
 }

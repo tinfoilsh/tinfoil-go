@@ -17,7 +17,7 @@ import (
 // All transports from this client share its verification and refresh state.
 func (s *SecureClient) NewTransport(build func(*VerifiedDocumentV3) (http.RoundTripper, error), isKeyError func(error) bool) (http.RoundTripper, error) {
 	if build == nil {
-		return nil, fmt.Errorf("transport builder is required")
+		return nil, &ConfigurationError{Err: fmt.Errorf("transport builder is required")}
 	}
 	t := &refreshingTransport{client: s, build: build, isKeyError: isKeyError}
 	if _, _, err := t.admit(context.Background()); err != nil {

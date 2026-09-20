@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/tinfoilsh/tinfoil-go/verifier/envelope"
+	sdkerrors "github.com/tinfoilsh/tinfoil-go/verifier/errors"
 	"github.com/tinfoilsh/tinfoil-go/verifier/measurement"
 	"github.com/tinfoilsh/tinfoil-go/verifier/provenance"
 	"github.com/tinfoilsh/tinfoil-go/verifier/quote"
@@ -44,7 +45,11 @@ func (v *VerifiedDocumentV3) HPKEPublicKey() (string, error) {
 	return v.cryptoMaterialData(envelope.CryptoMaterialIDHPKE, envelope.KeyX25519HPKEV1Format)
 }
 
-func (v *VerifiedDocumentV3) cryptoMaterialData(id, format string) (string, error) {
+func (v *VerifiedDocumentV3) cryptoMaterialData(id, format string) (result string, err error) {
+	defer func() { err = sdkerrors.Attestation(err) }()
+	if v == nil {
+		return "", sdkerrors.Configuration(fmt.Errorf("verified document is required"))
+	}
 	for _, item := range v.CryptoMaterial {
 		if item.ID != id {
 			continue
@@ -74,23 +79,26 @@ func (v *VerifiedDocumentV3) validateTransportKeys() error {
 // A nil policy uses defaults. repo is a trusted owner/name[@tag][@sha256:digest].
 // Callers must bind traffic to the returned keys and enforce FreshnessExpiresAt.
 func VerifyDocumentV3(docBytes, nonce []byte, repo string, opts *VerificationOptions) (*VerifiedDocumentV3, error) {
+	if strings.TrimSpace(repo) == "" {
+		return nil, sdkerrors.Configuration(fmt.Errorf("code repository is required"))
+	}
 	options, err := opts.normalized()
 	if err != nil {
 		return nil, err
 	}
 	doc, expectedReportData, err := envelope.Check(docBytes, nonce)
 	if err != nil {
-		return nil, fmt.Errorf("envelope: %w", err)
+		return nil, err
 	}
 
 	code, endorsements, freshnessExpiresAt, err := authenticateReferenceValues(doc, repo, options.FreshnessMaxAge)
 	if err != nil {
-		return nil, fmt.Errorf("reference values: %w", err)
+		return nil, sdkerrors.Attestation(fmt.Errorf("reference values: %w", err))
 	}
 
 	_, authenticated, err := quote.Verify(doc, endorsements.Artifact, code.Measurement, options.PinnedRegisters, code.Shape, expectedReportData)
 	if err != nil {
-		return nil, fmt.Errorf("cpu evidence: %w", err)
+		return nil, err
 	}
 
 	return &VerifiedDocumentV3{
@@ -159,7 +167,7 @@ func (s *SecureClient) fetchVerification() (*VerifiedDocumentV3, error) {
 	}
 	docBytes, err := envelope.Fetch(s.enclave, nonce)
 	if err != nil {
-		return nil, fmt.Errorf("fetching attestation document: %w", err)
+		return nil, err
 	}
 
 	verified, err := VerifyDocumentV3(docBytes, nonce, s.repo, &s.options)
@@ -168,7 +176,7 @@ func (s *SecureClient) fetchVerification() (*VerifiedDocumentV3, error) {
 	}
 
 	if err := verified.validateTransportKeys(); err != nil {
-		return nil, fmt.Errorf("binding: %w", err)
+		return nil, err
 	}
 	verified.ConfigRepo, _, _ = strings.Cut(s.repo, "@")
 	verified.EnclaveHost = s.enclave

@@ -58,7 +58,7 @@ func (s *SecureClient) refresh(call *verificationCall) {
 	s.stateMu.Lock()
 	defer s.stateMu.Unlock()
 	if err == nil && !time.Now().Before(state.FreshnessExpiresAt) {
-		err = ErrFreshnessExpired
+		err = &AttestationError{Err: ErrFreshnessExpired}
 	}
 	if err == nil {
 		s.state = state
