@@ -3,7 +3,6 @@ package client
 import (
 	"runtime/debug"
 	"strings"
-	"time"
 
 	"github.com/tinfoilsh/tinfoil-go/verifier/envelope"
 	"github.com/tinfoilsh/tinfoil-go/verifier/measurement"
@@ -16,8 +15,6 @@ const (
 	Version = "0.15.0"
 )
 
-var verificationTime = time.Now
-
 // SoftwareIdentity identifies software involved in verification.
 type SoftwareIdentity struct {
 	Name    string `json:"name"`
@@ -25,11 +22,7 @@ type SoftwareIdentity struct {
 }
 
 func currentVerifierIdentity() SoftwareIdentity {
-	return SoftwareIdentity{Name: verifierName, Version: currentVerifierVersion()}
-}
-
-func currentVerifierVersion() string {
-	return verifierVersion(debug.ReadBuildInfo())
+	return SoftwareIdentity{Name: verifierName, Version: verifierVersion(debug.ReadBuildInfo())}
 }
 
 func verifierVersion(info *debug.BuildInfo, ok bool) string {
@@ -67,13 +60,13 @@ func cloneMeasurement(value *measurement.Measurement) *measurement.Measurement {
 	return &cloned
 }
 
-func cloneVerification(groundTruth *VerifiedDocumentV3) *VerifiedDocumentV3 {
-	if groundTruth == nil {
+func cloneVerification(verified *VerifiedDocumentV3) *VerifiedDocumentV3 {
+	if verified == nil {
 		return nil
 	}
-	cloned := *groundTruth
-	cloned.CryptoMaterial = append([]envelope.CryptoMaterialItem(nil), groundTruth.CryptoMaterial...)
-	cloned.CodeMeasurement = cloneMeasurement(groundTruth.CodeMeasurement)
-	cloned.EnclaveMeasurement = cloneMeasurement(groundTruth.EnclaveMeasurement)
+	cloned := *verified
+	cloned.CryptoMaterial = append([]envelope.CryptoMaterialItem(nil), verified.CryptoMaterial...)
+	cloned.CodeMeasurement = cloneMeasurement(verified.CodeMeasurement)
+	cloned.EnclaveMeasurement = cloneMeasurement(verified.EnclaveMeasurement)
 	return &cloned
 }

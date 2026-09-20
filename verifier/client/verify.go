@@ -55,18 +55,17 @@ func (v *VerifiedDocumentV3) cryptoMaterialData(id, format string) (string, erro
 }
 
 // SecureClient requires TLS; EHBP also requires HPKE.
-func (v *VerifiedDocumentV3) transportKeys() (tlsFP, hpkeKey string, err error) {
-	tlsFP, err = v.TLSPublicKeyFP()
-	if err != nil {
-		return "", "", err
+func (v *VerifiedDocumentV3) validateTransportKeys() error {
+	if _, err := v.TLSPublicKeyFP(); err != nil {
+		return err
 	}
 	for _, item := range v.CryptoMaterial {
 		if item.ID == envelope.CryptoMaterialIDHPKE {
-			hpkeKey, err = v.HPKEPublicKey()
-			return tlsFP, hpkeKey, err
+			_, err := v.HPKEPublicKey()
+			return err
 		}
 	}
-	return tlsFP, "", nil
+	return nil
 }
 
 // VerifyDocumentV3 verifies a nonce-bound document with the supplied policy.
@@ -148,7 +147,7 @@ func freshnessExpiration(codeWitnessedAt, platformWitnessedAt time.Time, maxAge 
 	return codeWitnessedAt.Add(maxAge)
 }
 
-func (s *SecureClient) fetchVerification() (*verificationState, error) {
+func (s *SecureClient) fetchVerification() (*VerifiedDocumentV3, error) {
 	nonce, err := envelope.RandomNonce()
 	if err != nil {
 		return nil, err
@@ -163,14 +162,14 @@ func (s *SecureClient) fetchVerification() (*verificationState, error) {
 		return nil, err
 	}
 
-	if _, _, err := verified.transportKeys(); err != nil {
+	if err := verified.validateTransportKeys(); err != nil {
 		return nil, fmt.Errorf("binding: %w", err)
 	}
 	verified.ConfigRepo, _, _ = strings.Cut(s.repo, "@")
 	verified.EnclaveHost = s.enclave
 	verified.Verifier = currentVerifierIdentity()
-	verified.VerifiedAt = verificationTime().UTC().Format(time.RFC3339Nano)
-	return &verificationState{verified: verified}, nil
+	verified.VerifiedAt = time.Now().UTC().Format(time.RFC3339Nano)
+	return verified, nil
 }
 
 // Verify refreshes the client's verified measurements and keys.
@@ -179,5 +178,5 @@ func (s *SecureClient) Verify() (*VerifiedDocumentV3, error) {
 	if err != nil {
 		return nil, err
 	}
-	return cloneVerification(state.verified), nil
+	return cloneVerification(state), nil
 }

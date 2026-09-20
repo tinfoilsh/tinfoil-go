@@ -65,7 +65,7 @@ func TestClientFreshnessMaxAge(t *testing.T) {
 	}
 }
 
-func TestVerifyV3FreshnessExpiration(t *testing.T) {
+func TestVerifyFreshnessExpiration(t *testing.T) {
 	host, repo := os.Getenv("TINFOIL_ENCLAVE"), os.Getenv("TINFOIL_REPO")
 	if host == "" || repo == "" {
 		t.Skip("TINFOIL_ENCLAVE or TINFOIL_REPO not set")

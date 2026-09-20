@@ -54,30 +54,30 @@ func TestClientVerificationJSON(t *testing.T) {
 		Registers: []string{"a"},
 	}
 
-	gt := &VerifiedDocumentV3{
+	verified := &VerifiedDocumentV3{
 		CodeDigest:         "feabcd",
-		CryptoMaterial:     testState(time.Time{}, "key").verified.CryptoMaterial,
+		CryptoMaterial:     testState(time.Time{}, "key").CryptoMaterial,
 		CodeMeasurement:    codeMeasurement,
 		EnclaveMeasurement: enclaveMeasurement,
 	}
 	client := &SecureClient{
-		state: &verificationState{verified: gt},
+		state: verified,
 	}
 
 	encoded, err := client.VerificationJSON()
 	assert.NoError(t, err)
 
-	var gt2 VerifiedDocumentV3
-	assert.NoError(t, json.Unmarshal([]byte(encoded), &gt2))
-	assert.Equal(t, gt, &gt2)
+	var decoded VerifiedDocumentV3
+	assert.NoError(t, json.Unmarshal([]byte(encoded), &decoded))
+	assert.Equal(t, verified, &decoded)
 	view := client.Verification()
 	view.CodeMeasurement.Registers[0] = "changed"
 	view.CryptoMaterial[0].Data = "changed"
 	view.EnclaveMeasurement.Registers[0] = "changed"
-	assert.Equal(t, &gt2, client.Verification(), "returned measurements must not alias cached verification")
+	assert.Equal(t, &decoded, client.Verification(), "returned measurements must not alias cached verification")
 }
 
-func TestCurrentVerifierVersion(t *testing.T) {
+func TestVerifierVersion(t *testing.T) {
 	tests := []struct {
 		name    string
 		info    *debug.BuildInfo

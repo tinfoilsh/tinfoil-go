@@ -3,7 +3,6 @@ package client
 import (
 	"bytes"
 	"cmp"
-	_ "embed"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -20,9 +19,9 @@ type SecureClient struct {
 	options       VerificationOptions
 
 	stateMu    sync.RWMutex
-	state      *verificationState
+	state      *VerifiedDocumentV3
 	refreshing *verificationCall
-	verify     func() (*verificationState, error)
+	verify     func() (*VerifiedDocumentV3, error)
 }
 
 var (
@@ -108,10 +107,7 @@ func (s *SecureClient) Repo() string {
 func (s *SecureClient) Verification() *VerifiedDocumentV3 {
 	s.stateMu.RLock()
 	defer s.stateMu.RUnlock()
-	if s.state == nil {
-		return nil
-	}
-	return cloneVerification(s.state.verified)
+	return cloneVerification(s.state)
 }
 
 // VerificationJSON returns the last verification as JSON.
@@ -125,8 +121,8 @@ func (s *SecureClient) VerificationJSON() (string, error) {
 
 // HTTPClient returns an HTTP client that only accepts TLS connections to the verified enclave
 func (s *SecureClient) HTTPClient() (*http.Client, error) {
-	transport, err := s.NewTransport(func(groundTruth *VerifiedDocumentV3) (http.RoundTripper, error) {
-		key, err := groundTruth.TLSPublicKeyFP()
+	transport, err := s.NewTransport(func(verified *VerifiedDocumentV3) (http.RoundTripper, error) {
+		key, err := verified.TLSPublicKeyFP()
 		if err != nil {
 			return nil, err
 		}
@@ -138,7 +134,21 @@ func (s *SecureClient) HTTPClient() (*http.Client, error) {
 	return &http.Client{Transport: transport}, nil
 }
 
-func (s *SecureClient) makeRequest(req *http.Request) (*Response, error) {
+// Request sends an HTTPS request. headersJSON is a JSON object or empty.
+func (s *SecureClient) Request(method, url, headersJSON string, body []byte) (*Response, error) {
+	req, err := http.NewRequest(method, url, bytes.NewReader(body))
+	if err != nil {
+		return nil, err
+	}
+	if headersJSON != "" {
+		var headers map[string]string
+		if err := json.Unmarshal([]byte(headersJSON), &headers); err != nil {
+			return nil, err
+		}
+		for k, v := range headers {
+			req.Header.Set(k, v)
+		}
+	}
 	httpClient, err := s.HTTPClient()
 	if err != nil {
 		return nil, err
@@ -159,22 +169,4 @@ func (s *SecureClient) makeRequest(req *http.Request) (*Response, error) {
 		return nil, err
 	}
 	return toResponse(resp)
-}
-
-// Request sends an HTTPS request. headersJSON is a JSON object or empty.
-func (s *SecureClient) Request(method, url, headersJSON string, body []byte) (*Response, error) {
-	req, err := http.NewRequest(method, url, bytes.NewReader(body))
-	if err != nil {
-		return nil, err
-	}
-	if headersJSON != "" {
-		var headers map[string]string
-		if err := json.Unmarshal([]byte(headersJSON), &headers); err != nil {
-			return nil, err
-		}
-		for k, v := range headers {
-			req.Header.Set(k, v)
-		}
-	}
-	return s.makeRequest(req)
 }

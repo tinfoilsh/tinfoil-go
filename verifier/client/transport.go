@@ -31,11 +31,11 @@ type refreshingTransport struct {
 	build      func(*VerifiedDocumentV3) (http.RoundTripper, error)
 	isKeyError func(error) bool
 	mu         sync.Mutex
-	state      *verificationState
+	state      *VerifiedDocumentV3
 	transport  http.RoundTripper
 }
 
-func (t *refreshingTransport) admit(ctx context.Context) (http.RoundTripper, *verificationState, error) {
+func (t *refreshingTransport) admit(ctx context.Context) (http.RoundTripper, *VerifiedDocumentV3, error) {
 	for {
 		state, err := t.client.verifiedState(ctx, nil, false)
 		if err != nil {
@@ -43,7 +43,7 @@ func (t *refreshingTransport) admit(ctx context.Context) (http.RoundTripper, *ve
 		}
 		t.mu.Lock()
 		if t.state != state {
-			transport, err := t.build(cloneVerification(state.verified))
+			transport, err := t.build(cloneVerification(state))
 			if transport == nil && err == nil {
 				err = fmt.Errorf("transport builder returned nil")
 			}
@@ -72,7 +72,7 @@ func (t *refreshingTransport) admit(ctx context.Context) (http.RoundTripper, *ve
 		}
 		// Construction/lock contention may have crossed the deadline. Admission
 		// is the last check before delegation, even on a reused connection.
-		if time.Now().Before(state.verified.FreshnessExpiresAt) {
+		if time.Now().Before(state.FreshnessExpiresAt) {
 			return transport, state, nil
 		}
 	}

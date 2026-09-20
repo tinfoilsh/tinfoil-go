@@ -38,15 +38,15 @@ log.Printf("Status: %s, Body: %s", resp.Status, string(resp.Body))
 
 To verify manually and expose the verification state:
 ```go
-groundTruth, err := tinfoilClient.Verify()
+verified, err := tinfoilClient.Verify()
 if err != nil {
     log.Fatal(err)
 }
 // Access verified measurements and keys
-tlsKey, err := groundTruth.TLSPublicKeyFP()
+tlsKey, err := verified.TLSPublicKeyFP()
 if err != nil { log.Fatal(err) }
 log.Printf("TLS Cert Fingerprint: %s", tlsKey)
-hpkeKey, err := groundTruth.HPKEPublicKey()
+hpkeKey, err := verified.HPKEPublicKey()
 if err != nil { log.Fatal(err) }
 log.Printf("HPKE Public Key: %s", hpkeKey)
 ```

@@ -213,8 +213,8 @@ type transportVerifier interface {
 }
 
 func ehbpHTTPClient(secureClient transportVerifier, baseURL string) (*http.Client, error) {
-	transport, err := secureClient.NewTransport(func(groundTruth *client.VerifiedDocumentV3) (http.RoundTripper, error) {
-		key, err := groundTruth.HPKEPublicKey()
+	transport, err := secureClient.NewTransport(func(verified *client.VerifiedDocumentV3) (http.RoundTripper, error) {
+		key, err := verified.HPKEPublicKey()
 		if err != nil {
 			return nil, err
 		}
@@ -222,7 +222,7 @@ func ehbpHTTPClient(secureClient transportVerifier, baseURL string) (*http.Clien
 		if err != nil {
 			return nil, err
 		}
-		if headerValue, ok := enclaveURLHeaderValue(baseURL, groundTruth.EnclaveHost); ok {
+		if headerValue, ok := enclaveURLHeaderValue(baseURL, verified.EnclaveHost); ok {
 			return &enclaveURLHeaderTransport{enclaveURL: headerValue, transport: inner}, nil
 		}
 		return inner, nil

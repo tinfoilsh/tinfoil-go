@@ -27,10 +27,10 @@ func main() {
 		os.Exit(1)
 	}
 
-	groundTruth, err := c.VerificationJSON()
+	verified, err := c.VerificationJSON()
 	if err != nil {
-		slog.Error("failed to encode ground truth", "error", err)
+		slog.Error("failed to encode verification", "error", err)
 		os.Exit(1)
 	}
-	slog.Info(groundTruth)
+	slog.Info(verified)
 }
