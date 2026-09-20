@@ -214,6 +214,19 @@ func TestLayoutRequiresCanonicalRegisterCount(t *testing.T) {
 	assert.ErrorContains(t, err, "code measurement is https://tinfoil.sh/predicate/snp-tdx-multiplatform/v1 with 1 registers")
 }
 
+func TestPinnedLayoutUsesAuthenticatedPlatform(t *testing.T) {
+	register := strings.Repeat("ab", 48)
+	code := &measurement.Measurement{Type: measurement.SnpTdxMultiPlatformV1, Registers: []string{register, register, register}}
+	q := &Authenticated{platform: policy.PlatformTDX}
+	pins := &measurement.Measurement{Type: measurement.TdxGuestV2, Registers: []string{4: register}}
+	got, err := layout(code, pins, q)
+	require.NoError(t, err, "the caller-controlled measurement summary is not an input to policy")
+	assert.Equal(t, []string{"", "", register, register, register}, got)
+	pins.Type = measurement.SevGuestV2
+	_, err = layout(code, pins, q)
+	assert.ErrorContains(t, err, "pinned measurement")
+}
+
 // asCode wraps a guest measurement as the multiplatform code measurement that produces it.
 func asCode(m *measurement.Measurement) *measurement.Measurement {
 	if m.Type == measurement.TdxGuestV2 {

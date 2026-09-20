@@ -1,6 +1,5 @@
-// Package measurement defines the measurement value types shared by code
-// provenance and quote verification: register sets keyed by predicate type,
-// their equality semantics, and display fingerprints.
+// Package measurement defines register sets and display fingerprints for code
+// provenance and quote verification.
 package measurement
 
 import (
@@ -14,7 +13,6 @@ const RTMR3_ZERO = "000000000000000000000000000000000000000000000000000000000000
 type PredicateType string
 
 const (
-	// CC guest v2 types include the TLS key fingerprint and optionally HPKE public key
 	SevGuestV2 PredicateType = "https://tinfoil.sh/predicate/sev-snp-guest/v2"
 	TdxGuestV2 PredicateType = "https://tinfoil.sh/predicate/tdx-guest/v2"
 

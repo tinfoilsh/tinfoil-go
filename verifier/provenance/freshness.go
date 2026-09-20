@@ -1,6 +1,7 @@
 package provenance
 
 import (
+	"cmp"
 	"encoding/json/v2"
 	"fmt"
 	"time"
@@ -47,14 +48,25 @@ type freshnessStatement struct {
 }
 
 func AuthenticateFreshness(bundleJSON []byte, expected *AuthenticatedArtifact, now time.Time) (time.Time, error) {
+	return AuthenticateFreshnessWithMaxAge(bundleJSON, expected, now, MaxFreshnessAge)
+}
+
+func AuthenticateFreshnessWithMaxAge(bundleJSON []byte, expected *AuthenticatedArtifact, now time.Time, maxAge time.Duration) (time.Time, error) {
 	c, err := getDefaultClient()
 	if err != nil {
 		return time.Time{}, err
 	}
-	return c.AuthenticateFreshness(bundleJSON, expected, now)
+	return c.AuthenticateFreshnessWithMaxAge(bundleJSON, expected, now, maxAge)
 }
 
 func (c *Client) AuthenticateFreshness(bundleJSON []byte, expected *AuthenticatedArtifact, now time.Time) (time.Time, error) {
+	return c.AuthenticateFreshnessWithMaxAge(bundleJSON, expected, now, MaxFreshnessAge)
+}
+
+func (c *Client) AuthenticateFreshnessWithMaxAge(bundleJSON []byte, expected *AuthenticatedArtifact, now time.Time, maxAge time.Duration) (time.Time, error) {
+	if maxAge < 0 {
+		return time.Time{}, fmt.Errorf("freshness maximum age must not be negative")
+	}
 	if err := validateAuthenticatedArtifact(expected); err != nil {
 		return time.Time{}, err
 	}
@@ -78,7 +90,7 @@ func (c *Client) AuthenticateFreshness(bundleJSON []byte, expected *Authenticate
 	if err := validateWitness(statement.Predicate, expected); err != nil {
 		return time.Time{}, err
 	}
-	return validateFreshnessTime(result.VerifiedTimestamps, now)
+	return validateFreshnessTime(result.VerifiedTimestamps, now, cmp.Or(maxAge, MaxFreshnessAge))
 }
 
 func validateAuthenticatedArtifact(expected *AuthenticatedArtifact) error {
@@ -103,7 +115,7 @@ func validateAuthenticatedArtifact(expected *AuthenticatedArtifact) error {
 	return nil
 }
 
-func validateFreshnessTime(timestamps []verify.TimestampVerificationResult, now time.Time) (time.Time, error) {
+func validateFreshnessTime(timestamps []verify.TimestampVerificationResult, now time.Time, maxAge time.Duration) (time.Time, error) {
 	var loggedAt time.Time
 	for _, timestamp := range timestamps {
 		if timestamp.Type == transparencyLogTimestampType && (loggedAt.IsZero() || timestamp.Timestamp.Before(loggedAt)) {
@@ -116,7 +128,7 @@ func validateFreshnessTime(timestamps []verify.TimestampVerificationResult, now 
 	if loggedAt.After(now.Add(MaxFreshnessFutureSkew)) {
 		return time.Time{}, fmt.Errorf("freshness witness timestamp is in the future")
 	}
-	if now.Sub(loggedAt) > MaxFreshnessAge {
+	if now.Sub(loggedAt) > maxAge {
 		return time.Time{}, fmt.Errorf("freshness witness is stale")
 	}
 	return loggedAt, nil

@@ -11,20 +11,15 @@ import (
 	"github.com/tinfoilsh/tinfoil-go/verifier/policy"
 )
 
-// Expectations is the fully translated TDX expected state, resolved at
-// assembly so that validation performs no translation and no lookups. The
-// collateral floor is separate because it is not a quote field.
+// Expectations holds TDX validation options and the collateral TCB floor.
 type Expectations struct {
 	opts                           *tdxvalidate.Options
 	minimumTCBEvaluationDataNumber int
 }
 
-// Assemble translates a policy block into the complete expected state for
-// a quote. The endorsed measurement set is resolved to a single MRTD/RTMR0
-// by the quote's authenticated registers under the required VM shape, so a
-// quote outside the endorsed set fails assembly; every register comparison
-// then happens inside the library. The returned name is the resolved
-// measurements-map entry.
+// Assemble requires the quote's MRTD/RTMR0 to match an endorsed measurement for
+// the required VM shape, then builds validation options from policy and registers.
+// It returns the matching measurements-map entry's name.
 func Assemble(a *policy.Artifact, p *policy.TDXPolicy, required *policy.Shape, q *Quote, registers [5]string, reportData [64]byte) (*Expectations, string, error) {
 	opts, err := options(p)
 	if err != nil {
@@ -56,9 +51,7 @@ func Assemble(a *policy.Artifact, p *policy.TDXPolicy, required *policy.Shape, q
 	}, name, nil
 }
 
-// Validate compares a quote against the assembled expected state: the
-// library validation options plus the collateral floor. It is the only TDX
-// enforcement entry point, so no subset of the policy can be applied.
+// Validate checks quote fields and the collateral TCB floor.
 func (e *Expectations) Validate(q *Quote) error {
 	if err := tdxvalidate.TdxQuote(q.quote, e.opts); err != nil {
 		return err

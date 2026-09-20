@@ -89,6 +89,11 @@ The TLS pin runs for direct HTTPS and HTTPS-over-CONNECT connections. Fetching
 the document does not require a separate direct TLS probe. Code and platform
 witnesses have a seven-day maximum age by default; the earliest authenticated
 expiry is exposed by `VerifyV3` and `VerifyDocumentV3` as `FreshnessExpiresAt`.
+Use `VerificationOptions` with `NewSecureClientWithOptions`,
+`NewDefaultClientWithOptions`, or `VerifyDocumentV3WithOptions` to set
+`FreshnessMaxAge` and `PinnedRegisters`. Zero age uses seven days; negative ages
+fail before verification. Clients copy the options and pins at construction.
+Create a new client to change policy. Existing entry points retain their defaults.
 Callers using these APIs must retain the deadline and stop authorizing new
 requests at or after it, then verify again before accepting more requests.
 Re-verifying unchanged witnesses does not extend their deadline.
@@ -135,13 +140,24 @@ also need to migrate before adopting the v3 framework.
 
 ## Pinned registers
 
-Pin a register the release does not determine, such as a sealed RTMR3; empty
-registers keep their source:
+Pin a register the release does not determine, such as a sealed RTMR3, with
+`VerificationOptions.PinnedRegisters`. Empty registers retain their normal expectations,
+including zero for RTMR3. TDX registers are `[MRTD, RTMR0, RTMR1, RTMR2, RTMR3]`;
+SEV-SNP has one launch-measurement register. Pins must have the matching type
+and register count, and cannot conflict with release or platform measurements.
 
 ```go
 import "github.com/tinfoilsh/tinfoil-go/verifier/measurement"
 
-secureClient := client.NewPinnedClient("enclave.example.com", "org/repo", &measurement.Measurement{Type: measurement.TdxGuestV2, Registers: []string{"", "", "", "", rtmr3}})
+opts := client.VerificationOptions{
+    PinnedRegisters: &measurement.Measurement{
+        Type:      measurement.TdxGuestV2,
+        Registers: []string{4: rtmr3},
+    },
+}
+secureClient, err := client.NewSecureClientWithOptions("enclave.example.com", "org/repo", opts)
+// For a document already fetched with expectedNonce:
+verified, err := client.VerifyDocumentV3WithOptions(documentBytes, expectedNonce, trustedRepo, opts)
 ```
 
 ## JavaScript / TypeScript / WASM

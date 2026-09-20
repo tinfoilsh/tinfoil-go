@@ -37,12 +37,14 @@ func testResponse() *http.Response {
 
 func TestTransportExpirationAndUnchangedWitness(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		deadline := time.Now().Add(time.Minute)
+		witnessedAt := time.Now()
 		var verifications, requests int
-		s := NewSecureClient("enclave.example", "org/repo")
+		s, err := NewSecureClientWithOptions("enclave.example", "org/repo", VerificationOptions{FreshnessMaxAge: time.Minute})
+		require.NoError(t, err)
+		deadline := witnessedAt.Add(time.Minute)
 		s.verify = func() (*verificationState, error) {
 			verifications++
-			return testState(deadline, "key"), nil
+			return testState(freshnessExpiration(witnessedAt, witnessedAt.Add(time.Hour), s.freshnessMaxAge), "key"), nil
 		}
 		transport, err := s.NewTransport(func(*GroundTruth) (http.RoundTripper, error) {
 			return roundTripFunc(func(*http.Request) (*http.Response, error) {
@@ -381,7 +383,6 @@ func TestHTTPClientChecksExpirationOnReusedTLSConnections(t *testing.T) {
 			hc, err := s.HTTPClient()
 			require.NoError(t, err)
 			defer hc.CloseIdleConnections()
-			// Configure this client's cloned transport before its first request.
 			base := hc.Transport.(*refreshingTransport).transport.(*TLSBoundRoundTripper).getTransport()
 			base.Proxy = nil
 			base.TLSClientConfig.RootCAs = roots
@@ -401,8 +402,7 @@ func TestHTTPClientChecksExpirationOnReusedTLSConnections(t *testing.T) {
 				resp.Body.Close()
 				require.Equal(t, i == 1, reused)
 			}
-			// Publish an expired snapshot without modifying the immutable snapshot
-			// held by the already-returned HTTP client and its open connection.
+			// Expire the client state while the transport still holds the old snapshot.
 			s.stateMu.Lock()
 			s.state = testState(time.Now().Add(-time.Second), key)
 			s.stateMu.Unlock()

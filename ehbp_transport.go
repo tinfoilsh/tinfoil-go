@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"time"
 
 	"github.com/openai/openai-go/v3/option"
 	ehbpclient "github.com/tinfoilsh/encrypted-http-body-protocol/client"
@@ -27,9 +28,7 @@ const (
 	// so it works through proxies. This is the default.
 	TransportEHBP TransportMode = "ehbp"
 
-	// TransportTLS pins the enclave's TLS certificate. All traffic is encrypted
-	// and terminated at the verified enclave, which requires a direct
-	// connection (requests through a proxy will fail).
+	// TransportTLS pins the enclave's TLS public key, including for HTTPS-over-CONNECT.
 	TransportTLS TransportMode = "tls"
 )
 
@@ -42,6 +41,7 @@ type clientConfig struct {
 	enclave            string
 	repo               string
 	pins               *measurement.Measurement
+	freshnessMaxAge    time.Duration
 	transport          TransportMode
 	baseURL            string
 	baseURLSet         bool
@@ -59,15 +59,22 @@ func WithEnclave(enclave string) ClientOption {
 	return func(c *clientConfig) { c.enclave = enclave }
 }
 
-// WithRepo sets the GitHub repository used for code measurement verification.
+// WithRepo sets the trusted repository reference, owner/name[@tag][@sha256:digest].
+// A reference other than the default repository requires WithEnclave.
 func WithRepo(repo string) ClientOption {
 	return func(c *clientConfig) { c.repo = repo }
 }
 
-// WithPinnedRegisters pins enclave registers in addition to the release's code
-// measurement; empty registers keep their source. Requires WithEnclave.
+// WithPinnedRegisters adds register pins to code and platform verification.
+// Empty entries retain default checks. Requires WithEnclave.
 func WithPinnedRegisters(m *measurement.Measurement) ClientOption {
 	return func(c *clientConfig) { c.pins = m }
+}
+
+// WithFreshnessMaxAge limits code and platform witness age.
+// Zero uses the seven-day default; negative values are invalid.
+func WithFreshnessMaxAge(maxAge time.Duration) ClientOption {
+	return func(c *clientConfig) { c.freshnessMaxAge = maxAge }
 }
 
 // WithTransport selects the transport mode. Defaults to TransportEHBP.
@@ -75,13 +82,9 @@ func WithTransport(mode TransportMode) ClientOption {
 	return func(c *clientConfig) { c.transport = mode }
 }
 
-// WithBaseURL routes requests through the given base URL (for example your own
-// proxy) instead of sending them directly to the enclave. Request bodies stay
-// encrypted end-to-end to the verified enclave; when the base URL's origin
-// differs from the enclave's, the SDK adds the X-Tinfoil-Enclave-Url header so
-// the proxy can forward the encrypted request to the right enclave. Only
-// supported with the EHBP transport unless it uses the verified enclave's
-// HTTPS origin.
+// WithBaseURL routes requests through a proxy. EHBP encrypts bodies to the
+// enclave and adds X-Tinfoil-Enclave-Url when the proxy's origin differs.
+// TLS requires the verified enclave's HTTPS origin.
 func WithBaseURL(baseURL string) ClientOption {
 	return func(c *clientConfig) {
 		c.baseURL = baseURL
@@ -94,9 +97,8 @@ func WithOpenAIOptions(opts ...option.RequestOption) ClientOption {
 	return func(c *clientConfig) { c.openaiOpts = append(c.openaiOpts, opts...) }
 }
 
-// NewClientWithOptions creates a secure OpenAI client configured through
-// functional options. By default it selects a router automatically, verifies
-// against the default config repository, and uses the EHBP transport.
+// NewClientWithOptions creates an OpenAI client with attestation verification.
+// Defaults are router discovery, tinfoilsh/confidential-model-router, and EHBP.
 func NewClientWithOptions(opts ...ClientOption) (*Client, error) {
 	cfg := &clientConfig{
 		repo:      defaultConfigRepo,
@@ -118,28 +120,26 @@ func NewClientWithOptions(opts ...ClientOption) (*Client, error) {
 			return nil, fmt.Errorf("invalid base URL: %w", err)
 		}
 	}
-	if cfg.pins != nil && cfg.enclave == "" {
-		return nil, fmt.Errorf("pinned registers require an enclave")
+	if cfg.enclave == "" && (cfg.pins != nil || cfg.repo != defaultConfigRepo) {
+		return nil, fmt.Errorf("custom repository or pinned registers require an enclave")
 	}
 
+	verificationOpts := client.VerificationOptions{PinnedRegisters: cfg.pins, FreshnessMaxAge: cfg.freshnessMaxAge}
 	var secureClient *client.SecureClient
+	var err error
 	if cfg.enclave == "" {
-		var err error
-		secureClient, err = client.NewDefaultClient()
-		if err != nil {
-			return nil, fmt.Errorf("failed to create secure client: %w", err)
-		}
+		secureClient, err = client.NewDefaultClientWithOptions(verificationOpts)
 	} else {
-		secureClient = client.NewPinnedClient(cfg.enclave, cfg.repo, cfg.pins)
+		secureClient, err = client.NewSecureClientWithOptions(cfg.enclave, cfg.repo, verificationOpts)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("failed to create secure client: %w", err)
 	}
 
 	return createClientFromSecureClient(secureClient, cfg.transport, cfg.baseURL,
 		resolveUserCacheSecret(cfg.userCacheSecret, cfg.userCacheSecretSet), cfg.openaiOpts...)
 }
 
-// secureHTTPClient builds an HTTP client sharing the SecureClient verification for
-// the requested transport mode. The HTTP client is bound to the verified
-// enclave and configured proxy, if any.
 func secureHTTPClient(secureClient *client.SecureClient, mode TransportMode, baseURL, userCacheSecret string) (*http.Client, error) {
 	var (
 		httpClient *http.Client
@@ -162,9 +162,7 @@ func secureHTTPClient(secureClient *client.SecureClient, mode TransportMode, bas
 		}
 	}
 
-	// The cache-secret layer sits above the sealing transport, so the field it
-	// injects is encrypted with the rest of the body (EHBP) or sent over the
-	// pinned connection (TLS).
+	// Inject the cache secret before EHBP encryption or transmission over pinned TLS.
 	transport := httpClient.Transport
 	if userCacheSecret != "" {
 		transport = &userCacheSecretTransport{
@@ -185,8 +183,6 @@ func secureHTTPClient(secureClient *client.SecureClient, mode TransportMode, bas
 	return httpClient, nil
 }
 
-// allowedOrigins returns the set of origins a secured request may target: the
-// verified enclave and, when set, the proxy base URL.
 func allowedOrigins(enclave, baseURL string) (map[string]struct{}, error) {
 	origins := make(map[string]struct{}, 2)
 	if enclave != "" {
@@ -206,10 +202,8 @@ func allowedOrigins(enclave, baseURL string) (map[string]struct{}, error) {
 	return origins, nil
 }
 
-// hostBoundRoundTripper rejects requests to any origin other than the verified
-// enclave or the configured proxy. This guards the escape-hatch HTTP client
-// (and the OpenAI client) from disclosing sensitive request headers, such as the
-// API key, to an arbitrary host.
+// hostBoundRoundTripper restricts requests to the enclave and configured proxy
+// to prevent sending credentials to other origins.
 type hostBoundRoundTripper struct {
 	allowedOrigins map[string]struct{}
 	enclave        string
@@ -228,11 +222,6 @@ type transportVerifier interface {
 	NewTransport(func(*client.GroundTruth) (http.RoundTripper, error), func(error) bool) (http.RoundTripper, error)
 }
 
-// ehbpHTTPClient returns an HTTP client whose request bodies are encrypted to
-// the enclave's attested HPKE public key and that re-verifies attestation when
-// the server rotates its HPKE key. When baseURL routes requests through a proxy
-// whose origin differs from the enclave's, the client adds the
-// X-Tinfoil-Enclave-Url header so the proxy can forward to the verified enclave.
 func ehbpHTTPClient(secureClient transportVerifier, baseURL string) (*http.Client, error) {
 	transport, err := secureClient.NewTransport(func(groundTruth *client.GroundTruth) (http.RoundTripper, error) {
 		inner, err := buildEHBPTransport(groundTruth.HPKEPublicKey)
@@ -250,9 +239,6 @@ func ehbpHTTPClient(secureClient transportVerifier, baseURL string) (*http.Clien
 	return &http.Client{Transport: transport}, nil
 }
 
-// enclaveURLHeaderValue returns the X-Tinfoil-Enclave-Url header value and
-// whether it should be injected. The header is only needed when requests are
-// routed through a proxy whose origin differs from the verified enclave's.
 func enclaveURLHeaderValue(baseURL, enclave string) (string, bool) {
 	if baseURL == "" || enclave == "" {
 		return "", false
@@ -287,9 +273,7 @@ func originOf(rawURL string) (string, error) {
 	return normalizedOrigin(u), nil
 }
 
-// normalizedOrigin lowercases the scheme and host and drops an explicit
-// default port so that origins compare equal regardless of how the URL spells
-// them (for example https://host and https://host:443).
+// Treat https://host and https://host:443 as the same origin.
 func normalizedOrigin(u *url.URL) string {
 	scheme := strings.ToLower(u.Scheme)
 	hostname := strings.ToLower(u.Hostname())
@@ -325,12 +309,7 @@ func validateTLSBaseURL(baseURL, enclave string) error {
 	return nil
 }
 
-// enclaveURLHeaderTransport injects the X-Tinfoil-Enclave-Url header before
-// delegating to the wrapped transport. EHBP leaves request headers in
-// plaintext, so the header reaches the proxy while the body stays sealed to the
-// enclave's HPKE key. The value is captured when the transport is built; a
-// re-verification that swaps in a different enclave rebuilds this transport with
-// the new value, which also keeps every retry pointed at the right enclave.
+// The header and HPKE key come from the same verification snapshot.
 type enclaveURLHeaderTransport struct {
 	enclaveURL string
 	transport  http.RoundTripper
@@ -342,8 +321,6 @@ func (t *enclaveURLHeaderTransport) RoundTrip(req *http.Request) (*http.Response
 	return t.transport.RoundTrip(req)
 }
 
-// buildEHBPTransport creates an EHBP round tripper bound to a hex-encoded HPKE
-// public key obtained through attestation verification.
 func buildEHBPTransport(hpkePublicKeyHex string) (http.RoundTripper, error) {
 	if hpkePublicKeyHex == "" {
 		return nil, fmt.Errorf("enclave did not expose an HPKE public key; cannot use the EHBP transport (use WithTransport(TransportTLS))")

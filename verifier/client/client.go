@@ -2,17 +2,20 @@ package client
 
 import (
 	"bytes"
+	"cmp"
 	_ "embed"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"sync"
+	"time"
 
 	"github.com/tinfoilsh/tinfoil-go/verifier/measurement"
+	"github.com/tinfoilsh/tinfoil-go/verifier/provenance"
 	"github.com/tinfoilsh/tinfoil-go/verifier/util"
 )
 
-// GroundTruth represents the "known good" state of the enclave
+// GroundTruth records verified measurements and transport keys.
 type GroundTruth struct {
 	ConfigRepo         string                   `json:"config_repo,omitempty"`
 	EnclaveHost        string                   `json:"enclave_host,omitempty"`
@@ -26,12 +29,12 @@ type GroundTruth struct {
 	EnclaveFingerprint string                   `json:"enclave_fingerprint"`
 	Verifier           SoftwareIdentity         `json:"verifier"`
 	VerifiedAt         string                   `json:"verified_at"`
-	DigestFetched      bool                     `json:"-"`
 }
 
 type SecureClient struct {
-	enclave, repo string
-	pins          *measurement.Measurement
+	enclave, repo   string
+	pins            *measurement.Measurement
+	freshnessMaxAge time.Duration
 
 	stateMu    sync.RWMutex
 	state      *verificationState
@@ -43,10 +46,6 @@ var (
 	defaultRouterRepo = "tinfoilsh/confidential-model-router"
 	defaultRouterURL  = "https://atc.tinfoil.sh/routers"
 )
-
-func newFallbackClient() *SecureClient {
-	return NewSecureClient("inference.tinfoil.sh", defaultRouterRepo)
-}
 
 func fetchRouters() ([]string, error) {
 	resp, _, err := util.Get(defaultRouterURL)
@@ -62,54 +61,95 @@ func fetchRouters() ([]string, error) {
 	return routers, nil
 }
 
-// NewSecureClient creates a new secure client with a given repo and enclave
+// NewSecureClient uses the default verification options.
 func NewSecureClient(enclave, repo string) *SecureClient {
+	return NewClientWithOptions(enclave, repo)
+}
+
+// VerificationOptions is copied at construction. Create a new client to change it.
+type VerificationOptions struct {
+	// PinnedRegisters adds register checks; empty entries retain defaults.
+	PinnedRegisters *measurement.Measurement
+	// FreshnessMaxAge defaults to seven days when zero. Negative ages are invalid.
+	FreshnessMaxAge time.Duration
+}
+
+func NewSecureClientWithOptions(enclave, repo string, opts VerificationOptions) (*SecureClient, error) {
+	if opts.FreshnessMaxAge < 0 {
+		return nil, fmt.Errorf("freshness maximum age must not be negative")
+	}
+	return NewClientWithOptions(enclave, repo, WithPinnedRegisters(opts.PinnedRegisters), WithFreshnessMaxAge(opts.FreshnessMaxAge)), nil
+}
+
+type clientConfig struct {
+	pins            *measurement.Measurement
+	freshnessMaxAge time.Duration
+}
+
+// ClientOption configures a SecureClient created with NewClientWithOptions.
+type ClientOption func(*clientConfig)
+
+// WithPinnedRegisters pins enclave registers in addition to the release and
+// platform measurements. Empty registers retain their normal expectations.
+func WithPinnedRegisters(pins *measurement.Measurement) ClientOption {
+	return func(c *clientConfig) { c.pins = pins }
+}
+
+// WithFreshnessMaxAge limits code and platform witness age. Zero uses seven days.
+// Verification rejects negative values.
+func WithFreshnessMaxAge(maxAge time.Duration) ClientOption {
+	return func(c *clientConfig) { c.freshnessMaxAge = maxAge }
+}
+
+// NewClientWithOptions creates a secure client for an enclave and repository
+// reference, owner/name[@tag][@sha256:digest]. Verification happens on first use.
+func NewClientWithOptions(enclave, repo string, opts ...ClientOption) *SecureClient {
+	cfg := &clientConfig{}
+	for _, opt := range opts {
+		if opt != nil {
+			opt(cfg)
+		}
+	}
 	return &SecureClient{
-		enclave: enclave,
-		repo:    repo,
+		enclave:         enclave,
+		repo:            repo,
+		pins:            cloneMeasurement(cfg.pins),
+		freshnessMaxAge: cmp.Or(cfg.freshnessMaxAge, provenance.MaxFreshnessAge),
 	}
 }
 
-// NewPinnedClient is NewSecureClient with pinned enclave registers; empty
-// registers keep their source.
-func NewPinnedClient(enclave, repo string, pins *measurement.Measurement) *SecureClient {
-	c := NewSecureClient(enclave, repo)
-	c.pins = cloneMeasurement(pins)
-	return c
-}
-
-// NewDefaultClient creates a new secure client with fallback mechanism.
-// It tries to fetch routers from the router service, attempts to verify each one,
-// and falls back to inference.tinfoil.sh if all routers fail.
+// NewDefaultClient returns the first router that verifies, or a client for
+// inference.tinfoil.sh if discovery or verification fails.
 func NewDefaultClient() (*SecureClient, error) {
-	routers, err := fetchRouters()
+	return NewDefaultClientWithOptions(VerificationOptions{})
+}
+
+// NewDefaultClientWithOptions applies opts to every discovered router and fallback.
+func NewDefaultClientWithOptions(opts VerificationOptions) (*SecureClient, error) {
+	fallback, err := NewSecureClientWithOptions("inference.tinfoil.sh", defaultRouterRepo, opts)
 	if err != nil {
-		// If we can't get routers, fall back to inference.tinfoil.sh immediately
-		return newFallbackClient(), nil
+		return nil, err
 	}
-
-	// Try each router in sequence
+	routers, _ := fetchRouters()
 	for _, routerURL := range routers {
-		client := NewSecureClient(routerURL, defaultRouterRepo)
-
-		// Return first working router
+		client := NewClientWithOptions(routerURL, defaultRouterRepo, WithPinnedRegisters(fallback.pins), WithFreshnessMaxAge(fallback.freshnessMaxAge))
 		_, err := client.Verify()
 		if err == nil {
 			return client, nil
 		}
 	}
 
-	return newFallbackClient(), nil
+	return fallback, nil
 }
 
-// Enclave returns the enclave URL
+// Enclave returns the enclave host.
 func (s *SecureClient) Enclave() string {
 	s.stateMu.RLock()
 	defer s.stateMu.RUnlock()
 	return s.enclave
 }
 
-// Repo returns the repository URL
+// Repo returns the trusted repository reference, including any tag or digest pins.
 func (s *SecureClient) Repo() string {
 	return s.repo
 }
@@ -169,14 +209,12 @@ func (s *SecureClient) makeRequest(req *http.Request) (*Response, error) {
 		return nil, err
 	}
 
-	// If URL doesn't start with anything, assume it's a relative path and set the base URL
 	if req.URL.Host == "" {
 		req.URL.Scheme = "https"
 		req.URL.Host = s.Enclave()
 	}
 
-	// Request headers (which may carry the API key) are not encrypted, so never
-	// send them over a plaintext connection.
+	// Require HTTPS to protect request headers as well as the body.
 	if req.URL.Scheme != "https" {
 		return nil, fmt.Errorf("refusing to send request over non-https URL %q", req.URL.String())
 	}

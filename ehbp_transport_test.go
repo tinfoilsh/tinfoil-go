@@ -11,15 +11,16 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/openai/openai-go/v3"
 	"github.com/openai/openai-go/v3/option"
 	"github.com/stretchr/testify/require"
 	ehbpidentity "github.com/tinfoilsh/encrypted-http-body-protocol/identity"
 	"github.com/tinfoilsh/tinfoil-go/verifier/client"
+	"github.com/tinfoilsh/tinfoil-go/verifier/measurement"
 )
 
-// roundTripFunc adapts a function to an http.RoundTripper.
 type roundTripFunc func(*http.Request) (*http.Response, error)
 
 func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
@@ -75,6 +76,52 @@ func TestNewClientWithOptionsRejectsInvalidBaseURL(t *testing.T) {
 			require.Error(t, err)
 			require.Contains(t, err.Error(), "invalid base URL")
 		})
+	}
+}
+
+func TestNewClientWithOptionsRejectsInvalidFreshnessMaxAge(t *testing.T) {
+	for _, enclave := range []string{"", "enclave.example"} {
+		for _, maxAge := range []time.Duration{-time.Nanosecond, -time.Hour} {
+			c, err := NewClientWithOptions(WithEnclave(enclave), WithFreshnessMaxAge(maxAge))
+			require.Nil(t, c)
+			require.ErrorContains(t, err, "freshness maximum age must not be negative")
+		}
+	}
+}
+
+func TestClientFreshnessMaxAge(t *testing.T) {
+	host, repo := os.Getenv("TINFOIL_ENCLAVE"), os.Getenv("TINFOIL_REPO")
+	if host == "" || repo == "" {
+		t.Skip("TINFOIL_ENCLAVE or TINFOIL_REPO not set")
+	}
+	for _, mode := range []TransportMode{TransportEHBP, TransportTLS} {
+		for _, enclave := range []string{"", host} {
+			t.Run(string(mode)+"/"+enclave, func(t *testing.T) {
+				opts := []ClientOption{WithTransport(mode), WithEnclave(enclave), WithFreshnessMaxAge(time.Nanosecond)}
+				if enclave != "" {
+					opts = append(opts, WithRepo(repo))
+				}
+				c, err := NewClientWithOptions(opts...)
+				require.Nil(t, c)
+				require.ErrorContains(t, err, "freshness witness is stale")
+				c, err = NewClientWithOptions(append(opts, WithFreshnessMaxAge(0))...)
+				require.NoError(t, err)
+				require.NotNil(t, c)
+			})
+		}
+	}
+}
+
+func TestNewClientWithOptionsRequiresEnclaveForPins(t *testing.T) {
+	for _, opt := range []ClientOption{
+		WithRepo("org/repo"),
+		WithRepo(defaultConfigRepo + "@v1"),
+		WithRepo(defaultConfigRepo + "@sha256:" + strings.Repeat("ab", 32)),
+		WithPinnedRegisters(&measurement.Measurement{Type: measurement.TdxGuestV2, Registers: []string{4: strings.Repeat("ab", 48)}}),
+	} {
+		c, err := NewClientWithOptions(opt)
+		require.Nil(t, c)
+		require.ErrorContains(t, err, "require an enclave")
 	}
 }
 
@@ -245,8 +292,6 @@ func TestEHBPClientPreservesAdmissionAndRebuildsProxyHeader(t *testing.T) {
 	require.ErrorIs(t, err, client.ErrFreshnessExpired, "keep the verifier's admission layer around EHBP")
 	require.Empty(t, seen, "failed admission must not reach the proxy")
 
-	// Exercise the real builder supplied to shared refresh coordination with
-	// both snapshots, including the actual header and EHBP transport layers.
 	for _, host := range []string{"old.example", "new.example"} {
 		transport, err := rebuild(&client.GroundTruth{EnclaveHost: host, HPKEPublicKey: strings.Repeat("01", 32)})
 		require.NoError(t, err)
@@ -260,8 +305,6 @@ func TestEHBPClientPreservesAdmissionAndRebuildsProxyHeader(t *testing.T) {
 	}
 }
 
-// TestClientIntegration_TransportModes exercises NewClientWithOptions against a
-// live enclave for both transport modes.
 func TestClientIntegration_TransportModesWithCacheSecret(t *testing.T) {
 	const testUserCacheSecret = "go-live-integration-cache-secret"
 
@@ -294,10 +337,7 @@ func TestClientIntegration_TransportModesWithCacheSecret(t *testing.T) {
 	}
 }
 
-// TestClientIntegration_LowLevelEHBP exercises the low-level HTTPClient() path
-// (direct requests, not the OpenAI wrapper) against a live enclave for both
-// transport modes. It covers a bodyless GET, which EHBP sends without body
-// encryption per SPEC 7.4, and a POST whose body is sealed end-to-end.
+// Bodyless EHBP requests use no body encryption, per SPEC 7.4.
 func TestClientIntegration_LowLevelEHBP(t *testing.T) {
 	apiKey := os.Getenv("TINFOIL_API_KEY")
 	if apiKey == "" {

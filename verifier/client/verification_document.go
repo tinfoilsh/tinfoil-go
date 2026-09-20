@@ -104,16 +104,7 @@ func successfulStep() VerificationStepState {
 	return VerificationStepState{Status: "success"}
 }
 
-func skippedStep() VerificationStepState {
-	return VerificationStepState{Status: "skipped"}
-}
-
 func newVerificationDocument(groundTruth *GroundTruth) *VerificationDocument {
-	fetchDigest := skippedStep()
-	verifyCode := successfulStep()
-	if groundTruth.DigestFetched {
-		fetchDigest = successfulStep()
-	}
 	return &VerificationDocument{
 		SchemaVersion:   verificationDocumentSchemaVersion,
 		ConfigRepo:      groundTruth.ConfigRepo,
@@ -135,8 +126,8 @@ func newVerificationDocument(groundTruth *GroundTruth) *VerificationDocument {
 		Verifier:               groundTruth.Verifier,
 		VerifiedAt:             groundTruth.VerifiedAt,
 		Steps: VerificationSteps{
-			FetchDigest:         fetchDigest,
-			VerifyCode:          verifyCode,
+			FetchDigest:         VerificationStepState{Status: "skipped"},
+			VerifyCode:          successfulStep(),
 			VerifyEnclave:       successfulStep(),
 			CompareMeasurements: successfulStep(),
 			VerifyCertificate:   successfulStep(),

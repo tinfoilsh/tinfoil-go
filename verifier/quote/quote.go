@@ -1,15 +1,6 @@
-// Package quote verifies a v3 document's CPU evidence in three phases:
-//
-//  1. Authenticate: verify the quote's signature chain up to the pinned
-//     vendor root, from document-carried collateral only. Authenticated,
-//     not yet appraised.
-//  2. Assemble: resolve the complete policy — every value the quote must
-//     attest, as one object. Entries differ only in which verified source
-//     resolves them (policy artifact, code provenance, envelope); that
-//     distinction ends here. Assembly fails if any entry cannot be
-//     resolved.
-//  3. Validate: one comparison of the quote against the assembled policy,
-//     inside the vendor library's validation options.
+// Package quote authenticates CPU evidence using document-carried collateral and
+// pinned vendor roots. It then assembles and checks expectations from platform
+// policy, code measurements, caller pins, and REPORT_DATA.
 package quote
 
 import (
@@ -42,9 +33,8 @@ func (q *Authenticated) Platform() string { return q.platform }
 // Identity is the authenticated machine identifier (SEV CHIP_ID / TDX PPID), lowercase hex.
 func (q *Authenticated) Identity() string { return q.identity }
 
-// AssembledPolicy is the complete expected state of a quote, fully
-// resolved before validation runs. It captures the quote it was assembled
-// for, so it cannot be applied to any other quote.
+// AssembledPolicy holds the policy checks and a copy of the authenticated quote
+// to which they apply.
 type AssembledPolicy struct {
 	// PolicyName is the matched policy name.
 	PolicyName string
@@ -57,10 +47,9 @@ type AssembledPolicy struct {
 	tdx   *tdx.Expectations
 }
 
-// Authenticate verifies the quote's signature chain up to the pinned
-// vendor root, from the document's own endorsement collateral — no network
-// fetches. Callers must assemble a policy and validate before trusting the
-// platform.
+// Authenticate verifies the quote's signature chain against the pinned vendor
+// root using document-carried collateral. Callers must also assemble and validate
+// a policy before trusting the platform. No network requests are made.
 func Authenticate(doc *envelope.Document) (*Authenticated, error) {
 	switch doc.CPUEvidence.Format {
 	case envelope.SEVSNPReportV1Format:
@@ -90,12 +79,10 @@ func Authenticate(doc *envelope.Document) (*Authenticated, error) {
 	}
 }
 
-// Assemble resolves the complete policy for an authenticated quote from
-// its three verified sources: the policy artifact (machine lookup by
-// authenticated identity; for TDX, the platform measurement resolved under
-// the required VM shape), the code measurement, and the envelope's
-// REPORT_DATA. A machine absent from the artifact is not endorsed. A
-// register set in pins fills an empty slot or must equal its source.
+// Assemble combines endorsed machine policy, release measurements, caller pins,
+// and REPORT_DATA. TDX platform measurements must match the required VM shape.
+// A machine absent from endorsements is rejected. Pins fill unset registers or
+// must match the existing source value.
 func Assemble(endorsements *policy.Artifact, code, pins *measurement.Measurement, shape *policy.Shape, reportData [64]byte, q *Authenticated) (*AssembledPolicy, error) {
 	if code == nil {
 		return nil, fmt.Errorf("assembling policy: expected code measurement is required")
@@ -130,8 +117,7 @@ func Assemble(endorsements *policy.Artifact, code, pins *measurement.Measurement
 	return assembled, nil
 }
 
-// Validate compares the captured quote against the assembled policy in a
-// single vendor library call: no lookups, no translation.
+// Validate checks the captured quote against the assembled policy.
 func (p *AssembledPolicy) Validate() error {
 	switch p.quote.platform {
 	case policy.PlatformSEVSNP:
@@ -159,21 +145,23 @@ func Verify(doc *envelope.Document, endorsements *policy.Artifact, code, pins *m
 	return assembled, q, nil
 }
 
-// layout lays code out in the enclave's registers, "" for platform-supplied ones, then applies pins.
+// layout maps code and pins to enclave registers, leaving platform defaults empty.
 func layout(code, pins *measurement.Measurement, q *Authenticated) ([]string, error) {
 	if code.Type != measurement.SnpTdxMultiPlatformV1 || len(code.Registers) != 3 {
 		return nil, fmt.Errorf("code measurement is %s with %d registers, want %s with 3", code.Type, len(code.Registers), measurement.SnpTdxMultiPlatformV1)
 	}
 	// Registers are [snp_measurement, rtmr1, rtmr2].
 	registers := []string{code.Registers[0]}
+	enclaveType := measurement.SevGuestV2
 	if q.platform == policy.PlatformTDX {
 		registers = []string{"", "", code.Registers[1], code.Registers[2], ""}
+		enclaveType = measurement.TdxGuestV2
 	}
 	if pins == nil {
 		return registers, nil
 	}
-	if pins.Type != q.Measurement.Type || len(pins.Registers) != len(registers) {
-		return nil, fmt.Errorf("pinned measurement is %s with %d registers, enclave is %s with %d", pins.Type, len(pins.Registers), q.Measurement.Type, len(registers))
+	if pins.Type != enclaveType || len(pins.Registers) != len(registers) {
+		return nil, fmt.Errorf("pinned measurement is %s with %d registers, enclave is %s with %d", pins.Type, len(pins.Registers), enclaveType, len(registers))
 	}
 	for i, pin := range pins.Registers {
 		if pin != "" && registers[i] != "" && !strings.EqualFold(registers[i], pin) {

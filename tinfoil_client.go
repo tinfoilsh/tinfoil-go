@@ -26,28 +26,21 @@ func NewClientWithParams(enclave, repo string, openaiOpts ...option.RequestOptio
 
 // NewClient creates a new secure OpenAI client using default parameters
 func NewClient(openaiOpts ...option.RequestOption) (*Client, error) {
-	secureClient, err := client.NewDefaultClient()
-	if err != nil {
-		return nil, fmt.Errorf("failed to create secure client: %w", err)
-	}
-	return createClientFromSecureClient(secureClient, defaultTransportMode, "", resolveUserCacheSecret("", false), openaiOpts...)
+	return NewClientWithOptions(WithOpenAIOptions(openaiOpts...))
 }
 
-// createClientFromSecureClient is a helper function to create a Client from a SecureClient
 func createClientFromSecureClient(secureClient *client.SecureClient, mode TransportMode, baseURL, userCacheSecret string, openaiOpts ...option.RequestOption) (*Client, error) {
 	httpClient, err := secureHTTPClient(secureClient, mode, baseURL, userCacheSecret)
 	if err != nil {
 		return nil, err
 	}
 
-	// Route requests through the proxy base URL when set, otherwise straight to
-	// the verified enclave.
 	resolvedBaseURL := baseURL
 	if resolvedBaseURL == "" {
 		resolvedBaseURL = fmt.Sprintf("https://%s/v1/", secureClient.Enclave())
 	}
 
-	// Add our HTTP client and base URL to the options
+	// Apply these last so constructor options cannot replace the verified transport.
 	allOpts := append(openaiOpts,
 		option.WithHTTPClient(httpClient),
 		option.WithBaseURL(resolvedBaseURL),
@@ -87,11 +80,8 @@ func (c *Client) VerificationDocument() *client.VerificationDocument {
 	return c.secureClient.VerificationDocument()
 }
 
-// HTTPClient returns the underlying HTTP client used to reach the enclave. It
-// re-verifies before new requests when witnesses expire or the enclave rotates its key.
-// It is bound to the verified enclave (and the configured proxy, if any):
-// requests to any other origin are refused to avoid disclosing sensitive
-// headers. This can be used for secure, direct HTTP requests to the enclave.
+// HTTPClient returns an HTTP client restricted to the enclave and configured proxy.
+// It re-verifies before new requests when witnesses expire or the enclave rotates its key.
 func (c *Client) HTTPClient() *http.Client {
 	return c.httpClient
 }

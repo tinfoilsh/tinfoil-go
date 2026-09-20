@@ -9,8 +9,27 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"github.com/tinfoilsh/tinfoil-go/verifier/measurement"
 )
+
+func TestClientOptionsCopyPinnedRegisters(t *testing.T) {
+	register := strings.Repeat("ab", 48)
+	pins := &measurement.Measurement{Type: measurement.TdxGuestV2, Registers: []string{4: register}}
+	opt := WithPinnedRegisters(pins)
+	first := NewClientWithOptions("enclave.example", "org/repo", nil, opt)
+	opts := VerificationOptions{PinnedRegisters: pins, FreshnessMaxAge: time.Hour}
+	second, err := NewSecureClientWithOptions("enclave.example", "org/repo", opts)
+	require.NoError(t, err)
+	opts.FreshnessMaxAge = time.Minute
+	pins.Type = measurement.SevGuestV2
+	pins.Registers[4] = "changed"
+	assert.Equal(t, measurement.TdxGuestV2, first.pins.Type)
+	assert.Equal(t, register, first.pins.Registers[4])
+	first.pins.Registers[4] = "changed again"
+	assert.Equal(t, register, second.pins.Registers[4])
+	assert.Equal(t, time.Hour, second.freshnessMaxAge)
+}
 
 func TestVerify(t *testing.T) {
 	enclave := os.Getenv("TINFOIL_ENCLAVE")
@@ -88,26 +107,8 @@ func TestVerificationDocumentJSON(t *testing.T) {
 	assert.Equal(t, verifiedAt, document.VerifiedAt)
 	assert.Equal(t, "tls-fingerprint", document.EnclaveMeasurement.TLSPublicKeyFingerprint)
 	assert.True(t, document.SecurityVerified)
-}
-
-func TestVerificationDocumentStepStates(t *testing.T) {
-	tests := []struct {
-		name        string
-		groundTruth *GroundTruth
-		fetchDigest string
-		verifyCode  string
-	}{
-		{name: "direct release", groundTruth: &GroundTruth{ReleaseTag: "v1.2.3", Digest: "digest", DigestFetched: true}, fetchDigest: "success", verifyCode: "success"},
-		{name: "caller supplied bundle", groundTruth: &GroundTruth{ReleaseTag: "v1.2.3", Digest: "digest"}, fetchDigest: "skipped", verifyCode: "success"},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			document := newVerificationDocument(tt.groundTruth)
-			assert.Equal(t, tt.fetchDigest, document.Steps.FetchDigest.Status)
-			assert.Equal(t, tt.verifyCode, document.Steps.VerifyCode.Status)
-		})
-	}
+	assert.Equal(t, "skipped", document.Steps.FetchDigest.Status)
+	assert.Equal(t, "success", document.Steps.VerifyCode.Status)
 }
 
 func TestCurrentVerifierVersion(t *testing.T) {
@@ -151,8 +152,8 @@ func TestClientFetchRouters(t *testing.T) {
 	assert.True(t, strings.HasSuffix(routers[0], ".tinfoil.sh"))
 }
 
-func TestClientDefaultClient(t *testing.T) {
-	defaultClient := newFallbackClient()
+func TestClientFallbackEnclave(t *testing.T) {
+	defaultClient := NewSecureClient("inference.tinfoil.sh", defaultRouterRepo)
 	enclave := defaultClient.Enclave()
 	assert.NotEmpty(t, enclave)
 

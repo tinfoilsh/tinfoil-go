@@ -1,8 +1,10 @@
 package client
 
 import (
+	"cmp"
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/tinfoilsh/tinfoil-go/verifier/envelope"
@@ -11,20 +13,14 @@ import (
 	"github.com/tinfoilsh/tinfoil-go/verifier/quote"
 )
 
-// VerifiedDocumentV3 is what a verified v3 document proves. The operative
-// output is CryptoMaterial — the endorsed keys a caller may bind a channel
-// to; it is the only field that authorizes an action. The remaining fields
-// feed the client's ground truth.
+// VerifiedDocumentV3 contains verified measurements, transport keys, and witness expiry.
 type VerifiedDocumentV3 struct {
-	// CodeDigest names the verified code artifact; CodeMeasurement is the
-	// expected measurement applied from it.
 	CodeDigest      string
 	CodeTag         string
 	CodeMeasurement *measurement.Measurement
-	// EnclaveMeasurement carries the quote's authenticated registers,
-	// proven to match the expectations.
+	// EnclaveMeasurement contains the authenticated registers after policy checks.
 	EnclaveMeasurement *measurement.Measurement
-	// CryptoMaterial holds the endorsed key items (hash-bound into the quote).
+	// CryptoMaterial contains keys bound to the quote by REPORT_DATA.
 	CryptoMaterial []envelope.CryptoMaterialItem
 	// FreshnessExpiresAt is the earlier authenticated code/platform witness
 	// deadline. Cached verification must not authorize new requests at or
@@ -32,14 +28,12 @@ type VerifiedDocumentV3 struct {
 	FreshnessExpiresAt time.Time
 }
 
-// TLSPublicKeyFP returns the endorsed TLS key fingerprint (the id=tls
-// crypto_material entry), or an error if the document does not endorse one.
+// TLSPublicKeyFP returns the attested TLS key fingerprint, or an error if absent.
 func (v *VerifiedDocumentV3) TLSPublicKeyFP() (string, error) {
 	return v.cryptoMaterialData(envelope.CryptoMaterialIDTLS, envelope.KeySPKIFPSHA256V1Format)
 }
 
-// HPKEPublicKey returns the endorsed HPKE public key (the id=hpke
-// crypto_material entry), or an error if the document does not endorse one.
+// HPKEPublicKey returns the attested HPKE public key, or an error if absent.
 func (v *VerifiedDocumentV3) HPKEPublicKey() (string, error) {
 	return v.cryptoMaterialData(envelope.CryptoMaterialIDHPKE, envelope.KeyX25519HPKEV1Format)
 }
@@ -57,8 +51,7 @@ func (v *VerifiedDocumentV3) cryptoMaterialData(id, format string) (string, erro
 	return "", fmt.Errorf("document endorses no %q crypto material", id)
 }
 
-// transportKeys recovers keys after document verification. TLS is required
-// by SecureClient; HPKE is optional until the caller selects EHBP.
+// SecureClient requires TLS; EHBP also requires HPKE.
 func (v *VerifiedDocumentV3) transportKeys() (tlsFP, hpkeKey string, err error) {
 	tlsFP, err = v.TLSPublicKeyFP()
 	if err != nil {
@@ -73,37 +66,30 @@ func (v *VerifiedDocumentV3) transportKeys() (tlsFP, hpkeKey string, err error) 
 	return tlsFP, "", nil
 }
 
-// VerifyDocumentV3 verifies a v3 attestation document from its transmitted
-// bytes:
-//
-//  1. Check the envelope: format, nonce equality, endorsed-section hash
-//     recomputation, REPORT_DATA recomputation (no authentication).
-//  2. Authenticate the reference values: the sigstore-code and
-//     sigstore-platform, and sigstore-freshness entries against pinned signing
-//     identities, recovering the code measurement, its declared VM shape,
-//     the policy artifact, and its current freshness proof.
-//  3. Verify the CPU quote: authenticate against the pinned vendor roots,
-//     assemble the complete policy from the reference values, validate in
-//     one call.
-//
-// repo is the code repository the caller trusts (pins the sigstore-code
-// signing identity); the repo named inside the document is not trusted.
-// repo may pin a tag or digest, owner/name[@tag][@sha256:digest]. pins are
-// enclave registers to pin; empty ones keep their source.
-// Channel binding (TLS fingerprint / HPKE key) is the caller's
-// responsibility, using the returned endorsed crypto material.
+// VerifyDocumentV3 checks the nonce, section hashes, provenance, witnesses, and CPU quote.
+// repo is the caller's trusted owner/name[@tag][@sha256:digest] reference.
+// Non-empty pins add register checks; empty entries retain defaults.
+// Callers must bind traffic to the returned TLS/HPKE keys and enforce FreshnessExpiresAt.
 func VerifyDocumentV3(docBytes, nonce []byte, repo string, pins *measurement.Measurement) (*VerifiedDocumentV3, error) {
+	return VerifyDocumentV3WithOptions(docBytes, nonce, repo, VerificationOptions{PinnedRegisters: pins})
+}
+
+func VerifyDocumentV3WithOptions(docBytes, nonce []byte, repo string, opts VerificationOptions) (*VerifiedDocumentV3, error) {
+	if opts.FreshnessMaxAge < 0 {
+		return nil, fmt.Errorf("freshness maximum age must not be negative")
+	}
+	maxAge := cmp.Or(opts.FreshnessMaxAge, provenance.MaxFreshnessAge)
 	doc, expectedReportData, err := envelope.Check(docBytes, nonce)
 	if err != nil {
 		return nil, fmt.Errorf("envelope: %w", err)
 	}
 
-	code, endorsements, freshnessExpiresAt, err := authenticateReferenceValues(doc, repo)
+	code, endorsements, freshnessExpiresAt, err := authenticateReferenceValues(doc, repo, maxAge)
 	if err != nil {
 		return nil, fmt.Errorf("reference values: %w", err)
 	}
 
-	_, authenticated, err := quote.Verify(doc, endorsements.Artifact, code.Measurement, pins, code.Shape, expectedReportData)
+	_, authenticated, err := quote.Verify(doc, endorsements.Artifact, code.Measurement, opts.PinnedRegisters, code.Shape, expectedReportData)
 	if err != nil {
 		return nil, fmt.Errorf("cpu evidence: %w", err)
 	}
@@ -118,11 +104,7 @@ func VerifyDocumentV3(docBytes, nonce []byte, repo string, pins *measurement.Mea
 	}, nil
 }
 
-// authenticateReferenceValues authenticates the document's required code and
-// platform Sigstore artifacts plus the matching freshness proof for each,
-// returning the authenticated code, platform values, and the earlier of their
-// authenticated freshness expiration times.
-func authenticateReferenceValues(doc *envelope.Document, repo string) (*provenance.Code, *provenance.PlatformEndorsements, time.Time, error) {
+func authenticateReferenceValues(doc *envelope.Document, repo string, maxAge time.Duration) (*provenance.Code, *provenance.PlatformEndorsements, time.Time, error) {
 	codeRef, err := doc.ReferenceValuesCollateral(envelope.CollateralSigstoreCodeV1Format)
 	if err != nil {
 		return nil, nil, time.Time{}, err
@@ -136,7 +118,7 @@ func authenticateReferenceValues(doc *envelope.Document, repo string) (*provenan
 		return nil, nil, time.Time{}, err
 	}
 	appraisalTime := time.Now()
-	codeWitnessedAt, err := provenance.AuthenticateFreshness(codeFreshnessRef.SigstoreBundle, &code.AuthenticatedArtifact, appraisalTime)
+	codeWitnessedAt, err := provenance.AuthenticateFreshnessWithMaxAge(codeFreshnessRef.SigstoreBundle, &code.AuthenticatedArtifact, appraisalTime, maxAge)
 	if err != nil {
 		return nil, nil, time.Time{}, fmt.Errorf("verifying code freshness: %w", err)
 	}
@@ -153,32 +135,23 @@ func authenticateReferenceValues(doc *envelope.Document, repo string) (*provenan
 	if err != nil {
 		return nil, nil, time.Time{}, err
 	}
-	platformWitnessedAt, err := provenance.AuthenticateFreshness(freshnessRef.SigstoreBundle, &endorsements.AuthenticatedArtifact, appraisalTime)
+	platformWitnessedAt, err := provenance.AuthenticateFreshnessWithMaxAge(freshnessRef.SigstoreBundle, &endorsements.AuthenticatedArtifact, appraisalTime, maxAge)
 	if err != nil {
 		return nil, nil, time.Time{}, fmt.Errorf("verifying platform freshness: %w", err)
 	}
 
-	return code, endorsements, freshnessExpiration(codeWitnessedAt, platformWitnessedAt), nil
+	return code, endorsements, freshnessExpiration(codeWitnessedAt, platformWitnessedAt, maxAge), nil
 }
 
-// freshnessExpiration uses authenticated witness times, never local verification time.
-func freshnessExpiration(codeWitnessedAt, platformWitnessedAt time.Time) time.Time {
-	expiresAt := codeWitnessedAt.Add(provenance.MaxFreshnessAge)
-	platformExpiresAt := platformWitnessedAt.Add(provenance.MaxFreshnessAge)
-	if platformExpiresAt.Before(expiresAt) {
-		expiresAt = platformExpiresAt
+func freshnessExpiration(codeWitnessedAt, platformWitnessedAt time.Time, maxAge time.Duration) time.Time {
+	if platformWitnessedAt.Before(codeWitnessedAt) {
+		codeWitnessedAt = platformWitnessedAt
 	}
-	return expiresAt
+	return codeWitnessedAt.Add(maxAge)
 }
 
-// VerifyV3 runs the single-request v3 flow against the client's enclave:
-// generate a fresh nonce, fetch the document (evidence + collateral) in one
-// request, verify it, and recover its endorsed transport keys. On success the
-// client's ground truth is updated so the first and every subsequent request
-// enforce the endorsed TLS or HPKE key.
-//
-// The enclave fetch is the only network request: all collateral travels in
-// the document and Sigstore verification uses the embedded trust root.
+// VerifyV3 fetches and verifies a nonce-bound document, then caches the result.
+// Verification uses embedded roots and collateral from the document.
 func (s *SecureClient) VerifyV3() (*VerifiedDocumentV3, error) {
 	state, err := s.verifiedState(context.Background(), nil, true)
 	if err != nil {
@@ -192,6 +165,9 @@ func (s *SecureClient) VerifyV3() (*VerifiedDocumentV3, error) {
 }
 
 func (s *SecureClient) fetchVerification() (*verificationState, error) {
+	if s.freshnessMaxAge < 0 {
+		return nil, fmt.Errorf("freshness maximum age must not be negative")
+	}
 	nonce, err := envelope.RandomNonce()
 	if err != nil {
 		return nil, err
@@ -201,19 +177,18 @@ func (s *SecureClient) fetchVerification() (*verificationState, error) {
 		return nil, fmt.Errorf("fetching attestation document: %w", err)
 	}
 
-	verified, err := VerifyDocumentV3(docBytes, nonce, s.repo, s.pins)
+	verified, err := VerifyDocumentV3WithOptions(docBytes, nonce, s.repo, VerificationOptions{PinnedRegisters: s.pins, FreshnessMaxAge: s.freshnessMaxAge})
 	if err != nil {
 		return nil, err
 	}
 
-	// Recover the transport keys bound into the verified CPU report. The
-	// selected transport enforces its key before sending the first request.
 	tlsFP, hpkeKey, err := verified.transportKeys()
 	if err != nil {
 		return nil, fmt.Errorf("binding: %w", err)
 	}
+	repo, _, _ := strings.Cut(s.repo, "@")
 	groundTruth := &GroundTruth{
-		ConfigRepo:         s.repo,
+		ConfigRepo:         repo,
 		EnclaveHost:        s.enclave,
 		ReleaseTag:         verified.CodeTag,
 		TLSPublicKey:       tlsFP,
@@ -232,8 +207,7 @@ func (s *SecureClient) fetchVerification() (*verificationState, error) {
 	}, nil
 }
 
-// Verify attests the enclave with the v3 single-request flow and stores the
-// resulting ground truth in the client.
+// Verify refreshes the client's verified measurements and keys.
 func (s *SecureClient) Verify() (*GroundTruth, error) {
 	state, err := s.verifiedState(context.Background(), nil, true)
 	if err != nil {

@@ -71,19 +71,35 @@ func TestValidateFreshnessTime(t *testing.T) {
 		{Type: "Tlog", Timestamp: now.Add(-2 * time.Hour)},
 		{Type: "Tlog", Timestamp: now.Add(-3 * time.Hour)},
 	}
-	loggedAt, err := validateFreshnessTime(timestamps, now)
+	loggedAt, err := validateFreshnessTime(timestamps, now, MaxFreshnessAge)
 	require.NoError(t, err)
 	assert.Equal(t, now.Add(-3*time.Hour), loggedAt)
 
-	_, err = validateFreshnessTime(nil, now)
+	_, err = validateFreshnessTime(nil, now, MaxFreshnessAge)
 	assert.ErrorContains(t, err, "no verified transparency-log timestamp")
 
-	_, err = validateFreshnessTime([]verify.TimestampVerificationResult{{Type: "TimestampAuthority", Timestamp: now.Add(-time.Hour)}}, now)
+	_, err = validateFreshnessTime([]verify.TimestampVerificationResult{{Type: "TimestampAuthority", Timestamp: now.Add(-time.Hour)}}, now, MaxFreshnessAge)
 	assert.ErrorContains(t, err, "no verified transparency-log timestamp")
 
-	_, err = validateFreshnessTime([]verify.TimestampVerificationResult{{Type: "Tlog", Timestamp: now.Add(MaxFreshnessFutureSkew + time.Second)}}, now)
-	assert.ErrorContains(t, err, "in the future")
+	for _, maxAge := range []time.Duration{24 * time.Hour, MaxFreshnessAge, 30 * 24 * time.Hour} {
+		for _, age := range []time.Duration{maxAge - time.Nanosecond, maxAge, maxAge + time.Nanosecond, 8 * 24 * time.Hour} {
+			_, err = validateFreshnessTime([]verify.TimestampVerificationResult{{Type: "Tlog", Timestamp: now.Add(-age)}}, now, maxAge)
+			if age > maxAge {
+				require.ErrorContains(t, err, "stale")
+			} else {
+				require.NoError(t, err)
+			}
+		}
+		_, err = validateFreshnessTime(timestamps, now, maxAge)
+		require.NoError(t, err)
+		_, err = validateFreshnessTime([]verify.TimestampVerificationResult{{Type: "Tlog", Timestamp: now.Add(MaxFreshnessFutureSkew + time.Nanosecond)}}, now, maxAge)
+		require.ErrorContains(t, err, "in the future")
+	}
+}
 
-	_, err = validateFreshnessTime([]verify.TimestampVerificationResult{{Type: "Tlog", Timestamp: now.Add(-MaxFreshnessAge - time.Second)}}, now)
-	assert.ErrorContains(t, err, "stale")
+func TestAuthenticateFreshnessRejectsInvalidMaxAge(t *testing.T) {
+	for _, maxAge := range []time.Duration{-time.Nanosecond, -time.Hour} {
+		_, err := AuthenticateFreshnessWithMaxAge(nil, nil, time.Now(), maxAge)
+		require.ErrorContains(t, err, "freshness maximum age must not be negative")
+	}
 }
