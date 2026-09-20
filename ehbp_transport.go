@@ -11,6 +11,7 @@ import (
 	ehbpclient "github.com/tinfoilsh/encrypted-http-body-protocol/client"
 	ehbpidentity "github.com/tinfoilsh/encrypted-http-body-protocol/identity"
 	"github.com/tinfoilsh/tinfoil-go/verifier/client"
+	"github.com/tinfoilsh/tinfoil-go/verifier/measurement"
 )
 
 // enclaveURLHeader tells a proxy which enclave to forward an encrypted request
@@ -38,14 +39,15 @@ const (
 )
 
 type clientConfig struct {
-	enclave            string
-	repo               string
-	transport          TransportMode
-	baseURL            string
-	baseURLSet         bool
-	userCacheSecret    string
-	userCacheSecretSet bool
-	openaiOpts         []option.RequestOption
+	enclave             string
+	repo                string
+	expectedMeasurement *measurement.Measurement
+	transport           TransportMode
+	baseURL             string
+	baseURLSet          bool
+	userCacheSecret     string
+	userCacheSecretSet  bool
+	openaiOpts          []option.RequestOption
 }
 
 // ClientOption configures a Client created with NewClientWithOptions.
@@ -60,6 +62,10 @@ func WithEnclave(enclave string) ClientOption {
 // WithRepo sets the GitHub repository used for code measurement verification.
 func WithRepo(repo string) ClientOption {
 	return func(c *clientConfig) { c.repo = repo }
+}
+
+func WithExpectedMeasurement(m *measurement.Measurement) ClientOption {
+	return func(c *clientConfig) { c.expectedMeasurement = m }
 }
 
 // WithTransport selects the transport mode. Defaults to TransportEHBP.
@@ -114,12 +120,12 @@ func NewClientWithOptions(opts ...ClientOption) (*Client, error) {
 	var secureClient *client.SecureClient
 	if cfg.enclave == "" {
 		var err error
-		secureClient, err = client.NewDefaultClient()
+		secureClient, err = client.NewDefaultClient(cfg.expectedMeasurement)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create secure client: %w", err)
 		}
 	} else {
-		secureClient = client.NewSecureClient(cfg.enclave, cfg.repo)
+		secureClient = client.NewSecureClient(cfg.enclave, cfg.repo, cfg.expectedMeasurement)
 	}
 
 	return createClientFromSecureClient(secureClient, cfg.transport, cfg.baseURL,

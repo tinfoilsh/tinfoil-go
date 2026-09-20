@@ -3,7 +3,7 @@ import Tinfoil
 
 // Compile the supported Swift-facing API without contacting an enclave.
 func checkClientSurface() throws {
-    guard let client = ClientNewSecureClient("enclave.example", "org/repo") else {
+    guard let client = ClientNewSecureClient("enclave.example", "org/repo", nil) else {
         return
     }
     let _: String = client.enclave()

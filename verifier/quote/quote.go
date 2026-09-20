@@ -13,8 +13,10 @@
 package quote
 
 import (
-	"encoding/hex"
+	"cmp"
 	"fmt"
+	"slices"
+	"strings"
 
 	"github.com/tinfoilsh/tinfoil-go/verifier/envelope"
 	"github.com/tinfoilsh/tinfoil-go/verifier/measurement"
@@ -96,8 +98,9 @@ func Authenticate(doc *envelope.Document) (*Authenticated, error) {
 // its three verified sources: the policy artifact (machine lookup by
 // authenticated identity; for TDX, the platform measurement resolved under
 // the required VM shape), the code measurement, and the envelope's
-// REPORT_DATA. A machine absent from the artifact is not endorsed.
-func Assemble(endorsements *policy.Artifact, code *measurement.Measurement, shape *policy.Shape, reportData [64]byte, q *Authenticated) (*AssembledPolicy, error) {
+// REPORT_DATA. A machine absent from the artifact is not endorsed. A
+// register set in expected fills an empty slot or must equal its source.
+func Assemble(endorsements *policy.Artifact, code, expected *measurement.Measurement, shape *policy.Shape, reportData [64]byte, q *Authenticated) (*AssembledPolicy, error) {
 	if code == nil {
 		return nil, fmt.Errorf("assembling policy: expected code measurement is required")
 	}
@@ -112,20 +115,20 @@ func Assemble(endorsements *policy.Artifact, code *measurement.Measurement, shap
 		PolicyName: name,
 		quote:      *q,
 	}
+	registers, err := layout(code, expected, q)
+	if err != nil {
+		return nil, err
+	}
 	switch q.platform {
 	case policy.PlatformSEVSNP:
 		var digest []byte
-		digest, err = sevLaunchDigest(code)
+		digest, err = policy.DecodeHex("launch digest", registers[0], registerSize)
 		if err == nil {
 			assembled.sev, err = sev.Assemble(machinePolicy.SEVSNP, q.sev, digest, reportData)
 		}
 	case policy.PlatformTDX:
-		var registers tdx.CodeRegisters
-		registers, err = tdxCodeRegisters(code)
-		if err == nil {
-			assembled.tdx, assembled.PlatformMeasurementName, err = tdx.Assemble(
-				endorsements, machinePolicy.TDX, shape, q.tdx, registers, reportData)
-		}
+		assembled.tdx, assembled.PlatformMeasurementName, err = tdx.Assemble(
+			endorsements, machinePolicy.TDX, shape, q.tdx, [5]string(registers), reportData)
 	default:
 		return nil, fmt.Errorf("unsupported platform %q", q.platform)
 	}
@@ -149,12 +152,12 @@ func (p *AssembledPolicy) Validate() error {
 }
 
 // Verify composes Authenticate, Assemble, and Validate.
-func Verify(doc *envelope.Document, endorsements *policy.Artifact, code *measurement.Measurement, shape *policy.Shape, reportData [64]byte) (*AssembledPolicy, *Authenticated, error) {
+func Verify(doc *envelope.Document, endorsements *policy.Artifact, code, expected *measurement.Measurement, shape *policy.Shape, reportData [64]byte) (*AssembledPolicy, *Authenticated, error) {
 	q, err := Authenticate(doc)
 	if err != nil {
 		return nil, nil, err
 	}
-	assembled, err := Assemble(endorsements, code, shape, reportData, q)
+	assembled, err := Assemble(endorsements, code, expected, shape, reportData, q)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -164,67 +167,38 @@ func Verify(doc *envelope.Document, endorsements *policy.Artifact, code *measure
 	return assembled, q, nil
 }
 
-// sevLaunchDigest maps the expected code measurement onto the SEV launch
-// digest register.
-func sevLaunchDigest(m *measurement.Measurement) ([]byte, error) {
-	switch m.Type {
-	case measurement.SnpTdxMultiPlatformV1:
-		if len(m.Registers) != 3 {
-			return nil, fmt.Errorf("multiplatform code measurement carries %d registers, want 3", len(m.Registers))
-		}
-		return decodeRegister(m.Registers[0])
-	case measurement.SevGuestV2:
-		if len(m.Registers) != 1 {
-			return nil, fmt.Errorf("SEV code measurement carries %d registers, want 1", len(m.Registers))
-		}
-		return decodeRegister(m.Registers[0])
-	default:
-		return nil, fmt.Errorf("unsupported code measurement type %q for SEV-SNP", m.Type)
-	}
-}
-
-// tdxCodeRegisters maps the expected code measurement onto the TDX
-// workload registers.
-func tdxCodeRegisters(m *measurement.Measurement) (code tdx.CodeRegisters, err error) {
-	switch m.Type {
-	case measurement.SnpTdxMultiPlatformV1:
-		// Registers are [snp_measurement, rtmr1, rtmr2]; RTMR3 is never
-		// measured and must be zero.
-		if len(m.Registers) != 3 {
-			return code, fmt.Errorf("multiplatform code measurement carries %d registers, want 3", len(m.Registers))
-		}
-		code.RTMR3 = make([]byte, registerSize)
-		if code.RTMR1, err = decodeRegister(m.Registers[1]); err != nil {
-			return code, err
-		}
-		code.RTMR2, err = decodeRegister(m.Registers[2])
-		return code, err
-	case measurement.TdxGuestV2:
+// layout lays code out in the enclave's registers, "" for platform-supplied ones, then applies pins.
+func layout(code, expected *measurement.Measurement, q *Authenticated) ([]string, error) {
+	var registers []string
+	switch {
+	case code.Type == measurement.SnpTdxMultiPlatformV1 && len(code.Registers) != 3:
+		return nil, fmt.Errorf("multiplatform code measurement carries %d registers, want 3", len(code.Registers))
+	case code.Type == measurement.SnpTdxMultiPlatformV1 && q.platform == policy.PlatformSEVSNP:
+		registers = []string{code.Registers[0]}
+	case code.Type == measurement.SnpTdxMultiPlatformV1:
+		// Registers are [snp_measurement, rtmr1, rtmr2]; RTMR3 is never measured.
+		registers = []string{"", "", code.Registers[1], code.Registers[2], ""}
+	case code.Type != q.Measurement.Type:
+		return nil, fmt.Errorf("unsupported code measurement type %q for %s", code.Type, q.platform)
+	case len(code.Registers) != len(q.Measurement.Registers):
+		return nil, fmt.Errorf("%s code measurement carries %d registers, want %d", q.platform, len(code.Registers), len(q.Measurement.Registers))
+	case q.platform == policy.PlatformTDX:
 		// Registers are [mrtd, rtmr0, rtmr1, rtmr2, rtmr3].
-		if len(m.Registers) != 5 {
-			return code, fmt.Errorf("TDX code measurement carries %d registers, want 5", len(m.Registers))
-		}
-		if code.RTMR1, err = decodeRegister(m.Registers[2]); err != nil {
-			return code, err
-		}
-		if code.RTMR2, err = decodeRegister(m.Registers[3]); err != nil {
-			return code, err
-		}
-		code.RTMR3, err = decodeRegister(m.Registers[4])
-		return code, err
+		registers = append([]string{"", ""}, code.Registers[2:]...)
 	default:
-		return code, fmt.Errorf("unsupported code measurement type %q for TDX", m.Type)
+		registers = slices.Clone(code.Registers)
 	}
-}
-
-// decodeRegister decodes a 48-byte hex measurement register.
-func decodeRegister(hexValue string) ([]byte, error) {
-	b, err := hex.DecodeString(hexValue)
-	if err != nil {
-		return nil, fmt.Errorf("code measurement register is not hex: %w", err)
+	if expected == nil {
+		return registers, nil
 	}
-	if len(b) != registerSize {
-		return nil, fmt.Errorf("code measurement register must be %d bytes, got %d", registerSize, len(b))
+	if expected.Type != q.Measurement.Type || len(expected.Registers) != len(registers) {
+		return nil, fmt.Errorf("expected measurement is %s with %d registers, enclave is %s with %d", expected.Type, len(expected.Registers), q.Measurement.Type, len(registers))
 	}
-	return b, nil
+	for i, pin := range expected.Registers {
+		if pin != "" && registers[i] != "" && !strings.EqualFold(registers[i], pin) {
+			return nil, fmt.Errorf("register %d pinned to %s, release measures %s", i, pin, registers[i])
+		}
+		registers[i] = cmp.Or(registers[i], pin)
+	}
+	return registers, nil
 }

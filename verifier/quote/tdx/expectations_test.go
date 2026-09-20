@@ -4,7 +4,6 @@ import (
 	"encoding/hex"
 	"os"
 	"path/filepath"
-	"slices"
 	"strings"
 	"testing"
 
@@ -64,11 +63,8 @@ func TestValidate(t *testing.T) {
 
 	var reportData [64]byte
 	copy(reportData[:], body.GetReportData())
-	code := CodeRegisters{
-		RTMR1: slices.Clone(body.GetRtmrs()[1]),
-		RTMR2: slices.Clone(body.GetRtmrs()[2]),
-		RTMR3: slices.Clone(body.GetRtmrs()[3]),
-	}
+	rtmrs := body.GetRtmrs()
+	code := [5]string{"", "", hex.EncodeToString(rtmrs[1]), hex.EncodeToString(rtmrs[2]), hex.EncodeToString(rtmrs[3])}
 	quote := &Quote{quote: proto, tcbEvaluationDataNumber: 5}
 	shape := &policy.Shape{CPUs: 8, MemoryMB: 65536, Disks: 4}
 
@@ -126,7 +122,7 @@ func TestValidate(t *testing.T) {
 
 	// A workload register differing from code provenance must reject.
 	badCode := code
-	badCode.RTMR1 = make([]byte, 48)
+	badCode[2] = strings.Repeat("00", 48)
 	e, _, err := Assemble(a, matching, shape, quote, badCode, reportData)
 	require.NoError(t, err)
 	assert.Error(t, e.Validate(quote))
@@ -138,8 +134,8 @@ func TestValidate(t *testing.T) {
 	assert.Error(t, e.Validate(quote))
 
 	e = assemble(a, matching)
-	for _, register := range [][]byte{code.RTMR1, code.RTMR2, code.RTMR3} {
-		register[0] ^= 0xff
+	for i := range code {
+		code[i] = strings.Repeat("ff", 48)
 	}
 	require.NoError(t, e.Validate(quote), "caller mutation must not change assembled expectations")
 }

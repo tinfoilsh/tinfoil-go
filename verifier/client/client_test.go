@@ -19,7 +19,7 @@ func TestVerify(t *testing.T) {
 		t.Skip("TINFOIL_ENCLAVE or TINFOIL_REPO not set")
 	}
 
-	client := NewSecureClient(enclave, repo)
+	client := NewSecureClient(enclave, repo, nil)
 	_, err := client.Verify()
 	assert.NoError(t, err)
 }
@@ -133,7 +133,7 @@ func TestCurrentVerifierVersion(t *testing.T) {
 }
 
 func TestNewDefaultSecureClient(t *testing.T) {
-	client, err := NewDefaultClient()
+	client, err := NewDefaultClient(nil)
 	assert.NoError(t, err)
 	assert.NotNil(t, client)
 
@@ -152,7 +152,7 @@ func TestClientFetchRouters(t *testing.T) {
 }
 
 func TestClientDefaultClient(t *testing.T) {
-	defaultClient := newFallbackClient()
+	defaultClient := newFallbackClient(nil)
 	enclave := defaultClient.Enclave()
 	assert.NotEmpty(t, enclave)
 

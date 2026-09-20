@@ -1,6 +1,7 @@
 package client
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 	"time"
@@ -16,8 +17,9 @@ import (
 // to; it is the only field that authorizes an action. The remaining fields
 // feed the client's ground truth.
 type VerifiedDocumentV3 struct {
-	// CodeDigest names the verified code artifact; CodeMeasurement is the
-	// expected measurement applied from it.
+	// CodeRepo, CodeTag, and CodeDigest name the verified code artifact;
+	// CodeMeasurement is the expected measurement applied from it.
+	CodeRepo        string
 	CodeDigest      string
 	CodeTag         string
 	CodeMeasurement *measurement.Measurement
@@ -88,9 +90,10 @@ func (v *VerifiedDocumentV3) transportKeys() (tlsFP, hpkeKey string, err error) 
 //
 // repo is the code repository the caller trusts (pins the sigstore-code
 // signing identity); the repo named inside the document is not trusted.
+// repo may pin a tag or digest, owner/name[@tag][@sha256:digest]; expected pins registers.
 // Channel binding (TLS fingerprint / HPKE key) is the caller's
 // responsibility, using the returned endorsed crypto material.
-func VerifyDocumentV3(docBytes, nonce []byte, repo string) (*VerifiedDocumentV3, error) {
+func VerifyDocumentV3(docBytes, nonce []byte, repo string, expected *measurement.Measurement) (*VerifiedDocumentV3, error) {
 	doc, expectedReportData, err := envelope.Check(docBytes, nonce)
 	if err != nil {
 		return nil, fmt.Errorf("envelope: %w", err)
@@ -101,12 +104,13 @@ func VerifyDocumentV3(docBytes, nonce []byte, repo string) (*VerifiedDocumentV3,
 		return nil, fmt.Errorf("reference values: %w", err)
 	}
 
-	_, authenticated, err := quote.Verify(doc, endorsements.Artifact, code.Measurement, code.Shape, expectedReportData)
+	_, authenticated, err := quote.Verify(doc, endorsements.Artifact, code.Measurement, expected, code.Shape, expectedReportData)
 	if err != nil {
 		return nil, fmt.Errorf("cpu evidence: %w", err)
 	}
 
 	return &VerifiedDocumentV3{
+		CodeRepo:           code.Repo,
 		CodeDigest:         code.Digest,
 		CodeTag:            code.Tag,
 		CodeMeasurement:    code.Measurement,
@@ -121,11 +125,15 @@ func VerifyDocumentV3(docBytes, nonce []byte, repo string) (*VerifiedDocumentV3,
 // returning the authenticated code, platform values, and the earlier of their
 // authenticated freshness expiration times.
 func authenticateReferenceValues(doc *envelope.Document, repo string) (*provenance.Code, *provenance.PlatformEndorsements, time.Time, error) {
+	release, err := provenance.ParseRef(repo)
+	if err != nil {
+		return nil, nil, time.Time{}, err
+	}
 	codeRef, err := doc.ReferenceValuesCollateral(envelope.CollateralSigstoreCodeV1Format)
 	if err != nil {
 		return nil, nil, time.Time{}, err
 	}
-	code, err := provenance.AuthenticateCode(codeRef.SigstoreBundle, repo, codeRef.Tag, codeRef.Digest)
+	code, err := provenance.AuthenticateCode(codeRef.SigstoreBundle, release.Repo, cmp.Or(release.Tag, codeRef.Tag), cmp.Or(release.Digest, codeRef.Digest))
 	if err != nil {
 		return nil, nil, time.Time{}, fmt.Errorf("verifying code measurement: %w", err)
 	}
@@ -199,7 +207,7 @@ func (s *SecureClient) fetchVerification() (*verificationState, error) {
 		return nil, fmt.Errorf("fetching attestation document: %w", err)
 	}
 
-	verified, err := VerifyDocumentV3(docBytes, nonce, s.repo)
+	verified, err := VerifyDocumentV3(docBytes, nonce, s.repo, s.expectedMeasurement)
 	if err != nil {
 		return nil, err
 	}
@@ -210,40 +218,19 @@ func (s *SecureClient) fetchVerification() (*verificationState, error) {
 	if err != nil {
 		return nil, fmt.Errorf("binding: %w", err)
 	}
-	// Fingerprints mirror the legacy flow for consumers that display or
-	// compare them. TDX fingerprints incorporate the platform registers,
-	// which in v3 come from the verified quote itself (their values were
-	// already appraised against the endorsed platform measurements).
-	var hw *measurement.HardwareMeasurement
-	if verified.EnclaveMeasurement.Type == measurement.TdxGuestV2 && len(verified.EnclaveMeasurement.Registers) >= 2 {
-		hw = &measurement.HardwareMeasurement{
-			MRTD:  verified.EnclaveMeasurement.Registers[0],
-			RTMR0: verified.EnclaveMeasurement.Registers[1],
-		}
-	}
-	codeFingerprint, err := measurement.Fingerprint(verified.CodeMeasurement, hw, verified.EnclaveMeasurement.Type)
-	if err != nil {
-		return nil, fmt.Errorf("measurements: failed to compute code fingerprint: %w", err)
-	}
-	enclaveFingerprint, err := measurement.Fingerprint(verified.EnclaveMeasurement, hw, verified.EnclaveMeasurement.Type)
-	if err != nil {
-		return nil, fmt.Errorf("measurements: failed to compute enclave fingerprint: %w", err)
-	}
-
 	groundTruth := &GroundTruth{
-		ConfigRepo:          s.repo,
-		EnclaveHost:         s.enclave,
-		ReleaseTag:          verified.CodeTag,
-		TLSPublicKey:        tlsFP,
-		HPKEPublicKey:       hpkeKey,
-		Digest:              verified.CodeDigest,
-		CodeMeasurement:     verified.CodeMeasurement,
-		EnclaveMeasurement:  verified.EnclaveMeasurement,
-		HardwareMeasurement: hw,
-		CodeFingerprint:     codeFingerprint,
-		EnclaveFingerprint:  enclaveFingerprint,
-		Verifier:            currentVerifierIdentity(),
-		VerifiedAt:          verificationTime().UTC().Format(time.RFC3339Nano),
+		ConfigRepo:         verified.CodeRepo,
+		EnclaveHost:        s.enclave,
+		ReleaseTag:         verified.CodeTag,
+		TLSPublicKey:       tlsFP,
+		HPKEPublicKey:      hpkeKey,
+		Digest:             verified.CodeDigest,
+		CodeMeasurement:    verified.CodeMeasurement,
+		EnclaveMeasurement: verified.EnclaveMeasurement,
+		CodeFingerprint:    verified.CodeMeasurement.Fingerprint(),
+		EnclaveFingerprint: verified.EnclaveMeasurement.Fingerprint(),
+		Verifier:           currentVerifierIdentity(),
+		VerifiedAt:         verificationTime().UTC().Format(time.RFC3339Nano),
 	}
 	return &verificationState{
 		verified: verified, groundTruth: groundTruth,

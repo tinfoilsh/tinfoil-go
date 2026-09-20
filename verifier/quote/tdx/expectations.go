@@ -1,22 +1,15 @@
 package tdx
 
 import (
+	"cmp"
 	"encoding/hex"
 	"fmt"
-	"slices"
 
 	tdxvalidate "github.com/google/go-tdx-guest/validate"
 
+	"github.com/tinfoilsh/tinfoil-go/verifier/measurement"
 	"github.com/tinfoilsh/tinfoil-go/verifier/policy"
 )
-
-// CodeRegisters are the expected workload registers from code provenance;
-// RTMR0 is a platform register and comes from the policy artifact instead.
-type CodeRegisters struct {
-	RTMR1 []byte
-	RTMR2 []byte
-	RTMR3 []byte
-}
 
 // Expectations is the fully translated TDX expected state, resolved at
 // assembly so that validation performs no translation and no lookups. The
@@ -31,33 +24,30 @@ type Expectations struct {
 // by the quote's authenticated registers under the required VM shape, so a
 // quote outside the endorsed set fails assembly; every register comparison
 // then happens inside the library. The returned name is the resolved
-// measurements-map entry.
-func Assemble(a *policy.Artifact, p *policy.TDXPolicy, required *policy.Shape, q *Quote, code CodeRegisters, reportData [64]byte) (*Expectations, string, error) {
+// measurements-map entry. An empty registers[0] or [1] takes the resolved value.
+func Assemble(a *policy.Artifact, p *policy.TDXPolicy, required *policy.Shape, q *Quote, registers [5]string, reportData [64]byte) (*Expectations, string, error) {
 	opts, err := options(p)
 	if err != nil {
 		return nil, "", err
 	}
 	body := q.quote.GetTdQuoteBody()
-	if body == nil || len(body.GetRtmrs()) != 4 {
-		return nil, "", fmt.Errorf("TDX quote body must carry exactly 4 RTMRs")
-	}
-
 	name, m, err := a.ResolvePlatformMeasurement(p, required,
 		hex.EncodeToString(body.GetMrTd()),
 		hex.EncodeToString(body.GetRtmrs()[0]))
 	if err != nil {
 		return nil, "", err
 	}
-	mrtd, err := hex.DecodeString(m.MRTD)
-	if err != nil {
-		return nil, "", fmt.Errorf("platform measurement mrtd is not hex: %w", err)
+	registers[0] = cmp.Or(registers[0], m.MRTD)
+	registers[1] = cmp.Or(registers[1], m.RTMR0)
+	registers[4] = cmp.Or(registers[4], measurement.RTMR3_ZERO)
+	var decoded [5][]byte
+	for i, label := range [5]string{"mrtd", "rtmr0", "rtmr1", "rtmr2", "rtmr3"} {
+		if decoded[i], err = policy.DecodeHex(label, registers[i], 48); err != nil {
+			return nil, "", err
+		}
 	}
-	rtmr0, err := hex.DecodeString(m.RTMR0)
-	if err != nil {
-		return nil, "", fmt.Errorf("platform measurement rtmr0 is not hex: %w", err)
-	}
-	opts.TdQuoteBodyOptions.MrTd = mrtd
-	opts.TdQuoteBodyOptions.Rtmrs = [][]byte{rtmr0, slices.Clone(code.RTMR1), slices.Clone(code.RTMR2), slices.Clone(code.RTMR3)}
+	opts.TdQuoteBodyOptions.MrTd = decoded[0]
+	opts.TdQuoteBodyOptions.Rtmrs = decoded[1:]
 	opts.TdQuoteBodyOptions.ReportData = reportData[:]
 
 	return &Expectations{

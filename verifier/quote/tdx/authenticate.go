@@ -114,6 +114,9 @@ func Authenticate(doc *envelope.Document) (*Quote, error) {
 	}
 
 	body := quote.GetTdQuoteBody()
+	if body == nil || len(body.GetRtmrs()) != 4 {
+		return nil, fmt.Errorf("TDX quote body must carry exactly 4 RTMRs")
+	}
 	registers := []string{hex.EncodeToString(body.GetMrTd())}
 	for _, rtmr := range body.GetRtmrs() {
 		registers = append(registers, hex.EncodeToString(rtmr))

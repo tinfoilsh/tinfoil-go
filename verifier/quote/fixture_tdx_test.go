@@ -56,13 +56,13 @@ func TestVerifyLiveFixtureTDX(t *testing.T) {
 
 	// The dev configuration must be rejected by the endorsed platform
 	// measurements: no endorsed entry matches its shape.
-	_, _, err = Verify(doc, artifact, q.Measurement, devShape, reportData)
+	_, _, err = Verify(doc, artifact, q.Measurement, nil, devShape, reportData)
 	require.Error(t, err)
 	assert.ErrorContains(t, err, "VM shape")
 
 	// Allow the observed shape and verify the rest of the chain.
 	require.NoError(t, allowObservedShape(doc, artifact, devShape))
-	assembled, verified, err := Verify(doc, artifact, q.Measurement, devShape, reportData)
+	assembled, verified, err := Verify(doc, artifact, q.Measurement, nil, devShape, reportData)
 	require.NoError(t, err)
 	assert.Equal(t, policy.PlatformTDX, verified.Platform())
 	assert.Equal(t, tdxFixturePolicy(t), assembled.PolicyName)

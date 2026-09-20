@@ -40,7 +40,7 @@ func TestVerifyV3FreshnessExpiration(t *testing.T) {
 	require.NoError(t, err)
 	raw, err := envelope.Fetch(host, nonce)
 	require.NoError(t, err)
-	verified, err := VerifyDocumentV3(raw, nonce, repo)
+	verified, err := VerifyDocumentV3(raw, nonce, repo, nil)
 	require.NoError(t, err)
 	doc, err := envelope.Parse(raw)
 	require.NoError(t, err)
