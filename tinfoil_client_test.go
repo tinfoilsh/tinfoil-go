@@ -2,6 +2,7 @@ package tinfoil
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"strings"
 	"testing"
@@ -36,9 +37,16 @@ func TestClientStreamingChat(t *testing.T) {
 	for stream.Next() {
 		acc.AddChunk(stream.Current())
 	}
-	require.NoError(t, stream.Err())
+	if err := stream.Err(); err != nil {
+		// openai-go emits a JSON error for an empty SSE event before [DONE].
+		var syntaxErr *json.SyntaxError
+		require.ErrorAs(t, err, &syntaxErr)
+		require.Zero(t, syntaxErr.Offset, "only tolerate an empty SSE event")
+		require.EqualError(t, err, "unexpected end of JSON input")
+	}
 	require.NotEmpty(t, acc.Choices)
 	require.NotEmpty(t, acc.Choices[0].Message.Content)
+	require.NotEmpty(t, acc.Choices[0].FinishReason)
 }
 
 func TestHTTPClient(t *testing.T) {
