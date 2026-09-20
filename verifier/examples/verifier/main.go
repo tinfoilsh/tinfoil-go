@@ -2,6 +2,7 @@ package main
 
 import (
 	"flag"
+	"fmt"
 	"log/slog"
 	"os"
 
@@ -32,5 +33,5 @@ func main() {
 		slog.Error("failed to encode verification", "error", err)
 		os.Exit(1)
 	}
-	slog.Info(verified)
+	fmt.Println(verified)
 }

@@ -56,6 +56,9 @@ func AuthenticateFreshness(bundleJSON []byte, expected *AuthenticatedArtifact, n
 }
 
 func (c *Client) AuthenticateFreshness(bundleJSON []byte, expected *AuthenticatedArtifact, now time.Time, maxAge time.Duration) (time.Time, error) {
+	if maxAge < 0 {
+		return time.Time{}, fmt.Errorf("freshness maximum age must not be negative")
+	}
 	if err := validateAuthenticatedArtifact(expected); err != nil {
 		return time.Time{}, err
 	}

@@ -227,7 +227,7 @@ func ehbpHTTPClient(secureClient transportVerifier, baseURL string) (*http.Clien
 	transport, err := secureClient.NewTransport(func(verified *client.VerifiedDocumentV3) (http.RoundTripper, error) {
 		key, err := verified.HPKEPublicKey()
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("%w; cannot use the EHBP transport (use WithTransport(TransportTLS))", err)
 		}
 		inner, err := buildEHBPTransport(key)
 		if err != nil {
@@ -334,10 +334,6 @@ func (t *enclaveURLHeaderTransport) RoundTrip(req *http.Request) (*http.Response
 }
 
 func buildEHBPTransport(hpkePublicKeyHex string) (http.RoundTripper, error) {
-	if hpkePublicKeyHex == "" {
-		return nil, fmt.Errorf("enclave did not expose an HPKE public key; cannot use the EHBP transport (use WithTransport(TransportTLS))")
-	}
-
 	serverIdentity, err := ehbpidentity.FromPublicKeyHex(hpkePublicKeyHex)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse HPKE public key: %w", err)
