@@ -77,7 +77,6 @@ func TestProductionTurinFixtures(t *testing.T) {
 			// The main-branch fixture required ECC=false. Both production reports
 			// reject that expectation: this bit is exact policy, not a permission.
 			wrongPolicy := *fixture.Policy.SEVSNP
-			wrongPolicy.PlatformInfo = ptr(*wrongPolicy.PlatformInfo)
 			wrongPolicy.PlatformInfo.ECCEnabled = false
 			expected, err = Assemble(&wrongPolicy, q, report.Measurement, reportData)
 			require.NoError(t, err)

@@ -82,8 +82,7 @@ func TestOptionsPinnedFields(t *testing.T) {
 		HostData:          strings.Repeat("ab", 32),
 		ImageID:           strings.Repeat("cd", 16),
 		FamilyID:          strings.Repeat("ef", 16),
-		GuestPolicy:       &policy.GuestPolicy{SMT: true, PageSwapDisable: true},
-		PlatformInfo:      &policy.SNPPlatform{},
+		GuestPolicy:       policy.GuestPolicy{SMT: true, PageSwapDisable: true},
 
 		MinimumLaunchMitigationVector:  ptr(uint64(3)),
 		MinimumCurrentMitigationVector: ptr(uint64(1)),
@@ -124,7 +123,6 @@ func TestOptionsRejectsInvalidProductFields(t *testing.T) {
 	_, err = options(&missingFMC, ProductTurin)
 	assert.ErrorContains(t, err, "fmc_spl is required")
 	missingIOMMUWriteSafe := *turinPolicy.SEVSNP
-	missingIOMMUWriteSafe.PlatformInfo = ptr(*missingIOMMUWriteSafe.PlatformInfo)
 	missingIOMMUWriteSafe.PlatformInfo.IOMMUWriteSafe = false
 	_, err = options(&missingIOMMUWriteSafe, ProductTurin)
 	assert.ErrorContains(t, err, "iommu_write_safe is required")
@@ -138,7 +136,6 @@ func TestOptionsRejectsInvalidProductFields(t *testing.T) {
 	_, err = options(&unexpectedFMC, ProductGenoa)
 	assert.ErrorContains(t, err, "fmc_spl is not valid")
 	unexpectedIOMMUWriteSafe := *genoaPolicy.SEVSNP
-	unexpectedIOMMUWriteSafe.PlatformInfo = ptr(*unexpectedIOMMUWriteSafe.PlatformInfo)
 	unexpectedIOMMUWriteSafe.PlatformInfo.IOMMUWriteSafe = true
 	_, err = options(&unexpectedIOMMUWriteSafe, ProductGenoa)
 	assert.ErrorContains(t, err, "iommu_write_safe is not valid")
