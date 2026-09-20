@@ -30,7 +30,6 @@ import (
 const (
 	oidcIssuer = "https://token.actions.githubusercontent.com"
 
-	// platformEndorsementsRepo publishes the platform-endorsements artifact.
 	platformEndorsementsRepo = "tinfoilsh/platform-endorsements"
 	freshnessWitnessRepo     = "tinfoilsh/freshness-witness"
 )
@@ -49,9 +48,8 @@ type Client struct {
 //go:embed trusted_root.json
 var embeddedTrustedRoot []byte
 
-// defaultClient is built once from the embedded trusted root. Verification
-// never fetches trust material over the network; the embedded copy is
-// refreshed by the rootfetch tool.
+// Verification uses the embedded trust root without network fetches.
+// The rootfetch tool updates the embedded copy.
 var (
 	defaultClient     *Client
 	defaultClientErr  error
@@ -68,15 +66,11 @@ func getDefaultClient() (*Client, error) {
 // AuthenticateCode verifies code provenance using the embedded trust root and
 // the caller's owner/name[@tag][@sha256:digest] reference.
 func AuthenticateCode(bundleJSON []byte, ref, tag, hexDigest string) (*Code, error) {
-	m := refRE.FindStringSubmatch(ref)
-	if m == nil {
-		return nil, fmt.Errorf("invalid release reference %q: want owner/name[@tag][@sha256:digest]", ref)
-	}
 	c, err := getDefaultClient()
 	if err != nil {
 		return nil, err
 	}
-	return c.AuthenticateCode(bundleJSON, m[1], cmp.Or(m[2], tag), cmp.Or(m[3], hexDigest))
+	return c.AuthenticateCode(bundleJSON, ref, tag, hexDigest)
 }
 
 // AuthenticateEndorsements authenticates a platform-endorsements bundle
@@ -199,9 +193,8 @@ func (c *Client) verifyBundleWithIdentity(bundleJSON []byte, sanRegex, hexDigest
 	if err != nil {
 		return nil, nil, fmt.Errorf("creating issuer matcher: %w", err)
 	}
-	// runner_environment comes from the OIDC token, so a workflow retargeted
-	// to self-hosted (operator-controlled) infrastructure cannot claim
-	// github-hosted.
+	// runner_environment is an OIDC claim. Switching to a self-hosted runner
+	// fails this check.
 	certID, err := verify.NewCertificateIdentity(
 		sanMatcher,
 		issuerMatcher,
@@ -267,17 +260,22 @@ func enforceSubject0Digest(result *verify.VerificationResult, expectedDigest str
 // Code is the verified content of a code-provenance bundle.
 type Code struct {
 	AuthenticatedArtifact
-	// Measurement is the attested launch measurement.
+	// Measurement contains the release's expected registers.
 	Measurement *measurement.Measurement
 	// Shape is the VM shape the artifact declares.
 	Shape *policy.Shape
 }
 
-// AuthenticateCode authenticates a code-provenance bundle against the
-// repo's signing identity and the expected artifact digest, and returns
-// the verified code measurement plus the VM shape the artifact declares
-// (required).
-func (c *Client) AuthenticateCode(bundleJSON []byte, repo, tag, hexDigest string) (*Code, error) {
+// AuthenticateCode verifies code provenance against owner/name[@tag][@sha256:digest].
+// Pins in ref take precedence over the document's tag and digest hints.
+func (c *Client) AuthenticateCode(bundleJSON []byte, ref, tag, hexDigest string) (*Code, error) {
+	match := refRE.FindStringSubmatch(ref)
+	if match == nil {
+		return nil, fmt.Errorf("invalid release reference %q: want owner/name[@tag][@sha256:digest]", ref)
+	}
+	repo := match[1]
+	tag = cmp.Or(match[2], tag)
+	hexDigest = cmp.Or(match[3], hexDigest)
 	result, err := c.verifyBundle(bundleJSON, repo, hexDigest)
 	if err != nil {
 		return nil, fmt.Errorf("verifying bundle: %w", err)
@@ -297,7 +295,6 @@ func (c *Client) AuthenticateCode(bundleJSON []byte, repo, tag, hexDigest string
 	return &Code{AuthenticatedArtifact: authenticated, Measurement: m, Shape: shape}, nil
 }
 
-// shapeFromPredicate parses the required vm_shape predicate member.
 func shapeFromPredicate(fields map[string]*structpb.Value) (*policy.Shape, error) {
 	v, ok := fields["vm_shape"]
 	if !ok {

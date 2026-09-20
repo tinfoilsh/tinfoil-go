@@ -14,7 +14,6 @@ var ErrFreshnessExpired = errors.New("attestation freshness witnesses have expir
 type verificationState struct {
 	verified    *VerifiedDocumentV3
 	groundTruth *GroundTruth
-	document    *VerificationDocument
 }
 
 type verificationCall struct {

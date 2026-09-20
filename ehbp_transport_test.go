@@ -82,7 +82,10 @@ func TestNewClientWithOptionsRejectsInvalidBaseURL(t *testing.T) {
 func TestNewClientWithOptionsRejectsInvalidFreshnessMaxAge(t *testing.T) {
 	for _, enclave := range []string{"", "enclave.example"} {
 		for _, maxAge := range []time.Duration{-time.Nanosecond, -time.Hour} {
-			c, err := NewClientWithOptions(WithEnclave(enclave), WithFreshnessMaxAge(maxAge))
+			c, err := NewClientWithOptions(WithEnclave(enclave), WithVerificationOptions(client.VerificationOptions{
+				FreshnessMaxAge: maxAge,
+				PinnedRegisters: &measurement.Measurement{Type: measurement.TdxGuestV2, Registers: []string{4: strings.Repeat("ab", 48)}},
+			}))
 			require.Nil(t, c)
 			require.ErrorContains(t, err, "freshness maximum age must not be negative")
 		}
@@ -97,31 +100,35 @@ func TestClientFreshnessMaxAge(t *testing.T) {
 	for _, mode := range []TransportMode{TransportEHBP, TransportTLS} {
 		for _, enclave := range []string{"", host} {
 			t.Run(string(mode)+"/"+enclave, func(t *testing.T) {
-				opts := []ClientOption{WithTransport(mode), WithEnclave(enclave), WithFreshnessMaxAge(time.Nanosecond)}
+				opts := []ClientOption{WithTransport(mode), WithEnclave(enclave), WithVerificationOptions(client.VerificationOptions{FreshnessMaxAge: time.Nanosecond})}
 				if enclave != "" {
 					opts = append(opts, WithRepo(repo))
 				}
 				c, err := NewClientWithOptions(opts...)
 				require.Nil(t, c)
 				require.ErrorContains(t, err, "freshness witness is stale")
-				c, err = NewClientWithOptions(append(opts, WithFreshnessMaxAge(0))...)
+				c, err = NewClientWithOptions(append(opts, WithVerificationOptions(client.VerificationOptions{}))...)
 				require.NoError(t, err)
 				require.NotNil(t, c)
+				pins := c.VerificationDocument().EnclaveMeasurement.Measurement
+				pins.Registers[0] = strings.Repeat("ab", 48)
+				c, err = NewClientWithOptions(append(opts, WithVerificationOptions(client.VerificationOptions{PinnedRegisters: pins}))...)
+				require.Nil(t, c)
+				require.ErrorContains(t, err, "cpu evidence")
 			})
 		}
 	}
 }
 
-func TestNewClientWithOptionsRequiresEnclaveForPins(t *testing.T) {
+func TestNewClientWithOptionsRequiresEnclaveForCustomRepo(t *testing.T) {
 	for _, opt := range []ClientOption{
 		WithRepo("org/repo"),
 		WithRepo(defaultConfigRepo + "@v1"),
 		WithRepo(defaultConfigRepo + "@sha256:" + strings.Repeat("ab", 32)),
-		WithPinnedRegisters(&measurement.Measurement{Type: measurement.TdxGuestV2, Registers: []string{4: strings.Repeat("ab", 48)}}),
 	} {
 		c, err := NewClientWithOptions(opt)
 		require.Nil(t, c)
-		require.ErrorContains(t, err, "require an enclave")
+		require.ErrorContains(t, err, "requires an enclave")
 	}
 }
 

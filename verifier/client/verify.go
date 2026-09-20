@@ -1,7 +1,6 @@
 package client
 
 import (
-	"cmp"
 	"context"
 	"fmt"
 	"strings"
@@ -68,23 +67,24 @@ func (v *VerifiedDocumentV3) transportKeys() (tlsFP, hpkeKey string, err error) 
 
 // VerifyDocumentV3 checks the nonce, section hashes, provenance, witnesses, and CPU quote.
 // repo is the caller's trusted owner/name[@tag][@sha256:digest] reference.
-// Non-empty pins add register checks; empty entries retain defaults.
 // Callers must bind traffic to the returned TLS/HPKE keys and enforce FreshnessExpiresAt.
-func VerifyDocumentV3(docBytes, nonce []byte, repo string, pins *measurement.Measurement) (*VerifiedDocumentV3, error) {
-	return VerifyDocumentV3WithOptions(docBytes, nonce, repo, VerificationOptions{PinnedRegisters: pins})
+func VerifyDocumentV3(docBytes, nonce []byte, repo string) (*VerifiedDocumentV3, error) {
+	return VerifyDocumentV3WithOptions(docBytes, nonce, repo, VerificationOptions{})
 }
 
+// VerifyDocumentV3WithOptions applies opts to the same checks as VerifyDocumentV3.
+// Callers must bind traffic to the returned keys and enforce FreshnessExpiresAt.
 func VerifyDocumentV3WithOptions(docBytes, nonce []byte, repo string, opts VerificationOptions) (*VerifiedDocumentV3, error) {
-	if opts.FreshnessMaxAge < 0 {
-		return nil, fmt.Errorf("freshness maximum age must not be negative")
+	opts, err := opts.normalized()
+	if err != nil {
+		return nil, err
 	}
-	maxAge := cmp.Or(opts.FreshnessMaxAge, provenance.MaxFreshnessAge)
 	doc, expectedReportData, err := envelope.Check(docBytes, nonce)
 	if err != nil {
 		return nil, fmt.Errorf("envelope: %w", err)
 	}
 
-	code, endorsements, freshnessExpiresAt, err := authenticateReferenceValues(doc, repo, maxAge)
+	code, endorsements, freshnessExpiresAt, err := authenticateReferenceValues(doc, repo, opts.FreshnessMaxAge)
 	if err != nil {
 		return nil, fmt.Errorf("reference values: %w", err)
 	}
@@ -165,9 +165,6 @@ func (s *SecureClient) VerifyV3() (*VerifiedDocumentV3, error) {
 }
 
 func (s *SecureClient) fetchVerification() (*verificationState, error) {
-	if s.freshnessMaxAge < 0 {
-		return nil, fmt.Errorf("freshness maximum age must not be negative")
-	}
 	nonce, err := envelope.RandomNonce()
 	if err != nil {
 		return nil, err
@@ -177,7 +174,7 @@ func (s *SecureClient) fetchVerification() (*verificationState, error) {
 		return nil, fmt.Errorf("fetching attestation document: %w", err)
 	}
 
-	verified, err := VerifyDocumentV3WithOptions(docBytes, nonce, s.repo, VerificationOptions{PinnedRegisters: s.pins, FreshnessMaxAge: s.freshnessMaxAge})
+	verified, err := VerifyDocumentV3WithOptions(docBytes, nonce, s.repo, s.options)
 	if err != nil {
 		return nil, err
 	}
@@ -201,10 +198,7 @@ func (s *SecureClient) fetchVerification() (*verificationState, error) {
 		Verifier:           currentVerifierIdentity(),
 		VerifiedAt:         verificationTime().UTC().Format(time.RFC3339Nano),
 	}
-	return &verificationState{
-		verified: verified, groundTruth: groundTruth,
-		document: newVerificationDocument(groundTruth),
-	}, nil
+	return &verificationState{verified: verified, groundTruth: groundTruth}, nil
 }
 
 // Verify refreshes the client's verified measurements and keys.

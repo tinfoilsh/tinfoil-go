@@ -105,6 +105,9 @@ func successfulStep() VerificationStepState {
 }
 
 func newVerificationDocument(groundTruth *GroundTruth) *VerificationDocument {
+	if groundTruth == nil {
+		return nil
+	}
 	return &VerificationDocument{
 		SchemaVersion:   verificationDocumentSchemaVersion,
 		ConfigRepo:      groundTruth.ConfigRepo,
@@ -135,7 +138,8 @@ func newVerificationDocument(groundTruth *GroundTruth) *VerificationDocument {
 	}
 }
 
-func cloneVerificationDocument(document *VerificationDocument) *VerificationDocument {
+// Clone returns a deep copy of the verification document.
+func (document *VerificationDocument) Clone() *VerificationDocument {
 	if document == nil {
 		return nil
 	}
@@ -143,11 +147,6 @@ func cloneVerificationDocument(document *VerificationDocument) *VerificationDocu
 	cloned.CodeMeasurement = cloneMeasurement(document.CodeMeasurement)
 	cloned.EnclaveMeasurement.Measurement = cloneMeasurement(document.EnclaveMeasurement.Measurement)
 	return &cloned
-}
-
-// Clone returns a deep copy of the verification document.
-func (document *VerificationDocument) Clone() *VerificationDocument {
-	return cloneVerificationDocument(document)
 }
 
 func cloneMeasurement(value *measurement.Measurement) *measurement.Measurement {

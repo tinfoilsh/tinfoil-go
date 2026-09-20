@@ -17,3 +17,15 @@ func checkClientSurface() throws {
     _ = client.groundTruth()
     _ = client.verificationDocument()
 }
+
+func checkVerificationOptions(document: Data, nonce: Data) throws {
+    let options = #"{"freshness_max_age_ns":86400000000000,"pinned_registers":{"type":"https://tinfoil.sh/predicate/tdx-guest/v2","registers":["","","","","000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"]}}"#
+    var error: NSError?
+    _ = ClientNewSecureClientWithOptionsJSON("enclave.example", "org/repo", options, &error)
+    if let error { throw error }
+    _ = ClientNewDefaultClientWithOptionsJSON(options, &error)
+    if let error { throw error }
+    let result = ClientVerifyDocumentV3WithOptionsJSON(document, nonce, "org/repo", options, &error)
+    if let error { throw error }
+    let _: Any = try JSONSerialization.jsonObject(with: Data(result.utf8))
+}

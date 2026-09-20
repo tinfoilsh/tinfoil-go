@@ -6,13 +6,11 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
-	"time"
 
 	"github.com/openai/openai-go/v3/option"
 	ehbpclient "github.com/tinfoilsh/encrypted-http-body-protocol/client"
 	ehbpidentity "github.com/tinfoilsh/encrypted-http-body-protocol/identity"
 	"github.com/tinfoilsh/tinfoil-go/verifier/client"
-	"github.com/tinfoilsh/tinfoil-go/verifier/measurement"
 )
 
 // enclaveURLHeader tells a proxy which enclave to forward an encrypted request
@@ -40,8 +38,7 @@ const (
 type clientConfig struct {
 	enclave            string
 	repo               string
-	pins               *measurement.Measurement
-	freshnessMaxAge    time.Duration
+	verification       client.VerificationOptions
 	transport          TransportMode
 	baseURL            string
 	baseURLSet         bool
@@ -65,16 +62,10 @@ func WithRepo(repo string) ClientOption {
 	return func(c *clientConfig) { c.repo = repo }
 }
 
-// WithPinnedRegisters adds register pins to code and platform verification.
-// Empty entries retain default checks. Requires WithEnclave.
-func WithPinnedRegisters(m *measurement.Measurement) ClientOption {
-	return func(c *clientConfig) { c.pins = m }
-}
-
-// WithFreshnessMaxAge limits code and platform witness age.
-// Zero uses the seven-day default; negative values are invalid.
-func WithFreshnessMaxAge(maxAge time.Duration) ClientOption {
-	return func(c *clientConfig) { c.freshnessMaxAge = maxAge }
+// WithVerificationOptions sets the policy applied to enclave verification.
+// The client copies opts and its pins at construction, including for router discovery.
+func WithVerificationOptions(opts client.VerificationOptions) ClientOption {
+	return func(c *clientConfig) { c.verification = opts }
 }
 
 // WithTransport selects the transport mode. Defaults to TransportEHBP.
@@ -120,17 +111,16 @@ func NewClientWithOptions(opts ...ClientOption) (*Client, error) {
 			return nil, fmt.Errorf("invalid base URL: %w", err)
 		}
 	}
-	if cfg.enclave == "" && (cfg.pins != nil || cfg.repo != defaultConfigRepo) {
-		return nil, fmt.Errorf("custom repository or pinned registers require an enclave")
+	if cfg.enclave == "" && cfg.repo != defaultConfigRepo {
+		return nil, fmt.Errorf("custom repository requires an enclave")
 	}
 
-	verificationOpts := client.VerificationOptions{PinnedRegisters: cfg.pins, FreshnessMaxAge: cfg.freshnessMaxAge}
 	var secureClient *client.SecureClient
 	var err error
 	if cfg.enclave == "" {
-		secureClient, err = client.NewDefaultClientWithOptions(verificationOpts)
+		secureClient, err = client.NewDefaultClientWithOptions(cfg.verification)
 	} else {
-		secureClient, err = client.NewSecureClientWithOptions(cfg.enclave, cfg.repo, verificationOpts)
+		secureClient, err = client.NewSecureClientWithOptions(cfg.enclave, cfg.repo, cfg.verification)
 	}
 	if err != nil {
 		return nil, fmt.Errorf("failed to create secure client: %w", err)

@@ -16,19 +16,19 @@ import (
 func TestClientOptionsCopyPinnedRegisters(t *testing.T) {
 	register := strings.Repeat("ab", 48)
 	pins := &measurement.Measurement{Type: measurement.TdxGuestV2, Registers: []string{4: register}}
-	opt := WithPinnedRegisters(pins)
-	first := NewClientWithOptions("enclave.example", "org/repo", nil, opt)
 	opts := VerificationOptions{PinnedRegisters: pins, FreshnessMaxAge: time.Hour}
+	first, err := NewSecureClientWithOptions("enclave.example", "org/repo", opts)
+	require.NoError(t, err)
 	second, err := NewSecureClientWithOptions("enclave.example", "org/repo", opts)
 	require.NoError(t, err)
 	opts.FreshnessMaxAge = time.Minute
 	pins.Type = measurement.SevGuestV2
 	pins.Registers[4] = "changed"
-	assert.Equal(t, measurement.TdxGuestV2, first.pins.Type)
-	assert.Equal(t, register, first.pins.Registers[4])
-	first.pins.Registers[4] = "changed again"
-	assert.Equal(t, register, second.pins.Registers[4])
-	assert.Equal(t, time.Hour, second.freshnessMaxAge)
+	assert.Equal(t, measurement.TdxGuestV2, first.options.PinnedRegisters.Type)
+	assert.Equal(t, register, first.options.PinnedRegisters.Registers[4])
+	first.options.PinnedRegisters.Registers[4] = "changed again"
+	assert.Equal(t, register, second.options.PinnedRegisters.Registers[4])
+	assert.Equal(t, time.Hour, second.options.FreshnessMaxAge)
 }
 
 func TestVerify(t *testing.T) {
@@ -67,7 +67,6 @@ func TestClientGroundTruthJSON(t *testing.T) {
 	encoded, err := client.GroundTruthJSON()
 	assert.NoError(t, err)
 
-	// Decode and compare
 	var gt2 GroundTruth
 	assert.NoError(t, json.Unmarshal([]byte(encoded), &gt2))
 	assert.Equal(t, gt, &gt2)
@@ -89,9 +88,9 @@ func TestVerificationDocumentJSON(t *testing.T) {
 		Verifier:           SoftwareIdentity{Name: verifierName, Version: "v1.0.0"},
 		VerifiedAt:         verifiedAt,
 	}
-	client := &SecureClient{
-		state: &verificationState{groundTruth: groundTruth, document: newVerificationDocument(groundTruth)},
-	}
+	client := &SecureClient{}
+	require.Nil(t, client.VerificationDocument())
+	client.state = &verificationState{groundTruth: groundTruth}
 
 	encoded, err := client.VerificationDocumentJSON()
 	assert.NoError(t, err)
@@ -109,6 +108,13 @@ func TestVerificationDocumentJSON(t *testing.T) {
 	assert.True(t, document.SecurityVerified)
 	assert.Equal(t, "skipped", document.Steps.FetchDigest.Status)
 	assert.Equal(t, "success", document.Steps.VerifyCode.Status)
+
+	view := client.VerificationDocument()
+	view.CodeMeasurement.Registers[0] = "changed"
+	view.EnclaveMeasurement.Measurement.Registers[0] = "changed"
+	assert.Equal(t, "code", groundTruth.CodeMeasurement.Registers[0])
+	assert.Equal(t, "enclave", groundTruth.EnclaveMeasurement.Registers[0])
+	assert.Equal(t, &document, client.VerificationDocument())
 }
 
 func TestCurrentVerifierVersion(t *testing.T) {

@@ -97,6 +97,9 @@ guarantee.
 
 ## Advanced Functionality
 
+Use `WithVerificationOptions` to configure
+[register pins and freshness](verifier/README.md#verification-options).
+
 ```go
 // Create a secure client with explicit enclave and repo parameters
 client, err := tinfoil.NewClientWithParams(enclave, repo)

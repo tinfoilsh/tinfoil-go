@@ -49,11 +49,8 @@ func TestOptions(t *testing.T) {
 	assert.Equal(t, mustHex(t, p.TDX.MRSeam), opts.TdQuoteBodyOptions.MrSeam)
 }
 
-// TestValidate exercises the single composed enforcement entry point against
-// go-tdx-guest's production sample quote, with a policy derived from the
-// quote itself, then flips each policy dimension that is NOT covered by the
-// library options (tcbEvaluationDataNumber, the resolved platform
-// measurement) to prove none of them can be silently skipped.
+// Derive a matching policy from the sample quote, then change its expected
+// fields and collateral floor to check that mismatches fail.
 func TestValidate(t *testing.T) {
 	parsed, err := tdxabi.QuoteToProto(tdxtestdata.RawQuote)
 	require.NoError(t, err)

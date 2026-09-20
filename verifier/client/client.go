@@ -32,9 +32,8 @@ type GroundTruth struct {
 }
 
 type SecureClient struct {
-	enclave, repo   string
-	pins            *measurement.Measurement
-	freshnessMaxAge time.Duration
+	enclave, repo string
+	options       VerificationOptions
 
 	stateMu    sync.RWMutex
 	state      *verificationState
@@ -63,59 +62,35 @@ func fetchRouters() ([]string, error) {
 
 // NewSecureClient uses the default verification options.
 func NewSecureClient(enclave, repo string) *SecureClient {
-	return NewClientWithOptions(enclave, repo)
+	client, _ := NewSecureClientWithOptions(enclave, repo, VerificationOptions{})
+	return client
 }
 
 // VerificationOptions is copied at construction. Create a new client to change it.
 type VerificationOptions struct {
 	// PinnedRegisters adds register checks; empty entries retain defaults.
-	PinnedRegisters *measurement.Measurement
+	PinnedRegisters *measurement.Measurement `json:"pinned_registers,omitempty"`
 	// FreshnessMaxAge defaults to seven days when zero. Negative ages are invalid.
-	FreshnessMaxAge time.Duration
+	FreshnessMaxAge time.Duration `json:"freshness_max_age_ns,omitempty"`
 }
 
-func NewSecureClientWithOptions(enclave, repo string, opts VerificationOptions) (*SecureClient, error) {
+func (opts VerificationOptions) normalized() (VerificationOptions, error) {
 	if opts.FreshnessMaxAge < 0 {
-		return nil, fmt.Errorf("freshness maximum age must not be negative")
+		return VerificationOptions{}, fmt.Errorf("freshness maximum age must not be negative")
 	}
-	return NewClientWithOptions(enclave, repo, WithPinnedRegisters(opts.PinnedRegisters), WithFreshnessMaxAge(opts.FreshnessMaxAge)), nil
+	opts.FreshnessMaxAge = cmp.Or(opts.FreshnessMaxAge, provenance.MaxFreshnessAge)
+	opts.PinnedRegisters = cloneMeasurement(opts.PinnedRegisters)
+	return opts, nil
 }
 
-type clientConfig struct {
-	pins            *measurement.Measurement
-	freshnessMaxAge time.Duration
-}
-
-// ClientOption configures a SecureClient created with NewClientWithOptions.
-type ClientOption func(*clientConfig)
-
-// WithPinnedRegisters pins enclave registers in addition to the release and
-// platform measurements. Empty registers retain their normal expectations.
-func WithPinnedRegisters(pins *measurement.Measurement) ClientOption {
-	return func(c *clientConfig) { c.pins = pins }
-}
-
-// WithFreshnessMaxAge limits code and platform witness age. Zero uses seven days.
-// Verification rejects negative values.
-func WithFreshnessMaxAge(maxAge time.Duration) ClientOption {
-	return func(c *clientConfig) { c.freshnessMaxAge = maxAge }
-}
-
-// NewClientWithOptions creates a secure client for an enclave and repository
+// NewSecureClientWithOptions creates a secure client for an enclave and repository
 // reference, owner/name[@tag][@sha256:digest]. Verification happens on first use.
-func NewClientWithOptions(enclave, repo string, opts ...ClientOption) *SecureClient {
-	cfg := &clientConfig{}
-	for _, opt := range opts {
-		if opt != nil {
-			opt(cfg)
-		}
+func NewSecureClientWithOptions(enclave, repo string, opts VerificationOptions) (*SecureClient, error) {
+	opts, err := opts.normalized()
+	if err != nil {
+		return nil, err
 	}
-	return &SecureClient{
-		enclave:         enclave,
-		repo:            repo,
-		pins:            cloneMeasurement(cfg.pins),
-		freshnessMaxAge: cmp.Or(cfg.freshnessMaxAge, provenance.MaxFreshnessAge),
-	}
+	return &SecureClient{enclave: enclave, repo: repo, options: opts}, nil
 }
 
 // NewDefaultClient returns the first router that verifies, or a client for
@@ -132,7 +107,8 @@ func NewDefaultClientWithOptions(opts VerificationOptions) (*SecureClient, error
 	}
 	routers, _ := fetchRouters()
 	for _, routerURL := range routers {
-		client := NewClientWithOptions(routerURL, defaultRouterRepo, WithPinnedRegisters(fallback.pins), WithFreshnessMaxAge(fallback.freshnessMaxAge))
+		// Reuse the immutable policy snapshot copied before discovery.
+		client := &SecureClient{enclave: routerURL, repo: defaultRouterRepo, options: fallback.options}
 		_, err := client.Verify()
 		if err == nil {
 			return client, nil
@@ -144,8 +120,6 @@ func NewDefaultClientWithOptions(opts VerificationOptions) (*SecureClient, error
 
 // Enclave returns the enclave host.
 func (s *SecureClient) Enclave() string {
-	s.stateMu.RLock()
-	defer s.stateMu.RUnlock()
 	return s.enclave
 }
 
@@ -175,12 +149,7 @@ func (s *SecureClient) GroundTruthJSON() (string, error) {
 
 // VerificationDocument returns the result of the last successful verification.
 func (s *SecureClient) VerificationDocument() *VerificationDocument {
-	s.stateMu.RLock()
-	defer s.stateMu.RUnlock()
-	if s.state == nil {
-		return nil
-	}
-	return cloneVerificationDocument(s.state.document)
+	return newVerificationDocument(s.GroundTruth())
 }
 
 // VerificationDocumentJSON returns the verification document as JSON.

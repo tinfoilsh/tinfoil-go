@@ -93,8 +93,7 @@ func loadSEVFixture(t *testing.T) (*envelope.Document, [64]byte) {
 	return doc, reportData
 }
 
-// appendLiveCRL adds the required amd-crl collateral entry, fetching the
-// CRL exactly as the builder does.
+// appendLiveCRL fetches the AMD CRL missing from older fixtures.
 func appendLiveCRL(t *testing.T, doc *envelope.Document) {
 	t.Helper()
 	crlBytes, _, err := util.Get("https://kdsintf.amd.com/vcek/v1/Genoa/crl")
@@ -121,16 +120,11 @@ func loadEndorsementArtifact(t *testing.T) *policy.Artifact {
 	return artifact
 }
 
-// TestVerifySEV runs the v3 SEV path (signature chain, VCEK revocation,
-// REPORT_DATA binding, identity endorsement, appraisal policy) against a
-// live-captured production Genoa report wrapped in a v3 document.
 func TestVerifySEV(t *testing.T) {
 	doc, reportData := loadSEVFixture(t)
 	artifact := loadEndorsementArtifact(t)
 
-	// The fixture predates per-release code provenance, so the expected
-	// launch measurement is the quote's own; the equality path is still
-	// exercised, and the mismatch case is covered below.
+	// The fixture has no code provenance, so use its observed launch measurement.
 	q, err := Authenticate(doc)
 	require.NoError(t, err)
 	assembled, verified, err := Verify(doc, artifact, asCode(q.Measurement), nil, testShape, reportData)
@@ -183,8 +177,6 @@ func TestVerifySEV(t *testing.T) {
 	assert.ErrorContains(t, err, "no amd-crl endorsement collateral")
 }
 
-// TestVerifySEVRejectsBadCRL: a CRL that does not parse must reject rather
-// than being skipped.
 func TestVerifySEVRejectsBadCRL(t *testing.T) {
 	doc, _ := loadSEVFixture(t)
 
@@ -227,7 +219,7 @@ func TestPinnedLayoutUsesAuthenticatedPlatform(t *testing.T) {
 	assert.ErrorContains(t, err, "pinned measurement")
 }
 
-// asCode wraps a guest measurement as the multiplatform code measurement that produces it.
+// asCode extracts the release registers from a guest measurement.
 func asCode(m *measurement.Measurement) *measurement.Measurement {
 	if m.Type == measurement.TdxGuestV2 {
 		return &measurement.Measurement{Type: measurement.SnpTdxMultiPlatformV1, Registers: []string{"", m.Registers[2], m.Registers[3]}}

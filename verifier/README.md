@@ -89,11 +89,6 @@ The TLS pin runs for direct HTTPS and HTTPS-over-CONNECT connections. Fetching
 the document does not require a separate direct TLS probe. Code and platform
 witnesses have a seven-day maximum age by default; the earliest authenticated
 expiry is exposed by `VerifyV3` and `VerifyDocumentV3` as `FreshnessExpiresAt`.
-Use `VerificationOptions` with `NewSecureClientWithOptions`,
-`NewDefaultClientWithOptions`, or `VerifyDocumentV3WithOptions` to set
-`FreshnessMaxAge` and `PinnedRegisters`. Zero age uses seven days; negative ages
-fail before verification. Clients copy the options and pins at construction.
-Create a new client to change policy. Existing entry points retain their defaults.
 Callers using these APIs must retain the deadline and stop authorizing new
 requests at or after it, then verify again before accepting more requests.
 Re-verifying unchanged witnesses does not extend their deadline.
@@ -129,7 +124,7 @@ fetches reference values through the old bundle service.
 For an already fetched document, use:
 
 ```go
-verified, err := client.VerifyDocumentV3(documentBytes, expectedNonce, trustedRepo, nil)
+verified, err := client.VerifyDocumentV3(documentBytes, expectedNonce, trustedRepo)
 ```
 
 The repository and nonce are caller-owned expectations. After success, bind
@@ -138,13 +133,11 @@ This low-level function does not open a service connection or enforce a cache's
 expiration on the caller's behalf. Swift callers using the removed bundle APIs
 also need to migrate before adopting the v3 framework.
 
-## Pinned registers
+## Verification options
 
-Pin a register the release does not determine, such as a sealed RTMR3, with
-`VerificationOptions.PinnedRegisters`. Empty registers retain their normal expectations,
-including zero for RTMR3. TDX registers are `[MRTD, RTMR0, RTMR1, RTMR2, RTMR3]`;
-SEV-SNP has one launch-measurement register. Pins must have the matching type
-and register count, and cannot conflict with release or platform measurements.
+Pass `client.VerificationOptions` to the `*WithOptions` APIs to set register pins
+or `FreshnessMaxAge`. Empty pin entries retain defaults; TDX order is
+`[MRTD, RTMR0, RTMR1, RTMR2, RTMR3]`. Pins cannot override release or platform measurements.
 
 ```go
 import "github.com/tinfoilsh/tinfoil-go/verifier/measurement"
@@ -156,8 +149,6 @@ opts := client.VerificationOptions{
     },
 }
 secureClient, err := client.NewSecureClientWithOptions("enclave.example.com", "org/repo", opts)
-// For a document already fetched with expectedNonce:
-verified, err := client.VerifyDocumentV3WithOptions(documentBytes, expectedNonce, trustedRepo, opts)
 ```
 
 ## JavaScript / TypeScript / WASM

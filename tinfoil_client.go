@@ -9,22 +9,21 @@ import (
 	"github.com/tinfoilsh/tinfoil-go/verifier/client"
 )
 
-// Client wraps the OpenAI client to provide secure inference through Tinfoil
+// Client is an OpenAI client with enclave verification.
 type Client struct {
 	*openai.Client
-	secureClient  *client.SecureClient
-	httpClient    *http.Client
-	enclave, repo string
-	transport     TransportMode
+	secureClient *client.SecureClient
+	httpClient   *http.Client
+	transport    TransportMode
 }
 
-// NewClientWithParams creates a new secure OpenAI client with explicit enclave and repo parameters
+// NewClientWithParams uses an explicit enclave and repository.
 func NewClientWithParams(enclave, repo string, openaiOpts ...option.RequestOption) (*Client, error) {
 	secureClient := client.NewSecureClient(enclave, repo)
 	return createClientFromSecureClient(secureClient, defaultTransportMode, "", resolveUserCacheSecret("", false), openaiOpts...)
 }
 
-// NewClient creates a new secure OpenAI client using default parameters
+// NewClient discovers a router and uses EHBP.
 func NewClient(openaiOpts ...option.RequestOption) (*Client, error) {
 	return NewClientWithOptions(WithOpenAIOptions(openaiOpts...))
 }
@@ -51,18 +50,16 @@ func createClientFromSecureClient(secureClient *client.SecureClient, mode Transp
 		Client:       &openaiClient,
 		secureClient: secureClient,
 		httpClient:   httpClient,
-		enclave:      secureClient.Enclave(),
-		repo:         secureClient.Repo(),
 		transport:    mode,
 	}, nil
 }
 
 func (c *Client) Enclave() string {
-	return c.enclave
+	return c.secureClient.Enclave()
 }
 
 func (c *Client) Repo() string {
-	return c.repo
+	return c.secureClient.Repo()
 }
 
 // Transport returns the transport mode used to secure traffic to the enclave.
@@ -70,12 +67,12 @@ func (c *Client) Transport() TransportMode {
 	return c.transport
 }
 
-// Verify re-verifies the enclave attestation and returns the ground truth
+// Verify refreshes attestation and returns the verified state.
 func (c *Client) Verify() (*client.GroundTruth, error) {
 	return c.secureClient.Verify()
 }
 
-// VerificationDocument returns the shared verification used to admit requests.
+// VerificationDocument returns a copy of the last successful verification report.
 func (c *Client) VerificationDocument() *client.VerificationDocument {
 	return c.secureClient.VerificationDocument()
 }

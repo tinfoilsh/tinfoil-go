@@ -2,6 +2,7 @@ package client
 
 import (
 	"cmp"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -35,13 +36,10 @@ func TestFreshnessExpiration(t *testing.T) {
 }
 
 func TestClientFreshnessMaxAge(t *testing.T) {
-	require.Equal(t, 7*24*time.Hour, NewSecureClient("enclave.example", "org/repo").freshnessMaxAge)
+	require.Equal(t, 7*24*time.Hour, NewSecureClient("enclave.example", "org/repo").options.FreshnessMaxAge)
 	for _, maxAge := range []time.Duration{-time.Nanosecond, -time.Hour} {
-		s := NewClientWithOptions("enclave.example", "org/repo", WithFreshnessMaxAge(maxAge))
-		_, err := s.Verify()
-		require.ErrorContains(t, err, "freshness maximum age must not be negative")
 		opts := VerificationOptions{FreshnessMaxAge: maxAge}
-		s, err = NewSecureClientWithOptions("enclave.example", "org/repo", opts)
+		s, err := NewSecureClientWithOptions("enclave.example", "org/repo", opts)
 		require.Nil(t, s)
 		require.ErrorContains(t, err, "freshness maximum age must not be negative")
 		s, err = NewDefaultClientWithOptions(opts)
@@ -60,8 +58,8 @@ func TestClientFreshnessMaxAge(t *testing.T) {
 		s, err := NewDefaultClientWithOptions(opts)
 		require.NoError(t, err)
 		require.Equal(t, "inference.tinfoil.sh", s.Enclave())
-		require.Equal(t, cmp.Or(maxAge, 7*24*time.Hour), s.freshnessMaxAge)
-		require.Equal(t, opts.PinnedRegisters, s.pins)
+		require.Equal(t, cmp.Or(maxAge, 7*24*time.Hour), s.options.FreshnessMaxAge)
+		require.Equal(t, opts.PinnedRegisters, s.options.PinnedRegisters)
 	}
 }
 
@@ -74,7 +72,7 @@ func TestVerifyV3FreshnessExpiration(t *testing.T) {
 	require.NoError(t, err)
 	raw, err := envelope.Fetch(host, nonce)
 	require.NoError(t, err)
-	verified, err := VerifyDocumentV3(raw, nonce, repo, nil)
+	verified, err := VerifyDocumentV3(raw, nonce, repo)
 	require.NoError(t, err)
 	const maxAge = 30 * 24 * time.Hour
 	for _, age := range []time.Duration{0, maxAge} {
@@ -82,6 +80,13 @@ func TestVerifyV3FreshnessExpiration(t *testing.T) {
 		custom, err := VerifyDocumentV3WithOptions(raw, nonce, repo, opts)
 		require.NoError(t, err)
 		require.Equal(t, verified.FreshnessExpiresAt.Add(cmp.Or(age, provenance.MaxFreshnessAge)-provenance.MaxFreshnessAge), custom.FreshnessExpiresAt)
+		optionsJSON, err := json.Marshal(opts)
+		require.NoError(t, err)
+		resultJSON, err := VerifyDocumentV3WithOptionsJSON(raw, nonce, repo, string(optionsJSON))
+		require.NoError(t, err)
+		var mobileResult VerifiedDocumentV3
+		require.NoError(t, json.Unmarshal([]byte(resultJSON), &mobileResult))
+		require.Equal(t, *custom, mobileResult, "mobile callers receive the same keys, measurements, and expiry")
 	}
 	badPins := cloneMeasurement(verified.EnclaveMeasurement)
 	badPins.Registers[0] = "bad"

@@ -27,7 +27,7 @@ func testState(deadline time.Time, key string) *verificationState {
 	gt := &GroundTruth{TLSPublicKey: key, HPKEPublicKey: key, ReleaseTag: key}
 	return &verificationState{
 		verified:    &VerifiedDocumentV3{FreshnessExpiresAt: deadline},
-		groundTruth: gt, document: newVerificationDocument(gt),
+		groundTruth: gt,
 	}
 }
 
@@ -44,7 +44,7 @@ func TestTransportExpirationAndUnchangedWitness(t *testing.T) {
 		deadline := witnessedAt.Add(time.Minute)
 		s.verify = func() (*verificationState, error) {
 			verifications++
-			return testState(freshnessExpiration(witnessedAt, witnessedAt.Add(time.Hour), s.freshnessMaxAge), "key"), nil
+			return testState(freshnessExpiration(witnessedAt, witnessedAt.Add(time.Hour), s.options.FreshnessMaxAge), "key"), nil
 		}
 		transport, err := s.NewTransport(func(*GroundTruth) (http.RoundTripper, error) {
 			return roundTripFunc(func(*http.Request) (*http.Response, error) {
