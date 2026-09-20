@@ -49,7 +49,7 @@ type clientConfig struct {
 	openaiOpts         []option.RequestOption
 }
 
-// ClientOption configures a Client created with NewClient.
+// ClientOption configures a Client created with NewClientWithOptions.
 type ClientOption func(*clientConfig)
 
 // WithEnclave sets the enclave host to verify and connect to. When unset, a
@@ -94,9 +94,10 @@ func WithOpenAIOptions(opts ...option.RequestOption) ClientOption {
 	return func(c *clientConfig) { c.openaiOpts = append(c.openaiOpts, opts...) }
 }
 
-// NewClient creates an OpenAI client with attestation verification.
-// Defaults are router discovery, tinfoilsh/confidential-model-router, and EHBP.
-func NewClient(opts ...ClientOption) (*Client, error) {
+// NewClientWithOptions creates a secure OpenAI client configured through
+// functional options. By default it selects a router automatically, verifies
+// against the default config repository, and uses the EHBP transport.
+func NewClientWithOptions(opts ...ClientOption) (*Client, error) {
 	cfg := &clientConfig{
 		repo:      defaultConfigRepo,
 		transport: defaultTransportMode,

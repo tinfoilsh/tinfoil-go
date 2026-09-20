@@ -17,6 +17,15 @@ type Client struct {
 	transport    TransportMode
 }
 
+// NewClient creates a new secure OpenAI client using default parameters
+func NewClient(openaiOpts ...option.RequestOption) (*Client, error) {
+	secureClient, err := client.NewDefaultClient(nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create secure client: %w", err)
+	}
+	return createClientFromSecureClient(secureClient, defaultTransportMode, "", resolveUserCacheSecret("", false), openaiOpts...)
+}
+
 func createClientFromSecureClient(secureClient *client.SecureClient, mode TransportMode, baseURL, userCacheSecret string, openaiOpts ...option.RequestOption) (*Client, error) {
 	httpClient, err := secureHTTPClient(secureClient, mode, baseURL, userCacheSecret)
 	if err != nil {

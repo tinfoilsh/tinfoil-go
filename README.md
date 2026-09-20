@@ -41,7 +41,7 @@ import (
 func main() {
 	// Create a client
 	client, err := tinfoil.NewClient(
-		tinfoil.WithOpenAIOptions(option.WithAPIKey("<YOUR_API_KEY>")),
+		option.WithAPIKey("<YOUR_API_KEY>"),
 	)
 	if err != nil {
 		log.Fatalf("Failed to create client: %v", err)
@@ -69,7 +69,7 @@ func main() {
 ```go
 // 1. Create a client
 client, err := tinfoil.NewClient(
-	tinfoil.WithOpenAIOptions(option.WithAPIKey(os.Getenv("TINFOIL_API_KEY"))),
+	option.WithAPIKey(os.Getenv("TINFOIL_API_KEY")),
 )
 if err != nil {
 	log.Printf("Failed to create client: %v", err)
@@ -102,7 +102,7 @@ Use `WithVerificationOptions` to configure
 
 ```go
 // Create a secure client with explicit enclave and repo parameters
-client, err := tinfoil.NewClient(tinfoil.WithEnclave(enclave), tinfoil.WithRepo(repo))
+client, err := tinfoil.NewClientWithOptions(tinfoil.WithEnclave(enclave), tinfoil.WithRepo(repo))
 if err != nil {
 	return fmt.Errorf("Failed to create client: %v", err)
 }
@@ -126,7 +126,7 @@ By default, the SDK generates a random secret and persists it at `~/.tinfoil/use
 
 ```go
 // Pin a stable, non-empty, opaque secret for this client.
-client, err := tinfoil.NewClient(
+client, err := tinfoil.NewClientWithOptions(
 	tinfoil.WithUserCacheSecret(secret),
 )
 

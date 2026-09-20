@@ -22,7 +22,7 @@ func main() {
 	}
 
 	client, err := tinfoil.NewClient(
-		tinfoil.WithOpenAIOptions(option.WithAPIKey(apiKey)),
+		option.WithAPIKey(apiKey),
 	)
 	if err != nil {
 		log.Fatalf("Failed to create client: %v", err)

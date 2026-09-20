@@ -19,7 +19,7 @@ func TestClientStreamingChat(t *testing.T) {
 		t.Skip("TINFOIL_API_KEY not set; skipping integration test")
 	}
 
-	client, err := NewClient(WithOpenAIOptions(option.WithAPIKey(apiKey)))
+	client, err := NewClient(option.WithAPIKey(apiKey))
 	require.NoError(t, err)
 
 	// Create a streaming chat completion request
@@ -80,7 +80,7 @@ func TestClientIntegration_AudioTranscription(t *testing.T) {
 		t.Skip("TINFOIL_API_KEY not set; skipping integration test")
 	}
 
-	c, err := NewClient(WithOpenAIOptions(option.WithAPIKey(apiKey)))
+	c, err := NewClient(option.WithAPIKey(apiKey))
 	require.NoError(t, err)
 
 	audioFile, err := os.Open("testdata/jackhammer.wav")

@@ -68,23 +68,23 @@ func TestProxyClientOptionsApply(t *testing.T) {
 	require.True(t, cfg.baseURLSet)
 }
 
-func TestNewClientRejectsInvalidBaseURL(t *testing.T) {
+func TestNewClientWithOptionsRejectsInvalidBaseURL(t *testing.T) {
 	for _, baseURL := range []string{"", "proxy.example.com", "ftp://proxy.example.com", "://"} {
 		t.Run(baseURL, func(t *testing.T) {
-			_, err := NewClient(WithBaseURL(baseURL))
+			_, err := NewClientWithOptions(WithBaseURL(baseURL))
 			require.Error(t, err)
 			require.Contains(t, err.Error(), "invalid base URL")
 		})
 	}
 }
 
-func TestNewClientRequiresEnclaveForCustomRepo(t *testing.T) {
+func TestNewClientWithOptionsRequiresEnclaveForCustomRepo(t *testing.T) {
 	for _, opt := range []ClientOption{
 		WithRepo("org/repo"),
 		WithRepo(defaultConfigRepo + "@v1"),
 		WithRepo(defaultConfigRepo + "@sha256:" + strings.Repeat("ab", 32)),
 	} {
-		c, err := NewClient(opt)
+		c, err := NewClientWithOptions(opt)
 		require.Nil(t, c)
 		require.ErrorContains(t, err, "requires an enclave")
 	}
@@ -280,7 +280,7 @@ func TestClientIntegration_TransportModesWithCacheSecret(t *testing.T) {
 
 	for _, mode := range []TransportMode{TransportEHBP, TransportTLS} {
 		t.Run(string(mode), func(t *testing.T) {
-			c, err := NewClient(
+			c, err := NewClientWithOptions(
 				WithTransport(mode),
 				WithUserCacheSecret(testUserCacheSecret),
 				WithOpenAIOptions(option.WithAPIKey(apiKey)),
@@ -314,7 +314,7 @@ func TestClientIntegration_LowLevelEHBP(t *testing.T) {
 
 	for _, mode := range []TransportMode{TransportEHBP, TransportTLS} {
 		t.Run(string(mode), func(t *testing.T) {
-			c, err := NewClient(
+			c, err := NewClientWithOptions(
 				WithTransport(mode),
 				WithOpenAIOptions(option.WithAPIKey(apiKey)),
 			)
