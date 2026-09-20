@@ -40,7 +40,7 @@ func TestTransportExpirationAndUnchangedWitness(t *testing.T) {
 		deadline := time.Now().Add(time.Minute)
 		var verifications, requests int
 		s := NewSecureClient("enclave.example", "org/repo")
-		s.verify = func(context.Context) (*verificationState, error) {
+		s.verify = func() (*verificationState, error) {
 			verifications++
 			return testState(deadline, "key"), nil
 		}
@@ -76,7 +76,7 @@ func TestRefreshCoalescesRequestsAndExplicitVerify(t *testing.T) {
 				release := make(chan struct{})
 				var attempts, requests atomic.Int32
 				s := &SecureClient{state: testState(time.Now().Add(time.Minute), "old")}
-				s.verify = func(context.Context) (*verificationState, error) {
+				s.verify = func() (*verificationState, error) {
 					attempts.Add(1)
 					<-release
 					return testState(time.Now().Add(time.Hour), "new"), refreshErr
@@ -127,9 +127,9 @@ func errorString(err error) string {
 func TestRefreshWaitersCancelIndependentlyWithoutVerificationTimeout(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		release := make(chan struct{})
-		s := &SecureClient{verify: func(ctx context.Context) (*verificationState, error) {
+		s := &SecureClient{verify: func() (*verificationState, error) {
 			<-release
-			return testState(time.Now().Add(time.Hour), "key"), ctx.Err()
+			return testState(time.Now().Add(time.Hour), "key"), nil
 		}}
 		ctx, cancel := context.WithCancel(context.Background())
 		canceled, waiting := make(chan error, 1), make(chan error, 1)
@@ -167,7 +167,7 @@ func TestVerificationFetchStillTimesOut(t *testing.T) {
 
 func TestPreviouslyReturnedTransportsUseExplicitVerification(t *testing.T) {
 	var attempts int
-	s := &SecureClient{verify: func(context.Context) (*verificationState, error) {
+	s := &SecureClient{verify: func() (*verificationState, error) {
 		attempts++
 		key := "old"
 		if attempts > 1 {
@@ -214,7 +214,7 @@ func TestKeyRotationRetriesShareRefresh(t *testing.T) {
 				release := make(chan struct{})
 				var attempts, sends atomic.Int32
 				s := &SecureClient{state: testState(time.Now().Add(time.Hour), "old")}
-				s.verify = func(context.Context) (*verificationState, error) {
+				s.verify = func() (*verificationState, error) {
 					attempts.Add(1)
 					<-release
 					return testState(time.Now().Add(time.Hour), "new"), nil
@@ -275,7 +275,7 @@ func TestKeyRotationRetryLimits(t *testing.T) {
 			if tc.keyError {
 				original = ErrCertMismatch
 			}
-			s := &SecureClient{state: testState(time.Now().Add(time.Hour), "old"), verify: func(context.Context) (*verificationState, error) {
+			s := &SecureClient{state: testState(time.Now().Add(time.Hour), "old"), verify: func() (*verificationState, error) {
 				refreshes++
 				return testState(time.Now().Add(time.Hour), "new"), tc.refreshErr
 			}}
@@ -305,7 +305,7 @@ func TestKeyRotationRetryLimits(t *testing.T) {
 func TestExpirationDoesNotInterruptStream(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		deadline := time.Now().Add(time.Minute)
-		s := &SecureClient{state: testState(deadline, "key"), verify: func(context.Context) (*verificationState, error) {
+		s := &SecureClient{state: testState(deadline, "key"), verify: func() (*verificationState, error) {
 			return testState(deadline, "key"), nil
 		}}
 		reader, writer := io.Pipe()
@@ -335,7 +335,7 @@ func TestRedirectChecksExpiration(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		deadline := time.Now().Add(time.Minute)
 		var sends int
-		s := &SecureClient{state: testState(deadline, "key"), verify: func(context.Context) (*verificationState, error) {
+		s := &SecureClient{state: testState(deadline, "key"), verify: func() (*verificationState, error) {
 			return testState(deadline, "key"), nil
 		}}
 		transport, err := s.NewTransport(func(*GroundTruth) (http.RoundTripper, error) {
@@ -375,7 +375,7 @@ func TestHTTPClientChecksExpirationOnReusedTLSConnections(t *testing.T) {
 			roots.AddCert(target.Certificate())
 			key, err := CertPubkeyFP(target.Certificate())
 			require.NoError(t, err)
-			s := &SecureClient{state: testState(time.Now().Add(time.Hour), key), verify: func(context.Context) (*verificationState, error) {
+			s := &SecureClient{state: testState(time.Now().Add(time.Hour), key), verify: func() (*verificationState, error) {
 				return testState(time.Now().Add(-time.Second), key), nil
 			}}
 			hc, err := s.HTTPClient()

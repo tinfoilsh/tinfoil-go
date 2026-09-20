@@ -189,12 +189,12 @@ func (s *SecureClient) VerifyV3() (*VerifiedDocumentV3, error) {
 	return &result, nil
 }
 
-func (s *SecureClient) fetchVerification(ctx context.Context) (*verificationState, error) {
+func (s *SecureClient) fetchVerification() (*verificationState, error) {
 	nonce, err := envelope.RandomNonce()
 	if err != nil {
 		return nil, err
 	}
-	docBytes, err := envelope.FetchContext(ctx, s.enclave, nonce)
+	docBytes, err := envelope.Fetch(s.enclave, nonce)
 	if err != nil {
 		return nil, fmt.Errorf("fetching attestation document: %w", err)
 	}

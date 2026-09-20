@@ -2,7 +2,6 @@ package client
 
 import (
 	"bytes"
-	"context"
 	_ "embed"
 	"encoding/json"
 	"fmt"
@@ -37,7 +36,7 @@ type SecureClient struct {
 	stateMu    sync.RWMutex
 	state      *verificationState
 	refreshing *verificationCall
-	verify     func(context.Context) (*verificationState, error)
+	verify     func() (*verificationState, error)
 }
 
 var (

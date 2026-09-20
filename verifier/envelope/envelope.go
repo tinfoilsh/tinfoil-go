@@ -492,11 +492,6 @@ func Check(docBytes []byte, expectedNonce []byte) (*Document, [64]byte, error) {
 // fresh challenge nonce, returning the raw response bytes for verification.
 // It uses http.DefaultClient with a 30-second deadline and a 32 MiB body limit.
 func Fetch(host string, nonce []byte) ([]byte, error) {
-	return FetchContext(context.Background(), host, nonce)
-}
-
-// FetchContext is Fetch with cancellation. The 30-second deadline still applies.
-func FetchContext(ctx context.Context, host string, nonce []byte) ([]byte, error) {
 	if len(nonce) != NonceSize {
 		return nil, fmt.Errorf("nonce must be %d bytes, got %d", NonceSize, len(nonce))
 	}
@@ -506,7 +501,7 @@ func FetchContext(ctx context.Context, host string, nonce []byte) ([]byte, error
 		Path:     attestationEndpoint,
 		RawQuery: "nonce=" + hex.EncodeToString(nonce),
 	}
-	ctx, cancel := context.WithTimeout(ctx, attestationFetchTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), attestationFetchTimeout)
 	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
 	if err != nil {
