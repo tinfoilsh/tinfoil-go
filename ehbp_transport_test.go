@@ -16,6 +16,7 @@ import (
 	"github.com/openai/openai-go/v3/option"
 	"github.com/stretchr/testify/require"
 	ehbpidentity "github.com/tinfoilsh/encrypted-http-body-protocol/identity"
+	"github.com/tinfoilsh/tinfoil-go/internal/testutil"
 	"github.com/tinfoilsh/tinfoil-go/verifier/client"
 	"github.com/tinfoilsh/tinfoil-go/verifier/envelope"
 )
@@ -270,13 +271,11 @@ func TestEHBPClientPreservesAdmissionAndRebuildsProxyHeader(t *testing.T) {
 	}
 }
 
-func TestClientIntegration_TransportModesWithCacheSecret(t *testing.T) {
+func TestLiveClientIntegration_TransportModesWithCacheSecret(t *testing.T) {
+	testutil.RequireLive(t, "TINFOIL_API_KEY")
 	const testUserCacheSecret = "go-live-integration-cache-secret"
 
 	apiKey := os.Getenv("TINFOIL_API_KEY")
-	if apiKey == "" {
-		t.Skip("TINFOIL_API_KEY not set; skipping integration test")
-	}
 
 	for _, mode := range []TransportMode{TransportEHBP, TransportTLS} {
 		t.Run(string(mode), func(t *testing.T) {
@@ -306,11 +305,9 @@ func TestClientIntegration_TransportModesWithCacheSecret(t *testing.T) {
 // (direct requests, not the OpenAI wrapper) against a live enclave for both
 // transport modes. It covers a bodyless GET, which EHBP sends without body
 // encryption per SPEC 7.4, and a POST whose body is sealed end-to-end.
-func TestClientIntegration_LowLevelEHBP(t *testing.T) {
+func TestLiveClientIntegration_LowLevelEHBP(t *testing.T) {
+	testutil.RequireLive(t, "TINFOIL_API_KEY")
 	apiKey := os.Getenv("TINFOIL_API_KEY")
-	if apiKey == "" {
-		t.Skip("TINFOIL_API_KEY not set; skipping integration test")
-	}
 
 	for _, mode := range []TransportMode{TransportEHBP, TransportTLS} {
 		t.Run(string(mode), func(t *testing.T) {

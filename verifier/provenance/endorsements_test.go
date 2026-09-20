@@ -5,15 +5,14 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/tinfoilsh/tinfoil-go/internal/testutil"
 )
 
-// TestLatestPlatformEndorsements is a live test against the published
+// TestLiveLatestPlatformEndorsements is a live test against the published
 // artifact (GitHub proxy + Sigstore TUF/Rekor). Run with -short to exclude
 // it offline.
-func TestLatestPlatformEndorsements(t *testing.T) {
-	if testing.Short() {
-		t.Skip("live external services test; skipped with -short")
-	}
+func TestLiveLatestPlatformEndorsements(t *testing.T) {
+	testutil.RequireLive(t)
 	digest, err := fetchLatestDigest(platformEndorsementsRepo)
 	require.NoError(t, err)
 

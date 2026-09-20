@@ -7,6 +7,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/tinfoilsh/tinfoil-go/internal/testutil"
 	"github.com/tinfoilsh/tinfoil-go/verifier/measurement"
 )
 
@@ -46,10 +47,8 @@ func TestPinnedWorkflowIdentitiesAreAnchored(t *testing.T) {
 	)
 }
 
-func TestAuthenticateCode(t *testing.T) {
-	if testing.Short() {
-		t.Skip("live external services test; skipped with -short")
-	}
+func TestLiveAuthenticateCode(t *testing.T) {
+	testutil.RequireLive(t)
 	client := testClient(t)
 
 	const repo = "tinfoilsh/confidential-debug"

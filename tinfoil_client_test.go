@@ -10,14 +10,13 @@ import (
 	"github.com/openai/openai-go/v3"
 	"github.com/openai/openai-go/v3/option"
 	"github.com/stretchr/testify/require"
+	"github.com/tinfoilsh/tinfoil-go/internal/testutil"
 )
 
-// TestClientStreamingChat tests the streaming version with default parameters
-func TestClientStreamingChat(t *testing.T) {
+// TestLiveClientStreamingChat tests the streaming version with default parameters
+func TestLiveClientStreamingChat(t *testing.T) {
+	testutil.RequireLive(t, "TINFOIL_API_KEY")
 	apiKey := os.Getenv("TINFOIL_API_KEY")
-	if apiKey == "" {
-		t.Skip("TINFOIL_API_KEY not set; skipping integration test")
-	}
 
 	client, err := NewClient(option.WithAPIKey(apiKey))
 	require.NoError(t, err)
@@ -48,7 +47,8 @@ func TestClientStreamingChat(t *testing.T) {
 	require.NotEmpty(t, acc.Choices[0].FinishReason)
 }
 
-func TestHTTPClient(t *testing.T) {
+func TestLiveHTTPClient(t *testing.T) {
+	testutil.RequireLive(t)
 	t.Setenv(userCacheSecretEnv, "test-secret")
 	client, err := NewClient()
 	require.NoError(t, err)
@@ -71,14 +71,12 @@ func TestHTTPClient(t *testing.T) {
 	require.Same(t, httpClient, httpClient2, "HTTPClient() should return the same instance")
 }
 
-// TestClientIntegration_AudioTranscription mirrors the Python audio integration
+// TestLiveClientIntegration_AudioTranscription mirrors the Python audio integration
 // test: it transcribes a known clip through the high-level client over the
 // default (EHBP) transport and checks the recognized text.
-func TestClientIntegration_AudioTranscription(t *testing.T) {
+func TestLiveClientIntegration_AudioTranscription(t *testing.T) {
+	testutil.RequireLive(t, "TINFOIL_API_KEY")
 	apiKey := os.Getenv("TINFOIL_API_KEY")
-	if apiKey == "" {
-		t.Skip("TINFOIL_API_KEY not set; skipping integration test")
-	}
 
 	c, err := NewClient(option.WithAPIKey(apiKey))
 	require.NoError(t, err)

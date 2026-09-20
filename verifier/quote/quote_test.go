@@ -12,6 +12,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	sevabi "github.com/tinfoilsh/go-sev-guest/abi"
+	"github.com/tinfoilsh/tinfoil-go/internal/testutil"
 
 	"github.com/tinfoilsh/tinfoil-go/verifier/envelope"
 	"github.com/tinfoilsh/tinfoil-go/verifier/measurement"
@@ -28,12 +29,9 @@ var testShape = &policy.Shape{CPUs: 1, MemoryMB: 1, Disks: 1}
 // documents predate the amd-crl entry). The captured report predates the v3
 // REPORT_DATA ladder, so the expected REPORT_DATA is taken from the report
 // itself; the envelope ladder is covered by the envelope package tests.
-// Skips when the workspace fixture directory is not present or with -short.
+// Skips when the workspace fixture directory is not present.
 func loadSEVFixture(t *testing.T) (*envelope.Document, [64]byte) {
 	t.Helper()
-	if testing.Short() {
-		t.Skip("fetches the AMD CRL live; skipped with -short")
-	}
 	root := filepath.Join("..", "..", "..", "..", "attestation-samples", "inference.tinfoil.sh")
 	freshBytes, err := os.ReadFile(filepath.Join(root, "fresh.json"))
 	if os.IsNotExist(err) {
@@ -121,7 +119,8 @@ func loadEndorsementArtifact(t *testing.T) *policy.Artifact {
 	return artifact
 }
 
-func TestVerifySEV(t *testing.T) {
+func TestLiveVerifySEV(t *testing.T) {
+	testutil.RequireLive(t)
 	doc, reportData := loadSEVFixture(t)
 	artifact := loadEndorsementArtifact(t)
 
@@ -180,7 +179,8 @@ func TestVerifySEV(t *testing.T) {
 	assert.ErrorContains(t, err, "no amd-crl endorsement collateral")
 }
 
-func TestVerifySEVRejectsBadCRL(t *testing.T) {
+func TestLiveVerifySEVRejectsBadCRL(t *testing.T) {
+	testutil.RequireLive(t)
 	doc, _ := loadSEVFixture(t)
 
 	badCRL, err := json.Marshal(envelope.AMDCRLCollateral{
