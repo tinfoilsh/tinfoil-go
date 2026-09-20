@@ -98,8 +98,9 @@ check this deadline before admitting each request, including redirects and
 key-rotation retries. Expired or missing verification blocks new requests until
 refresh succeeds; refresh errors never authorize requests with expired keys.
 All clients returned by one `SecureClient` share verification state and one
-refresh attempt, including explicit `Verify()` calls. Refresh is bounded to 30
-seconds, and a waiting request can cancel without canceling other waiters.
+refresh attempt, including explicit `Verify()` calls. The attestation network
+fetch is bounded to 30 seconds; local cryptographic verification has no SDK
+timeout. A waiting request can cancel without canceling other waiters.
 
 A request admitted before expiration may finish, including a streaming response.
 Expiration does not interrupt that request. There is no background refresh.

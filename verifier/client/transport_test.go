@@ -124,31 +124,7 @@ func errorString(err error) string {
 	return err.Error()
 }
 
-func TestRefreshCancellationAndTimeout(t *testing.T) {
-	synctest.Test(t, func(t *testing.T) {
-		release := make(chan struct{})
-		s := &SecureClient{verify: func(context.Context) (*verificationState, error) {
-			<-release // Even a verifier that ignores cancellation cannot publish a late result.
-			return testState(time.Now().Add(time.Hour), "key"), nil
-		}}
-		ctx, cancel := context.WithCancel(context.Background())
-		canceled, waiting := make(chan error, 1), make(chan error, 1)
-		go func() { _, err := s.verifiedState(ctx, nil, false); canceled <- err }()
-		go func() { _, err := s.Verify(); waiting <- err }()
-		synctest.Wait()
-		cancel()
-		require.ErrorIs(t, <-canceled, context.Canceled)
-		select {
-		case <-waiting:
-			t.Fatal("one waiter canceled the shared refresh")
-		default:
-		}
-		time.Sleep(verificationTimeout)
-		require.ErrorIs(t, <-waiting, context.DeadlineExceeded)
-		close(release)
-		synctest.Wait()
-		require.Nil(t, s.GroundTruth(), "late results must not be published")
-	})
+func TestRefreshWaitersCancelIndependentlyWithoutVerificationTimeout(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		release := make(chan struct{})
 		s := &SecureClient{verify: func(ctx context.Context) (*verificationState, error) {
@@ -162,8 +138,30 @@ func TestRefreshCancellationAndTimeout(t *testing.T) {
 		synctest.Wait()
 		cancel()
 		require.ErrorIs(t, <-canceled, context.Canceled)
+		time.Sleep(time.Minute)
+		select {
+		case <-waiting:
+			t.Fatal("shared verification must survive caller cancellation and has no SDK timeout")
+		default:
+		}
 		close(release)
 		require.NoError(t, <-waiting)
+		require.NotNil(t, s.GroundTruth())
+	})
+}
+
+func TestVerificationFetchStillTimesOut(t *testing.T) {
+	original := http.DefaultClient
+	t.Cleanup(func() { http.DefaultClient = original })
+	synctest.Test(t, func(t *testing.T) {
+		http.DefaultClient = &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			<-req.Context().Done()
+			return nil, req.Context().Err()
+		})}
+		start := time.Now()
+		_, err := NewSecureClient("enclave.example", "org/repo").Verify()
+		require.ErrorIs(t, err, context.DeadlineExceeded)
+		require.Equal(t, 30*time.Second, time.Since(start))
 	})
 }
 

@@ -6,8 +6,6 @@ import (
 	"time"
 )
 
-const verificationTimeout = 30 * time.Second
-
 // ErrFreshnessExpired means the authenticated witnesses no longer authorize requests.
 var ErrFreshnessExpired = errors.New("attestation freshness witnesses have expired")
 
@@ -21,7 +19,6 @@ type verificationState struct {
 }
 
 type verificationCall struct {
-	ctx   context.Context
 	done  chan struct{}
 	state *verificationState
 	err   error
@@ -41,10 +38,9 @@ func (s *SecureClient) verifiedState(ctx context.Context, observed *verification
 	}
 	call := s.refreshing
 	if call == nil {
-		refreshCtx, cancel := context.WithTimeout(context.Background(), verificationTimeout)
-		call = &verificationCall{ctx: refreshCtx, done: make(chan struct{})}
+		call = &verificationCall{done: make(chan struct{})}
 		s.refreshing = call
-		go s.refresh(call, cancel)
+		go s.refresh(call)
 	}
 	s.stateMu.Unlock()
 
@@ -53,12 +49,6 @@ func (s *SecureClient) verifiedState(ctx context.Context, observed *verification
 	case <-ctx.Done():
 		return nil, ctx.Err()
 	case <-call.done:
-	case <-call.ctx.Done():
-		select {
-		case <-call.done:
-		default:
-			return nil, call.ctx.Err()
-		}
 	}
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -66,13 +56,14 @@ func (s *SecureClient) verifiedState(ctx context.Context, observed *verification
 	return call.state, call.err
 }
 
-func (s *SecureClient) refresh(call *verificationCall, cancel context.CancelFunc) {
-	defer cancel()
+func (s *SecureClient) refresh(call *verificationCall) {
 	verify := s.verify
 	if verify == nil {
 		verify = s.fetchVerification
 	}
-	state, err := verify(call.ctx)
+	// The attestation fetch bounds its network I/O. Local verification has no
+	// SDK deadline; each caller can independently cancel its wait above.
+	state, err := verify(context.Background())
 	s.stateMu.Lock()
 	defer s.stateMu.Unlock()
 	if err == nil && !time.Now().Before(state.verified.FreshnessExpiresAt) {
@@ -83,14 +74,6 @@ func (s *SecureClient) refresh(call *verificationCall, cancel context.CancelFunc
 		if s.state != nil {
 			state.generation = s.state.generation + 1
 		}
-	}
-	// Check at publication, including when the context's timer has not run yet.
-	if ctxErr := call.ctx.Err(); ctxErr != nil {
-		err = ctxErr
-	} else if deadline, ok := call.ctx.Deadline(); ok && !time.Now().Before(deadline) {
-		err = context.DeadlineExceeded
-	}
-	if err == nil {
 		s.state = state
 		call.state = state
 	}
