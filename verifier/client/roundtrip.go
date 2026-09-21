@@ -49,7 +49,7 @@ func (t *TLSBoundRoundTripper) getTransport() (*http.Transport, error) {
 		tlsConfig.VerifyConnection = func(state tls.ConnectionState) error {
 			if prevVerifyConnection != nil {
 				if err := prevVerifyConnection(state); err != nil {
-					return sdkerrors.Attestation(err)
+					return sdkerrors.WrapAttestation(err)
 				}
 			}
 
@@ -84,7 +84,7 @@ func (t *TLSBoundRoundTripper) RoundTrip(r *http.Request) (*http.Response, error
 	}
 	resp, err := transport.RoundTrip(r)
 	if isCertificateError(err) {
-		err = sdkerrors.Attestation(err)
+		err = sdkerrors.WrapAttestation(err)
 	}
 	return resp, err
 }

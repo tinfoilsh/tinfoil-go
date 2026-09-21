@@ -304,7 +304,7 @@ func RandomNonce() ([]byte, error) {
 // be lowercase, base64 canonical, and item ids unique. The endorsed
 // sections are retained as raw bytes for hashing.
 func Parse(docBytes []byte) (result *Document, err error) {
-	defer func() { err = sdkerrors.Attestation(err) }()
+	defer func() { err = sdkerrors.WrapAttestation(err) }()
 	var doc Document
 	if err := json.Unmarshal(docBytes, &doc, json.RejectUnknownMembers(true)); err != nil {
 		return nil, fmt.Errorf("parsing attestation document: %w", err)
@@ -467,10 +467,10 @@ func (d *Document) CryptoMaterialItem(id string) (*CryptoMaterialItem, bool) {
 // document is trusted until the quote proves the hardware bound that
 // REPORT_DATA.
 func Check(docBytes []byte, expectedNonce []byte) (result *Document, data [64]byte, err error) {
-	defer func() { err = sdkerrors.Attestation(err) }()
+	defer func() { err = sdkerrors.WrapAttestation(err) }()
 	var zero [64]byte
 	if len(expectedNonce) != NonceSize {
-		return nil, zero, sdkerrors.Configuration(fmt.Errorf("expected nonce must be %d bytes, got %d", NonceSize, len(expectedNonce)))
+		return nil, zero, sdkerrors.WrapConfiguration(fmt.Errorf("expected nonce must be %d bytes, got %d", NonceSize, len(expectedNonce)))
 	}
 	doc, err := Parse(docBytes)
 	if err != nil {
@@ -503,12 +503,12 @@ func Check(docBytes []byte, expectedNonce []byte) (result *Document, data [64]by
 // fresh challenge nonce, returning the raw response bytes for verification.
 // It uses http.DefaultClient with a 30-second deadline and a 32 MiB body limit.
 func Fetch(host string, nonce []byte) (result []byte, err error) {
-	defer func() { err = sdkerrors.Fetch(err) }()
+	defer func() { err = sdkerrors.WrapFetch(err) }()
 	if host == "" {
-		return nil, sdkerrors.Configuration(fmt.Errorf("enclave host is required"))
+		return nil, sdkerrors.WrapConfiguration(fmt.Errorf("enclave host is required"))
 	}
 	if len(nonce) != NonceSize {
-		return nil, sdkerrors.Configuration(fmt.Errorf("nonce must be %d bytes, got %d", NonceSize, len(nonce)))
+		return nil, sdkerrors.WrapConfiguration(fmt.Errorf("nonce must be %d bytes, got %d", NonceSize, len(nonce)))
 	}
 	u := url.URL{
 		Scheme:   "https",
@@ -520,7 +520,7 @@ func Fetch(host string, nonce []byte) (result []byte, err error) {
 	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
 	if err != nil {
-		return nil, sdkerrors.Configuration(fmt.Errorf("invalid enclave host: %w", err))
+		return nil, sdkerrors.WrapConfiguration(fmt.Errorf("invalid enclave host: %w", err))
 	}
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {

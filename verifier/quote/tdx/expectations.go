@@ -24,15 +24,15 @@ type Expectations struct {
 // the required VM shape, then builds validation options from policy and registers.
 // It returns the matching measurements-map entry's name.
 func Assemble(a *policy.Artifact, p *policy.TDXPolicy, required *policy.Shape, q *Quote, registers [5]string, reportData [64]byte) (result *Expectations, name string, err error) {
-	defer func() { err = sdkerrors.Attestation(err) }()
+	defer func() { err = sdkerrors.WrapAttestation(err) }()
 	if a == nil || p == nil {
-		return nil, "", sdkerrors.Configuration(fmt.Errorf("endorsements and TDX policy are required"))
+		return nil, "", sdkerrors.WrapConfiguration(fmt.Errorf("endorsements and TDX policy are required"))
 	}
 	if required == nil {
-		return nil, "", sdkerrors.Configuration(fmt.Errorf("VM shape is required"))
+		return nil, "", sdkerrors.WrapConfiguration(fmt.Errorf("VM shape is required"))
 	}
 	if q == nil || q.quote == nil {
-		return nil, "", sdkerrors.Configuration(fmt.Errorf("authenticated TDX quote is required"))
+		return nil, "", sdkerrors.WrapConfiguration(fmt.Errorf("authenticated TDX quote is required"))
 	}
 	opts, err := options(p)
 	if err != nil {
@@ -68,12 +68,12 @@ func Assemble(a *policy.Artifact, p *policy.TDXPolicy, required *policy.Shape, q
 // library validation options plus the collateral floor. It is the only TDX
 // enforcement entry point, so no subset of the policy can be applied.
 func (e *Expectations) Validate(q *Quote) (err error) {
-	defer func() { err = sdkerrors.Attestation(err) }()
+	defer func() { err = sdkerrors.WrapAttestation(err) }()
 	if e == nil || e.opts == nil {
-		return sdkerrors.Configuration(fmt.Errorf("assembled TDX expectations are required"))
+		return sdkerrors.WrapConfiguration(fmt.Errorf("assembled TDX expectations are required"))
 	}
 	if q == nil || q.quote == nil {
-		return sdkerrors.Configuration(fmt.Errorf("authenticated TDX quote is required"))
+		return sdkerrors.WrapConfiguration(fmt.Errorf("authenticated TDX quote is required"))
 	}
 	if err := tdxvalidate.TdxQuote(q.quote, e.opts); err != nil {
 		return err

@@ -46,9 +46,9 @@ func (v *VerifiedDocumentV3) HPKEPublicKey() (string, error) {
 }
 
 func (v *VerifiedDocumentV3) cryptoMaterialData(id, format string) (result string, err error) {
-	defer func() { err = sdkerrors.Attestation(err) }()
+	defer func() { err = sdkerrors.WrapAttestation(err) }()
 	if v == nil {
-		return "", sdkerrors.Configuration(fmt.Errorf("verified document is required"))
+		return "", sdkerrors.WrapConfiguration(fmt.Errorf("verified document is required"))
 	}
 	for _, item := range v.CryptoMaterial {
 		if item.ID != id {
@@ -80,7 +80,7 @@ func (v *VerifiedDocumentV3) validateTransportKeys() error {
 // Callers must bind traffic to the returned keys and enforce FreshnessExpiresAt.
 func VerifyDocumentV3(docBytes, nonce []byte, repo string, opts *VerificationOptions) (*VerifiedDocumentV3, error) {
 	if _, _, _, err := provenance.ParseReference(repo); err != nil {
-		return nil, sdkerrors.Configuration(err)
+		return nil, sdkerrors.WrapConfiguration(err)
 	}
 	options, err := opts.normalized()
 	if err != nil {
@@ -93,7 +93,7 @@ func VerifyDocumentV3(docBytes, nonce []byte, repo string, opts *VerificationOpt
 
 	code, endorsements, freshnessExpiresAt, err := authenticateReferenceValues(doc, repo, options.FreshnessMaxAge)
 	if err != nil {
-		return nil, sdkerrors.Attestation(fmt.Errorf("reference values: %w", err))
+		return nil, sdkerrors.WrapAttestation(fmt.Errorf("reference values: %w", err))
 	}
 
 	_, authenticated, err := quote.Verify(doc, endorsements.Artifact, code.Measurement, options.PinnedRegisters, code.Shape, expectedReportData)

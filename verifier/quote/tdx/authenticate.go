@@ -48,9 +48,9 @@ func (q *Quote) Identity() string { return q.identity }
 // fetches. Callers must assemble a policy and validate before trusting the
 // platform.
 func Authenticate(doc *envelope.Document) (result *Quote, err error) {
-	defer func() { err = sdkerrors.Attestation(err) }()
+	defer func() { err = sdkerrors.WrapAttestation(err) }()
 	if doc == nil {
-		return nil, sdkerrors.Configuration(fmt.Errorf("document is required"))
+		return nil, sdkerrors.WrapConfiguration(fmt.Errorf("document is required"))
 	}
 	rawQuote, err := base64.StdEncoding.DecodeString(doc.CPUEvidence.ReportBase64)
 	if err != nil {

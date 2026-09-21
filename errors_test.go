@@ -27,9 +27,9 @@ func TestErrorContract(t *testing.T) {
 		wrap   func(error) error
 		target any
 	}{
-		{"configuration", sdkerrors.Configuration, new(*tinfoil.ConfigurationError)},
-		{"fetch", sdkerrors.Fetch, new(*tinfoil.FetchError)},
-		{"attestation", sdkerrors.Attestation, new(*tinfoil.AttestationError)},
+		{"configuration", sdkerrors.WrapConfiguration, new(*tinfoil.ConfigurationError)},
+		{"fetch", sdkerrors.WrapFetch, new(*tinfoil.FetchError)},
+		{"attestation", sdkerrors.WrapAttestation, new(*tinfoil.AttestationError)},
 	} {
 		t.Run(tc.prefix, func(t *testing.T) {
 			err := tc.wrap(cause)
@@ -41,7 +41,7 @@ func TestErrorContract(t *testing.T) {
 			require.Same(t, cause, networkError)
 			require.ErrorIs(t, err, context.DeadlineExceeded)
 			require.Equal(t, tc.prefix+" error: "+cause.Error(), err.Error(), "gomobile prefix contract")
-			for _, wrap := range []func(error) error{sdkerrors.Configuration, sdkerrors.Fetch, sdkerrors.Attestation} {
+			for _, wrap := range []func(error) error{sdkerrors.WrapConfiguration, sdkerrors.WrapFetch, sdkerrors.WrapAttestation} {
 				require.Nil(t, wrap(nil))
 				for _, classified := range []error{err, fmt.Errorf("context: %w", err), errors.Join(err, context.Canceled)} {
 					require.Same(t, classified, wrap(classified), "do not reclassify or double-wrap SDK errors")

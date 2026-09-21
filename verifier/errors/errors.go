@@ -35,24 +35,24 @@ func (e *AttestationError) Error() string { return fmt.Sprintf("attestation erro
 func (e *AttestationError) Unwrap() error { return e.Err }
 func (*AttestationError) tinfoilError()   {}
 
-// Configuration classifies err unless it is nil or already an SDK error.
-func Configuration(err error) error {
+// WrapConfiguration wraps err unless it is nil or already contains an SDK error.
+func WrapConfiguration(err error) error {
 	if err == nil || classified(err) {
 		return err
 	}
 	return &ConfigurationError{Err: err}
 }
 
-// Fetch classifies err unless it is nil or already an SDK error.
-func Fetch(err error) error {
+// WrapFetch wraps err unless it is nil or already contains an SDK error.
+func WrapFetch(err error) error {
 	if err == nil || classified(err) {
 		return err
 	}
 	return &FetchError{Err: err}
 }
 
-// Attestation classifies err unless it is nil or already an SDK error.
-func Attestation(err error) error {
+// WrapAttestation wraps err unless it is nil or already contains an SDK error.
+func WrapAttestation(err error) error {
 	if err == nil || classified(err) {
 		return err
 	}

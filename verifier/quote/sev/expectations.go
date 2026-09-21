@@ -33,12 +33,12 @@ type Expectations struct {
 
 // Assemble combines policy with the launch digest, REPORT_DATA, and authenticated CHIP_ID.
 func Assemble(p *policy.SEVSNPPolicy, q *Quote, launchDigest string, reportData [64]byte) (result *Expectations, err error) {
-	defer func() { err = sdkerrors.Attestation(err) }()
+	defer func() { err = sdkerrors.WrapAttestation(err) }()
 	if p == nil {
-		return nil, sdkerrors.Configuration(fmt.Errorf("SEV policy is required"))
+		return nil, sdkerrors.WrapConfiguration(fmt.Errorf("SEV policy is required"))
 	}
 	if q == nil || q.attestation == nil {
-		return nil, sdkerrors.Configuration(fmt.Errorf("authenticated SEV quote is required"))
+		return nil, sdkerrors.WrapConfiguration(fmt.Errorf("authenticated SEV quote is required"))
 	}
 	opts, err := options(p, q.ProductLine())
 	if err != nil {
@@ -67,12 +67,12 @@ func Assemble(p *policy.SEVSNPPolicy, q *Quote, launchDigest string, reportData 
 // the only SEV enforcement entry point, so no subset of the policy can be
 // applied.
 func (e *Expectations) Validate(q *Quote) (err error) {
-	defer func() { err = sdkerrors.Attestation(err) }()
+	defer func() { err = sdkerrors.WrapAttestation(err) }()
 	if e == nil || e.opts == nil {
-		return sdkerrors.Configuration(fmt.Errorf("assembled SEV expectations are required"))
+		return sdkerrors.WrapConfiguration(fmt.Errorf("assembled SEV expectations are required"))
 	}
 	if q == nil || q.attestation == nil {
-		return sdkerrors.Configuration(fmt.Errorf("authenticated SEV quote is required"))
+		return sdkerrors.WrapConfiguration(fmt.Errorf("authenticated SEV quote is required"))
 	}
 	if err := sevvalidate.SnpAttestation(q.attestation, e.opts); err != nil {
 		return err
