@@ -5,7 +5,8 @@ import (
 	"testing"
 )
 
-// RequireLive selects tests that contact external services and checks their configuration.
+// RequireLive must be the first call in tests named TestLive* that contact
+// external services; the gate keeps default runs local and the prefix selects live CI.
 func RequireLive(t *testing.T, requiredEnv ...string) {
 	t.Helper()
 	if testing.Short() || os.Getenv("RUN_TINFOIL_INTEGRATION") != "true" {

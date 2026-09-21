@@ -13,7 +13,6 @@ import (
 	"github.com/tinfoilsh/tinfoil-go/internal/testutil"
 )
 
-// TestLiveClientStreamingChat tests the streaming version with default parameters
 func TestLiveClientStreamingChat(t *testing.T) {
 	testutil.RequireLive(t, "TINFOIL_API_KEY")
 	apiKey := os.Getenv("TINFOIL_API_KEY")

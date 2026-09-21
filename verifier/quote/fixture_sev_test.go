@@ -51,8 +51,8 @@ func loadLiveFixture(t *testing.T, dir string) (*envelope.Document, [64]byte, []
 // single-request flow (evidence + collateral in one response). The VCEK
 // comes from the document's own collateral and the endorsement artifact
 // from the policy package's testdata; only the AMD CRL is fetched live
-// (captured fixtures predate the amd-crl entry). Skips when the workspace
-// fixture directory is not present or with -short.
+// (captured fixtures predate the amd-crl entry). Requires explicit live opt-in
+// without -short; also skips when the workspace fixture directory is absent.
 func TestLiveSEVFixture(t *testing.T) {
 	testutil.RequireLive(t)
 	doc, reportData, _ := loadLiveFixture(t, "box3-genoa-v3")

@@ -179,17 +179,32 @@ func TestLiveVerifySEV(t *testing.T) {
 	assert.ErrorContains(t, err, "no amd-crl endorsement collateral")
 }
 
-func TestLiveVerifySEVRejectsBadCRL(t *testing.T) {
-	testutil.RequireLive(t)
-	doc, _ := loadSEVFixture(t)
+func TestVerifySEVRejectsBadCRL(t *testing.T) {
+	raw, err := os.ReadFile(filepath.Join("sev", "testdata", "inf17.json"))
+	require.NoError(t, err)
+	var fixture struct {
+		Report string `json:"report_base64"`
+		VCEK   string `json:"vcek_der_base64"`
+	}
+	require.NoError(t, json.Unmarshal(raw, &fixture))
+	chain, err := os.ReadFile(filepath.Join("sev", "turin_cert_chain.pem"))
+	require.NoError(t, err)
+	vcek, err := json.Marshal(envelope.AMDVCEKCollateral{VCEKDERBase64: fixture.VCEK, CertChainPEM: string(chain)})
+	require.NoError(t, err)
 
 	badCRL, err := json.Marshal(envelope.AMDCRLCollateral{
 		CRLDERBase64: base64.StdEncoding.EncodeToString([]byte("not a crl")),
 	})
 	require.NoError(t, err)
-	doc.Collateral[1].Data = badCRL
+	doc := &envelope.Document{
+		CPUEvidence: envelope.CPUEvidence{Format: envelope.SEVSNPReportV1Format, ReportBase64: fixture.Report},
+		Collateral: []envelope.CollateralEntry{
+			{ID: "cpu-endorsement", Role: envelope.RoleEndorsement, Format: envelope.CollateralAMDVCEKV1Format, Subjects: []string{envelope.SubjectCPU}, Data: vcek},
+			{ID: "cpu-crl", Role: envelope.RoleEndorsement, Format: envelope.CollateralAMDCRLV1Format, Subjects: []string{envelope.SubjectCPU}, Data: badCRL},
+		},
+	}
 	_, err = Authenticate(doc)
-	assert.Error(t, err)
+	assert.ErrorContains(t, err, "parsing amd-crl collateral")
 }
 
 func TestVerifyUnknownFormat(t *testing.T) {

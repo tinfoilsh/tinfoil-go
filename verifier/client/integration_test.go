@@ -10,6 +10,12 @@ import (
 	"github.com/tinfoilsh/tinfoil-go/internal/testutil"
 )
 
+const (
+	enclaveEnvVar = "TINFOIL_ENCLAVE"
+	repoEnvVar    = "TINFOIL_REPO"
+	apiKeyEnvVar  = "TINFOIL_API_KEY"
+)
+
 // ChatCompletionRequest represents a chat completion request
 type ChatCompletionRequest struct {
 	Model    string    `json:"model"`
@@ -33,8 +39,8 @@ type Choice struct {
 }
 
 func TestLiveBasicChatCompletion(t *testing.T) {
-	testutil.RequireLive(t, "TINFOIL_ENCLAVE", "TINFOIL_REPO", "TINFOIL_API_KEY")
-	enclave, repo, apiKey := os.Getenv("TINFOIL_ENCLAVE"), os.Getenv("TINFOIL_REPO"), os.Getenv("TINFOIL_API_KEY")
+	testutil.RequireLive(t, enclaveEnvVar, repoEnvVar, apiKeyEnvVar)
+	enclave, repo, apiKey := os.Getenv(enclaveEnvVar), os.Getenv(repoEnvVar), os.Getenv(apiKeyEnvVar)
 
 	// Create secure client
 	client, err := NewSecureClient(enclave, repo, nil)

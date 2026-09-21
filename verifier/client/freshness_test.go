@@ -67,8 +67,8 @@ func TestClientFreshnessMaxAge(t *testing.T) {
 }
 
 func TestLiveVerifyFreshnessExpiration(t *testing.T) {
-	testutil.RequireLive(t, "TINFOIL_ENCLAVE", "TINFOIL_REPO")
-	host, repo := os.Getenv("TINFOIL_ENCLAVE"), os.Getenv("TINFOIL_REPO")
+	testutil.RequireLive(t, enclaveEnvVar, repoEnvVar)
+	host, repo := os.Getenv(enclaveEnvVar), os.Getenv(repoEnvVar)
 	nonce, err := envelope.RandomNonce()
 	require.NoError(t, err)
 	raw, err := envelope.Fetch(host, nonce)

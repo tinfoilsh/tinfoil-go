@@ -162,6 +162,9 @@ RUN_TINFOIL_INTEGRATION=true go test -race -count=1 -timeout 5m -run '^TestLive'
 Selected live tests fail when required configuration is missing. `-short` skips
 live tests regardless of opt-in. Tests do not load `.env` files automatically.
 
+Name external-service tests `TestLive*` and call `testutil.RequireLive` first,
+passing any required environment-variable names.
+
 ## Reporting Vulnerabilities
 
 Please report security vulnerabilities by emailing [security@tinfoil.sh](mailto:security@tinfoil.sh).

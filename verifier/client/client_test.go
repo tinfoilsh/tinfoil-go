@@ -33,9 +33,9 @@ func TestClientOptionsCopyPinnedRegisters(t *testing.T) {
 }
 
 func TestLiveVerify(t *testing.T) {
-	testutil.RequireLive(t, "TINFOIL_ENCLAVE", "TINFOIL_REPO")
-	enclave := os.Getenv("TINFOIL_ENCLAVE")
-	repo := os.Getenv("TINFOIL_REPO")
+	testutil.RequireLive(t, enclaveEnvVar, repoEnvVar)
+	enclave := os.Getenv(enclaveEnvVar)
+	repo := os.Getenv(repoEnvVar)
 
 	client, err := NewSecureClient(enclave, repo, nil)
 	require.NoError(t, err)
