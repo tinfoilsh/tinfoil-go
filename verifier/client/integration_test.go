@@ -7,30 +7,14 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/tinfoilsh/tinfoil-go/internal/testutil"
 )
-
-/*
-Run only when TINFOIL_* environment variables are present.
-The job that sets those vars lives in .github/workflows/integration.yml.
-*/
 
 const (
 	enclaveEnvVar = "TINFOIL_ENCLAVE"
 	repoEnvVar    = "TINFOIL_REPO"
 	apiKeyEnvVar  = "TINFOIL_API_KEY"
 )
-
-func skipIfMissingEnvVars(t *testing.T) (enclave, repo, apiKey string) {
-	enclave = os.Getenv(enclaveEnvVar)
-	repo = os.Getenv(repoEnvVar)
-	apiKey = os.Getenv(apiKeyEnvVar)
-
-	if enclave == "" || repo == "" || apiKey == "" {
-		t.Skipf("Missing Tinfoil integration settings: %s, %s, or %s not set", enclaveEnvVar, repoEnvVar, apiKeyEnvVar)
-	}
-
-	return enclave, repo, apiKey
-}
 
 // ChatCompletionRequest represents a chat completion request
 type ChatCompletionRequest struct {
@@ -54,8 +38,9 @@ type Choice struct {
 	Message Message `json:"message"`
 }
 
-func TestBasicChatCompletion(t *testing.T) {
-	enclave, repo, apiKey := skipIfMissingEnvVars(t)
+func TestLiveBasicChatCompletion(t *testing.T) {
+	testutil.RequireLive(t, enclaveEnvVar, repoEnvVar, apiKeyEnvVar)
+	enclave, repo, apiKey := os.Getenv(enclaveEnvVar), os.Getenv(repoEnvVar), os.Getenv(apiKeyEnvVar)
 
 	// Create secure client
 	client, err := NewSecureClient(enclave, repo, nil)

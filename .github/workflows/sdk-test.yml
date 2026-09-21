@@ -10,7 +10,7 @@ permissions: {}
 
 jobs:
   test:
-    name: Test
+    name: Local tests
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -31,10 +31,6 @@ jobs:
         run: go install github.com/gotesttools/gotestfmt/v2/cmd/gotestfmt@v2.5.0
 
       - name: Run tests
-        env:
-          TINFOIL_API_KEY: ${{ secrets.TINFOIL_API_KEY }}
-          TINFOIL_ENCLAVE: inference.tinfoil.sh
-          TINFOIL_REPO: tinfoilsh/confidential-model-router
         run: |
           set -euo pipefail
           go test -race -p 1 -json -v -covermode atomic -coverprofile=coverage.out ./... 2>&1 | tee /tmp/gotest.log | gotestfmt
@@ -54,3 +50,25 @@ jobs:
           name: coverage-report
           path: coverage.out
           if-no-files-found: error
+
+  live:
+    name: Live integration
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+        with:
+          go-version-file: go.mod
+      - name: Run live tests
+        env:
+          RUN_TINFOIL_INTEGRATION: 'true'
+          TINFOIL_API_KEY: ${{ secrets.TINFOIL_API_KEY }}
+          TINFOIL_ENCLAVE: inference.tinfoil.sh
+          TINFOIL_REPO: tinfoilsh/confidential-model-router
+        run: go test -race -p 1 -count=1 -timeout 5m -v -run '^TestLive' ./...

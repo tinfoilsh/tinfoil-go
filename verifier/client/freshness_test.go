@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
+	"github.com/tinfoilsh/tinfoil-go/internal/testutil"
 	"github.com/tinfoilsh/tinfoil-go/verifier/envelope"
 	"github.com/tinfoilsh/tinfoil-go/verifier/measurement"
 	"github.com/tinfoilsh/tinfoil-go/verifier/provenance"
@@ -65,11 +66,9 @@ func TestClientFreshnessMaxAge(t *testing.T) {
 	}
 }
 
-func TestVerifyFreshnessExpiration(t *testing.T) {
-	host, repo := os.Getenv("TINFOIL_ENCLAVE"), os.Getenv("TINFOIL_REPO")
-	if host == "" || repo == "" {
-		t.Skip("TINFOIL_ENCLAVE or TINFOIL_REPO not set")
-	}
+func TestLiveVerifyFreshnessExpiration(t *testing.T) {
+	testutil.RequireLive(t, enclaveEnvVar, repoEnvVar)
+	host, repo := os.Getenv(enclaveEnvVar), os.Getenv(repoEnvVar)
 	nonce, err := envelope.RandomNonce()
 	require.NoError(t, err)
 	raw, err := envelope.Fetch(host, nonce)

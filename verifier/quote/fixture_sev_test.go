@@ -10,6 +10,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/tinfoilsh/tinfoil-go/internal/testutil"
 
 	"github.com/tinfoilsh/tinfoil-go/verifier/envelope"
 	"github.com/tinfoilsh/tinfoil-go/verifier/policy"
@@ -45,17 +46,15 @@ func loadLiveFixture(t *testing.T, dir string) (*envelope.Document, [64]byte, []
 	return doc, reportData, nonce
 }
 
-// TestVerifyLiveFixtureSEV runs envelope and CPU-evidence verification
+// TestLiveSEVFixture runs envelope and CPU-evidence verification
 // against a v3 document captured from real SEV-SNP Genoa hardware over the
 // single-request flow (evidence + collateral in one response). The VCEK
 // comes from the document's own collateral and the endorsement artifact
 // from the policy package's testdata; only the AMD CRL is fetched live
-// (captured fixtures predate the amd-crl entry). Skips when the workspace
-// fixture directory is not present or with -short.
-func TestVerifyLiveFixtureSEV(t *testing.T) {
-	if testing.Short() {
-		t.Skip("fetches the AMD CRL live; skipped with -short")
-	}
+// (captured fixtures predate the amd-crl entry). Requires explicit live opt-in
+// without -short; also skips when the workspace fixture directory is absent.
+func TestLiveSEVFixture(t *testing.T) {
+	testutil.RequireLive(t)
 	doc, reportData, _ := loadLiveFixture(t, "box3-genoa-v3")
 
 	// The endorsed key material must be present and well-formed.

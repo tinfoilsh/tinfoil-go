@@ -10,6 +10,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/tinfoilsh/tinfoil-go/internal/testutil"
 	"github.com/tinfoilsh/tinfoil-go/verifier/measurement"
 )
 
@@ -31,12 +32,10 @@ func TestClientOptionsCopyPinnedRegisters(t *testing.T) {
 	assert.Equal(t, time.Hour, second.options.FreshnessMaxAge)
 }
 
-func TestVerify(t *testing.T) {
-	enclave := os.Getenv("TINFOIL_ENCLAVE")
-	repo := os.Getenv("TINFOIL_REPO")
-	if enclave == "" || repo == "" {
-		t.Skip("TINFOIL_ENCLAVE or TINFOIL_REPO not set")
-	}
+func TestLiveVerify(t *testing.T) {
+	testutil.RequireLive(t, enclaveEnvVar, repoEnvVar)
+	enclave := os.Getenv(enclaveEnvVar)
+	repo := os.Getenv(repoEnvVar)
 
 	client, err := NewSecureClient(enclave, repo, nil)
 	require.NoError(t, err)
@@ -99,7 +98,8 @@ func TestVerifierVersion(t *testing.T) {
 	}
 }
 
-func TestNewDefaultSecureClient(t *testing.T) {
+func TestLiveNewDefaultSecureClient(t *testing.T) {
+	testutil.RequireLive(t)
 	client, err := NewDefaultClient(nil)
 	assert.NoError(t, err)
 	assert.NotNil(t, client)
@@ -111,14 +111,16 @@ func TestNewDefaultSecureClient(t *testing.T) {
 	assert.NoError(t, err)
 }
 
-func TestClientFetchRouters(t *testing.T) {
+func TestLiveClientFetchRouters(t *testing.T) {
+	testutil.RequireLive(t)
 	routers, err := fetchRouters()
-	assert.NoError(t, err)
-	assert.Greater(t, len(routers), 0)
+	require.NoError(t, err)
+	require.NotEmpty(t, routers)
 	assert.True(t, strings.HasSuffix(routers[0], ".tinfoil.sh"))
 }
 
-func TestClientFallbackEnclave(t *testing.T) {
+func TestLiveClientFallbackEnclave(t *testing.T) {
+	testutil.RequireLive(t)
 	defaultClient, err := NewSecureClient("inference.tinfoil.sh", defaultRouterRepo, nil)
 	require.NoError(t, err)
 	enclave := defaultClient.Enclave()

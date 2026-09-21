@@ -151,9 +151,19 @@ This library is a drop-in replacement for the [official OpenAI Go client](https:
 
 ## Tests
 
-Run `go test -race ./...`. The suite includes live tests that need network access.
-Set `TINFOIL_API_KEY` for authenticated inference tests, and `TINFOIL_ENCLAVE` and
-`TINFOIL_REPO` for live verifier tests. Tests do not load `.env` files automatically.
+Run `go test -race ./...` for local tests. Live tests require explicit opt-in,
+even when credentials are present. Set `TINFOIL_API_KEY`, `TINFOIL_ENCLAVE`, and
+`TINFOIL_REPO`, then run:
+
+```sh
+RUN_TINFOIL_INTEGRATION=true go test -race -count=1 -timeout 5m -run '^TestLive' ./...
+```
+
+Selected live tests fail when required configuration is missing. `-short` skips
+live tests regardless of opt-in. Tests do not load `.env` files automatically.
+
+Name external-service tests `TestLive*` and call `testutil.RequireLive` first,
+passing any required environment-variable names.
 
 ## Reporting Vulnerabilities
 
