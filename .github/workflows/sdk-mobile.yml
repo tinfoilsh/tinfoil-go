@@ -22,7 +22,7 @@ concurrency:
 jobs:
   build:
     name: Build XCFramework and check Swift API
-    runs-on: macos-latest
+    runs-on: macos-26
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -33,7 +33,7 @@ jobs:
           go-version-file: go.mod
       - uses: maxim-lobanov/setup-xcode@ed7a3b1fda3918c0306d1b724322adc0b8cc0a90 # v1.7.0
         with:
-          xcode-version: latest-stable
+          xcode-version: '26.6'
       - name: Show toolchain versions
         run: |
           go version
