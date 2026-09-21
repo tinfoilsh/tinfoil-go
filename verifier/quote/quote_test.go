@@ -18,6 +18,7 @@ import (
 	sdkerrors "github.com/tinfoilsh/tinfoil-go/verifier/errors"
 	"github.com/tinfoilsh/tinfoil-go/verifier/measurement"
 	"github.com/tinfoilsh/tinfoil-go/verifier/policy"
+	"github.com/tinfoilsh/tinfoil-go/verifier/quote/tdx"
 	"github.com/tinfoilsh/tinfoil-go/verifier/util"
 )
 
@@ -246,6 +247,14 @@ func TestPinnedLayoutUsesAuthenticatedPlatform(t *testing.T) {
 		var config *sdkerrors.ConfigurationError
 		require.ErrorAs(t, err, &config, "phase callers receive the same pin validation as client options")
 	}
+}
+
+func TestMissingTDXShapePrecedesPolicyLookup(t *testing.T) {
+	q := &Authenticated{platform: policy.PlatformTDX, tdx: &tdx.Quote{}}
+	_, err := Assemble(&policy.Artifact{}, &measurement.Measurement{}, nil, nil, [64]byte{}, q)
+	var config *sdkerrors.ConfigurationError
+	require.ErrorAs(t, err, &config)
+	require.ErrorContains(t, err, "VM shape", "missing input must be reported before the unendorsed machine")
 }
 
 // asCode extracts the release registers from a guest measurement.

@@ -111,6 +111,9 @@ func Assemble(endorsements *policy.Artifact, code, pins *measurement.Measurement
 	if code == nil {
 		return nil, sdkerrors.Configuration(fmt.Errorf("assembling policy: expected code measurement is required"))
 	}
+	if q.platform == policy.PlatformTDX && shape == nil {
+		return nil, sdkerrors.Configuration(fmt.Errorf("assembling policy: the code artifact's VM shape is required"))
+	}
 	name, machinePolicy, err := endorsements.PolicyFor(q.identity, q.platform)
 	if err != nil {
 		return nil, err
@@ -127,9 +130,6 @@ func Assemble(endorsements *policy.Artifact, code, pins *measurement.Measurement
 	case policy.PlatformSEVSNP:
 		assembled.sev, err = sev.Assemble(machinePolicy.SEVSNP, q.sev, registers[0], reportData)
 	case policy.PlatformTDX:
-		if shape == nil {
-			return nil, sdkerrors.Configuration(fmt.Errorf("assembling policy: the code artifact's VM shape is required"))
-		}
 		assembled.tdx, assembled.PlatformMeasurementName, err = tdx.Assemble(
 			endorsements, machinePolicy.TDX, shape, q.tdx, [5]string(registers), reportData)
 	default:

@@ -14,6 +14,7 @@ import (
 )
 
 func TestTLSBindingUnsupportedDefaultTransport(t *testing.T) {
+	// DefaultTransport is the configuration under test; keep this test serial.
 	original := http.DefaultTransport
 	t.Cleanup(func() { http.DefaultTransport = original })
 	for _, transport := range []http.RoundTripper{roundTripFunc(func(*http.Request) (*http.Response, error) {
@@ -43,8 +44,7 @@ func TestRequestPreservesTLSCategoryAndMobilePrefix(t *testing.T) {
 			}))
 			defer server.Close()
 			original := http.DefaultTransport
-			transport := original.(*http.Transport).Clone()
-			transport.Proxy = nil
+			transport := &http.Transport{}
 			roots := x509.NewCertPool()
 			if trustCertificate {
 				roots.AddCert(server.Certificate())
