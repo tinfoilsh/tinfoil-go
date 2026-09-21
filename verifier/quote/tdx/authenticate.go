@@ -22,8 +22,8 @@ import (
 	tdxverify "github.com/google/go-tdx-guest/verify"
 	tdxtrust "github.com/google/go-tdx-guest/verify/trust"
 
+	"github.com/tinfoilsh/tinfoil-go/internal/errdefs"
 	"github.com/tinfoilsh/tinfoil-go/verifier/envelope"
-	sdkerrors "github.com/tinfoilsh/tinfoil-go/verifier/errors"
 	"github.com/tinfoilsh/tinfoil-go/verifier/measurement"
 )
 
@@ -48,9 +48,9 @@ func (q *Quote) Identity() string { return q.identity }
 // fetches. Callers must assemble a policy and validate before trusting the
 // platform.
 func Authenticate(doc *envelope.Document) (result *Quote, err error) {
-	defer func() { err = sdkerrors.WrapAttestation(err) }()
+	defer func() { err = errdefs.WrapAttestation(err) }()
 	if doc == nil {
-		return nil, sdkerrors.WrapConfiguration(fmt.Errorf("document is required"))
+		return nil, &errdefs.ConfigurationError{Err: fmt.Errorf("document is required")}
 	}
 	rawQuote, err := base64.StdEncoding.DecodeString(doc.CPUEvidence.ReportBase64)
 	if err != nil {

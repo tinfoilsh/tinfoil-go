@@ -6,8 +6,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/tinfoilsh/tinfoil-go/internal/errdefs"
 	"github.com/tinfoilsh/tinfoil-go/verifier/envelope"
-	sdkerrors "github.com/tinfoilsh/tinfoil-go/verifier/errors"
 	"github.com/tinfoilsh/tinfoil-go/verifier/measurement"
 	"github.com/tinfoilsh/tinfoil-go/verifier/provenance"
 	"github.com/tinfoilsh/tinfoil-go/verifier/quote"
@@ -46,9 +46,9 @@ func (v *VerifiedDocumentV3) HPKEPublicKey() (string, error) {
 }
 
 func (v *VerifiedDocumentV3) cryptoMaterialData(id, format string) (result string, err error) {
-	defer func() { err = sdkerrors.WrapAttestation(err) }()
+	defer func() { err = errdefs.WrapAttestation(err) }()
 	if v == nil {
-		return "", sdkerrors.WrapConfiguration(fmt.Errorf("verified document is required"))
+		return "", &ConfigurationError{Err: fmt.Errorf("verified document is required")}
 	}
 	for _, item := range v.CryptoMaterial {
 		if item.ID != id {
@@ -80,7 +80,7 @@ func (v *VerifiedDocumentV3) validateTransportKeys() error {
 // Callers must bind traffic to the returned keys and enforce FreshnessExpiresAt.
 func VerifyDocumentV3(docBytes, nonce []byte, repo string, opts *VerificationOptions) (*VerifiedDocumentV3, error) {
 	if _, _, _, err := provenance.ParseReference(repo); err != nil {
-		return nil, sdkerrors.WrapConfiguration(err)
+		return nil, errdefs.WrapConfiguration(err)
 	}
 	options, err := opts.normalized()
 	if err != nil {
@@ -93,7 +93,7 @@ func VerifyDocumentV3(docBytes, nonce []byte, repo string, opts *VerificationOpt
 
 	code, endorsements, freshnessExpiresAt, err := authenticateReferenceValues(doc, repo, options.FreshnessMaxAge)
 	if err != nil {
-		return nil, sdkerrors.WrapAttestation(fmt.Errorf("reference values: %w", err))
+		return nil, errdefs.WrapAttestation(fmt.Errorf("reference values: %w", err))
 	}
 
 	_, authenticated, err := quote.Verify(doc, endorsements.Artifact, code.Measurement, options.PinnedRegisters, code.Shape, expectedReportData)

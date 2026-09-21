@@ -10,9 +10,9 @@ import (
 
 	"github.com/stretchr/testify/require"
 	tinfoil "github.com/tinfoilsh/tinfoil-go"
+	"github.com/tinfoilsh/tinfoil-go/internal/errdefs"
 	"github.com/tinfoilsh/tinfoil-go/verifier/client"
 	"github.com/tinfoilsh/tinfoil-go/verifier/envelope"
-	sdkerrors "github.com/tinfoilsh/tinfoil-go/verifier/errors"
 	"github.com/tinfoilsh/tinfoil-go/verifier/measurement"
 	"github.com/tinfoilsh/tinfoil-go/verifier/policy"
 	"github.com/tinfoilsh/tinfoil-go/verifier/quote"
@@ -27,9 +27,9 @@ func TestErrorContract(t *testing.T) {
 		wrap   func(error) error
 		target any
 	}{
-		{"configuration", sdkerrors.WrapConfiguration, new(*tinfoil.ConfigurationError)},
-		{"fetch", sdkerrors.WrapFetch, new(*tinfoil.FetchError)},
-		{"attestation", sdkerrors.WrapAttestation, new(*tinfoil.AttestationError)},
+		{"configuration", errdefs.WrapConfiguration, new(*tinfoil.ConfigurationError)},
+		{"fetch", errdefs.WrapFetch, new(*tinfoil.FetchError)},
+		{"attestation", errdefs.WrapAttestation, new(*tinfoil.AttestationError)},
 	} {
 		t.Run(tc.prefix, func(t *testing.T) {
 			err := tc.wrap(cause)
@@ -41,7 +41,7 @@ func TestErrorContract(t *testing.T) {
 			require.Same(t, cause, networkError)
 			require.ErrorIs(t, err, context.DeadlineExceeded)
 			require.Equal(t, tc.prefix+" error: "+cause.Error(), err.Error(), "gomobile prefix contract")
-			for _, wrap := range []func(error) error{sdkerrors.WrapConfiguration, sdkerrors.WrapFetch, sdkerrors.WrapAttestation} {
+			for _, wrap := range []func(error) error{errdefs.WrapConfiguration, errdefs.WrapFetch, errdefs.WrapAttestation} {
 				require.Nil(t, wrap(nil))
 				for _, classified := range []error{err, fmt.Errorf("context: %w", err), errors.Join(err, context.Canceled)} {
 					require.Same(t, classified, wrap(classified), "do not reclassify or double-wrap SDK errors")

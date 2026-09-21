@@ -1,11 +1,11 @@
 package client
 
-import sdkerrors "github.com/tinfoilsh/tinfoil-go/verifier/errors"
+import "github.com/tinfoilsh/tinfoil-go/internal/errdefs"
 
 // SDK error categories support errors.As; their causes support errors.Is.
 type (
-	Error              = sdkerrors.Error
-	ConfigurationError = sdkerrors.ConfigurationError
-	FetchError         = sdkerrors.FetchError
-	AttestationError   = sdkerrors.AttestationError
+	Error              = errdefs.Error
+	ConfigurationError = errdefs.ConfigurationError
+	FetchError         = errdefs.FetchError
+	AttestationError   = errdefs.AttestationError
 )
