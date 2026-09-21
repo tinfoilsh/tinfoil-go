@@ -15,10 +15,15 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build:
     name: Build XCFramework and check Swift API
-    runs-on: macos-latest
+    runs-on: macos-26
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
@@ -28,14 +33,23 @@ jobs:
           go-version-file: go.mod
       - uses: maxim-lobanov/setup-xcode@ed7a3b1fda3918c0306d1b724322adc0b8cc0a90 # v1.7.0
         with:
-          xcode-version: latest-stable
+          xcode-version: '26.6'
+      - name: Show toolchain versions
+        run: |
+          go version
+          xcodebuild -version
+          swift --version
       - name: Set up gomobile
         run: bash scripts/setup-mobile.sh
       - name: Build XCFramework
         run: bash scripts/build-mobile.sh
       - name: Type-check Swift API
         run: |
+          shopt -s nullglob
           frameworks=(Tinfoil.xcframework/macos-*/Tinfoil.framework)
+          if [[ ${#frameworks[@]} -ne 1 ]]; then
+            echo "Expected one macOS framework slice, found ${#frameworks[@]}" >&2
+            exit 1
+          fi
           framework="${frameworks[0]}"
-          test -d "$framework"
           swiftc -typecheck -F "$(dirname "$framework")" tests/mobile/Smoke.swift
