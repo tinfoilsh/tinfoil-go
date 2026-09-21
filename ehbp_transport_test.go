@@ -18,6 +18,8 @@ import (
 	ehbpidentity "github.com/tinfoilsh/encrypted-http-body-protocol/identity"
 	"github.com/tinfoilsh/tinfoil-go/verifier/client"
 	"github.com/tinfoilsh/tinfoil-go/verifier/envelope"
+	"github.com/tinfoilsh/tinfoil-go/verifier/measurement"
+	"github.com/tinfoilsh/tinfoil-go/verifier/policy"
 )
 
 type roundTripFunc func(*http.Request) (*http.Response, error)
@@ -87,6 +89,24 @@ func TestNewClientWithOptionsRequiresEnclaveForCustomRepo(t *testing.T) {
 		c, err := NewClientWithOptions(opt)
 		require.Nil(t, c)
 		require.ErrorContains(t, err, "requires an enclave")
+	}
+}
+
+func TestNewClientWithOptionsRejectsInvalidWorkloadPolicy(t *testing.T) {
+	const registerBytes = 48
+	code := &measurement.CodeMeasurement{SNPMeasurement: strings.Repeat("ab", registerBytes)}
+	for name, options := range map[string][]ClientOption{
+		"discovery":             {WithVerificationOptions(client.VerificationOptions{PinnedCode: code})},
+		"custom source":         {WithEnclave("enclave.example"), WithRepo("org/repo"), WithVerificationOptions(client.VerificationOptions{PinnedCode: code})},
+		"empty code":            {WithEnclave("enclave.example"), WithVerificationOptions(client.VerificationOptions{PinnedCode: &measurement.CodeMeasurement{}})},
+		"register pin conflict": {WithEnclave("enclave.example"), WithVerificationOptions(client.VerificationOptions{PinnedCode: code, PinnedRegisters: &measurement.Measurement{}})},
+		"shape without pin":     {WithEnclave("enclave.example"), WithVerificationOptions(client.VerificationOptions{PinnedShape: &policy.Shape{}})},
+	} {
+		t.Run(name, func(t *testing.T) {
+			c, err := NewClientWithOptions(options...)
+			require.Error(t, err)
+			require.Nil(t, c)
+		})
 	}
 }
 

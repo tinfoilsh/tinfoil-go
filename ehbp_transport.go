@@ -121,6 +121,15 @@ func NewClientWithOptions(opts ...ClientOption) (*Client, error) {
 	if cfg.enclave == "" && cfg.repo != defaultConfigRepo {
 		return nil, fmt.Errorf("custom repository requires an enclave")
 	}
+	if cfg.verification.PinnedCode != nil {
+		if cfg.enclave == "" {
+			return nil, fmt.Errorf("PinnedCode requires WithEnclave")
+		}
+		if cfg.repo != defaultConfigRepo {
+			return nil, fmt.Errorf("PinnedCode cannot be combined with a custom WithRepo")
+		}
+		cfg.repo = ""
+	}
 
 	var secureClient *client.SecureClient
 	var err error

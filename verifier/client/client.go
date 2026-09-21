@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/tinfoilsh/tinfoil-go/verifier/measurement"
+	"github.com/tinfoilsh/tinfoil-go/verifier/policy"
 	"github.com/tinfoilsh/tinfoil-go/verifier/provenance"
 	"github.com/tinfoilsh/tinfoil-go/verifier/util"
 )
@@ -47,11 +48,16 @@ func fetchRouters() ([]string, error) {
 type VerificationOptions struct {
 	// PinnedRegisters adds register checks; empty entries retain defaults.
 	PinnedRegisters *measurement.Measurement `json:"pinned_registers,omitempty"`
+	// PinnedCode replaces code provenance with trusted release workload registers.
+	// Requires an empty source repository and cannot be combined with PinnedRegisters.
+	PinnedCode *measurement.CodeMeasurement `json:"pinned_code,omitempty"`
+	// PinnedShape supplies the release's VM shape when PinnedCode targets TDX.
+	PinnedShape *policy.Shape `json:"pinned_shape,omitempty"`
 	// FreshnessMaxAge defaults to seven days when zero. Negative ages are invalid.
 	FreshnessMaxAge time.Duration `json:"freshness_max_age_ns,omitempty"`
 }
 
-func (input *VerificationOptions) normalized() (VerificationOptions, error) {
+func (input *VerificationOptions) normalized(repo string) (VerificationOptions, error) {
 	var opts VerificationOptions
 	if input != nil {
 		opts = *input
@@ -61,21 +67,57 @@ func (input *VerificationOptions) normalized() (VerificationOptions, error) {
 	}
 	opts.FreshnessMaxAge = cmp.Or(opts.FreshnessMaxAge, provenance.MaxFreshnessAge)
 	opts.PinnedRegisters = cloneMeasurement(opts.PinnedRegisters)
+	if opts.PinnedCode == nil {
+		if opts.PinnedShape != nil {
+			return VerificationOptions{}, fmt.Errorf("PinnedShape requires PinnedCode")
+		}
+		return opts, nil
+	}
+	if repo != "" {
+		return VerificationOptions{}, fmt.Errorf("PinnedCode cannot be combined with a source repository")
+	}
+	if opts.PinnedRegisters != nil {
+		return VerificationOptions{}, fmt.Errorf("PinnedCode cannot be combined with PinnedRegisters")
+	}
+	code, err := measurement.ValidateCode(opts.PinnedCode)
+	if err != nil {
+		return VerificationOptions{}, fmt.Errorf("invalid pinned code: %w", err)
+	}
+	opts.PinnedCode = code
+	if opts.PinnedShape != nil {
+		shape := *opts.PinnedShape
+		if shape.CPUs < 0 || shape.MemoryMB < 0 || shape.Disks < 0 || shape.GPUs != nil && *shape.GPUs < 0 {
+			return VerificationOptions{}, fmt.Errorf("pinned VM shape dimensions must be non-negative")
+		}
+		if shape.GPUs != nil {
+			gpus := *shape.GPUs
+			shape.GPUs = &gpus
+		}
+		opts.PinnedShape = &shape
+	} else if code.TDXMeasurement != nil && code.SNPMeasurement == "" {
+		return VerificationOptions{}, fmt.Errorf("a TDX workload pin requires PinnedShape")
+	}
 	return opts, nil
 }
 
 // NewSecureClient creates a secure client for an enclave and repository
 // reference, owner/name[@tag][@sha256:digest]. Verification happens on first use.
 func NewSecureClient(enclave, repo string, opts *VerificationOptions) (*SecureClient, error) {
-	options, err := opts.normalized()
+	options, err := opts.normalized(repo)
 	if err != nil {
 		return nil, err
+	}
+	if options.PinnedCode != nil && enclave == "" {
+		return nil, fmt.Errorf("PinnedCode requires an explicit enclave")
 	}
 	return &SecureClient{enclave: enclave, repo: repo, options: options}, nil
 }
 
 // NewDefaultClient applies opts to every discovered router and fallback.
 func NewDefaultClient(opts *VerificationOptions) (*SecureClient, error) {
+	if opts != nil && opts.PinnedCode != nil {
+		return nil, fmt.Errorf("PinnedCode requires an explicit enclave")
+	}
 	fallback, err := NewSecureClient("inference.tinfoil.sh", defaultRouterRepo, opts)
 	if err != nil {
 		return nil, err
