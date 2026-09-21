@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -93,7 +94,8 @@ func TestLiveVerifyFreshnessExpiration(t *testing.T) {
 		require.Equal(t, *custom, mobileResult, "mobile callers receive the same keys, measurements, and expiry")
 	}
 	badPins := cloneMeasurement(verified.EnclaveMeasurement)
-	badPins.Registers[0] = "bad"
+	badPins.Registers[0] = strings.Repeat("ab", 48)
+	require.NotEqual(t, verified.EnclaveMeasurement.Registers[0], badPins.Registers[0])
 	_, err = VerifyDocumentV3(raw, nonce, repo, &VerificationOptions{PinnedRegisters: badPins})
 	var attestation *AttestationError
 	require.ErrorAs(t, err, &attestation)

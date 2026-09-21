@@ -9,6 +9,8 @@ import (
 	"fmt"
 	"net/http"
 	"sync"
+
+	sdkerrors "github.com/tinfoilsh/tinfoil-go/verifier/errors"
 )
 
 var (
@@ -21,17 +23,23 @@ type TLSBoundRoundTripper struct {
 	ExpectedPublicKey string
 	once              sync.Once
 	transport         *http.Transport
+	err               error
 }
 
 var _ http.RoundTripper = &TLSBoundRoundTripper{}
 
-func (t *TLSBoundRoundTripper) getTransport() *http.Transport {
+func (t *TLSBoundRoundTripper) getTransport() (*http.Transport, error) {
 	t.once.Do(func() {
 		// Clone DefaultTransport settings for timeouts, proxy, keep-alive, etc.
 		// then verify the attested public key after normal TLS verification.
 		// VerifyConnection runs for direct HTTPS and HTTPS-over-CONNECT proxy
 		// connections; DialTLSContext only covers non-proxied HTTPS.
-		dt := http.DefaultTransport.(*http.Transport).Clone()
+		dt, ok := http.DefaultTransport.(*http.Transport)
+		if !ok || dt == nil {
+			t.err = &ConfigurationError{Err: fmt.Errorf("TLS binding requires http.DefaultTransport to be a non-nil *http.Transport")}
+			return
+		}
+		dt = dt.Clone()
 
 		tlsConfig := &tls.Config{}
 		if dt.TLSClientConfig != nil {
@@ -41,7 +49,7 @@ func (t *TLSBoundRoundTripper) getTransport() *http.Transport {
 		tlsConfig.VerifyConnection = func(state tls.ConnectionState) error {
 			if prevVerifyConnection != nil {
 				if err := prevVerifyConnection(state); err != nil {
-					return err
+					return sdkerrors.Attestation(err)
 				}
 			}
 
@@ -58,7 +66,7 @@ func (t *TLSBoundRoundTripper) getTransport() *http.Transport {
 		dt.TLSClientConfig = tlsConfig
 		t.transport = dt
 	})
-	return t.transport
+	return t.transport, t.err
 }
 
 func (t *TLSBoundRoundTripper) RoundTrip(r *http.Request) (*http.Response, error) {
@@ -70,11 +78,21 @@ func (t *TLSBoundRoundTripper) RoundTrip(r *http.Request) (*http.Response, error
 		return nil, &ConfigurationError{Err: ErrNoTLS}
 	}
 
-	return t.getTransport().RoundTrip(r)
+	transport, err := t.getTransport()
+	if err != nil {
+		return nil, err
+	}
+	resp, err := transport.RoundTrip(r)
+	if isCertificateError(err) {
+		err = sdkerrors.Attestation(err)
+	}
+	return resp, err
 }
 
 func (t *TLSBoundRoundTripper) CloseIdleConnections() {
-	t.getTransport().CloseIdleConnections()
+	if transport, err := t.getTransport(); err == nil {
+		transport.CloseIdleConnections()
+	}
 }
 
 // CertPubkeyFP returns the SPKI SHA-256 fingerprint of a certificate's

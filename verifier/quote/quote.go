@@ -19,6 +19,7 @@ import (
 
 	"github.com/tinfoilsh/tinfoil-go/verifier/envelope"
 	sdkerrors "github.com/tinfoilsh/tinfoil-go/verifier/errors"
+	"github.com/tinfoilsh/tinfoil-go/verifier/internal/pinning"
 	"github.com/tinfoilsh/tinfoil-go/verifier/measurement"
 	"github.com/tinfoilsh/tinfoil-go/verifier/policy"
 	"github.com/tinfoilsh/tinfoil-go/verifier/quote/sev"
@@ -175,6 +176,9 @@ func Verify(doc *envelope.Document, endorsements *policy.Artifact, code, pins *m
 
 // layout maps code and pins to enclave registers, leaving platform defaults empty.
 func layout(code, pins *measurement.Measurement, q *Authenticated) ([]string, error) {
+	if err := pinning.Validate(pins); err != nil {
+		return nil, sdkerrors.Configuration(err)
+	}
 	if code.Type != measurement.SnpTdxMultiPlatformV1 || len(code.Registers) != 3 {
 		return nil, fmt.Errorf("code measurement is %s with %d registers, want %s with 3", code.Type, len(code.Registers), measurement.SnpTdxMultiPlatformV1)
 	}

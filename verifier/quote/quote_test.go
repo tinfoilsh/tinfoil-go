@@ -15,6 +15,7 @@ import (
 	"github.com/tinfoilsh/tinfoil-go/internal/testutil"
 
 	"github.com/tinfoilsh/tinfoil-go/verifier/envelope"
+	sdkerrors "github.com/tinfoilsh/tinfoil-go/verifier/errors"
 	"github.com/tinfoilsh/tinfoil-go/verifier/measurement"
 	"github.com/tinfoilsh/tinfoil-go/verifier/policy"
 	"github.com/tinfoilsh/tinfoil-go/verifier/util"
@@ -233,8 +234,18 @@ func TestPinnedLayoutUsesAuthenticatedPlatform(t *testing.T) {
 	require.NoError(t, err, "the caller-controlled measurement summary is not an input to policy")
 	assert.Equal(t, []string{"", "", register, register, register}, got)
 	pins.Type = measurement.SevGuestV2
+	pins.Registers = []string{register}
 	_, err = layout(code, pins, q)
 	assert.ErrorContains(t, err, "pinned measurement")
+	for _, malformed := range []*measurement.Measurement{
+		{Type: "unknown"},
+		{Type: measurement.SevGuestV2, Registers: []string{}},
+		{Type: measurement.TdxGuestV2, Registers: []string{4: "bad"}},
+	} {
+		_, err = layout(code, malformed, q)
+		var config *sdkerrors.ConfigurationError
+		require.ErrorAs(t, err, &config, "phase callers receive the same pin validation as client options")
+	}
 }
 
 // asCode extracts the release registers from a guest measurement.

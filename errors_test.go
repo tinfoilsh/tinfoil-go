@@ -13,6 +13,7 @@ import (
 	"github.com/tinfoilsh/tinfoil-go/verifier/client"
 	"github.com/tinfoilsh/tinfoil-go/verifier/envelope"
 	sdkerrors "github.com/tinfoilsh/tinfoil-go/verifier/errors"
+	"github.com/tinfoilsh/tinfoil-go/verifier/measurement"
 	"github.com/tinfoilsh/tinfoil-go/verifier/policy"
 	"github.com/tinfoilsh/tinfoil-go/verifier/quote"
 	"github.com/tinfoilsh/tinfoil-go/verifier/quote/sev"
@@ -103,4 +104,30 @@ func TestPublicInputErrors(t *testing.T) {
 	var attestation *tinfoil.AttestationError
 	_, err = client.VerifyDocumentV3([]byte(`{}`), make([]byte, envelope.NonceSize), "org/repo", nil)
 	require.ErrorAs(t, err, &attestation, "malformed evidence is not a caller configuration error")
+}
+
+func TestMalformedPinsAreConfigurationErrors(t *testing.T) {
+	for _, pins := range []*measurement.Measurement{
+		{Type: "unknown"},
+		{Type: measurement.SevGuestV2},
+		{Type: measurement.TdxGuestV2, Registers: []string{""}},
+		{Type: measurement.SevGuestV2, Registers: []string{"bad"}},
+		{Type: measurement.TdxGuestV2, Registers: []string{4: strings.Repeat("zz", 48)}},
+	} {
+		opts := &client.VerificationOptions{PinnedRegisters: pins}
+		_, err := client.NewSecureClient("enclave.example", "org/repo", opts)
+		var config *tinfoil.ConfigurationError
+		require.ErrorAs(t, err, &config)
+		_, err = client.NewDefaultClient(opts)
+		require.ErrorAs(t, err, &config, "reject malformed pins before discovery")
+		_, err = client.VerifyDocumentV3(nil, nil, "org/repo", opts)
+		require.ErrorAs(t, err, &config)
+	}
+	for _, pins := range []*measurement.Measurement{
+		{Type: measurement.SevGuestV2, Registers: []string{strings.Repeat("AB", 48)}},
+		{Type: measurement.TdxGuestV2, Registers: []string{4: ""}},
+	} {
+		_, err := client.NewSecureClient("enclave.example", "org/repo", &client.VerificationOptions{PinnedRegisters: pins})
+		require.NoError(t, err, "valid uppercase and sparse pins remain supported")
+	}
 }

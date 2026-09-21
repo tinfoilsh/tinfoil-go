@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/tinfoilsh/tinfoil-go/verifier/internal/pinning"
 	"github.com/tinfoilsh/tinfoil-go/verifier/measurement"
 	"github.com/tinfoilsh/tinfoil-go/verifier/provenance"
 	"github.com/tinfoilsh/tinfoil-go/verifier/util"
@@ -61,6 +62,9 @@ func (input *VerificationOptions) normalized() (VerificationOptions, error) {
 	}
 	opts.FreshnessMaxAge = cmp.Or(opts.FreshnessMaxAge, provenance.MaxFreshnessAge)
 	opts.PinnedRegisters = cloneMeasurement(opts.PinnedRegisters)
+	if err := pinning.Validate(opts.PinnedRegisters); err != nil {
+		return VerificationOptions{}, &ConfigurationError{Err: err}
+	}
 	return opts, nil
 }
 
@@ -138,7 +142,8 @@ func (s *SecureClient) HTTPClient() (*http.Client, error) {
 }
 
 // Request sends an HTTPS request. headersJSON is a JSON object or empty.
-func (s *SecureClient) Request(method, url, headersJSON string, body []byte) (*Response, error) {
+func (s *SecureClient) Request(method, url, headersJSON string, body []byte) (result *Response, err error) {
+	defer func() { err = mobileError(err) }()
 	req, err := http.NewRequest(method, url, bytes.NewReader(body))
 	if err != nil {
 		return nil, &ConfigurationError{Err: err}
