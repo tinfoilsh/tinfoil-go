@@ -79,8 +79,8 @@ func (v *VerifiedDocumentV3) validateTransportKeys() error {
 // A nil policy uses defaults. repo is a trusted owner/name[@tag][@sha256:digest].
 // Callers must bind traffic to the returned keys and enforce FreshnessExpiresAt.
 func VerifyDocumentV3(docBytes, nonce []byte, repo string, opts *VerificationOptions) (*VerifiedDocumentV3, error) {
-	if strings.TrimSpace(repo) == "" {
-		return nil, sdkerrors.Configuration(fmt.Errorf("code repository is required"))
+	if _, _, _, err := provenance.ParseReference(repo); err != nil {
+		return nil, sdkerrors.Configuration(err)
 	}
 	options, err := opts.normalized()
 	if err != nil {

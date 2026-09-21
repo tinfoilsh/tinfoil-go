@@ -75,7 +75,7 @@ func WithTransport(mode TransportMode) ClientOption {
 	return func(c *clientConfig) { c.transport = mode }
 }
 
-// WithBaseURL routes requests through the given base URL (for example your own
+// WithBaseURL routes requests through the given HTTPS base URL (for example your own
 // proxy) instead of sending them directly to the enclave. Request bodies stay
 // encrypted end-to-end to the verified enclave; when the base URL's origin
 // differs from the enclave's, the SDK adds the X-Tinfoil-Enclave-Url header so
@@ -117,8 +117,12 @@ func NewClientWithOptions(opts ...ClientOption) (*Client, error) {
 		return nil, &ConfigurationError{Err: fmt.Errorf("unknown transport mode: %q", cfg.transport)}
 	}
 	if cfg.baseURLSet {
-		if _, err := originOf(cfg.baseURL); err != nil {
+		origin, err := originOf(cfg.baseURL)
+		if err != nil {
 			return nil, &ConfigurationError{Err: fmt.Errorf("invalid base URL: %w", err)}
+		}
+		if !strings.HasPrefix(origin, "https://") {
+			return nil, &ConfigurationError{Err: fmt.Errorf("invalid base URL: HTTPS is required to protect request headers")}
 		}
 	}
 	if cfg.enclave == "" && cfg.repo != defaultConfigRepo {
@@ -145,13 +149,10 @@ func secureHTTPClient(secureClient *client.SecureClient, mode TransportMode, bas
 		httpClient *http.Client
 		err        error
 	)
-	switch mode {
-	case TransportTLS:
+	if mode == TransportTLS {
 		httpClient, err = secureClient.HTTPClient()
-	case TransportEHBP, "":
+	} else {
 		httpClient, err = ehbpHTTPClient(secureClient, baseURL)
-	default:
-		return nil, &ConfigurationError{Err: fmt.Errorf("unknown transport mode: %q", mode)}
 	}
 	if err != nil {
 		return nil, err

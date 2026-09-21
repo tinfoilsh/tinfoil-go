@@ -70,7 +70,7 @@ func TestProxyClientOptionsApply(t *testing.T) {
 }
 
 func TestNewClientWithOptionsRejectsInvalidBaseURL(t *testing.T) {
-	for _, baseURL := range []string{"", "proxy.example.com", "ftp://proxy.example.com", "://"} {
+	for _, baseURL := range []string{"", "proxy.example.com", "ftp://proxy.example.com", "://", "http://proxy.example.com/v1"} {
 		t.Run(baseURL, func(t *testing.T) {
 			_, err := NewClientWithOptions(WithBaseURL(baseURL))
 			var config *ConfigurationError

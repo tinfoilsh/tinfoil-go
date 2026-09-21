@@ -131,6 +131,8 @@ case errors.As(err, &fetch):
 	// Attestation material could not be fetched; retry may help.
 case errors.As(err, &attestation):
 	// Verification or channel binding failed; do not trust this result.
+default:
+	return err
 }
 ```
 

@@ -142,6 +142,15 @@ var sha256DigestRE = regexp.MustCompile(`^[0-9a-f]{64}$`)
 // refRE matches owner/name[@tag][@sha256:digest]; the tag group is lazy so @sha256: alone is a digest.
 var refRE = regexp.MustCompile(`^([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)(?:@([^@\s~^:?*\[\\]+))??(?:@sha256:([0-9a-f]{64}))?$`)
 
+// ParseReference validates owner/name[@tag][@sha256:digest] and returns its parts.
+func ParseReference(ref string) (repo, tag, digest string, err error) {
+	match := refRE.FindStringSubmatch(ref)
+	if match == nil {
+		return "", "", "", fmt.Errorf("invalid release reference %q: want owner/name[@tag][@sha256:digest]", ref)
+	}
+	return match[1], match[2], match[3], nil
+}
+
 // signingIdentity returns the anchored SAN regex accepted for artifacts
 // signed from repo: one workflow file directly under the repository's
 // .github/workflows directory, run from a tag ref. The repository name is
@@ -286,13 +295,12 @@ type Code struct {
 // AuthenticateCode verifies code provenance against owner/name[@tag][@sha256:digest].
 // Pins in ref take precedence over the document's tag and digest hints.
 func (c *Client) AuthenticateCode(bundleJSON []byte, ref, tag, hexDigest string) (*Code, error) {
-	match := refRE.FindStringSubmatch(ref)
-	if match == nil {
-		return nil, fmt.Errorf("invalid release reference %q: want owner/name[@tag][@sha256:digest]", ref)
+	repo, pinnedTag, pinnedDigest, err := ParseReference(ref)
+	if err != nil {
+		return nil, err
 	}
-	repo := match[1]
-	tag = cmp.Or(match[2], tag)
-	hexDigest = cmp.Or(match[3], hexDigest)
+	tag = cmp.Or(pinnedTag, tag)
+	hexDigest = cmp.Or(pinnedDigest, hexDigest)
 	result, err := c.verifyBundle(bundleJSON, repo, hexDigest)
 	if err != nil {
 		return nil, fmt.Errorf("verifying bundle: %w", err)

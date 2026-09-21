@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -59,6 +60,17 @@ func TestPublicInputErrors(t *testing.T) {
 	require.ErrorAs(t, err, &config)
 	_, err = client.NewSecureClient("enclave.example", "", nil)
 	require.ErrorAs(t, err, &config, "reject missing trust configuration before fetching")
+	for _, repo := range []string{"owner", "owner/repo/extra", "owner/repo@sha256:bad"} {
+		_, err = client.NewSecureClient("enclave.example", repo, nil)
+		require.ErrorAs(t, err, &config)
+		_, err = client.VerifyDocumentV3(nil, nil, repo, nil)
+		require.ErrorAs(t, err, &config)
+	}
+	_, err = client.NewSecureClient("enclave.example", "org/repo@v1@sha256:"+strings.Repeat("a", 64), nil)
+	require.NoError(t, err)
+	var absent *client.SecureClient
+	_, err = absent.Verify()
+	require.ErrorAs(t, err, &config)
 	s, err := client.NewSecureClient("enclave.example", "org/repo", nil)
 	require.NoError(t, err)
 	_, err = s.Request("GET", "://", "", nil)

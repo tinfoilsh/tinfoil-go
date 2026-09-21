@@ -95,11 +95,12 @@ func TestLiveVerifyFreshnessExpiration(t *testing.T) {
 	badPins := cloneMeasurement(verified.EnclaveMeasurement)
 	badPins.Registers[0] = "bad"
 	_, err = VerifyDocumentV3(raw, nonce, repo, &VerificationOptions{PinnedRegisters: badPins})
-	require.ErrorContains(t, err, "cpu evidence")
+	var attestation *AttestationError
+	require.ErrorAs(t, err, &attestation)
 	s, err := NewDefaultClient(&VerificationOptions{PinnedRegisters: badPins, FreshnessMaxAge: maxAge})
 	require.NoError(t, err)
 	_, err = s.Verify()
-	require.ErrorContains(t, err, "cpu evidence")
+	require.ErrorAs(t, err, &attestation)
 	doc, err := envelope.Parse(raw)
 	require.NoError(t, err)
 	codeRef, err := doc.ReferenceValuesCollateral(envelope.CollateralSigstoreCodeV1Format)

@@ -67,8 +67,8 @@ func (input *VerificationOptions) normalized() (VerificationOptions, error) {
 // NewSecureClient creates a secure client for an enclave and repository
 // reference, owner/name[@tag][@sha256:digest]. Verification happens on first use.
 func NewSecureClient(enclave, repo string, opts *VerificationOptions) (*SecureClient, error) {
-	if repo == "" {
-		return nil, &ConfigurationError{Err: fmt.Errorf("code repository is required")}
+	if _, _, _, err := provenance.ParseReference(repo); err != nil {
+		return nil, &ConfigurationError{Err: err}
 	}
 	options, err := opts.normalized()
 	if err != nil {

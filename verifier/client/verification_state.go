@@ -18,6 +18,9 @@ type verificationCall struct {
 // verifiedState shares one refresh (including its failure) across all waiters.
 // A key-rotation retry can reuse a newer snapshot installed by another caller.
 func (s *SecureClient) verifiedState(ctx context.Context, observed *VerifiedDocumentV3, force bool) (*VerifiedDocumentV3, error) {
+	if s == nil {
+		return nil, &ConfigurationError{Err: errors.New("secure client is required")}
+	}
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
