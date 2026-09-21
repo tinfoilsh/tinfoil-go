@@ -10,7 +10,7 @@ import (
 
 func TestCryptoMaterialData(t *testing.T) {
 	const futureFormat = "https://example.com/key/future/v1"
-	deadline := time.Date(2026, 9, 21, 0, 0, 0, 0, time.UTC)
+	deadline := time.Now().Add(-time.Hour)
 	v := &VerifiedDocumentV3{
 		FreshnessExpiresAt: deadline,
 		CryptoMaterial: []envelope.CryptoMaterialItem{

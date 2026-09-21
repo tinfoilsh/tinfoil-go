@@ -1,6 +1,10 @@
 package envelope
 
 import (
+	"crypto/ecdh"
+	"crypto/ecdsa"
+	"crypto/ed25519"
+	"crypto/elliptic"
 	"crypto/sha256"
 	"crypto/x509"
 	"encoding/base64"
@@ -28,12 +32,25 @@ func TestAttestedKeyEnvelopeVectors(t *testing.T) {
 		ReportData     string             `json:"report_data"`
 	}
 	require.NoError(t, json.Unmarshal(data, &vectors))
+	require.Len(t, vectors, 3)
 	for _, v := range vectors {
 		t.Run(v.Algorithm, func(t *testing.T) {
 			pub, err := hex.DecodeString(v.Item.Data)
 			require.NoError(t, err)
-			_, err = x509.ParsePKIXPublicKey(pub)
+			key, err := x509.ParsePKIXPublicKey(pub)
 			require.NoError(t, err)
+			switch v.Algorithm {
+			case "ecdsa-p256":
+				require.IsType(t, &ecdsa.PublicKey{}, key)
+				require.Equal(t, elliptic.P256(), key.(*ecdsa.PublicKey).Curve)
+			case "ed25519":
+				require.IsType(t, ed25519.PublicKey{}, key)
+			case "x25519":
+				require.IsType(t, &ecdh.PublicKey{}, key)
+				require.Equal(t, ecdh.X25519(), key.(*ecdh.PublicKey).Curve())
+			default:
+				t.Fatalf("unexpected vector algorithm %q", v.Algorithm)
+			}
 			nonce, err := hex.DecodeString(v.Nonce)
 			require.NoError(t, err)
 			cm, err := base64.StdEncoding.DecodeString(v.CryptoMaterial)
