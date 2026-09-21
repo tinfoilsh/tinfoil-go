@@ -599,5 +599,7 @@ func decodeCollateral[T any](entry *CollateralEntry) (*T, error) {
 }
 
 // ErrCollateralNotFound reports that a document carries no collateral entry
-// of the requested role and format.
+// of the requested role and format. Low-level callers may use errors.Is to
+// distinguish absence from malformed collateral. Verification classifies missing
+// required collateral as an AttestationError while preserving this cause.
 var ErrCollateralNotFound = errors.New("collateral entry not found")

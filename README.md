@@ -141,6 +141,23 @@ All three implement `tinfoil.Error` and preserve causes for `errors.Is` and
 OpenAI errors pass through. The prefixes `configuration error:`, `fetch error:`,
 and `attestation error:` are stable for the Swift/gomobile bridge.
 
+These are the three SDK categories, not an exhaustive list of errors a request
+can return. Upstream API errors and ordinary request network/cancellation errors
+retain their causes and native handling. Invalid supported inputs and rejected
+attestation evidence return errors; the SDK does not recover arbitrary programming
+panics. Applications can use `errors.As` with `tinfoil.Error` to recognize any SDK
+category, and should keep a default branch for other failures.
+
+TLS and freshness recovery sentinels are private. V3 consumers should replace
+references to `client.ErrNoTLS` and `client.ErrNoValidCertificate` with checks for
+`ConfigurationError`, and `client.ErrCertMismatch` / `client.ErrFreshnessExpired`
+with checks for `AttestationError`. The low-level
+`envelope.ErrCollateralNotFound` marker remains available for distinguishing
+absent collateral from malformed data; it is not another SDK error category.
+Category checks are for reporting and handling failures, not broad request-retry
+triggers. Let `SecureClient` own safe key-rotation recovery rather than retrying
+every `AttestationError` in application code.
+
 ## Prompt Cache Scoping
 
 The inference router partitions prompt-prefix caches using both the authenticated API identity and `user_cache_secret`. Cache reuse requires the same identity, secret, model, and matching prompt prefix. Changing the identity or secret selects a different cache namespace, so those requests do not share cache entries or cache-hit timing.

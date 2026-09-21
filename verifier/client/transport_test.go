@@ -66,7 +66,7 @@ func TestTransportExpirationAndUnchangedWitness(t *testing.T) {
 		defer writer.Close()
 		req, _ = http.NewRequest(http.MethodPost, "https://enclave.example", body)
 		_, err = transport.RoundTrip(req)
-		require.ErrorIs(t, err, ErrFreshnessExpired)
+		require.ErrorIs(t, err, errFreshnessExpired)
 		_, err = writer.Write([]byte("must not send"))
 		require.ErrorIs(t, err, io.ErrClosedPipe, "admission failure must close the request body")
 		require.Equal(t, 1, requests, "expired keys must never authorize an application request")
@@ -217,7 +217,7 @@ func TestKeyRotationRetriesShareRefresh(t *testing.T) {
 		keyErr  error
 		matches func(error) bool
 	}{
-		{"TLS", ErrCertMismatch, isCertificateError},
+		{"TLS", errCertMismatch, isCertificateError},
 		{"EHBP", ehbpidentity.NewKeyConfigError(errors.New("rotated")), ehbpidentity.IsKeyConfigError},
 	} {
 		t.Run(mode.name, func(t *testing.T) {
@@ -284,7 +284,7 @@ func TestKeyRotationRetryLimits(t *testing.T) {
 			var sends, refreshes int
 			original := errors.New("connection refused")
 			if tc.keyError {
-				original = ErrCertMismatch
+				original = errCertMismatch
 			}
 			s := &SecureClient{state: testState(time.Now().Add(time.Hour), "old"), verify: func() (*VerifiedDocumentV3, error) {
 				refreshes++
@@ -334,7 +334,7 @@ func TestExpirationDoesNotInterruptStream(t *testing.T) {
 		defer resp.Body.Close()
 		time.Sleep(time.Minute)
 		_, err = transport.RoundTrip(req)
-		require.ErrorIs(t, err, ErrFreshnessExpired)
+		require.ErrorIs(t, err, errFreshnessExpired)
 		go func() { defer writer.Close(); _, _ = io.WriteString(writer, "still streaming") }()
 		body, err := io.ReadAll(resp.Body)
 		require.NoError(t, err)
@@ -364,7 +364,7 @@ func TestRedirectChecksExpiration(t *testing.T) {
 			return nil
 		}}
 		_, err = hc.Get("https://enclave.example")
-		require.ErrorIs(t, err, ErrFreshnessExpired)
+		require.ErrorIs(t, err, errFreshnessExpired)
 		require.Equal(t, 1, sends)
 	})
 }
@@ -418,7 +418,7 @@ func TestHTTPClientChecksExpirationOnReusedTLSConnections(t *testing.T) {
 			s.state = testState(time.Now().Add(-time.Second), key)
 			s.stateMu.Unlock()
 			_, err = hc.Get(target.URL)
-			require.ErrorIs(t, err, ErrFreshnessExpired)
+			require.ErrorIs(t, err, errFreshnessExpired)
 			require.EqualValues(t, 2, sends.Load())
 		})
 	}
@@ -441,23 +441,23 @@ func TestIsCertificateError(t *testing.T) {
 			expected: false,
 		},
 		{
-			name:     "ErrNoTLS",
-			err:      ErrNoTLS,
+			name:     "errNoTLS",
+			err:      errNoTLS,
 			expected: false,
 		},
 		{
-			name:     "wrapped ErrNoTLS",
-			err:      errors.Join(errors.New("connection failed"), ErrNoTLS),
+			name:     "wrapped errNoTLS",
+			err:      errors.Join(errors.New("connection failed"), errNoTLS),
 			expected: false,
 		},
 		{
-			name:     "ErrCertMismatch",
-			err:      ErrCertMismatch,
+			name:     "errCertMismatch",
+			err:      errCertMismatch,
 			expected: true,
 		},
 		{
-			name:     "wrapped ErrCertMismatch",
-			err:      errors.Join(errors.New("request failed"), ErrCertMismatch),
+			name:     "wrapped errCertMismatch",
+			err:      errors.Join(errors.New("request failed"), errCertMismatch),
 			expected: true,
 		},
 		{

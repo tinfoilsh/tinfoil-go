@@ -89,7 +89,7 @@ func (e *Expectations) Validate(q *Quote) (err error) {
 	wantPolicy.ABIMajor = gotPolicy.ABIMajor
 	wantPolicy.ABIMinor = gotPolicy.ABIMinor
 	if gotPolicy != wantPolicy {
-		return fmt.Errorf("report guest policy %+v does not equal the endorsed policy %+v", gotPolicy, wantPolicy)
+		return fmt.Errorf("SEV report guest policy does not match the endorsed policy")
 	}
 
 	gotInfo, err := sevabi.ParseSnpPlatformInfo(report.GetPlatformInfo())
@@ -97,7 +97,7 @@ func (e *Expectations) Validate(q *Quote) (err error) {
 		return fmt.Errorf("parsing report PLATFORM_INFO: %w", err)
 	}
 	if gotInfo != e.wantPlatformInfo {
-		return fmt.Errorf("report PLATFORM_INFO %+v does not equal the endorsed policy %+v", gotInfo, e.wantPlatformInfo)
+		return fmt.Errorf("SEV report PLATFORM_INFO does not match the endorsed policy")
 	}
 
 	return e.checkSigner(report)

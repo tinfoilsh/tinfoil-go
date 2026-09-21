@@ -35,10 +35,10 @@ func TestTransportDiscardsSnapshotRefreshedDuringBuild(t *testing.T) {
 func TestPlaintextRequestDoesNotRefresh(t *testing.T) {
 	s := &SecureClient{state: testState(time.Now().Add(time.Hour), "key"), verify: func() (*VerifiedDocumentV3, error) {
 		t.Error("re-verification cannot make a plaintext URL acceptable")
-		return nil, ErrNoTLS
+		return nil, errNoTLS
 	}}
 	hc, err := s.HTTPClient()
 	require.NoError(t, err)
 	_, err = hc.Get("http://enclave.example")
-	require.ErrorIs(t, err, ErrNoTLS)
+	require.ErrorIs(t, err, errNoTLS)
 }

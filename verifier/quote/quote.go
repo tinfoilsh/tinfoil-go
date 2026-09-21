@@ -195,7 +195,7 @@ func layout(code, pins *measurement.Measurement, q *Authenticated) ([]string, er
 	}
 	for i, pin := range pins.Registers {
 		if pin != "" && registers[i] != "" && !strings.EqualFold(registers[i], pin) {
-			return nil, fmt.Errorf("register %d pinned to %s, release measures %s", i, pin, registers[i])
+			return nil, fmt.Errorf("pinned register %d does not match the signed release measurement", i)
 		}
 		registers[i] = cmp.Or(registers[i], pin)
 	}
