@@ -72,21 +72,34 @@ func TestMobileWorkloadPinOptions(t *testing.T) {
 func TestMobileWorkloadPinRejectsInvalidOptions(t *testing.T) {
 	for _, raw := range []string{
 		`{"pinned_code":{}}`,
-		`{"pinned_code":"not a measurement"}`,
 		`{"pinned_code":{"snp_measurement":"abc"}}`,
 		`{"pinned_code":{"tdx_measurement":{"rtmr1":"abc"}}}`,
+	} {
+		t.Run(raw, func(t *testing.T) {
+			opts, err := ParseVerificationOptionsJSON(raw)
+			require.NoError(t, err)
+			c, err := NewSecureClient("enclave.example", "", opts)
+			require.ErrorContains(t, err, "invalid pinned code")
+			require.Nil(t, c)
+		})
+	}
+}
+
+func TestMobileWorkloadPinRejectsInvalidJSON(t *testing.T) {
+	register := strings.Repeat("ab", workloadRegisterBytes)
+	validCode := `"pinned_code":{"tdx_measurement":{"rtmr1":"` + register + `","rtmr2":"` + register + `"}}`
+	for _, raw := range []string{
+		`{"pinned_code":"not a measurement"}`,
 		`{"pinned_code":{"tdx_measurement":{"mrtd":"abc"}}}`,
-		`{"pinned_shape":{"memoryMB":8192}}`,
-		`{"pinned_shape":{"cpus":4,"cpus":8}}`,
-		`{"pinned_shape":[]}`,
+		`{` + validCode + `,"pinned_shape":{"memoryMB":8192}}`,
+		`{` + validCode + `,"pinned_shape":{"cpus":4,"cpus":8}}`,
+		`{` + validCode + `,"pinned_shape":[]}`,
 		`{"pinned_code":{}}{}`,
 	} {
 		t.Run(raw, func(t *testing.T) {
 			opts, err := ParseVerificationOptionsJSON(raw)
-			if err == nil {
-				_, err = NewSecureClient("enclave.example", "", opts)
-			}
-			require.Error(t, err)
+			require.ErrorContains(t, err, "parsing verification options")
+			require.Nil(t, opts)
 		})
 	}
 }

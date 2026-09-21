@@ -95,16 +95,42 @@ func TestNewClientWithOptionsRequiresEnclaveForCustomRepo(t *testing.T) {
 func TestNewClientWithOptionsRejectsInvalidWorkloadPolicy(t *testing.T) {
 	const registerBytes = 48
 	code := &measurement.CodeMeasurement{SNPMeasurement: strings.Repeat("ab", registerBytes)}
-	for name, options := range map[string][]ClientOption{
-		"discovery":             {WithVerificationOptions(client.VerificationOptions{PinnedCode: code})},
-		"custom source":         {WithEnclave("enclave.example"), WithRepo("org/repo"), WithVerificationOptions(client.VerificationOptions{PinnedCode: code})},
-		"empty code":            {WithEnclave("enclave.example"), WithVerificationOptions(client.VerificationOptions{PinnedCode: &measurement.CodeMeasurement{}})},
-		"register pin conflict": {WithEnclave("enclave.example"), WithVerificationOptions(client.VerificationOptions{PinnedCode: code, PinnedRegisters: &measurement.Measurement{}})},
-		"shape without pin":     {WithEnclave("enclave.example"), WithVerificationOptions(client.VerificationOptions{PinnedShape: &policy.Shape{}})},
+	for name, test := range map[string]struct {
+		options   []ClientOption
+		wantError string
+	}{
+		"discovery": {
+			[]ClientOption{WithVerificationOptions(client.VerificationOptions{PinnedCode: code})},
+			"PinnedCode requires WithEnclave",
+		},
+		"custom source": {
+			[]ClientOption{WithEnclave("enclave.example"), WithRepo("org/repo"), WithVerificationOptions(client.VerificationOptions{PinnedCode: code})},
+			"cannot be combined with a custom WithRepo",
+		},
+		"empty code": {
+			[]ClientOption{WithEnclave("enclave.example"), WithVerificationOptions(client.VerificationOptions{PinnedCode: &measurement.CodeMeasurement{}})},
+			"snp_measurement or tdx_measurement is required",
+		},
+		"explicit default still validates pin": {
+			[]ClientOption{WithEnclave("enclave.example"), WithRepo(defaultConfigRepo), WithVerificationOptions(client.VerificationOptions{PinnedCode: &measurement.CodeMeasurement{}})},
+			"snp_measurement or tdx_measurement is required",
+		},
+		"register pin conflict": {
+			[]ClientOption{WithEnclave("enclave.example"), WithVerificationOptions(client.VerificationOptions{PinnedCode: code, PinnedRegisters: &measurement.Measurement{}})},
+			"cannot be combined with PinnedRegisters",
+		},
+		"shape without pin": {
+			[]ClientOption{WithEnclave("enclave.example"), WithVerificationOptions(client.VerificationOptions{PinnedShape: &policy.Shape{}})},
+			"PinnedShape requires PinnedCode",
+		},
+		"shape with SNP-only pin": {
+			[]ClientOption{WithEnclave("enclave.example"), WithVerificationOptions(client.VerificationOptions{PinnedCode: code, PinnedShape: &policy.Shape{}})},
+			"PinnedShape requires a TDX measurement",
+		},
 	} {
 		t.Run(name, func(t *testing.T) {
-			c, err := NewClientWithOptions(options...)
-			require.Error(t, err)
+			c, err := NewClientWithOptions(test.options...)
+			require.ErrorContains(t, err, test.wantError)
 			require.Nil(t, c)
 		})
 	}

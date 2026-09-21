@@ -164,8 +164,9 @@ expectedMeasurement}` and omit `PinnedShape`. A pin may include both platforms;
 verification requires the measurement for the enclave's platform. Every
 supplied register must be 96 hex characters and is normalized to lowercase.
 Pins and shapes are copied at construction. Shape dimensions must be
-non-negative; GPUs may be omitted. `PinnedShape` requires `PinnedCode`, and a
-TDX enclave requires a shape even when both platform measurements were supplied.
+non-negative; GPUs may be omitted. `PinnedShape` requires a TDX measurement in
+`PinnedCode`; an SNP-only pin must omit it. A TDX enclave requires a shape even
+when both platform measurements were supplied.
 
 Workload pinning requires `WithEnclave`, cannot be combined with a custom
 `WithRepo`, and cannot be combined with `PinnedRegisters`. The latter remains a

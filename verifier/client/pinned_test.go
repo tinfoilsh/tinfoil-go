@@ -41,6 +41,24 @@ func TestWorkloadPinConfiguration(t *testing.T) {
 	combined := &measurement.CodeMeasurement{SNPMeasurement: register, TDXMeasurement: &measurement.TDXMeasurement{RTMR1: register, RTMR2: register}}
 	_, err = NewSecureClient("enclave.example", "", &VerificationOptions{PinnedCode: combined})
 	require.NoError(t, err, "a multiplatform pin can target SNP without a shape")
+	combinedClient, err := NewSecureClient("enclave.example", "", &VerificationOptions{PinnedCode: combined, PinnedShape: c.options.PinnedShape})
+	require.NoError(t, err)
+	require.Equal(t, combined, combinedClient.options.PinnedCode)
+	require.Equal(t, c.options.PinnedShape, combinedClient.options.PinnedShape)
+}
+
+func TestWorkloadPinRejectsShapeForSNP(t *testing.T) {
+	const wantError = "PinnedShape requires a TDX measurement"
+	opts := &VerificationOptions{
+		PinnedCode:  &measurement.CodeMeasurement{SNPMeasurement: strings.Repeat("ab", workloadRegisterBytes)},
+		PinnedShape: &policy.Shape{},
+	}
+	c, err := NewSecureClient("enclave.example", "", opts)
+	require.ErrorContains(t, err, wantError)
+	require.Nil(t, c)
+	verified, err := VerifyDocumentV3(nil, nil, "", opts)
+	require.ErrorContains(t, err, wantError)
+	require.Nil(t, verified)
 }
 
 func TestWorkloadPinRejectsInvalidConfiguration(t *testing.T) {

@@ -52,6 +52,7 @@ type VerificationOptions struct {
 	// Requires an empty source repository and cannot be combined with PinnedRegisters.
 	PinnedCode *measurement.CodeMeasurement `json:"pinned_code,omitempty"`
 	// PinnedShape supplies the release's VM shape when PinnedCode targets TDX.
+	// It requires a TDX measurement in PinnedCode.
 	PinnedShape *policy.Shape `json:"pinned_shape,omitempty"`
 	// FreshnessMaxAge defaults to seven days when zero. Negative ages are invalid.
 	FreshnessMaxAge time.Duration `json:"freshness_max_age_ns,omitempty"`
@@ -85,6 +86,9 @@ func (input *VerificationOptions) normalized(repo string) (VerificationOptions, 
 	}
 	opts.PinnedCode = code
 	if opts.PinnedShape != nil {
+		if code.TDXMeasurement == nil {
+			return VerificationOptions{}, fmt.Errorf("PinnedShape requires a TDX measurement")
+		}
 		shape := *opts.PinnedShape
 		if shape.CPUs < 0 || shape.MemoryMB < 0 || shape.Disks < 0 || shape.GPUs != nil && *shape.GPUs < 0 {
 			return VerificationOptions{}, fmt.Errorf("pinned VM shape dimensions must be non-negative")

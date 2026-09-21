@@ -179,6 +179,7 @@ MRTD/RTMR0 must match an endorsed platform under that shape; RTMR3 remains zero.
 No platform-register or fingerprint input is needed. Pins are validated,
 normalized, and copied, including nested TDX values and the VM shape.
 Negative shape dimensions are invalid; omitted GPUs are allowed.
+An SNP-only pin must omit `PinnedShape`; it requires a TDX measurement in the pin.
 
 Workload pins require an explicit enclave: `NewDefaultClient` rejects them.
 Use an empty repository argument for both `NewSecureClient` and offline
