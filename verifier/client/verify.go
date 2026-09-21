@@ -8,7 +8,6 @@ import (
 
 	"github.com/tinfoilsh/tinfoil-go/verifier/envelope"
 	"github.com/tinfoilsh/tinfoil-go/verifier/measurement"
-	"github.com/tinfoilsh/tinfoil-go/verifier/policy"
 	"github.com/tinfoilsh/tinfoil-go/verifier/provenance"
 	"github.com/tinfoilsh/tinfoil-go/verifier/quote"
 )
@@ -74,9 +73,8 @@ func (v *VerifiedDocumentV3) validateTransportKeys() error {
 // VerifyDocumentV3 verifies a nonce-bound document with the supplied policy.
 // A nil policy uses defaults. repo is a trusted owner/name[@tag][@sha256:digest].
 // Callers must bind traffic to the returned keys and enforce FreshnessExpiresAt.
-// With PinnedCode, repo must be empty and only platform provenance is verified.
 func VerifyDocumentV3(docBytes, nonce []byte, repo string, opts *VerificationOptions) (*VerifiedDocumentV3, error) {
-	options, err := opts.normalized(repo)
+	options, err := opts.normalized()
 	if err != nil {
 		return nil, err
 	}
@@ -85,47 +83,24 @@ func VerifyDocumentV3(docBytes, nonce []byte, repo string, opts *VerificationOpt
 		return nil, fmt.Errorf("envelope: %w", err)
 	}
 
-	result := &VerifiedDocumentV3{}
-	var endorsements *provenance.PlatformEndorsements
-	var shape *policy.Shape
-	if options.PinnedCode != nil {
-		result.CodeMeasurement, err = pinnedCodeMeasurement(options.PinnedCode, doc.CPUEvidence.Format)
-		if err != nil {
-			return nil, fmt.Errorf("pinned code: %w", err)
-		}
-		shape = options.PinnedShape
-		if shape == nil {
-			if doc.CPUEvidence.Format == envelope.TDXQuoteV1Format {
-				return nil, fmt.Errorf("a TDX workload pin requires PinnedShape")
-			}
-			shape = &policy.Shape{}
-		}
-		var witnessedAt time.Time
-		endorsements, witnessedAt, err = authenticatePlatformReferenceValues(doc, options.FreshnessMaxAge)
-		if err != nil {
-			return nil, fmt.Errorf("reference values: %w", err)
-		}
-		result.ConfigRepo = PinnedNoRepo
-		result.CodeDigest = PinnedNoDigest
-		result.FreshnessExpiresAt = witnessedAt.Add(options.FreshnessMaxAge)
-	} else {
-		var code *provenance.Code
-		code, endorsements, result.FreshnessExpiresAt, err = authenticateReferenceValues(doc, repo, options.FreshnessMaxAge)
-		if err != nil {
-			return nil, fmt.Errorf("reference values: %w", err)
-		}
-		result.CodeDigest, result.CodeTag, result.CodeMeasurement = code.Digest, code.Tag, code.Measurement
-		shape = code.Shape
+	code, endorsements, freshnessExpiresAt, err := authenticateReferenceValues(doc, repo, options.FreshnessMaxAge)
+	if err != nil {
+		return nil, fmt.Errorf("reference values: %w", err)
 	}
 
-	_, authenticated, err := quote.Verify(doc, endorsements.Artifact, result.CodeMeasurement, options.PinnedRegisters, shape, expectedReportData)
+	_, authenticated, err := quote.Verify(doc, endorsements.Artifact, code.Measurement, options.PinnedRegisters, code.Shape, expectedReportData)
 	if err != nil {
 		return nil, fmt.Errorf("cpu evidence: %w", err)
 	}
 
-	result.EnclaveMeasurement = authenticated.Measurement
-	result.CryptoMaterial = doc.CryptoMaterialItems()
-	return result, nil
+	return &VerifiedDocumentV3{
+		CodeDigest:         code.Digest,
+		CodeTag:            code.Tag,
+		CodeMeasurement:    code.Measurement,
+		EnclaveMeasurement: authenticated.Measurement,
+		CryptoMaterial:     doc.CryptoMaterialItems(),
+		FreshnessExpiresAt: freshnessExpiresAt,
+	}, nil
 }
 
 func authenticateReferenceValues(doc *envelope.Document, repo string, maxAge time.Duration) (*provenance.Code, *provenance.PlatformEndorsements, time.Time, error) {
@@ -141,37 +116,30 @@ func authenticateReferenceValues(doc *envelope.Document, repo string, maxAge tim
 	if err != nil {
 		return nil, nil, time.Time{}, err
 	}
-	codeWitnessedAt, err := provenance.AuthenticateFreshness(codeFreshnessRef.SigstoreBundle, &code.AuthenticatedArtifact, time.Now(), maxAge)
+	appraisalTime := time.Now()
+	codeWitnessedAt, err := provenance.AuthenticateFreshness(codeFreshnessRef.SigstoreBundle, &code.AuthenticatedArtifact, appraisalTime, maxAge)
 	if err != nil {
 		return nil, nil, time.Time{}, fmt.Errorf("verifying code freshness: %w", err)
 	}
 
-	endorsements, platformWitnessedAt, err := authenticatePlatformReferenceValues(doc, maxAge)
+	platformRef, err := doc.ReferenceValuesCollateral(envelope.CollateralSigstorePlatformV1Format)
 	if err != nil {
 		return nil, nil, time.Time{}, err
 	}
-	return code, endorsements, freshnessExpiration(codeWitnessedAt, platformWitnessedAt, maxAge), nil
-}
-
-func authenticatePlatformReferenceValues(doc *envelope.Document, maxAge time.Duration) (*provenance.PlatformEndorsements, time.Time, error) {
-	platformRef, err := doc.ReferenceValuesCollateral(envelope.CollateralSigstorePlatformV1Format)
-	if err != nil {
-		return nil, time.Time{}, err
-	}
 	endorsements, err := provenance.AuthenticatePlatformEndorsements(platformRef.SigstoreBundle, platformRef.Repo, platformRef.Tag, platformRef.Digest)
 	if err != nil {
-		return nil, time.Time{}, fmt.Errorf("verifying platform endorsements: %w", err)
+		return nil, nil, time.Time{}, fmt.Errorf("verifying platform endorsements: %w", err)
 	}
 	freshnessRef, err := doc.FreshnessCollateral(envelope.FreshnessCollateralIDPlatform)
 	if err != nil {
-		return nil, time.Time{}, err
+		return nil, nil, time.Time{}, err
 	}
-	platformWitnessedAt, err := provenance.AuthenticateFreshness(freshnessRef.SigstoreBundle, &endorsements.AuthenticatedArtifact, time.Now(), maxAge)
+	platformWitnessedAt, err := provenance.AuthenticateFreshness(freshnessRef.SigstoreBundle, &endorsements.AuthenticatedArtifact, appraisalTime, maxAge)
 	if err != nil {
-		return nil, time.Time{}, fmt.Errorf("verifying platform freshness: %w", err)
+		return nil, nil, time.Time{}, fmt.Errorf("verifying platform freshness: %w", err)
 	}
 
-	return endorsements, platformWitnessedAt, nil
+	return code, endorsements, freshnessExpiration(codeWitnessedAt, platformWitnessedAt, maxAge), nil
 }
 
 // freshnessExpiration uses authenticated witness times, never local verification time.
@@ -202,9 +170,7 @@ func (s *SecureClient) fetchVerification() (*VerifiedDocumentV3, error) {
 	if err := verified.validateTransportKeys(); err != nil {
 		return nil, fmt.Errorf("binding: %w", err)
 	}
-	if s.options.PinnedCode == nil {
-		verified.ConfigRepo, _, _ = strings.Cut(s.repo, "@")
-	}
+	verified.ConfigRepo, _, _ = strings.Cut(s.repo, "@")
 	verified.EnclaveHost = s.enclave
 	verified.Verifier = currentVerifierIdentity()
 	verified.VerifiedAt = time.Now().UTC().Format(time.RFC3339Nano)

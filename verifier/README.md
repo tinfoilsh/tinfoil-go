@@ -156,65 +156,6 @@ opts := client.VerificationOptions{
 secureClient, err := client.NewSecureClient("enclave.example.com", "org/repo", &opts)
 ```
 
-## Workload pinning
-
-`PinnedCode` replaces code provenance with the release's raw workload registers.
-The caller is responsible for obtaining them from a trusted source. It is
-separate from `PinnedRegisters`, which adds constraints while retaining release
-verification. The two modes cannot be combined.
-
-For SNP, construct a client with no source repository:
-
-```go
-opts := client.VerificationOptions{
-    PinnedCode: &measurement.CodeMeasurement{SNPMeasurement: expectedMeasurement},
-}
-secureClient, err := client.NewSecureClient("enclave.example.com", "", &opts)
-if err != nil { log.Fatal(err) }
-```
-
-For TDX, use `TDXMeasurement: &measurement.TDXMeasurement{RTMR1: rtmr1,
-RTMR2: rtmr2}` and set `PinnedShape` to the release's `policy.Shape`.
-MRTD/RTMR0 must match an endorsed platform under that shape; RTMR3 remains zero.
-No platform-register or fingerprint input is needed. Pins are validated,
-normalized, and copied, including nested TDX values and the VM shape.
-Negative shape dimensions are invalid; omitted GPUs are allowed.
-An SNP-only pin must omit `PinnedShape`; it requires a TDX measurement in the pin.
-
-Workload pins require an explicit enclave: `NewDefaultClient` rejects them.
-Use an empty repository argument for both `NewSecureClient` and offline
-`VerifyDocumentV3`; supplying a repository alongside `PinnedCode` is an error.
-The OpenAI wrapper accepts the same options through `WithVerificationOptions`.
-
-Only code provenance and its freshness witness are skipped. Platform
-endorsements and their witness, quote authentication, nonce/REPORT_DATA,
-platform policy, and transport-key binding remain required. `FreshnessMaxAge`
-applies to the platform witness; `FreshnessExpiresAt` comes from that witness
-alone. Re-verification retains the copied workload pin, shape, and enclave.
-
-Successful results use `pinned_no_digest` and `pinned_no_repo` and have no
-verified release tag. `CodeMeasurement` uses the multiplatform source layout
-`[snp_measurement, rtmr1, rtmr2]`, with omitted platform entries empty;
-`EnclaveMeasurement` contains the authenticated runtime registers.
-
-Mobile callers use the existing `ParseVerificationOptionsJSON` bridge:
-
-```json
-{
-  "pinned_code": {
-    "tdx_measurement": {
-      "rtmr1": "<96 hex characters>",
-      "rtmr2": "<96 hex characters>"
-    }
-  },
-  "pinned_shape": {"cpus": 8, "memory_mb": 32768, "disks": 1}
-}
-```
-
-Unknown JSON fields, including extra TDX registers or misspelled shape keys,
-are rejected. Pass the parsed options to the normal constructor or verifier
-with an empty repository argument.
-
 ## JavaScript / TypeScript / WASM
 
 ### JavaScript / TypeScript SDK
