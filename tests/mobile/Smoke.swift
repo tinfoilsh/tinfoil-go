@@ -22,3 +22,28 @@ func checkClientSurface(document: Data, nonce: Data) throws {
     if let error { throw error }
     let _: Any = try JSONSerialization.jsonObject(with: Data(result.utf8))
 }
+
+func checkWorkloadPinSurface() throws {
+    let registerHexLength = 96
+    let register = String(repeating: "a", count: registerHexLength)
+    let raw = """
+    {"pinned_code":{"tdx_measurement":{"rtmr1":"\(register)","rtmr2":"\(register)"}},
+     "pinned_shape":{"cpus":4,"memory_mb":8192,"disks":1},"freshness_max_age_ns":3600000000000}
+    """
+    var error: NSError?
+    let options = ClientParseVerificationOptionsJSON(raw, &error)
+    if let error { throw error }
+    guard let client = ClientNewSecureClient("enclave.example", "", options, &error) else {
+        if let error { throw error }
+        fatalError("Workload pin construction returned no client")
+    }
+    precondition(client.enclave() == "enclave.example")
+    precondition(client.repo().isEmpty)
+    precondition(client.verification() == nil)
+
+    error = nil
+    let invalid = ClientParseVerificationOptionsJSON("{\"pinned_shape\":{\"memoryMB\":8192}}", &error)
+    precondition(invalid == nil && error != nil)
+}
+
+try checkWorkloadPinSurface()

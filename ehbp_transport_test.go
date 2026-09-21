@@ -18,6 +18,8 @@ import (
 	ehbpidentity "github.com/tinfoilsh/encrypted-http-body-protocol/identity"
 	"github.com/tinfoilsh/tinfoil-go/verifier/client"
 	"github.com/tinfoilsh/tinfoil-go/verifier/envelope"
+	"github.com/tinfoilsh/tinfoil-go/verifier/measurement"
+	"github.com/tinfoilsh/tinfoil-go/verifier/policy"
 )
 
 type roundTripFunc func(*http.Request) (*http.Response, error)
@@ -87,6 +89,50 @@ func TestNewClientWithOptionsRequiresEnclaveForCustomRepo(t *testing.T) {
 		c, err := NewClientWithOptions(opt)
 		require.Nil(t, c)
 		require.ErrorContains(t, err, "requires an enclave")
+	}
+}
+
+func TestNewClientWithOptionsRejectsInvalidWorkloadPolicy(t *testing.T) {
+	const registerBytes = 48
+	code := &measurement.CodeMeasurement{SNPMeasurement: strings.Repeat("ab", registerBytes)}
+	for name, test := range map[string]struct {
+		options   []ClientOption
+		wantError string
+	}{
+		"discovery": {
+			[]ClientOption{WithVerificationOptions(client.VerificationOptions{PinnedCode: code})},
+			"PinnedCode requires WithEnclave",
+		},
+		"custom source": {
+			[]ClientOption{WithEnclave("enclave.example"), WithRepo("org/repo"), WithVerificationOptions(client.VerificationOptions{PinnedCode: code})},
+			"cannot be combined with a custom WithRepo",
+		},
+		"empty code": {
+			[]ClientOption{WithEnclave("enclave.example"), WithVerificationOptions(client.VerificationOptions{PinnedCode: &measurement.CodeMeasurement{}})},
+			"snp_measurement or tdx_measurement is required",
+		},
+		"explicit default still validates pin": {
+			[]ClientOption{WithEnclave("enclave.example"), WithRepo(defaultConfigRepo), WithVerificationOptions(client.VerificationOptions{PinnedCode: &measurement.CodeMeasurement{}})},
+			"snp_measurement or tdx_measurement is required",
+		},
+		"register pin conflict": {
+			[]ClientOption{WithEnclave("enclave.example"), WithVerificationOptions(client.VerificationOptions{PinnedCode: code, PinnedRegisters: &measurement.Measurement{}})},
+			"cannot be combined with PinnedRegisters",
+		},
+		"shape without pin": {
+			[]ClientOption{WithEnclave("enclave.example"), WithVerificationOptions(client.VerificationOptions{PinnedShape: &policy.Shape{}})},
+			"PinnedShape requires PinnedCode",
+		},
+		"shape with SNP-only pin": {
+			[]ClientOption{WithEnclave("enclave.example"), WithVerificationOptions(client.VerificationOptions{PinnedCode: code, PinnedShape: &policy.Shape{}})},
+			"PinnedShape requires a TDX measurement",
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			c, err := NewClientWithOptions(test.options...)
+			require.ErrorContains(t, err, test.wantError)
+			require.Nil(t, c)
+		})
 	}
 }
 

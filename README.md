@@ -116,6 +116,63 @@ if err != nil {
 }
 ```
 
+## Workload pinning
+
+Use `VerificationOptions.PinnedCode` to trust workload measurements obtained
+from a release out of band instead of verifying its code provenance. No new
+fingerprint is needed. For TDX, supply RTMR1/RTMR2 and the release's VM shape;
+MRTD/RTMR0 remain constrained by authenticated platform policy, and RTMR3 must
+be zero. Platform freshness, quote authentication, nonce/REPORT_DATA, and
+transport-key binding remain mandatory.
+
+Replace the register placeholders and shape with values from a trusted release:
+
+```go
+package main
+
+import (
+	"log"
+
+	"github.com/tinfoilsh/tinfoil-go"
+	"github.com/tinfoilsh/tinfoil-go/verifier/client"
+	"github.com/tinfoilsh/tinfoil-go/verifier/measurement"
+	"github.com/tinfoilsh/tinfoil-go/verifier/policy"
+)
+
+func main() {
+	c, err := tinfoil.NewClientWithOptions(
+		tinfoil.WithEnclave("enclave.example.com"),
+		tinfoil.WithVerificationOptions(client.VerificationOptions{
+			PinnedCode: &measurement.CodeMeasurement{
+				TDXMeasurement: &measurement.TDXMeasurement{
+					RTMR1: "<release rtmr1: 96 hex characters>",
+					RTMR2: "<release rtmr2: 96 hex characters>",
+				},
+			},
+			PinnedShape: &policy.Shape{CPUs: 8, MemoryMB: 32768, Disks: 1},
+		}),
+	)
+	if err != nil {
+		log.Fatal(err)
+	}
+	log.Printf("Verified enclave: %s", c.Verification().EnclaveHost)
+}
+```
+
+For AMD, set `PinnedCode` to `&measurement.CodeMeasurement{SNPMeasurement:
+expectedMeasurement}` and omit `PinnedShape`. A pin may include both platforms;
+verification requires the measurement for the enclave's platform. Every
+supplied register must be 96 hex characters and is normalized to lowercase.
+Pins and shapes are copied at construction. Shape dimensions must be
+non-negative; GPUs may be omitted. `PinnedShape` requires a TDX measurement in
+`PinnedCode`; an SNP-only pin must omit it. A TDX enclave requires a shape even
+when both platform measurements were supplied.
+
+Workload pinning requires `WithEnclave`, cannot be combined with a custom
+`WithRepo`, and cannot be combined with `PinnedRegisters`. The latter remains a
+separate, release-backed mode. Both modes honor `FreshnessMaxAge`.
+See the [verifier API](verifier/README.md#workload-pinning) for direct and mobile use.
+
 ## Prompt Cache Scoping
 
 The inference router partitions prompt-prefix caches using both the authenticated API identity and `user_cache_secret`. Cache reuse requires the same identity, secret, model, and matching prompt prefix. Changing the identity or secret selects a different cache namespace, so those requests do not share cache entries or cache-hit timing.
