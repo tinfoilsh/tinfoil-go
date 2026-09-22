@@ -176,7 +176,7 @@ func Verify(doc *envelope.Document, endorsements *policy.Artifact, code, pins *m
 // layout maps code and pins to enclave registers, leaving platform defaults empty.
 func layout(code, pins *measurement.Measurement, q *Authenticated) ([]string, error) {
 	if err := measurement.ValidatePins(pins); err != nil {
-		return nil, verifier.WrapConfiguration(err)
+		return nil, &verifier.ConfigurationError{Err: err}
 	}
 	if code.Type != measurement.SnpTdxMultiPlatformV1 || len(code.Registers) != 3 {
 		return nil, fmt.Errorf("code measurement is %s with %d registers, want %s with 3", code.Type, len(code.Registers), measurement.SnpTdxMultiPlatformV1)

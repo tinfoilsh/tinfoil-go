@@ -45,8 +45,7 @@ func (v *VerifiedDocumentV3) HPKEPublicKey() (string, error) {
 	return v.cryptoMaterialData(envelope.CryptoMaterialIDHPKE, envelope.KeyX25519HPKEV1Format)
 }
 
-func (v *VerifiedDocumentV3) cryptoMaterialData(id, format string) (result string, err error) {
-	defer func() { err = verifier.WrapAttestation(err) }()
+func (v *VerifiedDocumentV3) cryptoMaterialData(id, format string) (string, error) {
 	if v == nil {
 		return "", &ConfigurationError{Err: fmt.Errorf("verified document is required")}
 	}
@@ -55,11 +54,11 @@ func (v *VerifiedDocumentV3) cryptoMaterialData(id, format string) (result strin
 			continue
 		}
 		if item.Format != format {
-			return "", fmt.Errorf("crypto_material item %q has format %q, want %q", id, item.Format, format)
+			return "", &AttestationError{Err: fmt.Errorf("crypto_material item %q has format %q, want %q", id, item.Format, format)}
 		}
 		return item.Data, nil
 	}
-	return "", fmt.Errorf("document endorses no %q crypto material", id)
+	return "", &AttestationError{Err: fmt.Errorf("document endorses no %q crypto material", id)}
 }
 
 func (v *VerifiedDocumentV3) validateTransportKeys() error {
@@ -80,7 +79,7 @@ func (v *VerifiedDocumentV3) validateTransportKeys() error {
 // Callers must bind traffic to the returned keys and enforce FreshnessExpiresAt.
 func VerifyDocumentV3(docBytes, nonce []byte, repo string, opts *VerificationOptions) (*VerifiedDocumentV3, error) {
 	if _, _, _, err := provenance.ParseReference(repo); err != nil {
-		return nil, verifier.WrapConfiguration(err)
+		return nil, &ConfigurationError{Err: err}
 	}
 	options, err := opts.normalized()
 	if err != nil {

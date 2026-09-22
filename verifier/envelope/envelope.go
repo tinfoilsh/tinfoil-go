@@ -520,7 +520,7 @@ func Fetch(host string, nonce []byte) (result []byte, err error) {
 	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
 	if err != nil {
-		return nil, verifier.WrapConfiguration(fmt.Errorf("invalid enclave host: %w", err))
+		return nil, &verifier.ConfigurationError{Err: fmt.Errorf("invalid enclave host: %w", err)}
 	}
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
