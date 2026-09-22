@@ -14,9 +14,9 @@ import (
 )
 
 var (
-	ErrNoTLS              = errors.New("no TLS connection")
-	ErrCertMismatch       = errors.New("certificate fingerprint mismatch")
-	ErrNoValidCertificate = errors.New("no valid certificate")
+	errNoTLS              = errors.New("TLS binding requires an HTTPS request")
+	errCertMismatch       = errors.New("enclave certificate does not match the attested key; re-verify the enclave")
+	errNoValidCertificate = errors.New("TLS binding requires a verified certificate fingerprint")
 )
 
 type TLSBoundRoundTripper struct {
@@ -58,7 +58,7 @@ func (t *TLSBoundRoundTripper) getTransport() (*http.Transport, error) {
 				return &AttestationError{Err: err}
 			}
 			if certFP != t.ExpectedPublicKey {
-				return &AttestationError{Err: ErrCertMismatch}
+				return &AttestationError{Err: errCertMismatch}
 			}
 			return nil
 		}
@@ -71,11 +71,11 @@ func (t *TLSBoundRoundTripper) getTransport() (*http.Transport, error) {
 
 func (t *TLSBoundRoundTripper) RoundTrip(r *http.Request) (*http.Response, error) {
 	if len(t.ExpectedPublicKey) == 0 {
-		return nil, &ConfigurationError{Err: ErrNoValidCertificate}
+		return nil, &ConfigurationError{Err: errNoValidCertificate}
 	}
 
 	if r.URL == nil || r.URL.Scheme != "https" {
-		return nil, &ConfigurationError{Err: ErrNoTLS}
+		return nil, &ConfigurationError{Err: errNoTLS}
 	}
 
 	transport, err := t.getTransport()

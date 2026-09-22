@@ -148,7 +148,7 @@ func isCertificateError(err error) bool {
 	var unknownAuthErr x509.UnknownAuthorityError
 	var hostnameErr x509.HostnameError
 	var certVerifyErr *tls.CertificateVerificationError
-	return errors.Is(err, ErrCertMismatch) ||
+	return errors.Is(err, errCertMismatch) ||
 		errors.As(err, &certInvalidErr) || errors.As(err, &unknownAuthErr) ||
 		errors.As(err, &hostnameErr) || errors.As(err, &certVerifyErr)
 }

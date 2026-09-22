@@ -66,7 +66,7 @@ func TestRequestPreservesTLSCategoryAndMobilePrefix(t *testing.T) {
 			require.True(t, strings.HasPrefix(err.Error(), "attestation error: "))
 			require.Equal(t, 1, refreshes, "key recovery remains bounded")
 			if trustCertificate {
-				require.ErrorIs(t, err, ErrCertMismatch)
+				require.ErrorIs(t, err, errCertMismatch)
 			} else {
 				var certificateError *tls.CertificateVerificationError
 				require.ErrorAs(t, err, &certificateError)

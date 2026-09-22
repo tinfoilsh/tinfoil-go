@@ -239,6 +239,7 @@ func (f transportVerifierFunc) NewTransport(build func(*client.VerifiedDocumentV
 }
 
 func TestEHBPClientPreservesAdmissionAndRebuildsProxyHeader(t *testing.T) {
+	admissionFailure := &client.AttestationError{Err: errors.New("expired witnesses")}
 	seen := make(chan string, 2)
 	proxy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		seen <- r.Header.Get(enclaveURLHeader)
@@ -250,13 +251,13 @@ func TestEHBPClientPreservesAdmissionAndRebuildsProxyHeader(t *testing.T) {
 		rebuild = build
 		require.True(t, isKeyError(ehbpidentity.NewKeyConfigError(errors.New("rotated"))))
 		return roundTripFunc(func(*http.Request) (*http.Response, error) {
-			return nil, client.ErrFreshnessExpired
+			return nil, admissionFailure
 		}), nil
 	})
 	hc, err := ehbpHTTPClient(verifier, proxy.URL)
 	require.NoError(t, err)
 	_, err = hc.Get(proxy.URL)
-	require.ErrorIs(t, err, client.ErrFreshnessExpired, "keep the verifier's admission layer around EHBP")
+	require.ErrorIs(t, err, admissionFailure, "keep the verifier's admission layer around EHBP")
 	require.Empty(t, seen, "failed admission must not reach the proxy")
 
 	for _, host := range []string{"old.example", "new.example"} {

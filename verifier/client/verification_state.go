@@ -6,8 +6,8 @@ import (
 	"time"
 )
 
-// ErrFreshnessExpired means the authenticated witnesses no longer authorize requests.
-var ErrFreshnessExpired = errors.New("attestation freshness witnesses have expired")
+// errFreshnessExpired means the authenticated witnesses no longer authorize requests.
+var errFreshnessExpired = errors.New("attestation freshness witnesses have expired; retry verification with fresh evidence")
 
 type verificationCall struct {
 	done  chan struct{}
@@ -61,7 +61,7 @@ func (s *SecureClient) refresh(call *verificationCall) {
 	s.stateMu.Lock()
 	defer s.stateMu.Unlock()
 	if err == nil && !time.Now().Before(state.FreshnessExpiresAt) {
-		err = &AttestationError{Err: ErrFreshnessExpired}
+		err = &AttestationError{Err: errFreshnessExpired}
 	}
 	if err == nil {
 		s.state = state
