@@ -89,8 +89,10 @@ func NewDefaultClient(opts *VerificationOptions) (*SecureClient, error) {
 	routers, _ := fetchRouters()
 	for _, routerURL := range routers {
 		client := fallback.ForEnclave(routerURL)
-		_, err := client.Verify()
-		if err == nil {
+		// Disposable candidate probes get one attempt; retries belong to the selected client.
+		state, err := client.fetchVerification()
+		if err == nil && time.Now().Before(state.FreshnessExpiresAt) {
+			client.state = state
 			return client, nil
 		}
 	}

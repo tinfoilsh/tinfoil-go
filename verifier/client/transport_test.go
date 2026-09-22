@@ -6,6 +6,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptrace"
@@ -70,7 +71,7 @@ func TestTransportExpirationAndUnchangedWitness(t *testing.T) {
 		_, err = writer.Write([]byte("must not send"))
 		require.ErrorIs(t, err, io.ErrClosedPipe, "admission failure must close the request body")
 		require.Equal(t, 1, requests, "expired keys must never authorize an application request")
-		require.Equal(t, 2, verifications)
+		require.Equal(t, 3, verifications)
 		require.Equal(t, deadline, s.state.FreshnessExpiresAt)
 	})
 }
@@ -160,7 +161,9 @@ func TestVerificationFetchStillTimesOut(t *testing.T) {
 	original := http.DefaultClient
 	t.Cleanup(func() { http.DefaultClient = original })
 	synctest.Test(t, func(t *testing.T) {
+		var requests int
 		http.DefaultClient = &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			requests++
 			<-req.Context().Done()
 			return nil, req.Context().Err()
 		})}
@@ -172,7 +175,8 @@ func TestVerificationFetchStillTimesOut(t *testing.T) {
 		var fetch *FetchError
 		require.ErrorAs(t, err, &fetch)
 		require.True(t, strings.HasPrefix(err.Error(), "fetch error: "), "verification fetch retains its SDK category prefix")
-		require.Equal(t, 30*time.Second, time.Since(start))
+		require.Equal(t, 2, requests)
+		require.Equal(t, 61*time.Second, time.Since(start), "two bounded 30-second fetches and one recovery delay")
 	})
 }
 
@@ -223,11 +227,15 @@ func TestKeyRotationRetriesShareRefresh(t *testing.T) {
 		t.Run(mode.name, func(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
 				release := make(chan struct{})
+				rotated := make(chan struct{})
 				var attempts, sends atomic.Int32
 				s := &SecureClient{state: testState(time.Now().Add(time.Hour), "old")}
 				s.verify = func() (*VerifiedDocumentV3, error) {
-					attempts.Add(1)
+					attempt := attempts.Add(1)
 					<-release
+					if attempt == 1 {
+						return nil, &FetchError{Err: errors.New("temporarily unavailable")}
+					}
 					return testState(time.Now().Add(time.Hour), "new"), nil
 				}
 				transport, err := s.NewTransport(func(verified *VerifiedDocumentV3) (http.RoundTripper, error) {
@@ -239,6 +247,7 @@ func TestKeyRotationRetriesShareRefresh(t *testing.T) {
 						}
 						sends.Add(1)
 						if verified.CryptoMaterial[1].Data == "old" {
+							<-rotated
 							return nil, mode.keyErr
 						}
 						return testResponse(), nil
@@ -255,13 +264,15 @@ func TestKeyRotationRetriesShareRefresh(t *testing.T) {
 				}
 				go func() { _, err := s.Verify(); results <- err }()
 				synctest.Wait()
+				close(rotated)
+				synctest.Wait()
 				require.EqualValues(t, 1, attempts.Load())
 				close(release)
 				for range 17 {
 					require.NoError(t, <-results)
 				}
 				require.EqualValues(t, 32, sends.Load())
-				require.EqualValues(t, 1, attempts.Load())
+				require.EqualValues(t, 2, attempts.Load())
 			})
 		})
 	}
@@ -269,46 +280,66 @@ func TestKeyRotationRetriesShareRefresh(t *testing.T) {
 
 func TestKeyRotationRetryLimits(t *testing.T) {
 	failed := errors.New("verification failed")
+	last := errors.New("retry failed")
 	for _, tc := range []struct {
 		name                 string
 		keyError, replayable bool
-		refreshErr           error
+		refreshErr, retryErr error
 		sends, refreshes     int
 	}{
-		{"other error", false, true, nil, 1, 0},
-		{"unreplayable body", true, false, nil, 1, 0},
-		{"retry only once", true, true, nil, 2, 1},
-		{"refresh failure", true, true, failed, 1, 1},
+		{"other error", false, true, nil, nil, 1, 0},
+		{"unreplayable body", true, false, nil, nil, 1, 0},
+		{"retry only once", true, true, nil, nil, 2, 1},
+		{"native refresh failure", true, true, failed, nil, 1, 1},
+		{"configuration failure", true, true, &ConfigurationError{Err: failed}, nil, 1, 1},
+		{"both verification attempts fail", true, true, &FetchError{Err: failed}, &AttestationError{Err: last}, 1, 2},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			var sends, refreshes int
-			original := errors.New("connection refused")
-			if tc.keyError {
-				original = errCertMismatch
-			}
-			s := &SecureClient{state: testState(time.Now().Add(time.Hour), "old"), verify: func() (*VerifiedDocumentV3, error) {
-				refreshes++
-				return testState(time.Now().Add(time.Hour), "new"), tc.refreshErr
-			}}
-			transport, err := s.NewTransport(func(*VerifiedDocumentV3) (http.RoundTripper, error) {
-				return roundTripFunc(func(req *http.Request) (*http.Response, error) {
-					req.Body.Close()
-					sends++
-					return nil, original
-				}), nil
-			}, isCertificateError)
-			require.NoError(t, err)
-			req, _ := http.NewRequest(http.MethodPost, "https://enclave.example", bytes.NewBufferString("payload"))
-			if !tc.replayable {
-				req.GetBody = nil
-			}
-			_, err = transport.RoundTrip(req)
-			require.ErrorIs(t, err, original)
-			if tc.refreshErr != nil {
-				require.ErrorIs(t, err, tc.refreshErr)
-			}
-			require.Equal(t, tc.sends, sends)
-			require.Equal(t, tc.refreshes, refreshes)
+			synctest.Test(t, func(t *testing.T) {
+				var sends, refreshes int
+				original := errors.New("connection refused")
+				if tc.keyError {
+					original = fmt.Errorf("original key rejection: %w", errCertMismatch)
+				}
+				s := &SecureClient{state: testState(time.Now().Add(time.Hour), "old"), verify: func() (*VerifiedDocumentV3, error) {
+					refreshes++
+					if refreshes == 2 {
+						return nil, tc.retryErr
+					}
+					return testState(time.Now().Add(time.Hour), "new"), tc.refreshErr
+				}}
+				transport, err := s.NewTransport(func(*VerifiedDocumentV3) (http.RoundTripper, error) {
+					return roundTripFunc(func(req *http.Request) (*http.Response, error) {
+						req.Body.Close()
+						sends++
+						if sends == 2 {
+							return nil, errors.Join(errCertMismatch, last)
+						}
+						return nil, original
+					}), nil
+				}, isCertificateError)
+				require.NoError(t, err)
+				req, _ := http.NewRequest(http.MethodPost, "https://enclave.example", bytes.NewBufferString("payload"))
+				if !tc.replayable {
+					req.GetBody = nil
+				}
+				_, err = transport.RoundTrip(req)
+				require.ErrorIs(t, err, original)
+				if tc.refreshErr != nil {
+					require.ErrorIs(t, err, tc.refreshErr)
+				}
+				if tc.retryErr != nil {
+					require.ErrorIs(t, err, tc.retryErr)
+				}
+				if sends == 2 {
+					require.ErrorIs(t, err, last, "preserve the replay failure alongside the original key rejection")
+				}
+				if tc.keyError {
+					require.Nil(t, s.Verification(), "a rejected key must not be reused after recovery fails")
+				}
+				require.Equal(t, tc.sends, sends)
+				require.Equal(t, tc.refreshes, refreshes)
+			})
 		})
 	}
 }

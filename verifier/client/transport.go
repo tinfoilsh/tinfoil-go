@@ -88,25 +88,33 @@ func (t *refreshingTransport) RoundTrip(req *http.Request) (*http.Response, erro
 	if err == nil || t.isKeyError == nil || !t.isKeyError(err) {
 		return resp, err
 	}
+	t.client.invalidate(state)
 	retry, bodyErr := resetRequestBody(req)
 	if bodyErr != nil {
-		return resp, err
+		return resp, errors.Join(err, bodyErr)
 	}
 	if resp != nil && resp.Body != nil {
 		resp.Body.Close()
 	}
 	if _, refreshErr := t.client.verifiedState(req.Context(), state, true); refreshErr != nil {
 		closeRequestBody(retry)
-		return nil, errors.Join(err, refreshErr)
+		return nil, errors.Join(refreshErr, err)
 	}
 	// Each explicit retry is a new admission. In-flight responses/streams keep
 	// their original transport and are not canceled when its witnesses expire.
-	transport, _, refreshErr := t.admit(req.Context())
+	transport, state, refreshErr := t.admit(req.Context())
 	if refreshErr != nil {
 		closeRequestBody(retry)
-		return nil, errors.Join(err, refreshErr)
+		return nil, errors.Join(refreshErr, err)
 	}
-	return transport.RoundTrip(retry)
+	resp, retryErr := transport.RoundTrip(retry)
+	if retryErr != nil {
+		if t.isKeyError(retryErr) {
+			t.client.invalidate(state)
+		}
+		return resp, errors.Join(retryErr, err)
+	}
+	return resp, nil
 }
 
 func (t *refreshingTransport) CloseIdleConnections() {

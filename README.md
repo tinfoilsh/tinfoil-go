@@ -118,6 +118,10 @@ case errors.As(err, &attestation):
 
 All three implement `tinfoil.Error`. Upstream OpenAI errors pass through unchanged. Let `SecureClient` own key-rotation recovery rather than retrying every `AttestationError` in application code.
 
+Verification retries fetch or attestation failures once after one second, sharing the attempt across concurrent callers and preserving both causes. Configuration and unclassified errors are not retried.
+
+Key-rotation recovery discards rejected keys, re-verifies the same enclave, and replays a request at most once when its body can be recreated. Application API failures do not trigger this recovery.
+
 ## API Documentation
 
 This library is a drop-in replacement for the [official OpenAI Go client](https://github.com/openai/openai-go). All methods and types are identical; see the [OpenAI Go client documentation](https://pkg.go.dev/github.com/openai/openai-go/v3) for API usage.

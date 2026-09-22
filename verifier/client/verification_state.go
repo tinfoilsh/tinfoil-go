@@ -9,6 +9,11 @@ import (
 // errFreshnessExpired means the authenticated witnesses no longer authorize requests.
 var errFreshnessExpired = errors.New("attestation freshness witnesses have expired; retry verification with fresh evidence")
 
+const (
+	verificationRetries    = 1
+	verificationRetryDelay = time.Second
+)
+
 type verificationCall struct {
 	done  chan struct{}
 	state *VerifiedDocumentV3
@@ -57,11 +62,29 @@ func (s *SecureClient) refresh(call *verificationCall) {
 	}
 	// The attestation fetch bounds its network I/O. Local verification has no
 	// SDK deadline; each caller can independently cancel its wait above.
-	state, err := verify()
+	var state *VerifiedDocumentV3
+	var err, firstErr error
+	for attempt := 0; ; attempt++ {
+		state, err = verify()
+		if err == nil && !time.Now().Before(state.FreshnessExpiresAt) {
+			err = &AttestationError{Err: errFreshnessExpired}
+		}
+		if attempt == verificationRetries || !retryableVerification(err) {
+			break
+		}
+		firstErr = err
+		// Nothing from the failed attempt was published. Fetch a fresh nonce and
+		// full document after one delay; concurrent callers share this retry.
+		time.Sleep(verificationRetryDelay)
+	}
 	s.stateMu.Lock()
 	defer s.stateMu.Unlock()
+	// Lock contention may have crossed the deadline since the attempt finished.
 	if err == nil && !time.Now().Before(state.FreshnessExpiresAt) {
 		err = &AttestationError{Err: errFreshnessExpired}
+	}
+	if err != nil && firstErr != nil {
+		err = errors.Join(err, firstErr)
 	}
 	if err == nil {
 		s.state = state
@@ -70,4 +93,28 @@ func (s *SecureClient) refresh(call *verificationCall) {
 	call.err = err
 	s.refreshing = nil
 	close(call.done)
+}
+
+// Discard only the rejected snapshot; another caller may already have recovered.
+func (s *SecureClient) invalidate(state *VerifiedDocumentV3) {
+	s.stateMu.Lock()
+	defer s.stateMu.Unlock()
+	if s.state == state {
+		s.state = nil
+	}
+}
+
+func retryableVerification(err error) bool {
+	var config *ConfigurationError
+	if errors.As(err, &config) {
+		return false
+	}
+	// Joined failures put the terminal cause first; earlier probes are diagnostics.
+	if joined, ok := err.(interface{ Unwrap() []error }); ok {
+		causes := joined.Unwrap()
+		return len(causes) > 0 && retryableVerification(causes[0])
+	}
+	var fetch *FetchError
+	var attestation *AttestationError
+	return errors.As(err, &fetch) || errors.As(err, &attestation)
 }
