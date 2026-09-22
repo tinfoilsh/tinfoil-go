@@ -26,7 +26,8 @@ func TestVerifiedTransportKeysAllowTLSOnly(t *testing.T) {
 			v := &VerifiedDocumentV3{CryptoMaterial: tt.items}
 			err := v.validateTransportKeys()
 			if tt.wantError {
-				require.Error(t, err)
+				var attestation *AttestationError
+				require.ErrorAs(t, err, &attestation)
 				return
 			}
 			require.NoError(t, err)

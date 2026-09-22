@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -93,13 +94,15 @@ func TestLiveVerifyFreshnessExpiration(t *testing.T) {
 		require.Equal(t, *custom, mobileResult, "mobile callers receive the same keys, measurements, and expiry")
 	}
 	badPins := cloneMeasurement(verified.EnclaveMeasurement)
-	badPins.Registers[0] = "bad"
+	badPins.Registers[0] = strings.Repeat("ab", 48)
+	require.NotEqual(t, verified.EnclaveMeasurement.Registers[0], badPins.Registers[0])
 	_, err = VerifyDocumentV3(raw, nonce, repo, &VerificationOptions{PinnedRegisters: badPins})
-	require.ErrorContains(t, err, "cpu evidence")
+	var attestation *AttestationError
+	require.ErrorAs(t, err, &attestation)
 	s, err := NewDefaultClient(&VerificationOptions{PinnedRegisters: badPins, FreshnessMaxAge: maxAge})
 	require.NoError(t, err)
 	_, err = s.Verify()
-	require.ErrorContains(t, err, "cpu evidence")
+	require.ErrorAs(t, err, &attestation)
 	doc, err := envelope.Parse(raw)
 	require.NoError(t, err)
 	codeRef, err := doc.ReferenceValuesCollateral(envelope.CollateralSigstoreCodeV1Format)

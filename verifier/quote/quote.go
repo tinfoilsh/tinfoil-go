@@ -17,6 +17,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/tinfoilsh/tinfoil-go/verifier"
 	"github.com/tinfoilsh/tinfoil-go/verifier/envelope"
 	"github.com/tinfoilsh/tinfoil-go/verifier/measurement"
 	"github.com/tinfoilsh/tinfoil-go/verifier/policy"
@@ -61,7 +62,11 @@ type AssembledPolicy struct {
 // vendor root, from the document's own endorsement collateral — no network
 // fetches. Callers must assemble a policy and validate before trusting the
 // platform.
-func Authenticate(doc *envelope.Document) (*Authenticated, error) {
+func Authenticate(doc *envelope.Document) (result *Authenticated, err error) {
+	defer func() { err = verifier.WrapAttestation(err) }()
+	if doc == nil {
+		return nil, &verifier.ConfigurationError{Err: fmt.Errorf("document is required")}
+	}
 	switch doc.CPUEvidence.Format {
 	case envelope.SEVSNPReportV1Format:
 		q, err := sev.Authenticate(doc)
@@ -94,12 +99,19 @@ func Authenticate(doc *envelope.Document) (*Authenticated, error) {
 // and REPORT_DATA. TDX platform measurements must match the required VM shape.
 // A machine absent from endorsements is rejected. Pins fill unset registers or
 // must match the existing source value.
-func Assemble(endorsements *policy.Artifact, code, pins *measurement.Measurement, shape *policy.Shape, reportData [64]byte, q *Authenticated) (*AssembledPolicy, error) {
-	if code == nil {
-		return nil, fmt.Errorf("assembling policy: expected code measurement is required")
+func Assemble(endorsements *policy.Artifact, code, pins *measurement.Measurement, shape *policy.Shape, reportData [64]byte, q *Authenticated) (result *AssembledPolicy, err error) {
+	defer func() { err = verifier.WrapAttestation(err) }()
+	if endorsements == nil {
+		return nil, &verifier.ConfigurationError{Err: fmt.Errorf("endorsements are required")}
 	}
-	if shape == nil {
-		return nil, fmt.Errorf("assembling policy: the code artifact's VM shape is required")
+	if q == nil || q.sev == nil && q.tdx == nil {
+		return nil, &verifier.ConfigurationError{Err: fmt.Errorf("authenticated quote is required")}
+	}
+	if code == nil {
+		return nil, &verifier.ConfigurationError{Err: fmt.Errorf("assembling policy: expected code measurement is required")}
+	}
+	if q.platform == policy.PlatformTDX && shape == nil {
+		return nil, &verifier.ConfigurationError{Err: fmt.Errorf("assembling policy: the code artifact's VM shape is required")}
 	}
 	name, machinePolicy, err := endorsements.PolicyFor(q.identity, q.platform)
 	if err != nil {
@@ -130,7 +142,11 @@ func Assemble(endorsements *policy.Artifact, code, pins *measurement.Measurement
 
 // Validate compares the captured quote against the assembled policy in a
 // single vendor library call: no lookups, no translation.
-func (p *AssembledPolicy) Validate() error {
+func (p *AssembledPolicy) Validate() (err error) {
+	defer func() { err = verifier.WrapAttestation(err) }()
+	if p == nil || p.sev == nil && p.tdx == nil {
+		return &verifier.ConfigurationError{Err: fmt.Errorf("assembled policy is required")}
+	}
 	switch p.quote.platform {
 	case policy.PlatformSEVSNP:
 		return p.sev.Validate(p.quote.sev)
@@ -159,6 +175,9 @@ func Verify(doc *envelope.Document, endorsements *policy.Artifact, code, pins *m
 
 // layout maps code and pins to enclave registers, leaving platform defaults empty.
 func layout(code, pins *measurement.Measurement, q *Authenticated) ([]string, error) {
+	if err := measurement.ValidatePins(pins); err != nil {
+		return nil, &verifier.ConfigurationError{Err: err}
+	}
 	if code.Type != measurement.SnpTdxMultiPlatformV1 || len(code.Registers) != 3 {
 		return nil, fmt.Errorf("code measurement is %s with %d registers, want %s with 3", code.Type, len(code.Registers), measurement.SnpTdxMultiPlatformV1)
 	}

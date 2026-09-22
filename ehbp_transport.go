@@ -75,7 +75,7 @@ func WithTransport(mode TransportMode) ClientOption {
 	return func(c *clientConfig) { c.transport = mode }
 }
 
-// WithBaseURL routes requests through the given base URL (for example your own
+// WithBaseURL routes requests through the given HTTPS base URL (for example your own
 // proxy) instead of sending them directly to the enclave. Request bodies stay
 // encrypted end-to-end to the verified enclave; when the base URL's origin
 // differs from the enclave's, the SDK adds the X-Tinfoil-Enclave-Url header so
@@ -113,13 +113,20 @@ func NewClientWithOptions(opts ...ClientOption) (*Client, error) {
 	if cfg.repo == "" {
 		cfg.repo = defaultConfigRepo
 	}
+	if cfg.transport != TransportTLS && cfg.transport != TransportEHBP {
+		return nil, &ConfigurationError{Err: fmt.Errorf("unknown transport mode: %q", cfg.transport)}
+	}
 	if cfg.baseURLSet {
-		if _, err := originOf(cfg.baseURL); err != nil {
-			return nil, fmt.Errorf("invalid base URL: %w", err)
+		origin, err := originOf(cfg.baseURL)
+		if err != nil {
+			return nil, &ConfigurationError{Err: fmt.Errorf("invalid base URL: %w", err)}
+		}
+		if !strings.HasPrefix(origin, "https://") {
+			return nil, &ConfigurationError{Err: fmt.Errorf("invalid base URL: HTTPS is required to protect request headers")}
 		}
 	}
 	if cfg.enclave == "" && cfg.repo != defaultConfigRepo {
-		return nil, fmt.Errorf("custom repository requires an enclave")
+		return nil, &ConfigurationError{Err: fmt.Errorf("custom repository requires an enclave")}
 	}
 
 	var secureClient *client.SecureClient
@@ -130,7 +137,7 @@ func NewClientWithOptions(opts ...ClientOption) (*Client, error) {
 		secureClient, err = client.NewSecureClient(cfg.enclave, cfg.repo, &cfg.verification)
 	}
 	if err != nil {
-		return nil, fmt.Errorf("failed to create secure client: %w", err)
+		return nil, err
 	}
 
 	return createClientFromSecureClient(secureClient, cfg.transport, cfg.baseURL,
@@ -142,20 +149,17 @@ func secureHTTPClient(secureClient *client.SecureClient, mode TransportMode, bas
 		httpClient *http.Client
 		err        error
 	)
-	switch mode {
-	case TransportTLS:
+	if mode == TransportTLS {
 		httpClient, err = secureClient.HTTPClient()
-	case TransportEHBP, "":
+	} else {
 		httpClient, err = ehbpHTTPClient(secureClient, baseURL)
-	default:
-		return nil, fmt.Errorf("unknown transport mode: %q", mode)
 	}
 	if err != nil {
 		return nil, err
 	}
 	if mode == TransportTLS {
 		if err := validateTLSBaseURL(baseURL, secureClient.Enclave()); err != nil {
-			return nil, err
+			return nil, &ConfigurationError{Err: err}
 		}
 	}
 
@@ -172,7 +176,7 @@ func secureHTTPClient(secureClient *client.SecureClient, mode TransportMode, bas
 
 	origins, err := allowedOrigins(secureClient.Enclave(), baseURL)
 	if err != nil {
-		return nil, fmt.Errorf("failed to determine allowed request origins: %w", err)
+		return nil, &ConfigurationError{Err: fmt.Errorf("failed to determine allowed request origins: %w", err)}
 	}
 	httpClient.Transport = &hostBoundRoundTripper{
 		allowedOrigins: origins,
@@ -214,7 +218,7 @@ type hostBoundRoundTripper struct {
 func (t *hostBoundRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
 	origin := normalizedOrigin(req.URL)
 	if _, ok := t.allowedOrigins[origin]; !ok {
-		return nil, fmt.Errorf("refusing to send request to %q: client is bound to enclave %q", origin, t.enclave)
+		return nil, &ConfigurationError{Err: fmt.Errorf("refusing to send request to %q: client is bound to enclave %q", origin, t.enclave)}
 	}
 	return t.transport.RoundTrip(req)
 }
@@ -231,7 +235,7 @@ func ehbpHTTPClient(secureClient transportVerifier, baseURL string) (*http.Clien
 		}
 		inner, err := buildEHBPTransport(key)
 		if err != nil {
-			return nil, err
+			return nil, &AttestationError{Err: err}
 		}
 		if headerValue, ok := enclaveURLHeaderValue(baseURL, verified.EnclaveHost); ok {
 			return &enclaveURLHeaderTransport{enclaveURL: headerValue, transport: inner}, nil
@@ -239,7 +243,7 @@ func ehbpHTTPClient(secureClient transportVerifier, baseURL string) (*http.Clien
 		return inner, nil
 	}, ehbpidentity.IsKeyConfigError)
 	if err != nil {
-		return nil, fmt.Errorf("creating EHBP transport: %w", err)
+		return nil, err
 	}
 	return &http.Client{Transport: transport}, nil
 }

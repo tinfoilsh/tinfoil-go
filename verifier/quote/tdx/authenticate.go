@@ -22,6 +22,7 @@ import (
 	tdxverify "github.com/google/go-tdx-guest/verify"
 	tdxtrust "github.com/google/go-tdx-guest/verify/trust"
 
+	"github.com/tinfoilsh/tinfoil-go/verifier"
 	"github.com/tinfoilsh/tinfoil-go/verifier/envelope"
 	"github.com/tinfoilsh/tinfoil-go/verifier/measurement"
 )
@@ -46,7 +47,11 @@ func (q *Quote) Identity() string { return q.identity }
 // SGX root, replaying the document's captured PCS collateral — no network
 // fetches. Callers must assemble a policy and validate before trusting the
 // platform.
-func Authenticate(doc *envelope.Document) (*Quote, error) {
+func Authenticate(doc *envelope.Document) (result *Quote, err error) {
+	defer func() { err = verifier.WrapAttestation(err) }()
+	if doc == nil {
+		return nil, &verifier.ConfigurationError{Err: fmt.Errorf("document is required")}
+	}
 	rawQuote, err := base64.StdEncoding.DecodeString(doc.CPUEvidence.ReportBase64)
 	if err != nil {
 		return nil, fmt.Errorf("decoding TDX quote: %w", err)

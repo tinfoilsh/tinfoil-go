@@ -44,6 +44,9 @@ func TestTLSBoundRoundTripperRejectsPinnedMismatchThroughHTTPSProxy(t *testing.T
 
 	require.Error(t, err)
 	require.True(t, errors.Is(err, ErrCertMismatch), "got %v", err)
+	var attestation *AttestationError
+	require.ErrorAs(t, err, &attestation)
+	require.True(t, isCertificateError(err), "typed errors must preserve TLS recovery")
 	require.False(t, reached.Load(), "request must not reach the server after a pin mismatch")
 }
 

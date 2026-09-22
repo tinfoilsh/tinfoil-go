@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/http/httptrace"
 	"net/url"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"testing/synctest"
@@ -168,6 +169,9 @@ func TestVerificationFetchStillTimesOut(t *testing.T) {
 		require.NoError(t, err)
 		_, err = client.Verify()
 		require.ErrorIs(t, err, context.DeadlineExceeded)
+		var fetch *FetchError
+		require.ErrorAs(t, err, &fetch)
+		require.True(t, strings.HasPrefix(err.Error(), "fetch error: "), "verification fetch retains its SDK category prefix")
 		require.Equal(t, 30*time.Second, time.Since(start))
 	})
 }
@@ -388,7 +392,8 @@ func TestHTTPClientChecksExpirationOnReusedTLSConnections(t *testing.T) {
 			hc, err := s.HTTPClient()
 			require.NoError(t, err)
 			defer hc.CloseIdleConnections()
-			base := hc.Transport.(*refreshingTransport).transport.(*TLSBoundRoundTripper).getTransport()
+			base, err := hc.Transport.(*refreshingTransport).transport.(*TLSBoundRoundTripper).getTransport()
+			require.NoError(t, err)
 			base.Proxy = nil
 			base.TLSClientConfig.RootCAs = roots
 			if useProxy {

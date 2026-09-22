@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/tinfoilsh/tinfoil-go/verifier"
 	"github.com/tinfoilsh/tinfoil-go/verifier/envelope"
 	"github.com/tinfoilsh/tinfoil-go/verifier/measurement"
 	"github.com/tinfoilsh/tinfoil-go/verifier/provenance"
@@ -45,16 +46,19 @@ func (v *VerifiedDocumentV3) HPKEPublicKey() (string, error) {
 }
 
 func (v *VerifiedDocumentV3) cryptoMaterialData(id, format string) (string, error) {
+	if v == nil {
+		return "", &ConfigurationError{Err: fmt.Errorf("verified document is required")}
+	}
 	for _, item := range v.CryptoMaterial {
 		if item.ID != id {
 			continue
 		}
 		if item.Format != format {
-			return "", fmt.Errorf("crypto_material item %q has format %q, want %q", id, item.Format, format)
+			return "", &AttestationError{Err: fmt.Errorf("crypto_material item %q has format %q, want %q", id, item.Format, format)}
 		}
 		return item.Data, nil
 	}
-	return "", fmt.Errorf("document endorses no %q crypto material", id)
+	return "", &AttestationError{Err: fmt.Errorf("document endorses no %q crypto material", id)}
 }
 
 func (v *VerifiedDocumentV3) validateTransportKeys() error {
@@ -74,23 +78,26 @@ func (v *VerifiedDocumentV3) validateTransportKeys() error {
 // A nil policy uses defaults. repo is a trusted owner/name[@tag][@sha256:digest].
 // Callers must bind traffic to the returned keys and enforce FreshnessExpiresAt.
 func VerifyDocumentV3(docBytes, nonce []byte, repo string, opts *VerificationOptions) (*VerifiedDocumentV3, error) {
+	if _, _, _, err := provenance.ParseReference(repo); err != nil {
+		return nil, &ConfigurationError{Err: err}
+	}
 	options, err := opts.normalized()
 	if err != nil {
 		return nil, err
 	}
 	doc, expectedReportData, err := envelope.Check(docBytes, nonce)
 	if err != nil {
-		return nil, fmt.Errorf("envelope: %w", err)
+		return nil, err
 	}
 
 	code, endorsements, freshnessExpiresAt, err := authenticateReferenceValues(doc, repo, options.FreshnessMaxAge)
 	if err != nil {
-		return nil, fmt.Errorf("reference values: %w", err)
+		return nil, verifier.WrapAttestation(fmt.Errorf("reference values: %w", err))
 	}
 
 	_, authenticated, err := quote.Verify(doc, endorsements.Artifact, code.Measurement, options.PinnedRegisters, code.Shape, expectedReportData)
 	if err != nil {
-		return nil, fmt.Errorf("cpu evidence: %w", err)
+		return nil, err
 	}
 
 	return &VerifiedDocumentV3{
@@ -159,7 +166,7 @@ func (s *SecureClient) fetchVerification() (*VerifiedDocumentV3, error) {
 	}
 	docBytes, err := envelope.Fetch(s.enclave, nonce)
 	if err != nil {
-		return nil, fmt.Errorf("fetching attestation document: %w", err)
+		return nil, err
 	}
 
 	verified, err := VerifyDocumentV3(docBytes, nonce, s.repo, &s.options)
@@ -168,7 +175,7 @@ func (s *SecureClient) fetchVerification() (*VerifiedDocumentV3, error) {
 	}
 
 	if err := verified.validateTransportKeys(); err != nil {
-		return nil, fmt.Errorf("binding: %w", err)
+		return nil, err
 	}
 	verified.ConfigRepo, _, _ = strings.Cut(s.repo, "@")
 	verified.EnclaveHost = s.enclave

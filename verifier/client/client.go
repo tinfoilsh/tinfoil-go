@@ -57,16 +57,22 @@ func (input *VerificationOptions) normalized() (VerificationOptions, error) {
 		opts = *input
 	}
 	if opts.FreshnessMaxAge < 0 {
-		return VerificationOptions{}, fmt.Errorf("freshness maximum age must not be negative")
+		return VerificationOptions{}, &ConfigurationError{Err: fmt.Errorf("freshness maximum age must not be negative")}
 	}
 	opts.FreshnessMaxAge = cmp.Or(opts.FreshnessMaxAge, provenance.MaxFreshnessAge)
 	opts.PinnedRegisters = cloneMeasurement(opts.PinnedRegisters)
+	if err := measurement.ValidatePins(opts.PinnedRegisters); err != nil {
+		return VerificationOptions{}, &ConfigurationError{Err: err}
+	}
 	return opts, nil
 }
 
 // NewSecureClient creates a secure client for an enclave and repository
 // reference, owner/name[@tag][@sha256:digest]. Verification happens on first use.
 func NewSecureClient(enclave, repo string, opts *VerificationOptions) (*SecureClient, error) {
+	if _, _, _, err := provenance.ParseReference(repo); err != nil {
+		return nil, &ConfigurationError{Err: err}
+	}
 	options, err := opts.normalized()
 	if err != nil {
 		return nil, err
@@ -129,21 +135,22 @@ func (s *SecureClient) HTTPClient() (*http.Client, error) {
 		return &TLSBoundRoundTripper{ExpectedPublicKey: key}, nil
 	}, isCertificateError)
 	if err != nil {
-		return nil, fmt.Errorf("creating TLS transport: %w", err)
+		return nil, err
 	}
 	return &http.Client{Transport: transport}, nil
 }
 
 // Request sends an HTTPS request. headersJSON is a JSON object or empty.
-func (s *SecureClient) Request(method, url, headersJSON string, body []byte) (*Response, error) {
+func (s *SecureClient) Request(method, url, headersJSON string, body []byte) (result *Response, err error) {
+	defer func() { err = mobileError(err) }()
 	req, err := http.NewRequest(method, url, bytes.NewReader(body))
 	if err != nil {
-		return nil, err
+		return nil, &ConfigurationError{Err: err}
 	}
 	if headersJSON != "" {
 		var headers map[string]string
 		if err := json.Unmarshal([]byte(headersJSON), &headers); err != nil {
-			return nil, err
+			return nil, &ConfigurationError{Err: fmt.Errorf("failed to parse headers JSON: %w", err)}
 		}
 		for k, v := range headers {
 			req.Header.Set(k, v)
@@ -162,7 +169,7 @@ func (s *SecureClient) Request(method, url, headersJSON string, body []byte) (*R
 	// Request headers (which may carry the API key) are not encrypted, so never
 	// send them over a plaintext connection.
 	if req.URL.Scheme != "https" {
-		return nil, fmt.Errorf("refusing to send request over non-https URL %q", req.URL.String())
+		return nil, &ConfigurationError{Err: fmt.Errorf("refusing to send request over non-https URL %q", req.URL.String())}
 	}
 
 	resp, err := httpClient.Do(req)
