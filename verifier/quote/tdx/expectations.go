@@ -7,7 +7,7 @@ import (
 
 	tdxvalidate "github.com/google/go-tdx-guest/validate"
 
-	"github.com/tinfoilsh/tinfoil-go/internal/errdefs"
+	"github.com/tinfoilsh/tinfoil-go/verifier"
 	"github.com/tinfoilsh/tinfoil-go/verifier/measurement"
 	"github.com/tinfoilsh/tinfoil-go/verifier/policy"
 )
@@ -24,15 +24,15 @@ type Expectations struct {
 // the required VM shape, then builds validation options from policy and registers.
 // It returns the matching measurements-map entry's name.
 func Assemble(a *policy.Artifact, p *policy.TDXPolicy, required *policy.Shape, q *Quote, registers [5]string, reportData [64]byte) (result *Expectations, name string, err error) {
-	defer func() { err = errdefs.WrapAttestation(err) }()
+	defer func() { err = verifier.WrapAttestation(err) }()
 	if a == nil || p == nil {
-		return nil, "", &errdefs.ConfigurationError{Err: fmt.Errorf("endorsements and TDX policy are required")}
+		return nil, "", &verifier.ConfigurationError{Err: fmt.Errorf("endorsements and TDX policy are required")}
 	}
 	if required == nil {
-		return nil, "", &errdefs.ConfigurationError{Err: fmt.Errorf("VM shape is required")}
+		return nil, "", &verifier.ConfigurationError{Err: fmt.Errorf("VM shape is required")}
 	}
 	if q == nil || q.quote == nil {
-		return nil, "", &errdefs.ConfigurationError{Err: fmt.Errorf("authenticated TDX quote is required")}
+		return nil, "", &verifier.ConfigurationError{Err: fmt.Errorf("authenticated TDX quote is required")}
 	}
 	opts, err := options(p)
 	if err != nil {
@@ -68,12 +68,12 @@ func Assemble(a *policy.Artifact, p *policy.TDXPolicy, required *policy.Shape, q
 // library validation options plus the collateral floor. It is the only TDX
 // enforcement entry point, so no subset of the policy can be applied.
 func (e *Expectations) Validate(q *Quote) (err error) {
-	defer func() { err = errdefs.WrapAttestation(err) }()
+	defer func() { err = verifier.WrapAttestation(err) }()
 	if e == nil || e.opts == nil {
-		return &errdefs.ConfigurationError{Err: fmt.Errorf("assembled TDX expectations are required")}
+		return &verifier.ConfigurationError{Err: fmt.Errorf("assembled TDX expectations are required")}
 	}
 	if q == nil || q.quote == nil {
-		return &errdefs.ConfigurationError{Err: fmt.Errorf("authenticated TDX quote is required")}
+		return &verifier.ConfigurationError{Err: fmt.Errorf("authenticated TDX quote is required")}
 	}
 	if err := tdxvalidate.TdxQuote(q.quote, e.opts); err != nil {
 		return err

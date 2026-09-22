@@ -12,7 +12,7 @@ import (
 	"github.com/tinfoilsh/go-sev-guest/proto/sevsnp"
 	sevvalidate "github.com/tinfoilsh/go-sev-guest/validate"
 
-	"github.com/tinfoilsh/tinfoil-go/internal/errdefs"
+	"github.com/tinfoilsh/tinfoil-go/verifier"
 	"github.com/tinfoilsh/tinfoil-go/verifier/policy"
 )
 
@@ -33,12 +33,12 @@ type Expectations struct {
 
 // Assemble combines policy with the launch digest, REPORT_DATA, and authenticated CHIP_ID.
 func Assemble(p *policy.SEVSNPPolicy, q *Quote, launchDigest string, reportData [64]byte) (result *Expectations, err error) {
-	defer func() { err = errdefs.WrapAttestation(err) }()
+	defer func() { err = verifier.WrapAttestation(err) }()
 	if p == nil {
-		return nil, &errdefs.ConfigurationError{Err: fmt.Errorf("SEV policy is required")}
+		return nil, &verifier.ConfigurationError{Err: fmt.Errorf("SEV policy is required")}
 	}
 	if q == nil || q.attestation == nil {
-		return nil, &errdefs.ConfigurationError{Err: fmt.Errorf("authenticated SEV quote is required")}
+		return nil, &verifier.ConfigurationError{Err: fmt.Errorf("authenticated SEV quote is required")}
 	}
 	opts, err := options(p, q.ProductLine())
 	if err != nil {
@@ -67,12 +67,12 @@ func Assemble(p *policy.SEVSNPPolicy, q *Quote, launchDigest string, reportData 
 // the only SEV enforcement entry point, so no subset of the policy can be
 // applied.
 func (e *Expectations) Validate(q *Quote) (err error) {
-	defer func() { err = errdefs.WrapAttestation(err) }()
+	defer func() { err = verifier.WrapAttestation(err) }()
 	if e == nil || e.opts == nil {
-		return &errdefs.ConfigurationError{Err: fmt.Errorf("assembled SEV expectations are required")}
+		return &verifier.ConfigurationError{Err: fmt.Errorf("assembled SEV expectations are required")}
 	}
 	if q == nil || q.attestation == nil {
-		return &errdefs.ConfigurationError{Err: fmt.Errorf("authenticated SEV quote is required")}
+		return &verifier.ConfigurationError{Err: fmt.Errorf("authenticated SEV quote is required")}
 	}
 	if err := sevvalidate.SnpAttestation(q.attestation, e.opts); err != nil {
 		return err

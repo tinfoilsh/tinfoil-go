@@ -9,7 +9,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/tinfoilsh/tinfoil-go/verifier/internal/pinning"
 	"github.com/tinfoilsh/tinfoil-go/verifier/measurement"
 	"github.com/tinfoilsh/tinfoil-go/verifier/provenance"
 	"github.com/tinfoilsh/tinfoil-go/verifier/util"
@@ -62,7 +61,7 @@ func (input *VerificationOptions) normalized() (VerificationOptions, error) {
 	}
 	opts.FreshnessMaxAge = cmp.Or(opts.FreshnessMaxAge, provenance.MaxFreshnessAge)
 	opts.PinnedRegisters = cloneMeasurement(opts.PinnedRegisters)
-	if err := pinning.Validate(opts.PinnedRegisters); err != nil {
+	if err := measurement.ValidatePins(opts.PinnedRegisters); err != nil {
 		return VerificationOptions{}, &ConfigurationError{Err: err}
 	}
 	return opts, nil

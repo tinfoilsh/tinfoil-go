@@ -1,6 +1,6 @@
-// Package errdefs defines the SDK's three error categories. Wrapping preserves
+// Package verifier defines the SDK's three error categories. Wrapping preserves
 // an existing category and the underlying cause, as in the JS SDK's wrapOrThrow.
-package errdefs
+package verifier
 
 import (
 	"errors"
