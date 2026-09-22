@@ -62,6 +62,9 @@ const (
 	// KeySPKIFPSHA256V1Format is a 32-byte SHA-256 of the DER-encoded
 	// SubjectPublicKeyInfo (RFC 5280), the standard pinning computation.
 	KeySPKIFPSHA256V1Format = "https://tinfoil.sh/key/spki-fp-sha256/v1"
+	// KeySPKIV1Format carries a complete DER-encoded SubjectPublicKeyInfo as
+	// lowercase hex. Consumers validate the key algorithm for their protocol.
+	KeySPKIV1Format = "https://tinfoil.sh/key/spki/v1"
 	// KeyX25519HPKEV1Format is a raw 32-byte X25519 public key (RFC 7748)
 	// used for HPKE (RFC 9180).
 	KeyX25519HPKEV1Format = "https://tinfoil.sh/key/x25519-hpke/v1"

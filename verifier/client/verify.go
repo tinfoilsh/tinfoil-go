@@ -36,16 +36,18 @@ type VerifiedDocumentV3 struct {
 // TLSPublicKeyFP returns the endorsed TLS key fingerprint (the id=tls
 // crypto_material entry), or an error if the document does not endorse one.
 func (v *VerifiedDocumentV3) TLSPublicKeyFP() (string, error) {
-	return v.cryptoMaterialData(envelope.CryptoMaterialIDTLS, envelope.KeySPKIFPSHA256V1Format)
+	return v.CryptoMaterialData(envelope.CryptoMaterialIDTLS, envelope.KeySPKIFPSHA256V1Format)
 }
 
 // HPKEPublicKey returns the endorsed HPKE public key (the id=hpke
 // crypto_material entry), or an error if the document does not endorse one.
 func (v *VerifiedDocumentV3) HPKEPublicKey() (string, error) {
-	return v.cryptoMaterialData(envelope.CryptoMaterialIDHPKE, envelope.KeyX25519HPKEV1Format)
+	return v.CryptoMaterialData(envelope.CryptoMaterialIDHPKE, envelope.KeyX25519HPKEV1Format)
 }
 
-func (v *VerifiedDocumentV3) cryptoMaterialData(id, format string) (string, error) {
+// CryptoMaterialData returns the endorsed lowercase-hex data for exactly id and
+// format. Lookup does not refresh evidence or enforce FreshnessExpiresAt.
+func (v *VerifiedDocumentV3) CryptoMaterialData(id, format string) (string, error) {
 	if v == nil {
 		return "", &ConfigurationError{Err: fmt.Errorf("verified document is required")}
 	}

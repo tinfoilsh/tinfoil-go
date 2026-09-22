@@ -181,3 +181,24 @@ See the [tinfoil-js documentation](https://github.com/tinfoilsh/tinfoil-js) for 
 - CPU authentication and expectation enforcement: `quote/sev/` and `quote/tdx/`.
 - End-to-end verification: `client/verify.go`.
 - Per-connection TLS pinning: `client/roundtrip.go`.
+
+## Arbitrary endorsed material
+
+A successful `Verify` or `VerifyDocumentV3` result retains every endorsed
+`CryptoMaterial` item. Select by exact ID and format:
+
+```go
+data, err := verified.CryptoMaterialData("host-ssh", envelope.KeySPKIV1Format)
+if err != nil {
+    return err
+}
+// data is lowercase hex of full DER SPKI. Decode and validate the key for
+// your application's protocol before binding a connection to it.
+```
+
+Unknown valid formats are preserved. The SDK does not add protocol-specific
+key adapters; SSH conversion and pin installation belong to the CLI/consumer.
+Use only successfully verified results and retain the expected workload and
+`FreshnessExpiresAt` context. Lookup does not refresh or check expiry. Exporting
+a static pin records an enrollment decision; native clients do not enforce the
+attestation's expiry on subsequent connections.
