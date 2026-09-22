@@ -45,7 +45,7 @@ func runLive() int {
 		return conformance.ExitInternal
 	}
 
-	verified, err := client.VerifyDocumentV3(doc, nonce, req.Repo)
+	verified, err := client.VerifyDocumentV3(doc, nonce, req.Repo, nil)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "live verification: %v\n", err)
 		return rejectLive(conformance.RejectionCode(err))

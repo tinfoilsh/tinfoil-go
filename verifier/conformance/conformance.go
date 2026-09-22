@@ -223,7 +223,7 @@ func verifyFull(doc, nonce []byte, repo string, rts roots, prov provAuth, apprai
 	if err != nil {
 		return reject(StageVerify, "QUOTE_REJECTED")
 	}
-	assembled, err := quote.Assemble(endorsements.Artifact, code.Measurement, code.Shape, reportData, auth)
+	assembled, err := quote.Assemble(endorsements.Artifact, code.Measurement, nil, code.Shape, reportData, auth)
 	if err != nil {
 		return reject(StageVerify, "POLICY_REJECTED")
 	}
@@ -275,7 +275,7 @@ func authReferenceValues(doc *envelope.Document, repo string, prov provAuth, app
 	if err != nil {
 		return nil, nil, err
 	}
-	if _, err := prov.freshness(codeFresh.SigstoreBundle, &code.AuthenticatedArtifact, appraisal); err != nil {
+	if _, err := prov.freshness(codeFresh.SigstoreBundle, &code.AuthenticatedArtifact, appraisal, 0); err != nil {
 		return nil, nil, err
 	}
 	platRef, err := doc.ReferenceValuesCollateral(envelope.CollateralSigstorePlatformV1Format)
@@ -290,7 +290,7 @@ func authReferenceValues(doc *envelope.Document, repo string, prov provAuth, app
 	if err != nil {
 		return nil, nil, err
 	}
-	if _, err := prov.freshness(platFresh.SigstoreBundle, &endorsements.AuthenticatedArtifact, appraisal); err != nil {
+	if _, err := prov.freshness(platFresh.SigstoreBundle, &endorsements.AuthenticatedArtifact, appraisal, 0); err != nil {
 		return nil, nil, err
 	}
 	return code, endorsements, nil
@@ -355,7 +355,7 @@ func setQuoteRoots(rts roots) (func(), error) {
 type provAuth struct {
 	code      func(bundleJSON []byte, repo, tag, hexDigest string) (*provenance.Code, error)
 	platform  func(bundleJSON []byte, repo, tag, hexDigest string) (*provenance.PlatformEndorsements, error)
-	freshness func(bundleJSON []byte, expected *provenance.AuthenticatedArtifact, now time.Time) (time.Time, error)
+	freshness func(bundleJSON []byte, expected *provenance.AuthenticatedArtifact, now time.Time, maxAge time.Duration) (time.Time, error)
 }
 
 func newProvAuth(sigstoreRootJSON []byte) (provAuth, error) {
