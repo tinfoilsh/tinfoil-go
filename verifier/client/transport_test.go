@@ -17,6 +17,7 @@ import (
 	"testing/synctest"
 	"time"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	ehbpidentity "github.com/tinfoilsh/encrypted-http-body-protocol/identity"
 	"github.com/tinfoilsh/tinfoil-go/verifier/envelope"
@@ -47,7 +48,7 @@ func TestTransportExpirationAndUnchangedWitness(t *testing.T) {
 		s, err := NewSecureClient("enclave.example", "org/repo", &VerificationOptions{FreshnessMaxAge: time.Minute})
 		require.NoError(t, err)
 		deadline := witnessedAt.Add(time.Minute)
-		s.verify = func() (*VerifiedDocumentV3, error) {
+		s.verify = func(string) (*VerifiedDocumentV3, error) {
 			verifications++
 			return testState(freshnessExpiration(witnessedAt, witnessedAt.Add(time.Hour), s.options.FreshnessMaxAge), "key"), nil
 		}
@@ -83,7 +84,7 @@ func TestRefreshCoalescesRequestsAndExplicitVerify(t *testing.T) {
 				release := make(chan struct{})
 				var attempts, requests atomic.Int32
 				s := &SecureClient{state: testState(time.Now().Add(time.Minute), "old")}
-				s.verify = func() (*VerifiedDocumentV3, error) {
+				s.verify = func(string) (*VerifiedDocumentV3, error) {
 					attempts.Add(1)
 					<-release
 					return testState(time.Now().Add(time.Hour), "new"), refreshErr
@@ -134,13 +135,13 @@ func errorString(err error) string {
 func TestRefreshWaitersCancelIndependentlyWithoutVerificationTimeout(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		release := make(chan struct{})
-		s := &SecureClient{verify: func() (*VerifiedDocumentV3, error) {
+		s := &SecureClient{verify: func(string) (*VerifiedDocumentV3, error) {
 			<-release
 			return testState(time.Now().Add(time.Hour), "key"), nil
 		}}
 		ctx, cancel := context.WithCancel(context.Background())
 		canceled, waiting := make(chan error, 1), make(chan error, 1)
-		go func() { _, err := s.verifiedState(ctx, nil, false); canceled <- err }()
+		go func() { _, err := s.ready(ctx, nil); canceled <- err }()
 		go func() { _, err := s.Verify(); waiting <- err }()
 		synctest.Wait()
 		cancel()
@@ -182,7 +183,7 @@ func TestVerificationFetchStillTimesOut(t *testing.T) {
 
 func TestPreviouslyReturnedTransportsUseExplicitVerification(t *testing.T) {
 	var attempts int
-	s := &SecureClient{verify: func() (*VerifiedDocumentV3, error) {
+	s := &SecureClient{verify: func(string) (*VerifiedDocumentV3, error) {
 		attempts++
 		key := "old"
 		if attempts > 1 {
@@ -230,7 +231,7 @@ func TestKeyRotationRetriesShareRefresh(t *testing.T) {
 				rotated := make(chan struct{})
 				var attempts, sends atomic.Int32
 				s := &SecureClient{state: testState(time.Now().Add(time.Hour), "old")}
-				s.verify = func() (*VerifiedDocumentV3, error) {
+				s.verify = func(string) (*VerifiedDocumentV3, error) {
 					attempt := attempts.Add(1)
 					<-release
 					if attempt == 1 {
@@ -301,7 +302,8 @@ func TestKeyRotationRetryLimits(t *testing.T) {
 				if tc.keyError {
 					original = fmt.Errorf("original key rejection: %w", errCertMismatch)
 				}
-				s := &SecureClient{state: testState(time.Now().Add(time.Hour), "old"), verify: func() (*VerifiedDocumentV3, error) {
+				s := &SecureClient{enclave: "enclave.example", state: testState(time.Now().Add(time.Hour), "old"), verify: func(host string) (*VerifiedDocumentV3, error) {
+					assert.Equal(t, "enclave.example", host, "explicit enclaves stay fixed")
 					refreshes++
 					if refreshes == 2 {
 						return nil, tc.retryErr
@@ -344,10 +346,75 @@ func TestKeyRotationRetryLimits(t *testing.T) {
 	}
 }
 
+func TestTLSRecoveryRoutesToNewRouter(t *testing.T) {
+	for _, useProxy := range []bool{false, true} {
+		t.Run(fmt.Sprintf("CONNECT=%t", useProxy), func(t *testing.T) {
+			old := newECDSATLSServer(t, http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+				t.Error("the old router must reject the obsolete key before sending the request")
+			}))
+			defer old.Close()
+			var sends atomic.Int32
+			next := newECDSATLSServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				sends.Add(1)
+				body, err := io.ReadAll(r.Body)
+				require.NoError(t, err)
+				require.Equal(t, "payload", string(body))
+				require.Equal(t, "/v1/chat?stream=true", r.URL.String())
+				require.Equal(t, "Bearer test", r.Header.Get("Authorization"))
+				w.WriteHeader(http.StatusNoContent)
+			}))
+			defer next.Close()
+			roots := x509.NewCertPool()
+			roots.AddCert(old.Certificate())
+			roots.AddCert(next.Certificate())
+			base := &http.Transport{TLSClientConfig: &tls.Config{RootCAs: roots}}
+			if useProxy {
+				proxy := newConnectProxy()
+				defer proxy.Close()
+				proxyURL, err := url.Parse(proxy.URL)
+				require.NoError(t, err)
+				base.Proxy = http.ProxyURL(proxyURL)
+			}
+			original := http.DefaultTransport
+			http.DefaultTransport = base
+			defer func() { http.DefaultTransport = original; base.CloseIdleConnections() }()
+			key, err := CertPubkeyFP(next.Certificate())
+			require.NoError(t, err)
+			oldState := testState(time.Now().Add(time.Hour), "obsolete-key")
+			oldState.EnclaveHost = strings.TrimPrefix(old.URL, "https://")
+			s := &SecureClient{autoSelect: true, state: oldState}
+			// Discovery itself is covered separately; provide its newly verified result.
+			originalHTTP := http.DefaultClient
+			http.DefaultClient = &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+				return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(`["` + strings.TrimPrefix(next.URL, "https://") + `"]`))}, nil
+			})}
+			defer func() { http.DefaultClient = originalHTTP }()
+			s.verify = func(host string) (*VerifiedDocumentV3, error) {
+				state := testState(time.Now().Add(time.Hour), key)
+				state.EnclaveHost = host
+				return state, nil
+			}
+			hc, err := s.HTTPClient()
+			require.NoError(t, err)
+			defer hc.CloseIdleConnections()
+			for range 2 {
+				req, _ := http.NewRequest(http.MethodPost, old.URL+"/v1/chat?stream=true", bytes.NewBufferString("payload"))
+				req.Header.Set("Authorization", "Bearer test")
+				resp, err := hc.Do(req)
+				require.NoError(t, err)
+				resp.Body.Close()
+				require.Equal(t, old.URL+"/v1/chat?stream=true", req.URL.String(), "do not mutate the original request")
+				require.Equal(t, strings.TrimPrefix(next.URL, "https://"), s.Enclave())
+			}
+			require.EqualValues(t, 2, sends.Load(), "each request reaches the new router once")
+		})
+	}
+}
+
 func TestExpirationDoesNotInterruptStream(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		deadline := time.Now().Add(time.Minute)
-		s := &SecureClient{state: testState(deadline, "key"), verify: func() (*VerifiedDocumentV3, error) {
+		s := &SecureClient{state: testState(deadline, "key"), verify: func(string) (*VerifiedDocumentV3, error) {
 			return testState(deadline, "key"), nil
 		}}
 		reader, writer := io.Pipe()
@@ -377,7 +444,7 @@ func TestRedirectChecksExpiration(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		deadline := time.Now().Add(time.Minute)
 		var sends int
-		s := &SecureClient{state: testState(deadline, "key"), verify: func() (*VerifiedDocumentV3, error) {
+		s := &SecureClient{state: testState(deadline, "key"), verify: func(string) (*VerifiedDocumentV3, error) {
 			return testState(deadline, "key"), nil
 		}}
 		transport, err := s.NewTransport(func(*VerifiedDocumentV3) (http.RoundTripper, error) {
@@ -417,7 +484,7 @@ func TestHTTPClientChecksExpirationOnReusedTLSConnections(t *testing.T) {
 			roots.AddCert(target.Certificate())
 			key, err := CertPubkeyFP(target.Certificate())
 			require.NoError(t, err)
-			s := &SecureClient{state: testState(time.Now().Add(time.Hour), key), verify: func() (*VerifiedDocumentV3, error) {
+			s := &SecureClient{state: testState(time.Now().Add(time.Hour), key), verify: func(string) (*VerifiedDocumentV3, error) {
 				return testState(time.Now().Add(-time.Second), key), nil
 			}}
 			hc, err := s.HTTPClient()

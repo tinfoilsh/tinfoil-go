@@ -101,8 +101,7 @@ func TestVerifierVersion(t *testing.T) {
 func TestLiveNewDefaultSecureClient(t *testing.T) {
 	testutil.RequireLive(t)
 	client, err := NewDefaultClient(nil)
-	assert.NoError(t, err)
-	assert.NotNil(t, client)
+	require.NoError(t, err)
 
 	enclave := client.Enclave()
 	assert.NotEmpty(t, enclave)

@@ -3,26 +3,36 @@ package client
 import (
 	"bytes"
 	"cmp"
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"sync"
 	"time"
 
 	"github.com/tinfoilsh/tinfoil-go/verifier/measurement"
 	"github.com/tinfoilsh/tinfoil-go/verifier/provenance"
-	"github.com/tinfoilsh/tinfoil-go/verifier/util"
 )
 
 type SecureClient struct {
-	enclave, repo string
-	options       VerificationOptions
+	repo       string
+	options    VerificationOptions
+	autoSelect bool
 
 	stateMu    sync.RWMutex
+	enclave    string // Selected endpoint, protected by stateMu.
 	state      *VerifiedDocumentV3
 	refreshing *verificationCall
-	verify     func() (*VerifiedDocumentV3, error)
+	verify     func(string) (*VerifiedDocumentV3, error)
 }
+
+const (
+	fallbackEnclave         = "inference.tinfoil.sh"
+	routerDiscoveryTimeout  = 30 * time.Second
+	maxRouterDiscoveryBytes = 32 << 20
+)
 
 var (
 	defaultRouterRepo = "tinfoilsh/confidential-model-router"
@@ -30,13 +40,30 @@ var (
 )
 
 func fetchRouters() ([]string, error) {
-	resp, _, err := util.Get(defaultRouterURL)
+	ctx, cancel := context.WithTimeout(context.Background(), routerDiscoveryTimeout)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, defaultRouterURL, nil)
 	if err != nil {
 		return nil, err
 	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode > 299 {
+		return nil, fmt.Errorf("HTTP GET %s: %d %s", defaultRouterURL, resp.StatusCode, resp.Status)
+	}
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxRouterDiscoveryBytes+1))
+	if err != nil {
+		return nil, err
+	}
+	if len(body) > maxRouterDiscoveryBytes {
+		return nil, fmt.Errorf("router discovery response exceeds %d bytes", maxRouterDiscoveryBytes)
+	}
 
 	var routers []string
-	if err := json.Unmarshal(resp, &routers); err != nil {
+	if err := json.Unmarshal(body, &routers); err != nil {
 		return nil, err
 	}
 
@@ -80,24 +107,55 @@ func NewSecureClient(enclave, repo string, opts *VerificationOptions) (*SecureCl
 	return &SecureClient{enclave: enclave, repo: repo, options: options}, nil
 }
 
-// NewDefaultClient applies opts to every discovered router and fallback.
+// NewDefaultClient selects and verifies a router, applying opts to every
+// candidate and fallback. Only client initialization and key recovery select routers.
 func NewDefaultClient(opts *VerificationOptions) (*SecureClient, error) {
-	fallback, err := NewSecureClient("inference.tinfoil.sh", defaultRouterRepo, opts)
+	s, err := NewSecureClient(fallbackEnclave, defaultRouterRepo, opts)
 	if err != nil {
 		return nil, err
 	}
-	routers, _ := fetchRouters()
-	for _, routerURL := range routers {
-		client := fallback.ForEnclave(routerURL)
-		// Disposable candidate probes get one attempt; retries belong to the selected client.
-		state, err := client.fetchVerification()
-		if err == nil && time.Now().Before(state.FreshnessExpiresAt) {
-			client.state = state
-			return client, nil
+	s.autoSelect = true
+	if _, err := s.ready(context.Background(), nil); err != nil {
+		return nil, err
+	}
+	return s, nil
+}
+
+// ready coordinates client setup and recovery. Ordinary verification and
+// freshness refresh stay on the selected enclave; key recovery may reselect it.
+func (s *SecureClient) ready(ctx context.Context, rejected *VerifiedDocumentV3) (*VerifiedDocumentV3, error) {
+	return s.refreshState(ctx, rejected, rejected != nil, func() (*VerifiedDocumentV3, error) {
+		s.stateMu.RLock()
+		initializing := s.state == nil
+		enclave := s.enclave
+		s.stateMu.RUnlock()
+		if s.autoSelect && (initializing || rejected != nil) {
+			return s.selectRouter()
 		}
+		return s.fetchEnclaveVerification(enclave)
+	})
+}
+
+func (s *SecureClient) selectRouter() (*VerifiedDocumentV3, error) {
+	routers, err := fetchRouters()
+	var failures []error
+	if err != nil {
+		failures = append(failures, &FetchError{Err: fmt.Errorf("discovering routers: %w", err)})
+	}
+	for _, routerURL := range routers {
+		// One probe per candidate; the shared recovery loop owns the retry budget.
+		state, err := s.fetchEnclaveVerification(routerURL)
+		if err == nil {
+			return state, nil
+		}
+		failures = append(failures, fmt.Errorf("verifying router %q: %w", routerURL, err))
 	}
 
-	return fallback, nil
+	state, err := s.fetchEnclaveVerification(fallbackEnclave)
+	if err != nil {
+		return nil, errors.Join(err, errors.Join(failures...))
+	}
+	return state, nil
 }
 
 // ForEnclave keeps the repository reference and verification options.
@@ -105,8 +163,11 @@ func (s *SecureClient) ForEnclave(enclave string) *SecureClient {
 	return &SecureClient{enclave: enclave, repo: s.repo, options: s.options}
 }
 
-// Enclave returns the enclave URL
+// Enclave returns the selected enclave host. A default client may select another
+// router during key recovery; verification alone does not change the endpoint.
 func (s *SecureClient) Enclave() string {
+	s.stateMu.RLock()
+	defer s.stateMu.RUnlock()
 	return s.enclave
 }
 
@@ -131,14 +192,19 @@ func (s *SecureClient) VerificationJSON() (string, error) {
 	return string(encoded), nil
 }
 
-// HTTPClient returns an HTTP client that only accepts TLS connections to the verified enclave
+// HTTPClient returns an HTTP client that only accepts TLS connections to the verified enclave.
+// Default clients route HTTPS requests to the currently verified router.
 func (s *SecureClient) HTTPClient() (*http.Client, error) {
 	transport, err := s.NewTransport(func(verified *VerifiedDocumentV3) (http.RoundTripper, error) {
 		key, err := verified.TLSPublicKeyFP()
 		if err != nil {
 			return nil, err
 		}
-		return &TLSBoundRoundTripper{ExpectedPublicKey: key}, nil
+		transport := &TLSBoundRoundTripper{ExpectedPublicKey: key}
+		if s.autoSelect {
+			transport.enclave = verified.EnclaveHost
+		}
+		return transport, nil
 	}, isCertificateError)
 	if err != nil {
 		return nil, err

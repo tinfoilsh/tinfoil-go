@@ -20,9 +20,9 @@ type verificationCall struct {
 	err   error
 }
 
-// verifiedState shares one refresh (including its failure) across all waiters.
-// A key-rotation retry can reuse a newer snapshot installed by another caller.
-func (s *SecureClient) verifiedState(ctx context.Context, observed *VerifiedDocumentV3, force bool) (*VerifiedDocumentV3, error) {
+// refreshState shares and publishes the work chosen by the client. It does not
+// choose endpoints. A recovery can reuse a newer snapshot from another caller.
+func (s *SecureClient) refreshState(ctx context.Context, observed *VerifiedDocumentV3, force bool, load func() (*VerifiedDocumentV3, error)) (*VerifiedDocumentV3, error) {
 	if s == nil {
 		return nil, &ConfigurationError{Err: errors.New("secure client is required")}
 	}
@@ -39,7 +39,7 @@ func (s *SecureClient) verifiedState(ctx context.Context, observed *VerifiedDocu
 	if call == nil {
 		call = &verificationCall{done: make(chan struct{})}
 		s.refreshing = call
-		go s.refresh(call)
+		go s.refresh(call, load)
 	}
 	s.stateMu.Unlock()
 
@@ -55,17 +55,13 @@ func (s *SecureClient) verifiedState(ctx context.Context, observed *VerifiedDocu
 	return call.state, call.err
 }
 
-func (s *SecureClient) refresh(call *verificationCall) {
-	verify := s.verify
-	if verify == nil {
-		verify = s.fetchVerification
-	}
+func (s *SecureClient) refresh(call *verificationCall, load func() (*VerifiedDocumentV3, error)) {
 	// The attestation fetch bounds its network I/O. Local verification has no
 	// SDK deadline; each caller can independently cancel its wait above.
 	var state *VerifiedDocumentV3
 	var err, firstErr error
 	for attempt := 0; ; attempt++ {
-		state, err = verify()
+		state, err = load()
 		if err == nil && !time.Now().Before(state.FreshnessExpiresAt) {
 			err = &AttestationError{Err: errFreshnessExpired}
 		}
@@ -87,6 +83,9 @@ func (s *SecureClient) refresh(call *verificationCall) {
 		err = errors.Join(err, firstErr)
 	}
 	if err == nil {
+		if state.EnclaveHost != "" {
+			s.enclave = state.EnclaveHost
+		}
 		s.state = state
 		call.state = state
 	}

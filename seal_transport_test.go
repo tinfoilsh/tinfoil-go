@@ -54,6 +54,24 @@ func TestSealRerouteUpdatesEnclaveAfterVerification(t *testing.T) {
 	require.Equal(t, "next.example", c.Enclave())
 }
 
+func TestSealRerouteRebuildsStaleEnclaveEntry(t *testing.T) {
+	initial := sealTestClient(t)
+	var builds int
+	seal, err := newSealTransport(initial, func(*client.SecureClient) (http.RoundTripper, error) {
+		builds++
+		return roundTripFunc(func(*http.Request) (*http.Response, error) {
+			return newResponse(http.StatusNoContent, ""), nil
+		}), nil
+	})
+	require.NoError(t, err)
+	// Model a cached client's endpoint changing after automatic key recovery.
+	seal.active.secure = initial.ForEnclave("replacement.example")
+	selected, err := seal.follow(initial.ForEnclave(initial.Enclave()))
+	require.NoError(t, err)
+	require.Equal(t, initial.Enclave(), selected.secure.Enclave())
+	require.Equal(t, 2, builds, "a stale cache entry must be rebuilt for its requested enclave")
+}
+
 type sealTestBody struct {
 	io.Reader
 	reads, closes int

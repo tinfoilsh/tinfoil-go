@@ -14,6 +14,8 @@ import (
 // NewTransport admits requests only with unexpired verification. build must
 // bind its transport to the supplied attested keys. isKeyError identifies an
 // error safe to retry after re-verification; nil disables key-rotation retries.
+// Default clients may select a new router: build must route to EnclaveHost,
+// directly or through its proxy, using the keys from that same document.
 // All transports from this client share its verification and refresh state.
 func (s *SecureClient) NewTransport(build func(*VerifiedDocumentV3) (http.RoundTripper, error), isKeyError func(error) bool) (http.RoundTripper, error) {
 	if build == nil {
@@ -37,7 +39,7 @@ type refreshingTransport struct {
 
 func (t *refreshingTransport) admit(ctx context.Context) (http.RoundTripper, *VerifiedDocumentV3, error) {
 	for {
-		state, err := t.client.verifiedState(ctx, nil, false)
+		state, err := t.client.ready(ctx, nil)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -96,7 +98,7 @@ func (t *refreshingTransport) RoundTrip(req *http.Request) (*http.Response, erro
 	if resp != nil && resp.Body != nil {
 		resp.Body.Close()
 	}
-	if _, refreshErr := t.client.verifiedState(req.Context(), state, true); refreshErr != nil {
+	if _, refreshErr := t.client.ready(req.Context(), state); refreshErr != nil {
 		closeRequestBody(retry)
 		return nil, errors.Join(refreshErr, err)
 	}

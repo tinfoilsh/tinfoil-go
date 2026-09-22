@@ -183,6 +183,7 @@ func secureHTTPClient(secureClient *client.SecureClient, mode TransportMode, bas
 	httpClient.Transport = &hostBoundRoundTripper{
 		allowedOrigins: origins,
 		enclave:        secureClient.Enclave(),
+		currentEnclave: func() string { return active().Enclave() },
 		transport:      transport,
 	}
 	return httpClient, active, nil
@@ -214,12 +215,18 @@ func allowedOrigins(enclave, baseURL string) (map[string]struct{}, error) {
 type hostBoundRoundTripper struct {
 	allowedOrigins map[string]struct{}
 	enclave        string
+	currentEnclave func() string
 	transport      http.RoundTripper
 }
 
 func (t *hostBoundRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
 	origin := normalizedOrigin(req.URL)
-	if _, ok := t.allowedOrigins[origin]; !ok {
+	_, allowed := t.allowedOrigins[origin]
+	if !allowed && t.currentEnclave != nil {
+		current, _ := originOf("https://" + t.currentEnclave())
+		allowed = origin == current
+	}
+	if !allowed {
 		return nil, &ConfigurationError{Err: fmt.Errorf("refusing to send request to %q: client is bound to enclave %q", origin, t.enclave)}
 	}
 	return t.transport.RoundTrip(req)
@@ -239,10 +246,11 @@ func ehbpTransport(secureClient transportVerifier, baseURL string) (http.RoundTr
 		if err != nil {
 			return nil, &AttestationError{Err: err}
 		}
-		if headerValue, ok := enclaveURLHeaderValue(baseURL, verified.EnclaveHost); ok {
-			return &enclaveURLHeaderTransport{enclaveURL: headerValue, transport: inner}, nil
+		var proxyOrigin string
+		if _, ok := enclaveURLHeaderValue(baseURL, verified.EnclaveHost); ok {
+			proxyOrigin, _ = originOf(baseURL)
 		}
-		return inner, nil
+		return &enclaveRoutingTransport{enclave: verified.EnclaveHost, proxyOrigin: proxyOrigin, transport: inner}, nil
 	}, ehbpidentity.IsKeyConfigError)
 }
 
@@ -318,20 +326,24 @@ func validateTLSBaseURL(baseURL, enclave string) error {
 	return nil
 }
 
-// enclaveURLHeaderTransport injects the X-Tinfoil-Enclave-Url header before
-// delegating to the wrapped transport. EHBP leaves request headers in
-// plaintext, so the header reaches the proxy while the body stays sealed to the
-// enclave's HPKE key. The value is captured when the transport is built; a
-// re-verification that swaps in a different enclave rebuilds this transport with
-// the new value, which also keeps every retry pointed at the right enclave.
-type enclaveURLHeaderTransport struct {
-	enclaveURL string
-	transport  http.RoundTripper
+// enclaveRoutingTransport binds the destination to the same snapshot as the
+// HPKE key. Direct requests follow the selected router; a configured proxy
+// keeps its URL and receives the selected enclave in a header.
+type enclaveRoutingTransport struct {
+	enclave     string
+	proxyOrigin string
+	transport   http.RoundTripper
 }
 
-func (t *enclaveURLHeaderTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+func (t *enclaveRoutingTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	req = req.Clone(req.Context())
-	req.Header.Set(enclaveURLHeader, t.enclaveURL)
+	req.Header.Set(sealHeader, t.enclave)
+	if t.proxyOrigin != "" && normalizedOrigin(req.URL) == t.proxyOrigin {
+		req.Header.Set(enclaveURLHeader, "https://"+t.enclave)
+	} else {
+		req.URL.Host, req.Host = t.enclave, t.enclave
+		req.Header.Del(enclaveURLHeader)
+	}
 	return t.transport.RoundTrip(req)
 }
 

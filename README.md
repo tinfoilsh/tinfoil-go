@@ -120,7 +120,7 @@ All three implement `tinfoil.Error`. Upstream OpenAI errors pass through unchang
 
 Verification retries fetch or attestation failures once after one second, sharing the attempt across concurrent callers and preserving both causes. Configuration and unclassified errors are not retried.
 
-Key-rotation recovery discards rejected keys, re-verifies the same enclave, and replays a request at most once when its body can be recreated. Application API failures do not trigger this recovery.
+Key-rotation recovery discards rejected keys and replays a request at most once when its body can be recreated. The default client can reselect a router during initialization or key recovery; explicitly configured enclaves stay fixed. `Verify()` and freshness refresh do not discover routers. Direct requests follow the verified endpoint, while configured EHBP proxies keep their URL. Application API failures do not trigger this recovery.
 
 ## API Documentation
 

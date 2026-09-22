@@ -3,8 +3,6 @@ package client
 import (
 	"cmp"
 	"encoding/json"
-	"net/http"
-	"net/http/httptest"
 	"os"
 	"strings"
 	"testing"
@@ -52,16 +50,10 @@ func TestClientFreshnessMaxAge(t *testing.T) {
 		_, err = VerifyDocumentV3(nil, nil, "org/repo", &opts)
 		require.ErrorContains(t, err, "freshness maximum age must not be negative")
 	}
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte("[]")) }))
-	defer server.Close()
-	originalURL := defaultRouterURL
-	defaultRouterURL = server.URL
-	t.Cleanup(func() { defaultRouterURL = originalURL })
 	for _, maxAge := range []time.Duration{0, 24 * time.Hour, 30 * 24 * time.Hour} {
 		opts := VerificationOptions{FreshnessMaxAge: maxAge, PinnedRegisters: &measurement.Measurement{Type: measurement.TdxGuestV2, Registers: []string{4: measurement.RTMR3_ZERO}}}
-		s, err := NewDefaultClient(&opts)
+		s, err := NewSecureClient(fallbackEnclave, defaultRouterRepo, &opts)
 		require.NoError(t, err)
-		require.Equal(t, "inference.tinfoil.sh", s.Enclave())
 		require.Equal(t, cmp.Or(maxAge, 7*24*time.Hour), s.options.FreshnessMaxAge)
 		require.Equal(t, opts.PinnedRegisters, s.options.PinnedRegisters)
 	}
@@ -99,9 +91,7 @@ func TestLiveVerifyFreshnessExpiration(t *testing.T) {
 	_, err = VerifyDocumentV3(raw, nonce, repo, &VerificationOptions{PinnedRegisters: badPins})
 	var attestation *AttestationError
 	require.ErrorAs(t, err, &attestation)
-	s, err := NewDefaultClient(&VerificationOptions{PinnedRegisters: badPins, FreshnessMaxAge: maxAge})
-	require.NoError(t, err)
-	_, err = s.Verify()
+	_, err = NewDefaultClient(&VerificationOptions{PinnedRegisters: badPins, FreshnessMaxAge: maxAge})
 	require.ErrorAs(t, err, &attestation)
 	doc, err := envelope.Parse(raw)
 	require.NoError(t, err)

@@ -52,7 +52,7 @@ func (t *sealTransport) follow(secure *client.SecureClient) (*sealedEnclave, err
 	t.mu.Lock()
 	e := t.enclaves[secure.Enclave()]
 	t.mu.Unlock()
-	if e == nil {
+	if e == nil || e.secure.Enclave() != secure.Enclave() {
 		transport, err := t.build(secure)
 		if err != nil {
 			return nil, err

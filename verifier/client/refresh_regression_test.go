@@ -9,7 +9,7 @@ import (
 )
 
 func TestTransportDiscardsSnapshotRefreshedDuringBuild(t *testing.T) {
-	s := &SecureClient{state: testState(time.Now().Add(time.Hour), "old"), verify: func() (*VerifiedDocumentV3, error) {
+	s := &SecureClient{state: testState(time.Now().Add(time.Hour), "old"), verify: func(string) (*VerifiedDocumentV3, error) {
 		return testState(time.Now().Add(time.Hour), "new"), nil
 	}}
 	var built, sent []string
@@ -33,7 +33,7 @@ func TestTransportDiscardsSnapshotRefreshedDuringBuild(t *testing.T) {
 }
 
 func TestPlaintextRequestDoesNotRefresh(t *testing.T) {
-	s := &SecureClient{state: testState(time.Now().Add(time.Hour), "key"), verify: func() (*VerifiedDocumentV3, error) {
+	s := &SecureClient{state: testState(time.Now().Add(time.Hour), "key"), verify: func(string) (*VerifiedDocumentV3, error) {
 		t.Error("re-verification cannot make a plaintext URL acceptable")
 		return nil, errNoTLS
 	}}
