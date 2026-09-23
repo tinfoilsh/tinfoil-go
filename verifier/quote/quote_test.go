@@ -15,7 +15,7 @@ import (
 	"github.com/tinfoilsh/tinfoil-go/internal/testutil"
 
 	"github.com/tinfoilsh/tinfoil-go/verifier"
-	"github.com/tinfoilsh/tinfoil-go/verifier/envelope"
+	"github.com/tinfoilsh/tinfoil-go/verifier/document"
 	"github.com/tinfoilsh/tinfoil-go/verifier/measurement"
 	"github.com/tinfoilsh/tinfoil-go/verifier/policy"
 	"github.com/tinfoilsh/tinfoil-go/verifier/quote/tdx"
@@ -30,9 +30,9 @@ var testShape = &policy.Shape{CPUs: 1, MemoryMB: 1, Disks: 1}
 // Genoa report, its VCEK collateral, and a live-fetched AMD CRL (captured
 // documents predate the amd-crl entry). The captured report predates the v3
 // REPORT_DATA ladder, so the expected REPORT_DATA is taken from the report
-// itself; the envelope ladder is covered by the envelope package tests.
+// itself; the document ladder is covered by the document package tests.
 // Skips when the workspace fixture directory is not present.
-func loadSEVFixture(t *testing.T) (*envelope.Document, [64]byte) {
+func loadSEVFixture(t *testing.T) (*document.Document, [64]byte) {
 	t.Helper()
 	root := filepath.Join("..", "..", "..", "..", "attestation-samples", "inference.tinfoil.sh")
 	freshBytes, err := os.ReadFile(filepath.Join(root, "fresh.json"))
@@ -69,23 +69,23 @@ func loadSEVFixture(t *testing.T) (*envelope.Document, [64]byte) {
 	var reportData [64]byte
 	copy(reportData[:], parsedReport.ReportData)
 
-	vcekData, err := json.Marshal(envelope.AMDVCEKCollateral{
+	vcekData, err := json.Marshal(document.AMDVCEKCollateral{
 		VCEKDERBase64: material.Collateral.CPUVendor.SEVSNP.VCEKDERBase64,
 		CertChainPEM:  material.Collateral.CPUVendor.SEVSNP.CertChainPEM,
 	})
 	require.NoError(t, err)
 
-	doc := &envelope.Document{
-		Format: envelope.AttestationV3Format,
-		CPUEvidence: envelope.CPUEvidence{
-			Format:       envelope.SEVSNPReportV1Format,
+	doc := &document.Document{
+		Format: document.AttestationV3Format,
+		CPUEvidence: document.CPUEvidence{
+			Format:       document.SEVSNPReportV1Format,
 			ReportBase64: fresh.CPU.Report,
 		},
-		Collateral: []envelope.CollateralEntry{{
+		Collateral: []document.CollateralEntry{{
 			ID:       "cpu-endorsement",
-			Role:     envelope.RoleEndorsement,
-			Format:   envelope.CollateralAMDVCEKV1Format,
-			Subjects: []string{envelope.SubjectCPU},
+			Role:     document.RoleEndorsement,
+			Format:   document.CollateralAMDVCEKV1Format,
+			Subjects: []string{document.SubjectCPU},
 			Data:     vcekData,
 		}},
 	}
@@ -95,19 +95,19 @@ func loadSEVFixture(t *testing.T) (*envelope.Document, [64]byte) {
 
 // appendLiveCRL adds the required amd-crl collateral entry, fetching the
 // CRL exactly as the builder does.
-func appendLiveCRL(t *testing.T, doc *envelope.Document) {
+func appendLiveCRL(t *testing.T, doc *document.Document) {
 	t.Helper()
 	crlBytes, _, err := util.Get("https://kdsintf.amd.com/vcek/v1/Genoa/crl")
 	require.NoError(t, err)
-	crlData, err := json.Marshal(envelope.AMDCRLCollateral{
+	crlData, err := json.Marshal(document.AMDCRLCollateral{
 		CRLDERBase64: base64.StdEncoding.EncodeToString(crlBytes),
 	})
 	require.NoError(t, err)
-	doc.Collateral = append(doc.Collateral, envelope.CollateralEntry{
+	doc.Collateral = append(doc.Collateral, document.CollateralEntry{
 		ID:       "cpu-crl",
-		Role:     envelope.RoleEndorsement,
-		Format:   envelope.CollateralAMDCRLV1Format,
-		Subjects: []string{envelope.SubjectCPU},
+		Role:     document.RoleEndorsement,
+		Format:   document.CollateralAMDCRLV1Format,
+		Subjects: []string{document.SubjectCPU},
 		Data:     crlData,
 	})
 }
@@ -191,18 +191,18 @@ func TestVerifySEVRejectsBadCRL(t *testing.T) {
 	require.NoError(t, json.Unmarshal(raw, &fixture))
 	chain, err := os.ReadFile(filepath.Join("sev", "turin_cert_chain.pem"))
 	require.NoError(t, err)
-	vcek, err := json.Marshal(envelope.AMDVCEKCollateral{VCEKDERBase64: fixture.VCEK, CertChainPEM: string(chain)})
+	vcek, err := json.Marshal(document.AMDVCEKCollateral{VCEKDERBase64: fixture.VCEK, CertChainPEM: string(chain)})
 	require.NoError(t, err)
 
-	badCRL, err := json.Marshal(envelope.AMDCRLCollateral{
+	badCRL, err := json.Marshal(document.AMDCRLCollateral{
 		CRLDERBase64: base64.StdEncoding.EncodeToString([]byte("not a crl")),
 	})
 	require.NoError(t, err)
-	doc := &envelope.Document{
-		CPUEvidence: envelope.CPUEvidence{Format: envelope.SEVSNPReportV1Format, ReportBase64: fixture.Report},
-		Collateral: []envelope.CollateralEntry{
-			{ID: "cpu-endorsement", Role: envelope.RoleEndorsement, Format: envelope.CollateralAMDVCEKV1Format, Subjects: []string{envelope.SubjectCPU}, Data: vcek},
-			{ID: "cpu-crl", Role: envelope.RoleEndorsement, Format: envelope.CollateralAMDCRLV1Format, Subjects: []string{envelope.SubjectCPU}, Data: badCRL},
+	doc := &document.Document{
+		CPUEvidence: document.CPUEvidence{Format: document.SEVSNPReportV1Format, ReportBase64: fixture.Report},
+		Collateral: []document.CollateralEntry{
+			{ID: "cpu-endorsement", Role: document.RoleEndorsement, Format: document.CollateralAMDVCEKV1Format, Subjects: []string{document.SubjectCPU}, Data: vcek},
+			{ID: "cpu-crl", Role: document.RoleEndorsement, Format: document.CollateralAMDCRLV1Format, Subjects: []string{document.SubjectCPU}, Data: badCRL},
 		},
 	}
 	_, err = Authenticate(doc)
@@ -210,8 +210,8 @@ func TestVerifySEVRejectsBadCRL(t *testing.T) {
 }
 
 func TestVerifyUnknownFormat(t *testing.T) {
-	doc := &envelope.Document{
-		CPUEvidence: envelope.CPUEvidence{Format: "https://tinfoil.sh/format/unknown/v1"},
+	doc := &document.Document{
+		CPUEvidence: document.CPUEvidence{Format: "https://tinfoil.sh/format/unknown/v1"},
 	}
 	_, _, err := Verify(doc, &policy.Artifact{}, &measurement.Measurement{}, nil, testShape, [64]byte{})
 	assert.Error(t, err)

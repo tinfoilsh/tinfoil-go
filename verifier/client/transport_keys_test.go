@@ -4,23 +4,23 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
-	"github.com/tinfoilsh/tinfoil-go/verifier/envelope"
+	"github.com/tinfoilsh/tinfoil-go/verifier/document"
 )
 
 func TestVerifiedTransportKeysAllowTLSOnly(t *testing.T) {
-	tls := envelope.CryptoMaterialItem{ID: "tls", Format: envelope.KeySPKIFPSHA256V1Format, Data: "tls-fingerprint"}
-	hpke := envelope.CryptoMaterialItem{ID: "hpke", Format: envelope.KeyX25519HPKEV1Format, Data: "hpke-key"}
+	tls := document.CryptoMaterialItem{ID: "tls", Format: document.KeySPKIFPSHA256V1Format, Data: "tls-fingerprint"}
+	hpke := document.CryptoMaterialItem{ID: "hpke", Format: document.KeyX25519HPKEV1Format, Data: "hpke-key"}
 	for _, tt := range []struct {
 		name      string
-		items     []envelope.CryptoMaterialItem
+		items     []document.CryptoMaterialItem
 		wantHPKE  string
 		wantError bool
 	}{
-		{"TLS only", []envelope.CryptoMaterialItem{tls}, "", false},
-		{"TLS and HPKE", []envelope.CryptoMaterialItem{tls, hpke}, "hpke-key", false},
-		{"missing TLS", []envelope.CryptoMaterialItem{hpke}, "", true},
-		{"wrong TLS format", []envelope.CryptoMaterialItem{{ID: "tls", Format: "unexpected"}}, "", true},
-		{"wrong HPKE format", []envelope.CryptoMaterialItem{tls, {ID: "hpke", Format: "unexpected"}}, "", true},
+		{"TLS only", []document.CryptoMaterialItem{tls}, "", false},
+		{"TLS and HPKE", []document.CryptoMaterialItem{tls, hpke}, "hpke-key", false},
+		{"missing TLS", []document.CryptoMaterialItem{hpke}, "", true},
+		{"wrong TLS format", []document.CryptoMaterialItem{{ID: "tls", Format: "unexpected"}}, "", true},
+		{"wrong HPKE format", []document.CryptoMaterialItem{tls, {ID: "hpke", Format: "unexpected"}}, "", true},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			v := &VerifiedDocumentV3{CryptoMaterial: tt.items}

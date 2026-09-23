@@ -14,12 +14,12 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/tinfoilsh/tinfoil-go/verifier/envelope"
+	"github.com/tinfoilsh/tinfoil-go/verifier/document"
 )
 
 func TestPCSReplayGetter(t *testing.T) {
 	body := []byte(`{"tcbInfo":{"tcbEvaluationDataNumber":19}}`)
-	getter, err := newPCSReplayGetter([]envelope.PCSResponse{{
+	getter, err := newPCSReplayGetter([]document.PCSResponse{{
 		URL:        "https://api.trustedservices.intel.com/tdx/certification/v4/tcb?fmspc=90c06f000000&tcbEvaluationDataNumber=19",
 		Headers:    map[string][]string{"tcb-info-issuer-chain": {"chain"}},
 		BodyBase64: base64.StdEncoding.EncodeToString(body),
@@ -38,7 +38,7 @@ func TestPCSReplayGetter(t *testing.T) {
 }
 
 func TestTCBEvaluationRecorder(t *testing.T) {
-	inner, err := newPCSReplayGetter([]envelope.PCSResponse{
+	inner, err := newPCSReplayGetter([]document.PCSResponse{
 		{
 			URL:        "https://api.trustedservices.intel.com/tdx/certification/v4/tcb?fmspc=90c06f000000",
 			BodyBase64: base64.StdEncoding.EncodeToString([]byte(`{"tcbInfo":{"tcbEvaluationDataNumber":20}}`)),
@@ -92,7 +92,7 @@ func TestPCSReplayGetterValidatesCRL(t *testing.T) {
 		},
 	} {
 		t.Run(name, func(t *testing.T) {
-			getter, err := newPCSReplayGetter([]envelope.PCSResponse{{
+			getter, err := newPCSReplayGetter([]document.PCSResponse{{
 				URL:        tc.url,
 				BodyBase64: base64.StdEncoding.EncodeToString(tc.body),
 			}})

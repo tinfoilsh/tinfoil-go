@@ -4,7 +4,7 @@ import (
 	"runtime/debug"
 	"strings"
 
-	"github.com/tinfoilsh/tinfoil-go/verifier/envelope"
+	"github.com/tinfoilsh/tinfoil-go/verifier/document"
 	"github.com/tinfoilsh/tinfoil-go/verifier/measurement"
 )
 
@@ -65,7 +65,7 @@ func cloneVerification(verified *VerifiedDocumentV3) *VerifiedDocumentV3 {
 		return nil
 	}
 	cloned := *verified
-	cloned.CryptoMaterial = append([]envelope.CryptoMaterialItem(nil), verified.CryptoMaterial...)
+	cloned.CryptoMaterial = append([]document.CryptoMaterialItem(nil), verified.CryptoMaterial...)
 	cloned.CodeMeasurement = cloneMeasurement(verified.CodeMeasurement)
 	cloned.EnclaveMeasurement = cloneMeasurement(verified.EnclaveMeasurement)
 	return &cloned

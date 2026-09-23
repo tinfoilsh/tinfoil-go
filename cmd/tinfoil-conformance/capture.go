@@ -12,7 +12,7 @@ import (
 	"time"
 
 	"github.com/tinfoilsh/tinfoil-go/verifier/conformance"
-	"github.com/tinfoilsh/tinfoil-go/verifier/envelope"
+	"github.com/tinfoilsh/tinfoil-go/verifier/document"
 )
 
 // runCapture fetches a v3 attestation from a live enclave and, only if it
@@ -40,7 +40,7 @@ func runCapture(args []string) int {
 		return conformance.ExitMalformed
 	}
 
-	doc, err := envelope.Fetch(*host, nonce)
+	doc, err := document.Fetch(*host, nonce)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "fetching attestation from %s: %v\n", *host, err)
 		return conformance.ExitInternal
@@ -98,14 +98,14 @@ func runCapture(args []string) int {
 // resolveNonce returns the supplied hex nonce or a fresh random one.
 func resolveNonce(h string) ([]byte, error) {
 	if h == "" {
-		return envelope.RandomNonce()
+		return document.RandomNonce()
 	}
 	n, err := hex.DecodeString(h)
 	if err != nil {
 		return nil, err
 	}
-	if len(n) != envelope.NonceSize {
-		return nil, fmt.Errorf("nonce must be %d bytes, got %d", envelope.NonceSize, len(n))
+	if len(n) != document.NonceSize {
+		return nil, fmt.Errorf("nonce must be %d bytes, got %d", document.NonceSize, len(n))
 	}
 	return n, nil
 }

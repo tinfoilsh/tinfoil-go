@@ -23,7 +23,7 @@ import (
 	"github.com/tinfoilsh/go-sev-guest/verify/trust"
 
 	"github.com/tinfoilsh/tinfoil-go/verifier"
-	"github.com/tinfoilsh/tinfoil-go/verifier/envelope"
+	"github.com/tinfoilsh/tinfoil-go/verifier/document"
 	"github.com/tinfoilsh/tinfoil-go/verifier/measurement"
 )
 
@@ -148,16 +148,16 @@ func (q *Quote) Identity() string { return q.identity }
 // root and its VCEK against the document-carried CRL — no network fetches.
 // Callers must assemble a policy and validate before trusting the
 // platform.
-func Authenticate(doc *envelope.Document) (result *Quote, err error) {
+func Authenticate(doc *document.Document) (result *Quote, err error) {
 	defer func() { err = verifier.WrapAttestation(err) }()
 	if doc == nil {
 		return nil, &verifier.ConfigurationError{Err: fmt.Errorf("document is required")}
 	}
-	entry, ok := doc.EndorsementCollateral(envelope.CollateralAMDVCEKV1Format, envelope.SubjectCPU)
+	entry, ok := doc.EndorsementCollateral(document.CollateralAMDVCEKV1Format, document.SubjectCPU)
 	if !ok {
 		return nil, fmt.Errorf("document carries no amd-vcek endorsement collateral for the cpu")
 	}
-	var data envelope.AMDVCEKCollateral
+	var data document.AMDVCEKCollateral
 	if err := json.Unmarshal(entry.Data, &data, json.RejectUnknownMembers(true)); err != nil {
 		return nil, fmt.Errorf("parsing amd-vcek collateral entry %q: %w", entry.ID, err)
 	}
@@ -173,11 +173,11 @@ func Authenticate(doc *envelope.Document) (result *Quote, err error) {
 	if err != nil {
 		return nil, fmt.Errorf("amd-vcek collateral entry %q: %w", entry.ID, err)
 	}
-	crlEntry, ok := doc.EndorsementCollateral(envelope.CollateralAMDCRLV1Format, envelope.SubjectCPU)
+	crlEntry, ok := doc.EndorsementCollateral(document.CollateralAMDCRLV1Format, document.SubjectCPU)
 	if !ok {
 		return nil, fmt.Errorf("document carries no amd-crl endorsement collateral for the cpu")
 	}
-	var crl envelope.AMDCRLCollateral
+	var crl document.AMDCRLCollateral
 	if err := json.Unmarshal(crlEntry.Data, &crl, json.RejectUnknownMembers(true)); err != nil {
 		return nil, fmt.Errorf("parsing amd-crl collateral entry %q: %w", crlEntry.ID, err)
 	}

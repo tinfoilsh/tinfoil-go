@@ -15,7 +15,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/tinfoilsh/tinfoil-go/verifier/envelope"
+	"github.com/tinfoilsh/tinfoil-go/verifier/document"
 	"github.com/tinfoilsh/tinfoil-go/verifier/measurement"
 	"github.com/tinfoilsh/tinfoil-go/verifier/policy"
 )
@@ -31,7 +31,7 @@ func tdxFixturePolicy(t *testing.T) string {
 	return meta.Policy
 }
 
-// TestVerifyLiveFixtureTDX runs envelope and TDX CPU-evidence verification
+// TestVerifyLiveFixtureTDX runs document and TDX CPU-evidence verification
 // against a v3 document captured from real TDX hardware over the
 // single-request flow. Quote verification replays the document's own
 // captured Intel PCS collateral — fully offline.
@@ -44,7 +44,7 @@ func tdxFixturePolicy(t *testing.T) string {
 // Skips when the fixture is absent or its captured collateral has expired.
 func TestVerifyLiveFixtureTDX(t *testing.T) {
 	doc, reportData, _ := loadLiveFixture(t, "inf14-tdx-v3")
-	require.Equal(t, envelope.TDXQuoteV1Format, doc.CPUEvidence.Format)
+	require.Equal(t, document.TDXQuoteV1Format, doc.CPUEvidence.Format)
 	artifact := loadEndorsementArtifact(t)
 
 	q, err := Authenticate(doc)
@@ -76,7 +76,7 @@ func TestVerifyLiveFixtureTDX(t *testing.T) {
 
 // allowObservedShape adds the quote's own MRTD/RTMR0, measured for shape,
 // to every TDX policy as an allowed platform configuration (test only).
-func allowObservedShape(doc *envelope.Document, artifact *policy.Artifact, shape *policy.Shape) error {
+func allowObservedShape(doc *document.Document, artifact *policy.Artifact, shape *policy.Shape) error {
 	raw, err := base64.StdEncoding.DecodeString(doc.CPUEvidence.ReportBase64)
 	if err != nil {
 		return err

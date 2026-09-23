@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tinfoilsh/tinfoil-go/verifier/envelope"
+	"github.com/tinfoilsh/tinfoil-go/verifier/document"
 )
 
 // TestLiveVerification fetches a v3 attestation from a real enclave and runs
@@ -26,11 +26,11 @@ func TestLiveVerification(t *testing.T) {
 	}
 	repo := os.Getenv("TINFOIL_LIVE_REPO")
 
-	nonce, err := envelope.RandomNonce()
+	nonce, err := document.RandomNonce()
 	if err != nil {
 		t.Fatalf("nonce: %v", err)
 	}
-	doc, err := envelope.Fetch(host, nonce)
+	doc, err := document.Fetch(host, nonce)
 	if err != nil {
 		t.Fatalf("fetch from %s: %v", host, err)
 	}

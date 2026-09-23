@@ -84,7 +84,7 @@ The client generates a fresh nonce and fetches one document from
 carries CPU evidence, attested transport keys, and all required verification
 collateral. Verification then runs offline using the embedded trust roots:
 
-1. Strictly parse the envelope and check the nonce and endorsed-section hashes.
+1. Strictly parse the document and check the nonce and endorsed-section hashes.
 2. Authenticate code provenance, platform policy, and their freshness witnesses.
 3. Authenticate the CPU quote and enforce the complete code/platform policy.
 4. Use the endorsed TLS key for each HTTPS connection, or the endorsed HPKE key
@@ -175,7 +175,7 @@ See the [tinfoil-js documentation](https://github.com/tinfoilsh/tinfoil-js) for 
 
 ## Auditing the Verification Code
 
-- Envelope parsing and nonce/hash binding: `envelope/envelope.go`.
+- Document parsing and nonce/hash binding: `document/document.go`.
 - Code, platform and freshness provenance: `provenance/`.
 - Strict platform-policy parsing: `policy/`.
 - CPU authentication and expectation enforcement: `quote/sev/` and `quote/tdx/`.
@@ -188,7 +188,7 @@ A successful `Verify` or `VerifyDocumentV3` result retains every endorsed
 `CryptoMaterial` item. Select by exact ID and format:
 
 ```go
-data, err := verified.CryptoMaterialData("host-ssh", envelope.KeySPKIV1Format)
+data, err := verified.CryptoMaterialData("host-ssh", document.KeySPKIV1Format)
 if err != nil {
     return err
 }
