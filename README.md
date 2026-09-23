@@ -103,9 +103,17 @@ resp, err := httpClient.Get(fmt.Sprintf("https://%s/health", enclave))
 Use `errors.As` to distinguish SDK failures:
 
 ```go
-var config *tinfoil.ConfigurationError // invalid arguments or client configuration
-var fetch *tinfoil.FetchError           // attestation material could not be fetched; retry may help
-var attestation *tinfoil.AttestationError // verification or channel binding failed; do not trust this result
+var config *tinfoil.ConfigurationError
+var fetch *tinfoil.FetchError
+var attestation *tinfoil.AttestationError
+switch {
+case errors.As(err, &config):
+	// Invalid arguments or client configuration.
+case errors.As(err, &fetch):
+	// Attestation material could not be fetched; retry may help.
+case errors.As(err, &attestation):
+	// Verification or channel binding failed; do not trust this result.
+}
 ```
 
 All three implement `tinfoil.Error`. Upstream OpenAI errors pass through unchanged. Let `SecureClient` own key-rotation recovery rather than retrying every `AttestationError` in application code.
