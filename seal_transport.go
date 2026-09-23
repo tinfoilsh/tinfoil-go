@@ -27,32 +27,18 @@ const (
 
 	catalogPath = "/catalog"
 	catalogTTL  = 5 * time.Minute
-	// A catalog replica that failed to verify is skipped for this long.
-	sealRetryAfter = time.Minute
 )
 
 type sealedEnclave struct {
-	ready     chan struct{}
 	secure    *client.SecureClient
 	transport http.RoundTripper
-	err       error
-	failedAt  time.Time
-}
-
-// stale reports whether e failed at least retryAfter ago; one still verifying is not.
-func (e *sealedEnclave) stale(retryAfter time.Duration) bool {
-	select {
-	case <-e.ready:
-		return e.err != nil && time.Since(e.failedAt) >= retryAfter
-	default:
-		return false
-	}
 }
 
 // sealTransport picks each request's replica from its cache prefix, so a
 // conversation stays on one warm replica.
 type sealTransport struct {
 	build func(*client.SecureClient) (http.RoundTripper, error)
+	relay string
 	home  *sealedEnclave
 
 	mu       sync.Mutex
@@ -67,38 +53,37 @@ type catalog map[string]struct {
 	Hosts []string `json:"hosts"`
 }
 
-func newSealTransport(secure *client.SecureClient, build func(*client.SecureClient) (http.RoundTripper, error)) (*sealTransport, error) {
-	home := &sealedEnclave{ready: make(chan struct{}), secure: secure}
-	home.transport, home.err = build(secure)
-	close(home.ready)
-	if home.err != nil {
-		return nil, home.err
+func newSealTransport(secure *client.SecureClient, relay string, build func(*client.SecureClient) (http.RoundTripper, error)) (*sealTransport, error) {
+	transport, err := build(secure)
+	if err != nil {
+		return nil, err
 	}
+	home := &sealedEnclave{secure: secure, transport: transport}
 	return &sealTransport{
 		build:    build,
+		relay:    relay,
 		home:     home,
 		enclaves: map[string]*sealedEnclave{secure.Enclave(): home},
 	}, nil
 }
 
-// enclave verifies host on first use and retries a failure older than retryAfter.
-func (t *sealTransport) enclave(host string, retryAfter time.Duration) (*sealedEnclave, error) {
+func (t *sealTransport) enclave(host string) (*sealedEnclave, error) {
 	t.mu.Lock()
 	e := t.enclaves[host]
-	if e != nil && !e.stale(retryAfter) {
-		t.mu.Unlock()
-		<-e.ready
-		return e, e.err
-	}
-	e = &sealedEnclave{ready: make(chan struct{}), secure: t.home.secure.ForEnclave(host)}
-	t.enclaves[host] = e
 	t.mu.Unlock()
-	e.transport, e.err = t.build(e.secure)
-	if e.err != nil {
-		e.failedAt = time.Now()
+	if e != nil {
+		return e, nil
 	}
-	close(e.ready)
-	return e, e.err
+	secure := t.home.secure.ForEnclave(host).ViaRelay(t.relay)
+	transport, err := t.build(secure)
+	if err != nil {
+		return nil, err
+	}
+	e = &sealedEnclave{secure: secure, transport: transport}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.enclaves[host] = e
+	return e, nil
 }
 
 func (t *sealTransport) pick(model, prefix string) string {
@@ -122,15 +107,14 @@ func (t *sealTransport) pick(model, prefix string) string {
 // replicas reads the relay's catalog, which is untrusted: each replica is
 // verified against the pinned repository before anything is sealed to it.
 func (t *sealTransport) replicas(model string) []string {
-	relay := t.home.secure.Relay()
-	if relay == "" {
+	if t.relay == "" || t.relay == t.home.secure.Enclave() {
 		return nil
 	}
 	t.catalogMu.Lock()
 	defer t.catalogMu.Unlock()
 	if time.Since(t.fetchedAt) > catalogTTL {
 		t.fetchedAt = time.Now()
-		if body, _, err := util.Get("https://" + relay + catalogPath); err == nil {
+		if body, _, err := util.Get("https://" + t.relay + catalogPath); err == nil {
 			var fetched catalog
 			if json.Unmarshal(body, &fetched) == nil {
 				t.catalog = fetched
@@ -148,7 +132,7 @@ func (t *sealTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	hasBody := req.Body != nil && req.Body != http.NoBody
 	replayable := !hasBody || req.GetBody != nil
 	e := t.home
-	if picked, err := t.enclave(t.pick(req.Header.Get(modelHeader), req.Header.Get(cachePrefixHeader)), sealRetryAfter); err == nil {
+	if picked, err := t.enclave(t.pick(req.Header.Get(modelHeader), req.Header.Get(cachePrefixHeader))); err == nil {
 		e = picked
 	}
 	for redirects := 0; ; redirects++ {
@@ -173,7 +157,7 @@ func (t *sealTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 		if redirects == maxSealRedirects {
 			return nil, &FetchError{Err: fmt.Errorf("gateway kept routing away from the enclave the request was sealed to (last: %s)", routed)}
 		}
-		if e, err = t.enclave(routed, 0); err != nil {
+		if e, err = t.enclave(routed); err != nil {
 			return nil, fmt.Errorf("following gateway route to enclave %s: %w", routed, err)
 		}
 	}

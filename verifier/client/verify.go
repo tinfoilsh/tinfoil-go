@@ -166,7 +166,7 @@ func (s *SecureClient) fetchVerification() (*VerifiedDocumentV3, error) {
 	if err != nil {
 		return nil, err
 	}
-	docBytes, err := envelope.Fetch(s.enclave, s.relay, nonce)
+	docBytes, err := envelope.FetchVia(s.enclave, s.relay, nonce)
 	if err != nil {
 		return nil, err
 	}

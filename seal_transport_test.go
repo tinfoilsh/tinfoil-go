@@ -29,7 +29,7 @@ func TestSealRerouteIsPerRequest(t *testing.T) {
 	initial := sealTestClient(t)
 	verificationErr := errors.New("verification failed")
 	var nextBuilds, initialHits int
-	seal, err := newSealTransport(initial, func(s *client.SecureClient) (http.RoundTripper, error) {
+	seal, err := newSealTransport(initial, "", func(s *client.SecureClient) (http.RoundTripper, error) {
 		if s.Enclave() != initial.Enclave() {
 			nextBuilds++
 			if nextBuilds == 1 {
@@ -91,7 +91,7 @@ func TestSealUploadReplay(t *testing.T) {
 			responseBody := &sealTestBody{Reader: strings.NewReader("")}
 			initial := sealTestClient(t)
 			var attempts int
-			seal, err := newSealTransport(initial, func(s *client.SecureClient) (http.RoundTripper, error) {
+			seal, err := newSealTransport(initial, "", func(s *client.SecureClient) (http.RoundTripper, error) {
 				return roundTripFunc(func(req *http.Request) (*http.Response, error) {
 					defer req.Body.Close()
 					attempts++
@@ -153,7 +153,7 @@ func TestSealJSONRoutingPreservesInjectedBodyAcrossRetries(t *testing.T) {
 			initial := sealTestClient(t)
 			var bodies []string
 			var prefixes []string
-			seal, err := newSealTransport(initial, func(s *client.SecureClient) (http.RoundTripper, error) {
+			seal, err := newSealTransport(initial, "", func(s *client.SecureClient) (http.RoundTripper, error) {
 				return roundTripFunc(func(req *http.Request) (*http.Response, error) {
 					defer req.Body.Close()
 					body, err := io.ReadAll(req.Body)

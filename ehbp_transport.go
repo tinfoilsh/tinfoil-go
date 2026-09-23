@@ -139,10 +139,6 @@ func NewClientWithOptions(opts ...ClientOption) (*Client, error) {
 	if err != nil {
 		return nil, err
 	}
-	if _, proxied := enclaveURLHeaderValue(cfg.baseURL, secureClient.Enclave()); proxied {
-		base, _ := url.Parse(cfg.baseURL)
-		secureClient = secureClient.ViaRelay(base.Host)
-	}
 
 	return createClientFromSecureClient(secureClient, cfg.transport, cfg.baseURL,
 		resolveUserCacheSecret(cfg.userCacheSecret, cfg.userCacheSecretSet), cfg.openaiOpts...)
@@ -159,7 +155,8 @@ func secureHTTPClient(secureClient *client.SecureClient, mode TransportMode, bas
 			return nil, &ConfigurationError{Err: err}
 		}
 	} else {
-		seal, err := newSealTransport(secureClient, func(s *client.SecureClient) (http.RoundTripper, error) {
+		base, _ := url.Parse(baseURL)
+		seal, err := newSealTransport(secureClient, base.Host, func(s *client.SecureClient) (http.RoundTripper, error) {
 			return ehbpTransport(s, baseURL)
 		})
 		if err != nil {

@@ -72,7 +72,7 @@ func TestLiveVerifyFreshnessExpiration(t *testing.T) {
 	host, repo := os.Getenv(enclaveEnvVar), os.Getenv(repoEnvVar)
 	nonce, err := envelope.RandomNonce()
 	require.NoError(t, err)
-	raw, err := envelope.Fetch(host, "", nonce)
+	raw, err := envelope.Fetch(host, nonce)
 	require.NoError(t, err)
 	verified, err := VerifyDocumentV3(raw, nonce, repo, nil)
 	require.NoError(t, err)

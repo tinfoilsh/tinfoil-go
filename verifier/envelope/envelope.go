@@ -505,8 +505,12 @@ func Check(docBytes []byte, expectedNonce []byte) (result *Document, data [64]by
 // Fetch retrieves a v3 attestation document from an enclave host using a
 // fresh challenge nonce, returning the raw response bytes for verification.
 // It uses http.DefaultClient with a 30-second deadline and a 32 MiB body limit.
-// A non-empty relay host forwards the fetch; verification ignores the path.
-func Fetch(host, relay string, nonce []byte) (result []byte, err error) {
+func Fetch(host string, nonce []byte) ([]byte, error) {
+	return FetchVia(host, "", nonce)
+}
+
+// FetchVia is Fetch through a non-empty relay host; verification ignores the path.
+func FetchVia(host, relay string, nonce []byte) (result []byte, err error) {
 	defer func() { err = verifier.WrapFetch(err) }()
 	if host == "" {
 		return nil, &verifier.ConfigurationError{Err: fmt.Errorf("enclave host is required")}

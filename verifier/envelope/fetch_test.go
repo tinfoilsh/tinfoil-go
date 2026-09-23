@@ -31,7 +31,7 @@ func TestFetchSizeLimitAndRedirects(t *testing.T) {
 				return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(strings.Repeat("x", size)))}, nil
 			}),
 		}
-		body, err := Fetch("enclave.example", "", testNonce())
+		body, err := Fetch("enclave.example", testNonce())
 		require.Equal(t, 1, redirects)
 		if size > limit {
 			require.ErrorContains(t, err, "exceeds 33554432 bytes")
@@ -57,7 +57,7 @@ func TestFetchTimeout(t *testing.T) {
 				return &http.Response{StatusCode: http.StatusOK, Body: body}, nil
 			})}
 			start := time.Now()
-			_, err := Fetch("enclave.example", "", testNonce())
+			_, err := Fetch("enclave.example", testNonce())
 			require.ErrorIs(t, err, context.DeadlineExceeded)
 			if timeout == 0 {
 				timeout = 30 * time.Second
