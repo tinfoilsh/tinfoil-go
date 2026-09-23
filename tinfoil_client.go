@@ -12,9 +12,9 @@ import (
 // Client wraps the OpenAI client to provide secure inference through Tinfoil
 type Client struct {
 	*openai.Client
-	secureClient *client.SecureClient
-	httpClient   *http.Client
-	transport    TransportMode
+	active     func() *client.SecureClient
+	httpClient *http.Client
+	transport  TransportMode
 }
 
 // NewClient creates a new secure OpenAI client using default parameters
@@ -27,7 +27,7 @@ func NewClient(openaiOpts ...option.RequestOption) (*Client, error) {
 }
 
 func createClientFromSecureClient(secureClient *client.SecureClient, mode TransportMode, baseURL, userCacheSecret string, openaiOpts ...option.RequestOption) (*Client, error) {
-	httpClient, err := secureHTTPClient(secureClient, mode, baseURL, userCacheSecret)
+	httpClient, active, err := secureHTTPClient(secureClient, mode, baseURL, userCacheSecret)
 	if err != nil {
 		return nil, err
 	}
@@ -45,19 +45,19 @@ func createClientFromSecureClient(secureClient *client.SecureClient, mode Transp
 
 	openaiClient := openai.NewClient(allOpts...)
 	return &Client{
-		Client:       &openaiClient,
-		secureClient: secureClient,
-		httpClient:   httpClient,
-		transport:    mode,
+		Client:     &openaiClient,
+		active:     active,
+		httpClient: httpClient,
+		transport:  mode,
 	}, nil
 }
 
 func (c *Client) Enclave() string {
-	return c.secureClient.Enclave()
+	return c.active().Enclave()
 }
 
 func (c *Client) Repo() string {
-	return c.secureClient.Repo()
+	return c.active().Repo()
 }
 
 // Transport returns the transport mode used to secure traffic to the enclave.
@@ -67,12 +67,12 @@ func (c *Client) Transport() TransportMode {
 
 // Verify refreshes attestation and returns the verified state.
 func (c *Client) Verify() (*client.VerifiedDocumentV3, error) {
-	return c.secureClient.Verify()
+	return c.active().Verify()
 }
 
 // Verification returns a copy of the last successful verification.
 func (c *Client) Verification() *client.VerifiedDocumentV3 {
-	return c.secureClient.Verification()
+	return c.active().Verification()
 }
 
 // HTTPClient returns the underlying HTTP client used to reach the enclave. It

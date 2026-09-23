@@ -144,23 +144,25 @@ func NewClientWithOptions(opts ...ClientOption) (*Client, error) {
 		resolveUserCacheSecret(cfg.userCacheSecret, cfg.userCacheSecretSet), cfg.openaiOpts...)
 }
 
-func secureHTTPClient(secureClient *client.SecureClient, mode TransportMode, baseURL, userCacheSecret string) (*http.Client, error) {
-	var (
-		httpClient *http.Client
-		err        error
-	)
+func secureHTTPClient(secureClient *client.SecureClient, mode TransportMode, baseURL, userCacheSecret string) (*http.Client, func() *client.SecureClient, error) {
+	active := func() *client.SecureClient { return secureClient }
+	var httpClient *http.Client
 	if mode == TransportTLS {
-		httpClient, err = secureClient.HTTPClient()
-	} else {
-		httpClient, err = ehbpHTTPClient(secureClient, baseURL)
-	}
-	if err != nil {
-		return nil, err
-	}
-	if mode == TransportTLS {
-		if err := validateTLSBaseURL(baseURL, secureClient.Enclave()); err != nil {
-			return nil, &ConfigurationError{Err: err}
+		var err error
+		if httpClient, err = secureClient.HTTPClient(); err != nil {
+			return nil, nil, err
 		}
+		if err := validateTLSBaseURL(baseURL, secureClient.Enclave()); err != nil {
+			return nil, nil, &ConfigurationError{Err: err}
+		}
+	} else {
+		seal, err := newSealTransport(secureClient, func(s *client.SecureClient) (http.RoundTripper, error) {
+			return ehbpTransport(s, baseURL)
+		})
+		if err != nil {
+			return nil, nil, err
+		}
+		httpClient, active = &http.Client{Transport: seal}, seal.enclave
 	}
 
 	// The cache-secret layer sits above the sealing transport, so the field it
@@ -176,14 +178,14 @@ func secureHTTPClient(secureClient *client.SecureClient, mode TransportMode, bas
 
 	origins, err := allowedOrigins(secureClient.Enclave(), baseURL)
 	if err != nil {
-		return nil, &ConfigurationError{Err: fmt.Errorf("failed to determine allowed request origins: %w", err)}
+		return nil, nil, &ConfigurationError{Err: fmt.Errorf("failed to determine allowed request origins: %w", err)}
 	}
 	httpClient.Transport = &hostBoundRoundTripper{
 		allowedOrigins: origins,
 		enclave:        secureClient.Enclave(),
 		transport:      transport,
 	}
-	return httpClient, nil
+	return httpClient, active, nil
 }
 
 func allowedOrigins(enclave, baseURL string) (map[string]struct{}, error) {
@@ -227,8 +229,8 @@ type transportVerifier interface {
 	NewTransport(func(*client.VerifiedDocumentV3) (http.RoundTripper, error), func(error) bool) (http.RoundTripper, error)
 }
 
-func ehbpHTTPClient(secureClient transportVerifier, baseURL string) (*http.Client, error) {
-	transport, err := secureClient.NewTransport(func(verified *client.VerifiedDocumentV3) (http.RoundTripper, error) {
+func ehbpTransport(secureClient transportVerifier, baseURL string) (http.RoundTripper, error) {
+	return secureClient.NewTransport(func(verified *client.VerifiedDocumentV3) (http.RoundTripper, error) {
 		key, err := verified.HPKEPublicKey()
 		if err != nil {
 			return nil, fmt.Errorf("%w; cannot use the EHBP transport (use WithTransport(TransportTLS))", err)
@@ -242,10 +244,6 @@ func ehbpHTTPClient(secureClient transportVerifier, baseURL string) (*http.Clien
 		}
 		return inner, nil
 	}, ehbpidentity.IsKeyConfigError)
-	if err != nil {
-		return nil, err
-	}
-	return &http.Client{Transport: transport}, nil
 }
 
 func enclaveURLHeaderValue(baseURL, enclave string) (string, bool) {

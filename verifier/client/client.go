@@ -88,8 +88,7 @@ func NewDefaultClient(opts *VerificationOptions) (*SecureClient, error) {
 	}
 	routers, _ := fetchRouters()
 	for _, routerURL := range routers {
-		// Reuse the immutable policy snapshot copied before discovery.
-		client := &SecureClient{enclave: routerURL, repo: defaultRouterRepo, options: fallback.options}
+		client := fallback.ForEnclave(routerURL)
 		_, err := client.Verify()
 		if err == nil {
 			return client, nil
@@ -97,6 +96,11 @@ func NewDefaultClient(opts *VerificationOptions) (*SecureClient, error) {
 	}
 
 	return fallback, nil
+}
+
+// ForEnclave keeps the repository reference and verification options.
+func (s *SecureClient) ForEnclave(enclave string) *SecureClient {
+	return &SecureClient{enclave: enclave, repo: s.repo, options: s.options}
 }
 
 // Enclave returns the enclave URL
