@@ -2,10 +2,7 @@ package tinfoil
 
 import (
 	"bytes"
-	"cmp"
 	"crypto/rand"
-	"crypto/sha256"
-	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -43,11 +40,6 @@ const (
 	// userCacheSecretField is the router-only request-body field. A non-empty
 	// string scopes the prompt cache to that secret.
 	userCacheSecretField = "user_cache_secret"
-
-	// Derived client-side: no router sits between a gateway client and the engine.
-	cacheSaltField = "cache_salt"
-	// Separates the salt from the secret's other use, the cache-prefix hash.
-	cacheSaltDomainTag = "tinfoil/client-cache-salt/v1"
 
 	// userCacheSecretEnv provisions the secret via the environment.
 	userCacheSecretEnv = "TINFOIL_USER_CACHE_SECRET"
@@ -264,7 +256,7 @@ type userCacheSecretTransport struct {
 }
 
 func (t *userCacheSecretTransport) RoundTrip(req *http.Request) (*http.Response, error) {
-	if t.secret == "" || !userCacheSecretPathEligible(req) || req.GetBody == nil {
+	if t.secret == "" || !userCacheSecretPathEligible(req) {
 		return t.transport.RoundTrip(req)
 	}
 
@@ -311,9 +303,8 @@ func userCacheSecretPathEligible(req *http.Request) bool {
 // injectUserCacheSecret adds the field to a JSON-object body, preserving
 // number precision across the re-marshal (float64 round-tripping would corrupt
 // int64-range values such as seed). It reports false — forward the original
-// bytes — for non-object bodies, trailing data, or a non-string or duplicated
-// field. An existing empty string is replaced; a non-empty one is kept, and
-// cache_salt is derived from whichever secret the body ends up carrying.
+// bytes — for non-object bodies, trailing data, or a body that already carries
+// a non-empty or non-string field. An existing empty string is replaced.
 func injectUserCacheSecret(raw []byte, secret string) ([]byte, bool) {
 	if !utf8.Valid(raw) {
 		return nil, false
@@ -350,13 +341,11 @@ func injectUserCacheSecret(raw []byte, secret string) ([]byte, bool) {
 	}
 	if existing, ok := body[userCacheSecretField]; ok {
 		value, isString := existing.(string)
-		if fieldCount != 1 || !isString {
+		if fieldCount != 1 || !isString || value != "" {
 			return nil, false
 		}
-		secret = cmp.Or(value, secret)
 	}
 	body[userCacheSecretField] = secret
-	body[cacheSaltField] = deriveCacheSalt(secret)
 	newBody, err := json.Marshal(body)
 	if err != nil {
 		return nil, false
@@ -373,9 +362,4 @@ func injectUserCacheSecret(raw []byte, secret string) ([]byte, bool) {
 func decodeConsumedAll(dec *json.Decoder) bool {
 	_, err := dec.Token()
 	return err == io.EOF
-}
-
-func deriveCacheSalt(secret string) string {
-	sum := sha256.Sum256([]byte(cacheSaltDomainTag + "\x00" + secret))
-	return base64.RawURLEncoding.EncodeToString(sum[:])
 }
