@@ -44,7 +44,7 @@ func TestProductionTurinFixtures(t *testing.T) {
 			require.NoError(t, err)
 			product, err := productFromReport(report)
 			require.NoError(t, err)
-			roots, err := trustedRoots(ProductTurin)
+			roots, err := trustedRoots(ProductTurin, nil)
 			require.NoError(t, err)
 			attestation := &sevsnp.Attestation{
 				Report: report,

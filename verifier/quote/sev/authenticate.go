@@ -35,21 +35,41 @@ var askArkGenoaPEM []byte
 //go:embed turin_cert_chain.pem
 var askArkTurinPEM []byte
 
-// amdRootPEMOverride, when non-nil, replaces the embedded per-product anchor
-// and timeNow is the validity-window clock; production defaults, overridden
-// only by the conformance build (see conformance.go).
-var (
-	amdRootPEMOverride []byte
-	timeNow            = time.Now
-)
+// Options carries per-authentication overrides. A nil *Options, and the zero
+// value, select the production defaults: the embedded per-product anchor and
+// the current time. Overrides are held per verification rather than in process
+// state, so concurrent verifications cannot observe each other.
+//
+// The overrides themselves exist only in the conformance build. A production
+// binary has no way to set them, so it cannot be made to trust a supplied
+// anchor or to appraise collateral at anything but the current time.
+type Options struct {
+	overrides overrides
+}
+
+func (o *Options) now() time.Time {
+	if o == nil {
+		return time.Now()
+	}
+	if pinned := o.overrides.clock(); !pinned.IsZero() {
+		return pinned
+	}
+	return time.Now()
+}
+
+func (o *Options) rootPEM() []byte {
+	if o == nil {
+		return nil
+	}
+	return o.overrides.root()
+}
 
 // trustedRoots builds the pinned AMD trust anchors from repo-owned copies
 // rather than the library's embedded defaults, so an anchor only changes
 // when its file is deliberately regenerated. A fresh instance is built per
 // authentication: the library caches the CRL it fetched on this object, and
 // document-supplied collateral must never affect other verifications.
-func trustedRoots(productLine string) (map[string][]*trust.AMDRootCerts, error) {
-	rootPEM := amdRootPEMOverride
+func trustedRoots(productLine string, rootPEM []byte) (map[string][]*trust.AMDRootCerts, error) {
 	if rootPEM == nil {
 		switch productLine {
 		case ProductGenoa:
@@ -148,11 +168,14 @@ func (q *Quote) Identity() string { return q.identity }
 // root and its VCEK against the document-carried CRL — no network fetches.
 // Callers must assemble a policy and validate before trusting the
 // platform.
-func Authenticate(doc *document.Document) (result *Quote, err error) {
+func Authenticate(doc *document.Document, opts *Options) (result *Quote, err error) {
 	defer func() { err = errs.WrapAttestation(err) }()
 	if doc == nil {
 		return nil, &errs.ConfigurationError{Err: fmt.Errorf("document is required")}
 	}
+	// Sampled once so the CRL window and the library's own validity checks
+	// appraise the same instant.
+	now := opts.now()
 	entry, ok := doc.EndorsementCollateral(document.CollateralAMDVCEKV1Format, document.SubjectCPU)
 	if !ok {
 		return nil, fmt.Errorf("document carries no amd-vcek endorsement collateral for the cpu")
@@ -194,12 +217,12 @@ func Authenticate(doc *document.Document) (result *Quote, err error) {
 	if err != nil {
 		return nil, fmt.Errorf("parsing amd-crl collateral: %w", err)
 	}
-	if now := timeNow(); now.Before(parsedCRL.ThisUpdate) || now.After(parsedCRL.NextUpdate) {
+	if now.Before(parsedCRL.ThisUpdate) || now.After(parsedCRL.NextUpdate) {
 		return nil, fmt.Errorf("amd-crl collateral is outside its validity window (this_update %s, next_update %s)",
 			parsedCRL.ThisUpdate.Format(time.RFC3339), parsedCRL.NextUpdate.Format(time.RFC3339))
 	}
 
-	att, err := verifySignature(doc.CPUEvidence.ReportBase64, vcekDER, askDER, arkDER, crlDER)
+	att, err := verifySignature(doc.CPUEvidence.ReportBase64, vcekDER, askDER, arkDER, crlDER, now, opts.rootPEM())
 	if err != nil {
 		return nil, err
 	}
@@ -237,7 +260,7 @@ func rejectMaskedChipID(report *sevsnp.Report) error {
 // verifySignature verifies the report signature under the AMD roots with
 // the provided VCEK and ASK/ARK chain, checking VCEK revocation against
 // the provided CRL. No policy validation.
-func verifySignature(reportBase64 string, vcekDER, askDER, arkDER, crlDER []byte) (*sevsnp.Attestation, error) {
+func verifySignature(reportBase64 string, vcekDER, askDER, arkDER, crlDER []byte, now time.Time, rootPEM []byte) (*sevsnp.Attestation, error) {
 	reportBytes, err := base64.StdEncoding.DecodeString(reportBase64)
 	if err != nil {
 		return nil, err
@@ -256,7 +279,7 @@ func verifySignature(reportBase64 string, vcekDER, askDER, arkDER, crlDER []byte
 		return nil, err
 	}
 	productLine := kds.ProductLine(product)
-	roots, err := trustedRoots(productLine)
+	roots, err := trustedRoots(productLine, rootPEM)
 	if err != nil {
 		return nil, err
 	}
@@ -268,7 +291,7 @@ func verifySignature(reportBase64 string, vcekDER, askDER, arkDER, crlDER []byte
 		CheckRevocations: true,
 		TrustedRoots:     roots,
 		Product:          product,
-		Now:              timeNow(),
+		Now:              now,
 	}
 
 	attestation := &sevsnp.Attestation{

@@ -23,7 +23,7 @@ func TestPCSReplayGetter(t *testing.T) {
 		URL:        "https://api.trustedservices.intel.com/tdx/certification/v4/tcb?fmspc=90c06f000000&tcbEvaluationDataNumber=19",
 		Headers:    map[string][]string{"tcb-info-issuer-chain": {"chain"}},
 		BodyBase64: base64.StdEncoding.EncodeToString(body),
-	}})
+	}}, time.Now())
 	require.NoError(t, err)
 
 	// The library requests the same resource without the
@@ -47,7 +47,7 @@ func TestTCBEvaluationRecorder(t *testing.T) {
 			URL:        "https://api.trustedservices.intel.com/tdx/certification/v4/qe/identity",
 			BodyBase64: base64.StdEncoding.EncodeToString([]byte(`{"enclaveIdentity":{"tcbEvaluationDataNumber":19}}`)),
 		},
-	})
+	}, time.Now())
 	require.NoError(t, err)
 	recorder := &tcbEvaluationRecorder{inner: inner}
 
@@ -95,7 +95,7 @@ func TestPCSReplayGetterValidatesCRL(t *testing.T) {
 			getter, err := newPCSReplayGetter([]document.PCSResponse{{
 				URL:        tc.url,
 				BodyBase64: base64.StdEncoding.EncodeToString(tc.body),
-			}})
+			}}, now)
 			require.NoError(t, err)
 
 			_, body, err := getter.Get(tc.url)

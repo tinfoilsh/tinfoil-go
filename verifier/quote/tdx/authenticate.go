@@ -47,10 +47,17 @@ func (q *Quote) Identity() string { return q.identity }
 // SGX root, replaying the document's captured PCS collateral — no network
 // fetches. Callers must assemble a policy and validate before trusting the
 // platform.
-func Authenticate(doc *document.Document) (result *Quote, err error) {
+func Authenticate(doc *document.Document, opts *Options) (result *Quote, err error) {
 	defer func() { err = errs.WrapAttestation(err) }()
 	if doc == nil {
 		return nil, &errs.ConfigurationError{Err: fmt.Errorf("document is required")}
+	}
+	// Sampled once so the replayed CRL windows and the library's own validity
+	// checks appraise the same instant.
+	now := opts.now()
+	roots, err := opts.roots()
+	if err != nil {
+		return nil, err
 	}
 	rawQuote, err := base64.StdEncoding.DecodeString(doc.CPUEvidence.ReportBase64)
 	if err != nil {
@@ -89,23 +96,23 @@ func Authenticate(doc *document.Document) (result *Quote, err error) {
 	if err := json.Unmarshal(entry.Data, &data, json.RejectUnknownMembers(true)); err != nil {
 		return nil, fmt.Errorf("parsing intel-pcs collateral entry %q: %w", entry.ID, err)
 	}
-	inner, err := newPCSReplayGetter(data.Responses)
+	inner, err := newPCSReplayGetter(data.Responses, now)
 	if err != nil {
 		return nil, err
 	}
 	recorder := &tcbEvaluationRecorder{inner: inner}
 
 	// All options explicit: collateral replayed from the document, chain
-	// pinned to the embedded Intel root, revocation checking on, validity
-	// evaluated at the current time.
-	opts := &tdxverify.Options{
+	// pinned to the configured Intel root, revocation checking on, validity
+	// evaluated at the sampled instant.
+	verifyOpts := &tdxverify.Options{
 		Getter:           recorder,
-		TrustedRoots:     intelRootCertPool,
+		TrustedRoots:     roots,
 		GetCollateral:    true,
 		CheckRevocations: true,
-		Now:              timeNow(),
+		Now:              now,
 	}
-	if err := tdxverify.TdxQuote(parsed, opts); err != nil {
+	if err := tdxverify.TdxQuote(parsed, verifyOpts); err != nil {
 		return nil, fmt.Errorf("verifying TDX quote: %w", err)
 	}
 
@@ -151,9 +158,10 @@ func pcsCollateralKey(rawURL string) (string, error) {
 
 type pcsReplayGetter struct {
 	responses map[string]*document.PCSResponse
+	now       time.Time
 }
 
-func newPCSReplayGetter(responses []document.PCSResponse) (*pcsReplayGetter, error) {
+func newPCSReplayGetter(responses []document.PCSResponse, now time.Time) (*pcsReplayGetter, error) {
 	m := make(map[string]*document.PCSResponse, len(responses))
 	for i := range responses {
 		key, err := pcsCollateralKey(responses[i].URL)
@@ -162,7 +170,7 @@ func newPCSReplayGetter(responses []document.PCSResponse) (*pcsReplayGetter, err
 		}
 		m[strings.ToLower(key)] = &responses[i]
 	}
-	return &pcsReplayGetter{responses: m}, nil
+	return &pcsReplayGetter{responses: m, now: now}, nil
 }
 
 func (g *pcsReplayGetter) Get(requestURL string) (map[string][]string, []byte, error) {
@@ -184,7 +192,7 @@ func (g *pcsReplayGetter) Get(requestURL string) (map[string][]string, []byte, e
 	// CRL from a .der URL that does not identify the body as a CRL.
 	crl, crlErr := x509.ParseRevocationList(body)
 	if crlErr == nil {
-		if now := timeNow(); now.Before(crl.ThisUpdate) || now.After(crl.NextUpdate) {
+		if g.now.Before(crl.ThisUpdate) || g.now.After(crl.NextUpdate) {
 			return nil, nil, fmt.Errorf("captured CRL for %s is outside its validity window", requestURL)
 		}
 	} else if strings.Contains(key, "crl") {
@@ -263,10 +271,6 @@ var sgxRootCACertPEM []byte
 
 var intelRootCertPool *x509.CertPool
 
-// timeNow is the validity-window clock; the production default, overridden only
-// by the conformance build to replay a frozen document at its capture time.
-var timeNow = time.Now
-
 func init() {
 	root, _ := pem.Decode(sgxRootCACertPEM)
 	if root == nil {
@@ -278,4 +282,51 @@ func init() {
 	}
 	intelRootCertPool = x509.NewCertPool()
 	intelRootCertPool.AddCert(cert)
+}
+
+func poolFromPEM(rootPEM []byte) (*x509.CertPool, error) {
+	block, _ := pem.Decode(rootPEM)
+	if block == nil {
+		return nil, fmt.Errorf("intel SGX root PEM carried no certificate")
+	}
+	cert, err := x509.ParseCertificate(block.Bytes)
+	if err != nil {
+		return nil, fmt.Errorf("parsing Intel SGX root certificate: %w", err)
+	}
+	pool := x509.NewCertPool()
+	pool.AddCert(cert)
+	return pool, nil
+}
+
+// Options carries per-authentication overrides. A nil *Options, and the zero
+// value, select the production defaults: the embedded Intel SGX root and the
+// current time. Overrides are held per verification rather than in process
+// state, so concurrent verifications cannot observe each other.
+//
+// The overrides themselves exist only in the conformance build. A production
+// binary has no way to set them, so it cannot be made to trust a supplied
+// root or to appraise collateral at anything but the current time.
+type Options struct {
+	overrides overrides
+}
+
+func (o *Options) now() time.Time {
+	if o == nil {
+		return time.Now()
+	}
+	if pinned := o.overrides.clock(); !pinned.IsZero() {
+		return pinned
+	}
+	return time.Now()
+}
+
+func (o *Options) roots() (*x509.CertPool, error) {
+	if o == nil {
+		return intelRootCertPool, nil
+	}
+	rootPEM := o.overrides.root()
+	if rootPEM == nil {
+		return intelRootCertPool, nil
+	}
+	return poolFromPEM(rootPEM)
 }

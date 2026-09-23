@@ -129,9 +129,9 @@ func TestLiveVerifySEV(t *testing.T) {
 	// The fixture predates per-release code provenance, so the expected
 	// launch measurement is the quote's own; the equality path is still
 	// exercised, and the mismatch case is covered below.
-	q, err := Authenticate(doc)
+	q, err := Authenticate(doc, nil)
 	require.NoError(t, err)
-	assembled, verified, err := Verify(doc, artifact, asCode(q.Measurement), nil, testShape, reportData)
+	assembled, verified, err := Verify(doc, artifact, asCode(q.Measurement), nil, testShape, reportData, nil)
 	require.NoError(t, err)
 	assert.Equal(t, policy.PlatformSEVSNP, verified.Platform())
 	assert.Equal(t, "amd-genoa-prod", assembled.PolicyName)
@@ -144,13 +144,13 @@ func TestLiveVerifySEV(t *testing.T) {
 	// Wrong REPORT_DATA must reject even with a valid signature.
 	wrongReportData := reportData
 	wrongReportData[0] ^= 0xff
-	_, _, err = Verify(doc, artifact, asCode(q.Measurement), nil, testShape, wrongReportData)
+	_, _, err = Verify(doc, artifact, asCode(q.Measurement), nil, testShape, wrongReportData, nil)
 	assert.ErrorContains(t, err, "REPORT_DATA")
 
 	// A launch measurement differing from the code expectation must reject.
 	wrongMeasurement := asCode(q.Measurement)
 	wrongMeasurement.Registers[0] = strings.Repeat("ab", 48)
-	_, _, err = Verify(doc, artifact, wrongMeasurement, nil, testShape, reportData)
+	_, _, err = Verify(doc, artifact, wrongMeasurement, nil, testShape, reportData, nil)
 	assert.Error(t, err)
 
 	// An assembly without the required code expectation must reject.
@@ -164,20 +164,20 @@ func TestLiveVerifySEV(t *testing.T) {
 	// A machine absent from the artifact must reject.
 	unendorsed := *artifact
 	unendorsed.Machines = map[string]string{}
-	_, _, err = Verify(doc, &unendorsed, asCode(q.Measurement), nil, testShape, reportData)
+	_, _, err = Verify(doc, &unendorsed, asCode(q.Measurement), nil, testShape, reportData, nil)
 	assert.ErrorContains(t, err, "not endorsed")
 
 	// v3 is single-request: a document without its endorsement collateral is
 	// rejected, never patched up with a network fetch.
 	noVCEK := *doc
 	noVCEK.Collateral = nil
-	_, _, err = Verify(&noVCEK, artifact, asCode(q.Measurement), nil, testShape, reportData)
+	_, _, err = Verify(&noVCEK, artifact, asCode(q.Measurement), nil, testShape, reportData, nil)
 	assert.ErrorContains(t, err, "no amd-vcek endorsement collateral")
 
 	// A document without the CRL collateral must reject.
 	noCRL := *doc
 	noCRL.Collateral = doc.Collateral[:1]
-	_, _, err = Verify(&noCRL, artifact, asCode(q.Measurement), nil, testShape, reportData)
+	_, _, err = Verify(&noCRL, artifact, asCode(q.Measurement), nil, testShape, reportData, nil)
 	assert.ErrorContains(t, err, "no amd-crl endorsement collateral")
 }
 
@@ -205,7 +205,7 @@ func TestVerifySEVRejectsBadCRL(t *testing.T) {
 			{ID: "cpu-crl", Role: document.RoleEndorsement, Format: document.CollateralAMDCRLV1Format, Subjects: []string{document.SubjectCPU}, Data: badCRL},
 		},
 	}
-	_, err = Authenticate(doc)
+	_, err = Authenticate(doc, nil)
 	assert.ErrorContains(t, err, "parsing amd-crl collateral")
 }
 
@@ -213,7 +213,7 @@ func TestVerifyUnknownFormat(t *testing.T) {
 	doc := &document.Document{
 		CPUEvidence: document.CPUEvidence{Format: "https://tinfoil.sh/format/unknown/v1"},
 	}
-	_, _, err := Verify(doc, &policy.Artifact{}, &measurement.Measurement{}, nil, testShape, [64]byte{})
+	_, _, err := Verify(doc, &policy.Artifact{}, &measurement.Measurement{}, nil, testShape, [64]byte{}, nil)
 	assert.Error(t, err)
 	assert.Contains(t, fmt.Sprint(err), "unsupported cpu_evidence format")
 }
