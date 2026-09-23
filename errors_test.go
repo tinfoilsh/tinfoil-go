@@ -76,7 +76,7 @@ func TestPublicInputErrors(t *testing.T) {
 	require.NoError(t, err)
 	_, err = s.Request("GET", "://", "", nil)
 	require.ErrorAs(t, err, &config)
-	_, err = envelope.Fetch("", make([]byte, envelope.NonceSize))
+	_, err = envelope.Fetch("", "", make([]byte, envelope.NonceSize))
 	require.ErrorAs(t, err, &config)
 	_, err = quote.Authenticate(nil)
 	require.ErrorAs(t, err, &config)

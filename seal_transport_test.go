@@ -25,10 +25,10 @@ func sealMismatch(enclave string) *http.Response {
 	return resp
 }
 
-func TestSealRerouteUpdatesEnclaveAfterVerification(t *testing.T) {
+func TestSealRerouteIsPerRequest(t *testing.T) {
 	initial := sealTestClient(t)
 	verificationErr := errors.New("verification failed")
-	var nextBuilds int
+	var nextBuilds, initialHits int
 	seal, err := newSealTransport(initial, func(s *client.SecureClient) (http.RoundTripper, error) {
 		if s.Enclave() != initial.Enclave() {
 			nextBuilds++
@@ -37,21 +37,25 @@ func TestSealRerouteUpdatesEnclaveAfterVerification(t *testing.T) {
 			}
 		}
 		return roundTripFunc(func(req *http.Request) (*http.Response, error) {
-			if s.Enclave() == initial.Enclave() && req.URL.Path == "/reroute" {
+			if s.Enclave() == initial.Enclave() {
+				initialHits++
 				return sealMismatch("next.example"), nil
 			}
 			return newResponse(http.StatusNoContent, ""), nil
 		}), nil
 	})
 	require.NoError(t, err)
-	c := &Client{active: seal.enclave, httpClient: &http.Client{Transport: seal}}
+	c := &Client{secure: initial, httpClient: &http.Client{Transport: seal}}
 	_, err = c.HTTPClient().Get("https://gateway.example/reroute")
 	require.ErrorIs(t, err, verificationErr)
-	require.Equal(t, initial.Enclave(), c.Enclave(), "failed verification must not change the enclave")
-	resp, err := c.HTTPClient().Get("https://gateway.example/reroute")
-	require.NoError(t, err)
-	resp.Body.Close()
-	require.Equal(t, "next.example", c.Enclave())
+	for range 2 {
+		resp, err := c.HTTPClient().Get("https://gateway.example/reroute")
+		require.NoError(t, err)
+		resp.Body.Close()
+	}
+	require.Equal(t, 3, initialHits, "every request starts from its own pick, not the last reroute")
+	require.Equal(t, 2, nextBuilds, "a failed verification is retried, a successful one is reused")
+	require.Equal(t, initial.Enclave(), c.Enclave())
 }
 
 type sealTestBody struct {

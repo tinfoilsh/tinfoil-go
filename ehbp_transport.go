@@ -139,30 +139,33 @@ func NewClientWithOptions(opts ...ClientOption) (*Client, error) {
 	if err != nil {
 		return nil, err
 	}
+	if _, proxied := enclaveURLHeaderValue(cfg.baseURL, secureClient.Enclave()); proxied {
+		base, _ := url.Parse(cfg.baseURL)
+		secureClient = secureClient.ViaRelay(base.Host)
+	}
 
 	return createClientFromSecureClient(secureClient, cfg.transport, cfg.baseURL,
 		resolveUserCacheSecret(cfg.userCacheSecret, cfg.userCacheSecretSet), cfg.openaiOpts...)
 }
 
-func secureHTTPClient(secureClient *client.SecureClient, mode TransportMode, baseURL, userCacheSecret string) (*http.Client, func() *client.SecureClient, error) {
-	active := func() *client.SecureClient { return secureClient }
+func secureHTTPClient(secureClient *client.SecureClient, mode TransportMode, baseURL, userCacheSecret string) (*http.Client, error) {
 	var httpClient *http.Client
 	if mode == TransportTLS {
 		var err error
 		if httpClient, err = secureClient.HTTPClient(); err != nil {
-			return nil, nil, err
+			return nil, err
 		}
 		if err := validateTLSBaseURL(baseURL, secureClient.Enclave()); err != nil {
-			return nil, nil, &ConfigurationError{Err: err}
+			return nil, &ConfigurationError{Err: err}
 		}
 	} else {
 		seal, err := newSealTransport(secureClient, func(s *client.SecureClient) (http.RoundTripper, error) {
 			return ehbpTransport(s, baseURL)
 		})
 		if err != nil {
-			return nil, nil, err
+			return nil, err
 		}
-		httpClient, active = &http.Client{Transport: seal}, seal.enclave
+		httpClient = &http.Client{Transport: seal}
 	}
 
 	// The cache-secret layer sits above the sealing transport, so the field it
@@ -178,14 +181,14 @@ func secureHTTPClient(secureClient *client.SecureClient, mode TransportMode, bas
 
 	origins, err := allowedOrigins(secureClient.Enclave(), baseURL)
 	if err != nil {
-		return nil, nil, &ConfigurationError{Err: fmt.Errorf("failed to determine allowed request origins: %w", err)}
+		return nil, &ConfigurationError{Err: fmt.Errorf("failed to determine allowed request origins: %w", err)}
 	}
 	httpClient.Transport = &hostBoundRoundTripper{
 		allowedOrigins: origins,
 		enclave:        secureClient.Enclave(),
 		transport:      transport,
 	}
-	return httpClient, active, nil
+	return httpClient, nil
 }
 
 func allowedOrigins(enclave, baseURL string) (map[string]struct{}, error) {

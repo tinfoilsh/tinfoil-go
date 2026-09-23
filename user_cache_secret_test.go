@@ -400,11 +400,11 @@ func TestUserCacheSecretTransportLeavesStreamingBodyUntouched(t *testing.T) {
 
 func TestUserCacheSecretTransportNeverClobbersNonEmptyOrNonStringValues(t *testing.T) {
 	cases := []struct {
-		name string
-		raw  string
+		name, raw, want string
 	}{
-		{"explicit per-request secret", `{"model":"m","user_cache_secret":"end-user-7"}`},
-		{"non-string per-request value", `{"model":"m","user_cache_secret":null}`},
+		{"explicit per-request secret", `{"model":"m","user_cache_secret":"end-user-7"}`,
+			`{"cache_salt":"` + deriveCacheSalt("end-user-7") + `","model":"m","user_cache_secret":"end-user-7"}`},
+		{"non-string per-request value", `{"model":"m","user_cache_secret":null}`, `{"model":"m","user_cache_secret":null}`},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -412,7 +412,7 @@ func TestUserCacheSecretTransportNeverClobbersNonEmptyOrNonStringValues(t *testi
 			transport := captureTransport("client-level", &got, nil)
 			_, err := transport.RoundTrip(postJSONRequest(t, "https://enclave.example.com/v1/chat/completions", tc.raw))
 			require.NoError(t, err)
-			require.Equal(t, tc.raw, string(got), "a body that already carries the field must pass through byte-identical")
+			require.Equal(t, tc.want, string(got))
 		})
 	}
 }
