@@ -254,9 +254,9 @@ func TestEHBPClientPreservesAdmissionAndRebuildsProxyHeader(t *testing.T) {
 			return nil, admissionFailure
 		}), nil
 	})
-	hc, err := ehbpHTTPClient(verifier, proxy.URL)
+	rt, err := ehbpTransport(verifier, proxy.URL)
 	require.NoError(t, err)
-	_, err = hc.Get(proxy.URL)
+	_, err = (&http.Client{Transport: rt}).Get(proxy.URL)
 	require.ErrorIs(t, err, admissionFailure, "keep the verifier's admission layer around EHBP")
 	require.Empty(t, seen, "failed admission must not reach the proxy")
 
