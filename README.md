@@ -2,8 +2,9 @@
 
 [![SDK Tests](https://github.com/tinfoilsh/tinfoil-go/actions/workflows/sdk-test.yml/badge.svg)](https://github.com/tinfoilsh/tinfoil-go/actions/workflows/sdk-test.yml)
 [![govulncheck](https://github.com/tinfoilsh/tinfoil-go/actions/workflows/govulncheck.yml/badge.svg)](https://github.com/tinfoilsh/tinfoil-go/actions/workflows/govulncheck.yml)
-
 [![Documentation](https://img.shields.io/badge/docs-tinfoil.sh-blue)](https://docs.tinfoil.sh/sdk/go-sdk)
+
+A Go client for verifiably private AI inference with Tinfoil. It wraps the [OpenAI Go client v3](https://pkg.go.dev/github.com/openai/openai-go/v3) with the same API, and before sending any request it verifies the enclave's attestation and encrypts the request body to the attested key using [EHBP](https://docs.tinfoil.sh/resources/ehbp), so only the verified enclave can read it. A TLS certificate pinning transport is available as a fallback.
 
 For complete documentation, see the [Go SDK documentation](https://docs.tinfoil.sh/sdk/go-sdk).
 
@@ -11,19 +12,11 @@ For complete documentation, see the [Go SDK documentation](https://docs.tinfoil.
 
 Requires Go 1.27.1 or later.
 
-Add the Tinfoil SDK to your project:
-
 ```bash
 go get github.com/tinfoilsh/tinfoil-go
 ```
 
 ## Quick Start
-
-The Tinfoil Go client is a wrapper around the [OpenAI Go client v3](https://pkg.go.dev/github.com/openai/openai-go/v3) and provides secure communication with Tinfoil enclaves. It has the same API as the OpenAI client, with additional security features:
-
-- Automatic attestation validation to ensure enclave integrity verification
-- Supports [Encrypted HTTP Body Protocol](https://docs.tinfoil.sh/resources/ehbp) to provide direct-to-enclave encrypted communication with attested public keys
-- Supports a fallback mode with TLS certificate pinning using attested certificates to provide direct-to-enclave encrypted communication over TLS 
 
 ```go
 package main
@@ -32,30 +25,28 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"os"
 
-    "github.com/openai/openai-go/v3"
-    "github.com/openai/openai-go/v3/option"
+	"github.com/openai/openai-go/v3"
+	"github.com/openai/openai-go/v3/option"
 	"github.com/tinfoilsh/tinfoil-go"
 )
 
 func main() {
-	// Create a client
 	client, err := tinfoil.NewClient(
-		option.WithAPIKey("<YOUR_API_KEY>"),
+		option.WithAPIKey(os.Getenv("TINFOIL_API_KEY")),
 	)
 	if err != nil {
 		log.Fatalf("Failed to create client: %v", err)
 	}
 
-	// Make requests using the OpenAI client API
-	// Note: enclave verification and direct-to-enclave encryption happens automatically
+	// Enclave verification and encryption happen automatically.
 	chatCompletion, err := client.Chat.Completions.New(context.TODO(), openai.ChatCompletionNewParams{
 		Messages: []openai.ChatCompletionMessageParamUnion{
 			openai.UserMessage("Say this is a test"),
 		},
-		Model: "llama3-3-70b", // see https://docs.tinfoil.sh/models/catalog for supported models
+		Model: "llama3-3-70b", // see https://docs.tinfoil.sh/models/catalog
 	})
-
 	if err != nil {
 		log.Fatalf("Chat completion error: %v", err)
 	}
@@ -64,23 +55,7 @@ func main() {
 }
 ```
 
-## Usage
-
-```go
-// 1. Create a client
-client, err := tinfoil.NewClient(
-	option.WithAPIKey(os.Getenv("TINFOIL_API_KEY")),
-)
-if err != nil {
-	log.Printf("Failed to create client: %v", err)
-	return
-}
-
-// 2. Use client as you would openai.Client
-// see https://pkg.go.dev/github.com/openai/openai-go/v3 for API documentation
-```
-
-## Verification result
+## Verification document
 
 The client retains the result used by its active secure transport:
 
@@ -91,124 +66,67 @@ fmt.Println(document.Verifier.Name, document.Verifier.Version)
 fmt.Println(document.VerifiedAt)
 ```
 
-`VerifiedAt` is recorded from the local clock after successful verification or
-re-verification. It is not an attested timestamp or evidence freshness
-guarantee.
-
-## Advanced Functionality
-
-Use `WithVerificationOptions` to configure
-[register pins and freshness](verifier/README.md#verification-options).
-
-```go
-// Create a secure client with explicit enclave and repo parameters
-client, err := tinfoil.NewClientWithOptions(tinfoil.WithEnclave(enclave), tinfoil.WithRepo(repo))
-if err != nil {
-	return fmt.Errorf("Failed to create client: %w", err)
-}
-
-// For direct HTTP access, use the underlying HTTPClient
-httpClient := client.HTTPClient()
-endpoint := fmt.Sprintf("https://%s/health", enclave)
-resp, err := httpClient.Get(endpoint)
-if err != nil {
-	return fmt.Errorf("Request failed: %w", err)
-}
-```
-
-## Error handling
-
-Use the standard library's `errors.As` to handle SDK failures:
-
-```go
-var config *tinfoil.ConfigurationError
-var fetch *tinfoil.FetchError
-var attestation *tinfoil.AttestationError
-switch {
-case errors.As(err, &config):
-	// Fix invalid arguments or client configuration.
-case errors.As(err, &fetch):
-	// Attestation material could not be fetched; retry may help.
-case errors.As(err, &attestation):
-	// Verification or channel binding failed; do not trust this result.
-default:
-	return err
-}
-```
-
-All three implement `tinfoil.Error` and preserve causes for `errors.Is` and
-`errors.As`. The same types are available from `verifier/client`. Upstream
-OpenAI errors pass through. The prefixes `configuration error:`, `fetch error:`,
-and `attestation error:` are stable for the Swift/gomobile bridge.
-
-These are the three SDK categories, not an exhaustive list of errors a request
-can return. Upstream API errors and ordinary request network/cancellation errors
-retain their causes and native handling. Invalid supported inputs and rejected
-attestation evidence return errors; the SDK does not recover arbitrary programming
-panics. Applications can use `errors.As` with `tinfoil.Error` to recognize any SDK
-category, and should keep a default branch for other failures.
-
-TLS and freshness recovery sentinels are private. V3 consumers should replace
-references to `client.ErrNoTLS` and `client.ErrNoValidCertificate` with checks for
-`ConfigurationError`, and `client.ErrCertMismatch` / `client.ErrFreshnessExpired`
-with checks for `AttestationError`. The low-level
-`envelope.ErrCollateralNotFound` marker remains available for distinguishing
-absent collateral from malformed data; it is not another SDK error category.
-Category checks are for reporting and handling failures, not broad request-retry
-triggers. Let `SecureClient` own safe key-rotation recovery rather than retrying
-every `AttestationError` in application code.
+`VerifiedAt` is recorded from the local clock after successful verification. It is not an attested timestamp or a freshness guarantee.
 
 ## Prompt Cache Scoping
 
-The inference router partitions prompt-prefix caches using both the authenticated API identity and `user_cache_secret`. Cache reuse requires the same identity, secret, model, and matching prompt prefix. Changing the identity or secret selects a different cache namespace, so those requests do not share cache entries or cache-hit timing.
-
-`user_cache_secret` is sensitive application data used only for cache partitioning. It is not an API credential or encryption key. Do not log or expose it unnecessarily: a caller who can send requests with the same API identity and secret joins that cache namespace and can observe its cache-hit timing. The SDK adds it to eligible request bodies before EHBP sealing or transport over the pinned connection to the verified enclave.
-
-By default, the SDK generates a random secret and persists it at `~/.tinfoil/user_cache_secret`, requesting mode `0600` where supported. Tinfoil SDKs using the same home directory reuse this value. This default is suitable for a single-user application, but it does not separate end users who share one application process or home directory. You can control the scope explicitly:
+The router partitions prompt caches by API identity and a `user_cache_secret` that the SDK adds to eligible requests. By default it generates one and persists it at `~/.tinfoil/user_cache_secret`, which is suitable for single-user applications. Multi-user services should scope each request to its end user:
 
 ```go
-// Pin a stable, non-empty, opaque secret for this client.
+// Pin a stable, opaque secret for this client (or set TINFOIL_USER_CACHE_SECRET).
 client, err := tinfoil.NewClientWithOptions(
 	tinfoil.WithUserCacheSecret(secret),
 )
 
-// Or provision it via the environment
-//   TINFOIL_USER_CACHE_SECRET=<secret>   use this value
-
-// Multi-user services should scope every request to its end user;
-// a non-empty string field set here wins over the client-level secret:
+// A per-request value wins over the client-level secret.
 completion, err := client.Chat.Completions.New(ctx, params,
 	option.WithJSONSet("user_cache_secret", perUserSecret))
 ```
 
-Resolution order is a non-empty per-request string, a non-empty client value, a non-empty `TINFOIL_USER_CACHE_SECRET`, then the generated default. Empty client or environment values are treated as unset, and an empty per-request string is replaced with the resolved client value. The SDK leaves non-string values unchanged, and applications should not use them for cache scoping.
+See [Prompt caching](https://docs.tinfoil.sh/sdk/prompt-caching) for resolution order and guidance on choosing a scope.
 
-Multi-user services must provide a stable, non-empty, opaque value for each user (or group whose members may share cache-hit timing) on every eligible request. Do not use a raw user identifier, API key, or encryption key. A single client, environment, or generated value groups all requests using it under the same API identity. If persistence is unavailable, the SDK uses an in-memory value and cache continuity ends when the process exits.
+## Advanced Functionality
+
+```go
+// Target a specific enclave and repository
+client, err := tinfoil.NewClientWithOptions(tinfoil.WithEnclave(enclave), tinfoil.WithRepo(repo))
+
+// Make verified HTTP requests to the enclave directly
+httpClient := client.HTTPClient()
+resp, err := httpClient.Get(fmt.Sprintf("https://%s/health", enclave))
+```
+
+`WithVerificationOptions` configures [register pins and freshness](verifier/README.md#verification-options).
+
+## Error handling
+
+Use `errors.As` to distinguish SDK failures:
+
+```go
+var config *tinfoil.ConfigurationError // invalid arguments or client configuration
+var fetch *tinfoil.FetchError           // attestation material could not be fetched; retry may help
+var attestation *tinfoil.AttestationError // verification or channel binding failed; do not trust this result
+```
+
+All three implement `tinfoil.Error`. Upstream OpenAI errors pass through unchanged. Let `SecureClient` own key-rotation recovery rather than retrying every `AttestationError` in application code.
 
 ## API Documentation
 
-This library is a drop-in replacement for the [official OpenAI Go client](https://github.com/openai/openai-go) that can be used with Tinfoil. All methods and types are identical. See the [OpenAI Go client documentation](https://pkg.go.dev/github.com/openai/openai-go/v3) for complete API usage and documentation.
+This library is a drop-in replacement for the [official OpenAI Go client](https://github.com/openai/openai-go). All methods and types are identical; see the [OpenAI Go client documentation](https://pkg.go.dev/github.com/openai/openai-go/v3) for API usage.
 
-[![Go Reference](https://pkg.go.dev/badge/github.com/openai/openai-go/v3.svg)](https://pkg.go.dev/github.com/openai/openai-go/v3)
+## Development
 
-## Tests
-
-Run `go test -race ./...` for local tests. Live tests require explicit opt-in,
-even when credentials are present. Set `TINFOIL_API_KEY`, `TINFOIL_ENCLAVE`, and
-`TINFOIL_REPO`, then run:
+Run `go test -race ./...` for local tests. Live tests require explicit opt-in: set `TINFOIL_API_KEY`, `TINFOIL_ENCLAVE`, and `TINFOIL_REPO`, then run:
 
 ```sh
 RUN_TINFOIL_INTEGRATION=true go test -race -count=1 -timeout 5m -run '^TestLive' ./...
 ```
 
-Selected live tests fail when required configuration is missing. `-short` skips
-live tests regardless of opt-in. Tests do not load `.env` files automatically.
-
-Name external-service tests `TestLive*` and call `testutil.RequireLive` first,
-passing any required environment-variable names.
-
 ## Reporting Vulnerabilities
 
-Please report security vulnerabilities by emailing [security@tinfoil.sh](mailto:security@tinfoil.sh).
+Please report security vulnerabilities by either:
+
+- Emailing [security@tinfoil.sh](mailto:security@tinfoil.sh)
+- Opening an issue on GitHub on this repository
 
 We aim to respond to (legitimate) security reports within 24 hours.
