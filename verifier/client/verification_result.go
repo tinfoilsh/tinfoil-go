@@ -12,7 +12,7 @@ const (
 	verifierName       = "tinfoil-go"
 	verifierModulePath = "github.com/tinfoilsh/tinfoil-go"
 	// Version is the Tinfoil Go SDK release version.
-	Version = "0.15.0"
+	Version = "0.15.7"
 )
 
 // SoftwareIdentity identifies software involved in verification.
