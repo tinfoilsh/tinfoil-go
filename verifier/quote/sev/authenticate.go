@@ -22,8 +22,8 @@ import (
 	"github.com/tinfoilsh/go-sev-guest/verify"
 	"github.com/tinfoilsh/go-sev-guest/verify/trust"
 
-	"github.com/tinfoilsh/tinfoil-go/verifier"
 	"github.com/tinfoilsh/tinfoil-go/verifier/document"
+	"github.com/tinfoilsh/tinfoil-go/verifier/errs"
 	"github.com/tinfoilsh/tinfoil-go/verifier/measurement"
 )
 
@@ -149,9 +149,9 @@ func (q *Quote) Identity() string { return q.identity }
 // Callers must assemble a policy and validate before trusting the
 // platform.
 func Authenticate(doc *document.Document) (result *Quote, err error) {
-	defer func() { err = verifier.WrapAttestation(err) }()
+	defer func() { err = errs.WrapAttestation(err) }()
 	if doc == nil {
-		return nil, &verifier.ConfigurationError{Err: fmt.Errorf("document is required")}
+		return nil, &errs.ConfigurationError{Err: fmt.Errorf("document is required")}
 	}
 	entry, ok := doc.EndorsementCollateral(document.CollateralAMDVCEKV1Format, document.SubjectCPU)
 	if !ok {
