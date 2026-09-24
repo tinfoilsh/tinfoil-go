@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"sync"
 	"time"
 )
 
@@ -20,59 +19,84 @@ func (s *SecureClient) NewTransport(build func(*VerifiedDocumentV3) (http.RoundT
 		return nil, &ConfigurationError{Err: fmt.Errorf("transport builder is required")}
 	}
 	t := &refreshingTransport{client: s, build: build, isKeyError: isKeyError}
-	if _, _, err := t.admit(context.Background()); err != nil {
+	if err := s.registerTransport(t); err != nil {
 		return nil, err
 	}
 	return t, nil
+}
+
+func (s *SecureClient) registerTransport(t *refreshingTransport) error {
+	for {
+		state, err := s.verifiedState(context.Background(), nil, false)
+		if err != nil {
+			return err
+		}
+		s.stateMu.RLock()
+		registered := state.transports[t] != nil
+		s.stateMu.RUnlock()
+		if registered {
+			return nil
+		}
+		transport, err := t.buildTransport(state.VerifiedDocumentV3)
+		if err != nil {
+			return err
+		}
+		s.stateMu.Lock()
+		call := s.refreshing
+		if s.state == state && call == nil && time.Now().Before(state.FreshnessExpiresAt) {
+			if state.transports == nil {
+				state.transports = make(map[*refreshingTransport]http.RoundTripper)
+			}
+			if existing := state.transports[t]; existing != nil {
+				s.stateMu.Unlock()
+				closeIdleConnections(transport)
+				return nil
+			}
+			state.transports[t] = transport
+			s.stateMu.Unlock()
+			return nil
+		}
+		s.stateMu.Unlock()
+		closeIdleConnections(transport)
+		// Register only against the completed refresh, so every later refresh
+		// includes this transport in the state it publishes.
+		if call != nil {
+			<-call.done
+		}
+	}
 }
 
 type refreshingTransport struct {
 	client     *SecureClient
 	build      func(*VerifiedDocumentV3) (http.RoundTripper, error)
 	isKeyError func(error) bool
-	mu         sync.Mutex
-	state      *VerifiedDocumentV3
-	transport  http.RoundTripper
 }
 
-func (t *refreshingTransport) admit(ctx context.Context) (http.RoundTripper, *VerifiedDocumentV3, error) {
+func (t *refreshingTransport) buildTransport(verified *VerifiedDocumentV3) (http.RoundTripper, error) {
+	transport, err := t.build(cloneVerification(verified))
+	if transport == nil && err == nil {
+		err = fmt.Errorf("transport builder returned nil")
+	}
+	if err != nil {
+		closeIdleConnections(transport)
+	}
+	return transport, err
+}
+
+func (t *refreshingTransport) admit(ctx context.Context) (http.RoundTripper, *enclaveState, error) {
 	for {
 		state, err := t.client.verifiedState(ctx, nil, false)
 		if err != nil {
 			return nil, nil, err
 		}
-		t.mu.Lock()
-		if t.state != state {
-			transport, err := t.build(cloneVerification(state))
-			if transport == nil && err == nil {
-				err = fmt.Errorf("transport builder returned nil")
-			}
-			if err != nil {
-				t.mu.Unlock()
-				return nil, nil, err
-			}
-			// Verification may have advanced while we waited or built. Install
-			// only the current snapshot, serialized with refresh publication.
-			t.client.stateMu.RLock()
-			if t.client.state != state {
-				t.client.stateMu.RUnlock()
-				t.mu.Unlock()
-				closeIdleConnections(transport)
-				continue
-			}
-			previous := t.transport
-			t.state, t.transport = state, transport
-			t.client.stateMu.RUnlock()
-			closeIdleConnections(previous)
-		}
-		transport := t.transport
-		t.mu.Unlock()
 		if err := ctx.Err(); err != nil {
 			return nil, nil, err
 		}
-		// Construction/lock contention may have crossed the deadline. Admission
-		// is the last check before delegation, even on a reused connection.
-		if time.Now().Before(state.FreshnessExpiresAt) {
+		t.client.stateMu.RLock()
+		transport := state.transports[t]
+		valid := time.Now().Before(state.FreshnessExpiresAt)
+		t.client.stateMu.RUnlock()
+		if valid {
 			return transport, state, nil
 		}
 	}
@@ -110,9 +134,10 @@ func (t *refreshingTransport) RoundTrip(req *http.Request) (*http.Response, erro
 }
 
 func (t *refreshingTransport) CloseIdleConnections() {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	closeIdleConnections(t.transport)
+	t.client.stateMu.RLock()
+	transport := t.client.state.transports[t]
+	t.client.stateMu.RUnlock()
+	closeIdleConnections(transport)
 }
 
 func closeIdleConnections(transport http.RoundTripper) {

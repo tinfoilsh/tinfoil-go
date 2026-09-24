@@ -18,10 +18,11 @@ type SecureClient struct {
 	enclave, repo, relay string
 	options              VerificationOptions
 
-	stateMu    sync.RWMutex
-	state      *VerifiedDocumentV3
-	refreshing *verificationCall
-	verify     func() (*VerifiedDocumentV3, error)
+	stateMu      sync.RWMutex
+	state        *enclaveState
+	refreshing   *verificationCall
+	tlsTransport *refreshingTransport
+	verify       func() (*VerifiedDocumentV3, error)
 }
 
 var (
@@ -122,7 +123,10 @@ func (s *SecureClient) Repo() string {
 func (s *SecureClient) Verification() *VerifiedDocumentV3 {
 	s.stateMu.RLock()
 	defer s.stateMu.RUnlock()
-	return cloneVerification(s.state)
+	if s.state == nil {
+		return nil
+	}
+	return cloneVerification(s.state.VerifiedDocumentV3)
 }
 
 // VerificationJSON returns the last verification as JSON.
@@ -136,14 +140,22 @@ func (s *SecureClient) VerificationJSON() (string, error) {
 
 // HTTPClient returns an HTTP client that only accepts TLS connections to the verified enclave
 func (s *SecureClient) HTTPClient() (*http.Client, error) {
-	transport, err := s.NewTransport(func(verified *VerifiedDocumentV3) (http.RoundTripper, error) {
-		key, err := verified.TLSPublicKeyFP()
-		if err != nil {
-			return nil, err
-		}
-		return &TLSBoundRoundTripper{ExpectedPublicKey: key}, nil
-	}, isCertificateError)
-	if err != nil {
+	if s == nil {
+		return nil, &ConfigurationError{Err: fmt.Errorf("secure client is required")}
+	}
+	s.stateMu.Lock()
+	if s.tlsTransport == nil {
+		s.tlsTransport = &refreshingTransport{client: s, build: func(verified *VerifiedDocumentV3) (http.RoundTripper, error) {
+			key, err := verified.TLSPublicKeyFP()
+			if err != nil {
+				return nil, err
+			}
+			return &TLSBoundRoundTripper{ExpectedPublicKey: key}, nil
+		}, isKeyError: isCertificateError}
+	}
+	transport := s.tlsTransport
+	s.stateMu.Unlock()
+	if err := s.registerTransport(transport); err != nil {
 		return nil, err
 	}
 	return &http.Client{Transport: transport}, nil

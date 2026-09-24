@@ -3,21 +3,27 @@ package client
 import (
 	"context"
 	"errors"
+	"net/http"
 	"time"
 )
 
 // errFreshnessExpired means the authenticated witnesses no longer authorize requests.
 var errFreshnessExpired = errors.New("attestation freshness witnesses have expired; retry verification with fresh evidence")
 
+type enclaveState struct {
+	*VerifiedDocumentV3
+	transports map[*refreshingTransport]http.RoundTripper
+}
+
 type verificationCall struct {
 	done  chan struct{}
-	state *VerifiedDocumentV3
+	state *enclaveState
 	err   error
 }
 
 // verifiedState shares one refresh (including its failure) across all waiters.
 // A key-rotation retry can reuse a newer snapshot installed by another caller.
-func (s *SecureClient) verifiedState(ctx context.Context, observed *VerifiedDocumentV3, force bool) (*VerifiedDocumentV3, error) {
+func (s *SecureClient) verifiedState(ctx context.Context, observed *enclaveState, force bool) (*enclaveState, error) {
 	if s == nil {
 		return nil, &ConfigurationError{Err: errors.New("secure client is required")}
 	}
@@ -51,15 +57,28 @@ func (s *SecureClient) verifiedState(ctx context.Context, observed *VerifiedDocu
 }
 
 func (s *SecureClient) refresh(call *verificationCall) {
+	s.stateMu.RLock()
+	previous := s.state
+	s.stateMu.RUnlock()
 	verify := s.verify
 	if verify == nil {
 		verify = s.fetchVerification
 	}
 	// The attestation fetch bounds its network I/O. Local verification has no
 	// SDK deadline; each caller can independently cancel its wait above.
-	state, err := verify()
+	verified, err := verify()
+	state := &enclaveState{VerifiedDocumentV3: verified, transports: make(map[*refreshingTransport]http.RoundTripper)}
+	if err == nil && previous != nil {
+		for adapter := range previous.transports {
+			transport, buildErr := adapter.buildTransport(verified)
+			if buildErr != nil {
+				err = buildErr
+				break
+			}
+			state.transports[adapter] = transport
+		}
+	}
 	s.stateMu.Lock()
-	defer s.stateMu.Unlock()
 	if err == nil && !time.Now().Before(state.FreshnessExpiresAt) {
 		err = &AttestationError{Err: errFreshnessExpired}
 	}
@@ -70,4 +89,16 @@ func (s *SecureClient) refresh(call *verificationCall) {
 	call.err = err
 	s.refreshing = nil
 	close(call.done)
+	s.stateMu.Unlock()
+	if err != nil {
+		state.closeIdleConnections()
+	} else if previous != nil {
+		previous.closeIdleConnections()
+	}
+}
+
+func (state *enclaveState) closeIdleConnections() {
+	for _, transport := range state.transports {
+		closeIdleConnections(transport)
+	}
 }

@@ -192,5 +192,5 @@ func (s *SecureClient) Verify() (*VerifiedDocumentV3, error) {
 	if err != nil {
 		return nil, err
 	}
-	return cloneVerification(state), nil
+	return cloneVerification(state.VerifiedDocumentV3), nil
 }
