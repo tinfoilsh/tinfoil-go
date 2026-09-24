@@ -58,18 +58,43 @@ type AssembledPolicy struct {
 	tdx   *tdx.Expectations
 }
 
+// Options carries per-authentication overrides. A nil *Options, and the zero
+// value, select the production defaults: the embedded vendor roots and the
+// current time. Only the anchor for the document's own platform is used.
+//
+// The overrides themselves exist only in the conformance build. A production
+// binary has no way to set them, so it cannot be made to trust a supplied
+// vendor root or to appraise collateral at anything but the current time.
+type Options struct {
+	overrides overrides
+}
+
+func (o *Options) sevOptions() *sev.Options {
+	if o == nil {
+		return nil
+	}
+	return o.overrides.sev()
+}
+
+func (o *Options) tdxOptions() *tdx.Options {
+	if o == nil {
+		return nil
+	}
+	return o.overrides.tdx()
+}
+
 // Authenticate verifies the quote's signature chain up to the pinned
 // vendor root, from the document's own endorsement collateral — no network
 // fetches. Callers must assemble a policy and validate before trusting the
 // platform.
-func Authenticate(doc *document.Document) (result *Authenticated, err error) {
+func Authenticate(doc *document.Document, opts *Options) (result *Authenticated, err error) {
 	defer func() { err = errs.WrapAttestation(err) }()
 	if doc == nil {
 		return nil, &errs.ConfigurationError{Err: fmt.Errorf("document is required")}
 	}
 	switch doc.CPUEvidence.Format {
 	case document.SEVSNPReportV1Format:
-		q, err := sev.Authenticate(doc)
+		q, err := sev.Authenticate(doc, opts.sevOptions())
 		if err != nil {
 			return nil, err
 		}
@@ -80,7 +105,7 @@ func Authenticate(doc *document.Document) (result *Authenticated, err error) {
 			sev:         q,
 		}, nil
 	case document.TDXQuoteV1Format:
-		q, err := tdx.Authenticate(doc)
+		q, err := tdx.Authenticate(doc, opts.tdxOptions())
 		if err != nil {
 			return nil, err
 		}
@@ -157,9 +182,10 @@ func (p *AssembledPolicy) Validate() (err error) {
 	}
 }
 
-// Verify composes Authenticate, Assemble, and Validate.
-func Verify(doc *document.Document, endorsements *policy.Artifact, code, pins *measurement.Measurement, shape *policy.Shape, reportData [64]byte) (*AssembledPolicy, *Authenticated, error) {
-	q, err := Authenticate(doc)
+// Verify composes Authenticate, Assemble, and Validate. A nil opts selects
+// the production clock and embedded vendor roots.
+func Verify(doc *document.Document, endorsements *policy.Artifact, code, pins *measurement.Measurement, shape *policy.Shape, reportData [64]byte, opts *Options) (*AssembledPolicy, *Authenticated, error) {
+	q, err := Authenticate(doc, opts)
 	if err != nil {
 		return nil, nil, err
 	}

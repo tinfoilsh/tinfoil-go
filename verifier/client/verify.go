@@ -97,7 +97,7 @@ func VerifyDocumentV3(docBytes, nonce []byte, repo string, opts *VerificationOpt
 		return nil, verifier.WrapAttestation(fmt.Errorf("reference values: %w", err))
 	}
 
-	_, authenticated, err := quote.Verify(doc, endorsements.Artifact, code.Measurement, options.PinnedRegisters, code.Shape, expectedReportData)
+	_, authenticated, err := quote.Verify(doc, endorsements.Artifact, code.Measurement, options.PinnedRegisters, code.Shape, expectedReportData, nil)
 	if err != nil {
 		return nil, err
 	}

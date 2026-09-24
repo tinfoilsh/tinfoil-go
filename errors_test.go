@@ -78,7 +78,7 @@ func TestPublicInputErrors(t *testing.T) {
 	require.ErrorAs(t, err, &config)
 	_, err = document.Fetch("", make([]byte, document.NonceSize))
 	require.ErrorAs(t, err, &config)
-	_, err = quote.Authenticate(nil)
+	_, err = quote.Authenticate(nil, nil)
 	require.ErrorAs(t, err, &config)
 	_, err = quote.Assemble(nil, nil, nil, nil, [64]byte{}, nil)
 	require.ErrorAs(t, err, &config)

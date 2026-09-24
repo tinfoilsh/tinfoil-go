@@ -6,10 +6,9 @@
 // Input/Output shapes and exit codes so the suite drives them identically.
 //
 // The full-verify stage composes the verification flow step by step (rather
-// than calling client.VerifyDocumentV3) so it can inject synthetic roots via
-// the tag-gated seams, pin the freshness appraisal time for frozen documents,
-// and attribute a rejection to the failing layer — all with no production
-// change beyond those seams.
+// than calling client.VerifyDocumentV3) so it can attribute a rejection to the
+// failing layer. Synthetic roots and the appraisal clock travel as ordinary
+// per-call options, so the adapter mutates no production state.
 package conformance
 
 import (
@@ -23,8 +22,6 @@ import (
 	"github.com/tinfoilsh/tinfoil-go/verifier/measurement"
 	"github.com/tinfoilsh/tinfoil-go/verifier/provenance"
 	"github.com/tinfoilsh/tinfoil-go/verifier/quote"
-	"github.com/tinfoilsh/tinfoil-go/verifier/quote/sev"
-	"github.com/tinfoilsh/tinfoil-go/verifier/quote/tdx"
 )
 
 // Exit codes are the cross-SDK adapter contract: the suite reads them to decide
@@ -109,19 +106,14 @@ type Rejection struct {
 
 // Run executes one stage and returns the wire Output plus the adapter exit code.
 //
-// Run is single-call by contract: it pins process-wide seams (verification
-// clock, injected roots) for the duration of the call and restores them on
-// return. The adapter binary and the fixture runner invoke it sequentially;
-// it must not be called concurrently.
+// The verification clock and the injected vendor roots travel as per-call
+// options, so Run holds no process state and concurrent calls cannot observe
+// each other.
 func Run(stage string, in Input) (Output, int) {
 	// Pin the validity-window and freshness clock for a frozen document.
 	appraisal := time.Now()
 	if in.VerificationTimeUnix != 0 {
 		appraisal = time.Unix(in.VerificationTimeUnix, 0)
-		sev.SetVerificationTime(appraisal)
-		tdx.SetVerificationTime(appraisal)
-		defer sev.ResetVerificationTime()
-		defer tdx.ResetVerificationTime()
 	}
 
 	if in.SchemaVersion != SchemaVersion {
@@ -143,10 +135,13 @@ func Run(stage string, in Input) (Output, int) {
 	if err != nil {
 		return malformed(stage)
 	}
+	quoteOpts := &quote.Options{}
+	quoteOpts.DangerousTestOnlySetClock(appraisal)
+	quoteOpts.DangerousTestOnlySetRoots(rts.amd, rts.intel)
 
 	switch stage {
 	case StageVerify:
-		return verifyFull(doc, nonce, in.Repo, rts, prov, appraisal)
+		return verifyFull(doc, nonce, in.Repo, quoteOpts, prov, appraisal)
 	case StageCheckEnvelope:
 		if _, _, err := document.Check(doc, nonce); err != nil {
 			return reject(stage, "ENVELOPE_REJECTED")
@@ -187,12 +182,7 @@ func Run(stage string, in Input) (Output, int) {
 		if err != nil {
 			return malformed(stage)
 		}
-		undo, err := setQuoteRoots(rts)
-		if err != nil {
-			return malformed(stage)
-		}
-		defer undo()
-		auth, err := quote.Authenticate(parsed)
+		auth, err := quote.Authenticate(parsed, quoteOpts)
 		if err != nil {
 			return reject(stage, "QUOTE_REJECTED")
 		}
@@ -205,7 +195,7 @@ func Run(stage string, in Input) (Output, int) {
 }
 
 // verifyFull composes the whole flow; the first failing step names the layer.
-func verifyFull(doc, nonce []byte, repo string, rts roots, prov provAuth, appraisal time.Time) (Output, int) {
+func verifyFull(doc, nonce []byte, repo string, quoteOpts *quote.Options, prov provAuth, appraisal time.Time) (Output, int) {
 	parsed, reportData, err := document.Check(doc, nonce)
 	if err != nil {
 		return reject(StageVerify, "ENVELOPE_REJECTED")
@@ -214,12 +204,7 @@ func verifyFull(doc, nonce []byte, repo string, rts roots, prov provAuth, apprai
 	if err != nil {
 		return reject(StageVerify, "PROVENANCE_REJECTED")
 	}
-	undo, err := setQuoteRoots(rts)
-	if err != nil {
-		return malformed(StageVerify)
-	}
-	defer undo()
-	auth, err := quote.Authenticate(parsed)
+	auth, err := quote.Authenticate(parsed, quoteOpts)
 	if err != nil {
 		return reject(StageVerify, "QUOTE_REJECTED")
 	}
@@ -324,29 +309,6 @@ func (in Input) roots() (roots, error) {
 		r.sigstore = j
 	}
 	return r, nil
-}
-
-// setQuoteRoots injects the vendor roots for quote.Authenticate and returns an
-// undo that restores the embedded roots.
-func setQuoteRoots(rts roots) (func(), error) {
-	var undo []func()
-	reset := func() {
-		for i := len(undo) - 1; i >= 0; i-- {
-			undo[i]()
-		}
-	}
-	if rts.amd != nil {
-		sev.SetAMDRoot(rts.amd)
-		undo = append(undo, sev.ResetAMDRoot)
-	}
-	if rts.intel != nil {
-		if err := tdx.SetIntelRoot(rts.intel); err != nil {
-			reset()
-			return nil, err
-		}
-		undo = append(undo, tdx.ResetIntelRoot)
-	}
-	return reset, nil
 }
 
 // provAuth authenticates provenance against an injected Sigstore root, or the

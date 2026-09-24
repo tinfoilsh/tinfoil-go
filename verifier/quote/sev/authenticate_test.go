@@ -18,7 +18,7 @@ import (
 func TestVerifySignatureRejectsNonExactReportSize(t *testing.T) {
 	for _, size := range []int{sevabi.ReportSize - 1, sevabi.ReportSize + 1} {
 		report := base64.StdEncoding.EncodeToString(make([]byte, size))
-		_, err := verifySignature(report, nil, nil, nil, nil)
+		_, err := verifySignature(report, nil, nil, nil, nil, time.Now(), nil)
 		assert.ErrorContains(t, err, "must be exactly", "size %d", size)
 	}
 }
@@ -26,7 +26,7 @@ func TestVerifySignatureRejectsNonExactReportSize(t *testing.T) {
 func TestTrustedRootsSelectProduct(t *testing.T) {
 	for _, productLine := range []string{ProductGenoa, ProductTurin} {
 		t.Run(productLine, func(t *testing.T) {
-			roots, err := trustedRoots(productLine)
+			roots, err := trustedRoots(productLine, nil)
 			require.NoError(t, err)
 			require.Len(t, roots, 1)
 			require.Len(t, roots[productLine], 1)
@@ -34,7 +34,7 @@ func TestTrustedRootsSelectProduct(t *testing.T) {
 		})
 	}
 
-	_, err := trustedRoots("Milan")
+	_, err := trustedRoots("Milan", nil)
 	assert.ErrorContains(t, err, "unsupported SEV product line")
 }
 
@@ -58,7 +58,7 @@ func TestVerifyBox2TurinSignatureWithPinnedRoots(t *testing.T) {
 	require.NoError(t, err)
 	product, err := productFromReport(report)
 	require.NoError(t, err)
-	roots, err := trustedRoots(ProductTurin)
+	roots, err := trustedRoots(ProductTurin, nil)
 	require.NoError(t, err)
 	attestation := &sevsnp.Attestation{
 		Report: report,
