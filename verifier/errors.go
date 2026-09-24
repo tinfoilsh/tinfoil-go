@@ -1,6 +1,3 @@
-// Package verifier re-exports the SDK's three error categories. They are
-// defined in verifier/errs so the low-level verification packages can classify
-// their errors without importing this package, which imports them in turn.
 package verifier
 
 import "github.com/tinfoilsh/tinfoil-go/verifier/errs"
