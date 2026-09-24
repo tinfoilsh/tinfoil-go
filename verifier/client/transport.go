@@ -20,14 +20,14 @@ func (s *SecureClient) NewTransport(build func(*VerifiedDocumentV3) (http.RoundT
 	if build == nil {
 		return nil, &ConfigurationError{Err: fmt.Errorf("transport builder is required")}
 	}
-	t := &refreshingTransport{client: s, build: build, isKeyError: isKeyError}
+	t := &clientTransport{client: s, build: build, isKeyError: isKeyError}
 	if err := s.registerTransport(t); err != nil {
 		return nil, err
 	}
 	return t, nil
 }
 
-func (s *SecureClient) registerTransport(t *refreshingTransport) error {
+func (s *SecureClient) registerTransport(t *clientTransport) error {
 	for {
 		state, err := s.verifiedState(context.Background(), nil, false)
 		if err != nil {
@@ -47,7 +47,7 @@ func (s *SecureClient) registerTransport(t *refreshingTransport) error {
 		call := s.refreshing
 		if s.state == state && call == nil && time.Now().Before(state.FreshnessExpiresAt) {
 			if state.transports == nil {
-				state.transports = make(map[*refreshingTransport]http.RoundTripper)
+				state.transports = make(map[*clientTransport]http.RoundTripper)
 			}
 			if existing := state.transports[t]; existing != nil {
 				s.stateMu.Unlock()
@@ -68,13 +68,13 @@ func (s *SecureClient) registerTransport(t *refreshingTransport) error {
 	}
 }
 
-type refreshingTransport struct {
+type clientTransport struct {
 	client     *SecureClient
 	build      func(*VerifiedDocumentV3) (http.RoundTripper, error)
 	isKeyError func(error) bool
 }
 
-func (t *refreshingTransport) buildTransport(verified *VerifiedDocumentV3) (http.RoundTripper, error) {
+func (t *clientTransport) buildTransport(verified *VerifiedDocumentV3) (http.RoundTripper, error) {
 	transport, err := t.build(cloneVerification(verified))
 	if transport == nil && err == nil {
 		err = fmt.Errorf("transport builder returned nil")
@@ -85,7 +85,7 @@ func (t *refreshingTransport) buildTransport(verified *VerifiedDocumentV3) (http
 	return transport, err
 }
 
-func (t *refreshingTransport) admit(ctx context.Context) (http.RoundTripper, *enclaveState, error) {
+func (t *clientTransport) admit(ctx context.Context) (http.RoundTripper, *enclaveState, error) {
 	for {
 		state, err := t.client.verifiedState(ctx, nil, false)
 		if err != nil {
@@ -104,7 +104,7 @@ func (t *refreshingTransport) admit(ctx context.Context) (http.RoundTripper, *en
 	}
 }
 
-func (t *refreshingTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+func (t *clientTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	transport, state, err := t.admit(req.Context())
 	if err != nil {
 		closeRequestBody(req)
@@ -135,7 +135,7 @@ func (t *refreshingTransport) RoundTrip(req *http.Request) (*http.Response, erro
 	return transport.RoundTrip(retry)
 }
 
-func (t *refreshingTransport) CloseIdleConnections() {
+func (t *clientTransport) CloseIdleConnections() {
 	t.client.stateMu.RLock()
 	transport := t.client.state.transports[t]
 	t.client.stateMu.RUnlock()

@@ -12,7 +12,7 @@ var errFreshnessExpired = errors.New("attestation freshness witnesses have expir
 
 type enclaveState struct {
 	*VerifiedDocumentV3
-	transports map[*refreshingTransport]http.RoundTripper
+	transports map[*clientTransport]http.RoundTripper
 }
 
 type verificationCall struct {
@@ -70,7 +70,7 @@ func (s *SecureClient) refresh(call *verificationCall) {
 	if err == nil && !time.Now().Before(verified.FreshnessExpiresAt) {
 		err = &AttestationError{Err: errFreshnessExpired}
 	}
-	state := &enclaveState{VerifiedDocumentV3: verified, transports: make(map[*refreshingTransport]http.RoundTripper)}
+	state := &enclaveState{VerifiedDocumentV3: verified, transports: make(map[*clientTransport]http.RoundTripper)}
 	if err == nil && previous != nil {
 		for adapter := range previous.transports {
 			transport, buildErr := adapter.buildTransport(verified)

@@ -23,7 +23,7 @@ type SecureClient struct {
 	stateMu      sync.RWMutex
 	state        *enclaveState
 	refreshing   *verificationCall
-	tlsTransport *refreshingTransport
+	tlsTransport *clientTransport
 	verify       func() (*VerifiedDocumentV3, error)
 }
 
@@ -143,7 +143,7 @@ func (s *SecureClient) HTTPClient() (*http.Client, error) {
 	}
 	s.stateMu.Lock()
 	if s.tlsTransport == nil {
-		s.tlsTransport = &refreshingTransport{client: s, build: func(verified *VerifiedDocumentV3) (http.RoundTripper, error) {
+		s.tlsTransport = &clientTransport{client: s, build: func(verified *VerifiedDocumentV3) (http.RoundTripper, error) {
 			key, err := verified.TLSPublicKeyFP()
 			if err != nil {
 				return nil, err
