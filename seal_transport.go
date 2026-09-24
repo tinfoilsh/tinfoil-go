@@ -2,16 +2,26 @@ package tinfoil
 
 import (
 	"bytes"
+	"cmp"
 	"crypto/sha256"
+	"encoding/base64"
+	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
+	"maps"
+	"math/rand/v2"
 	"mime"
 	"net/http"
+	"net/url"
 	"slices"
+	"strings"
 	"sync"
+	"time"
 
+	"github.com/openai/openai-go/v3"
+	"github.com/openai/openai-go/v3/option"
 	"github.com/tinfoilsh/tinfoil-go/verifier/client"
 )
 
@@ -20,65 +30,200 @@ const (
 	cachePrefixHeader = "X-Tinfoil-Cache-Prefix"
 	sealHeader        = "X-Tinfoil-Seal"
 	maxSealRedirects  = 3
+	maxRerouted       = 1024
+
+	catalogPath         = "/catalog"
+	catalogFetchTimeout = 10 * time.Second
+	trustedRepoOwner    = "tinfoilsh/"
+
+	// Derived client-side: no router sits between a gateway client and the engine.
+	cacheSaltField = "cache_salt"
+	// Separates the salt from the secret's other use, the cache-prefix hash.
+	cacheSaltDomainTag = "tinfoil/client-cache-salt/v1"
 )
 
-type sealedEnclave struct {
-	secure    *client.SecureClient
-	transport http.RoundTripper
+// CatalogEntry lists a model's repository and replica hosts.
+type CatalogEntry struct {
+	Repo  string   `json:"repo"`
+	Hosts []string `json:"hosts"`
 }
 
-type sealTransport struct {
-	build    func(*client.SecureClient) (http.RoundTripper, error)
-	mu       sync.Mutex
-	active   *sealedEnclave
-	enclaves map[string]*sealedEnclave
-}
+// Catalog maps model names to their entries. It is untrusted: each replica is
+// verified against its repository before anything is sealed to it.
+type Catalog map[string]CatalogEntry
 
-func newSealTransport(secure *client.SecureClient, build func(*client.SecureClient) (http.RoundTripper, error)) (*sealTransport, error) {
-	t := &sealTransport{build: build, enclaves: map[string]*sealedEnclave{}}
-	if _, err := t.follow(secure); err != nil {
-		return nil, err
+// FetchCatalog reads the catalog of the gateway at host, keeping only models
+// with replicas of a tinfoilsh/ repository.
+func FetchCatalog(host string) (Catalog, error) {
+	resp, err := (&http.Client{Timeout: catalogFetchTimeout}).Get("https://" + host + catalogPath)
+	if err != nil {
+		return nil, &FetchError{Err: err}
 	}
-	return t, nil
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, &FetchError{Err: fmt.Errorf("fetching gateway catalog: %s", resp.Status)}
+	}
+	var catalog Catalog
+	if err := json.NewDecoder(resp.Body).Decode(&catalog); err != nil {
+		return nil, &FetchError{Err: fmt.Errorf("decoding gateway catalog: %w", err)}
+	}
+	maps.DeleteFunc(catalog, func(_ string, entry CatalogEntry) bool { return !entry.trusted() })
+	return catalog, nil
 }
 
-func (t *sealTransport) enclave() *client.SecureClient {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	return t.active.secure
+func (e CatalogEntry) trusted() bool {
+	return strings.HasPrefix(e.Repo, trustedRepoOwner) && len(e.Hosts) > 0
 }
 
-func (t *sealTransport) follow(secure *client.SecureClient) (*sealedEnclave, error) {
-	t.mu.Lock()
-	e := t.enclaves[secure.Enclave()]
-	t.mu.Unlock()
-	if e == nil {
-		transport, err := t.build(secure)
+// Gateway is an OpenAI client that seals each request to a verified replica
+// of the model it names.
+type Gateway struct {
+	*openai.Client
+	httpClient *http.Client
+}
+
+// NewGateway reads catalog on every request, so a long-running caller can
+// refresh it; nil fetches it once. It accepts WithVerificationOptions,
+// WithUserCacheSecret and WithOpenAIOptions.
+func NewGateway(baseURL string, catalog func() Catalog, opts ...ClientOption) (*Gateway, error) {
+	cfg := &clientConfig{}
+	for _, opt := range opts {
+		if opt != nil {
+			opt(cfg)
+		}
+	}
+	if cfg.enclave != "" || cfg.repo != "" || cmp.Or(cfg.transport, TransportEHBP) != TransportEHBP || cfg.baseURLSet {
+		return nil, &ConfigurationError{Err: fmt.Errorf("a gateway takes its enclaves and repositories from its catalog and uses the EHBP transport")}
+	}
+	base, err := url.Parse(baseURL)
+	if err != nil || base.Scheme != "https" || base.Host == "" {
+		return nil, &ConfigurationError{Err: fmt.Errorf("gateway base URL must be an absolute HTTPS URL: %q", baseURL)}
+	}
+	if catalog == nil {
+		fetched, err := FetchCatalog(base.Host)
 		if err != nil {
 			return nil, err
 		}
-		e = &sealedEnclave{secure: secure, transport: transport}
+		catalog = func() Catalog { return fetched }
+	}
+	seal := &sealTransport{
+		catalog: catalog,
+		secret:  resolveUserCacheSecret(cfg.userCacheSecret, cfg.userCacheSecretSet),
+		build: func(r replica) (http.RoundTripper, error) {
+			secure, err := client.NewSecureClient(r.host, r.repo, &cfg.verification)
+			if err != nil {
+				return nil, err
+			}
+			httpClient, err := ehbpHTTPClient(secure.ViaRelay(base.Host), baseURL)
+			if err != nil {
+				return nil, err
+			}
+			return httpClient.Transport, nil
+		},
+	}
+	httpClient, err := boundHTTPClient(&http.Client{Transport: seal}, "", baseURL, "")
+	if err != nil {
+		return nil, err
+	}
+	openaiClient := openai.NewClient(append(cfg.openaiOpts, option.WithHTTPClient(httpClient), option.WithBaseURL(baseURL))...)
+	return &Gateway{Client: &openaiClient, httpClient: httpClient}, nil
+}
+
+// HTTPClient seals requests to a replica of the model named in their body.
+func (g *Gateway) HTTPClient() *http.Client {
+	return g.httpClient
+}
+
+type replica struct{ host, repo string }
+
+// sealTransport picks each request's replica from its cache prefix, or from
+// where the gateway last rerouted that prefix, so a conversation stays on one
+// warm replica.
+type sealTransport struct {
+	build    func(replica) (http.RoundTripper, error)
+	catalog  func() Catalog
+	secret   string
+	enclaves sync.Map // replica to http.RoundTripper
+	mu       sync.Mutex
+	rerouted map[string]string // cache prefix to host
+}
+
+func (t *sealTransport) enclave(r replica) (http.RoundTripper, error) {
+	if rt, ok := t.enclaves.Load(r); ok {
+		return rt.(http.RoundTripper), nil
+	}
+	rt, err := t.build(r)
+	if err != nil {
+		return nil, err
+	}
+	t.enclaves.Store(r, rt)
+	return rt, nil
+}
+
+func (t *sealTransport) reroutedHost(prefix string) string {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.rerouted[prefix]
+}
+
+func (t *sealTransport) remember(prefix, host string) {
+	if prefix == "" {
+		return
 	}
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	t.enclaves[secure.Enclave()] = e
-	t.active = e
-	return e, nil
+	if t.rerouted == nil || len(t.rerouted) == maxRerouted {
+		t.rerouted = map[string]string{}
+	}
+	t.rerouted[prefix] = host
+}
+
+// rank orders hosts by rendezvous score for a cache prefix, or randomly without one.
+func rank(hosts []string, prefix, first string) []string {
+	hosts = slices.Clone(hosts)
+	if prefix == "" {
+		rand.Shuffle(len(hosts), func(i, j int) { hosts[i], hosts[j] = hosts[j], hosts[i] })
+		return hosts
+	}
+	score := func(host string) uint64 {
+		sum := sha256.Sum256([]byte(prefix + "\x00" + host))
+		return binary.BigEndian.Uint64(sum[:])
+	}
+	slices.SortFunc(hosts, func(a, b string) int { return cmp.Compare(score(b), score(a)) })
+	if i := slices.Index(hosts, first); i > 0 {
+		copy(hosts[1:i+1], hosts[:i])
+		hosts[0] = first
+	}
+	return hosts
 }
 
 func (t *sealTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	req = req.Clone(req.Context())
-	if err := prepareRoutingHeaders(req); err != nil {
+	if err := t.prepare(req); err != nil {
 		return nil, err
+	}
+	model := req.Header.Get(modelHeader)
+	entry := t.catalog()[model]
+	if !entry.trusted() {
+		return nil, &ConfigurationError{Err: fmt.Errorf("model %q has no %s replicas in the gateway catalog", model, trustedRepoOwner)}
 	}
 	hasBody := req.Body != nil && req.Body != http.NoBody
 	replayable := !hasBody || req.GetBody != nil
-	t.mu.Lock()
-	e := t.active
-	t.mu.Unlock()
+	var host string
+	var transport http.RoundTripper
+	var err error
+	prefix := req.Header.Get(cachePrefixHeader)
+	for _, host = range rank(entry.Hosts, prefix, t.reroutedHost(prefix)) {
+		if transport, err = t.enclave(replica{host, entry.Repo}); err == nil {
+			break
+		}
+	}
+	if err != nil {
+		return nil, err
+	}
 	for redirects := 0; ; redirects++ {
 		out := req.Clone(req.Context())
-		out.Header.Set(sealHeader, e.secure.Enclave())
+		out.Header.Set(sealHeader, host)
 		if redirects > 0 && hasBody {
 			var err error
 			out.Body, err = req.GetBody()
@@ -86,25 +231,27 @@ func (t *sealTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 				return nil, fmt.Errorf("replaying request after enclave reroute: %w", err)
 			}
 		}
-		resp, err := e.transport.RoundTrip(out)
+		resp, err := transport.RoundTrip(out)
 		if err != nil {
 			return nil, err
 		}
 		routed := resp.Header.Get(sealHeader)
-		if resp.StatusCode != http.StatusPreconditionFailed || routed == "" || routed == e.secure.Enclave() || !replayable {
+		if resp.StatusCode != http.StatusPreconditionFailed || routed == "" || routed == host || !replayable {
 			return resp, nil
 		}
 		resp.Body.Close()
 		if redirects == maxSealRedirects {
 			return nil, &FetchError{Err: fmt.Errorf("gateway kept routing away from the enclave the request was sealed to (last: %s)", routed)}
 		}
-		if e, err = t.follow(e.secure.ForEnclave(routed)); err != nil {
+		if transport, err = t.enclave(replica{routed, entry.Repo}); err != nil {
 			return nil, fmt.Errorf("following gateway route to enclave %s: %w", routed, err)
 		}
+		t.remember(prefix, routed)
+		host = routed
 	}
 }
 
-func prepareRoutingHeaders(req *http.Request) error {
+func (t *sealTransport) prepare(req *http.Request) error {
 	if req.Method != http.MethodPost || req.Body == nil || req.Body == http.NoBody {
 		return nil
 	}
@@ -114,36 +261,52 @@ func prepareRoutingHeaders(req *http.Request) error {
 	}
 	// Only inspect JSON inference requests. Uploads keep their original body
 	// and use GetBody if a seal mismatch requires another attempt.
+	scoped := userCacheSecretPathEligible(req)
 	body, err := io.ReadAll(req.Body)
 	req.Body.Close()
 	if err != nil {
 		return err
 	}
+	var fields map[string]json.RawMessage
+	if json.Unmarshal(body, &fields) == nil && fields != nil {
+		var model string
+		if req.Header.Get(modelHeader) == "" && json.Unmarshal(fields["model"], &model) == nil && model != "" {
+			req.Header.Set(modelHeader, model)
+		}
+		if scoped {
+			body = t.scopeCache(req.Header, fields, body)
+		}
+	}
+	req.ContentLength = int64(len(body))
 	req.GetBody = func() (io.ReadCloser, error) {
 		return io.NopCloser(bytes.NewReader(body)), nil
 	}
 	req.Body, _ = req.GetBody()
-	setRoutingHeaders(req.Header, body)
 	return nil
 }
 
-func setRoutingHeaders(h http.Header, body []byte) {
-	var fields map[string]json.RawMessage
-	if json.Unmarshal(body, &fields) != nil {
-		return
-	}
-	var model string
-	if h.Get(modelHeader) == "" && json.Unmarshal(fields["model"], &model) == nil && model != "" {
-		h.Set(modelHeader, model)
-	}
+// The engine only needs the salt; the secret itself never leaves the client.
+func (t *sealTransport) scopeCache(h http.Header, fields map[string]json.RawMessage, body []byte) []byte {
 	var secret string
-	if h.Get(cachePrefixHeader) != "" || json.Unmarshal(fields[userCacheSecretField], &secret) != nil || secret == "" {
-		return
+	json.Unmarshal(fields[userCacheSecretField], &secret)
+	if secret = cmp.Or(secret, t.secret); secret == "" {
+		return body
 	}
-	if head := promptHead(fields); head != nil {
+	if head := promptHead(fields); head != nil && h.Get(cachePrefixHeader) == "" {
 		sum := sha256.Sum256(slices.Concat([]byte(secret), []byte{0}, head))
 		h.Set(cachePrefixHeader, hex.EncodeToString(sum[:]))
 	}
+	delete(fields, userCacheSecretField)
+	fields[cacheSaltField], _ = json.Marshal(deriveCacheSalt(secret))
+	if scoped, err := json.Marshal(fields); err == nil {
+		return scoped
+	}
+	return body
+}
+
+func deriveCacheSalt(secret string) string {
+	sum := sha256.Sum256([]byte(cacheSaltDomainTag + "\x00" + secret))
+	return base64.RawURLEncoding.EncodeToString(sum[:])
 }
 
 // The first element is the prefix later turns of a conversation share.

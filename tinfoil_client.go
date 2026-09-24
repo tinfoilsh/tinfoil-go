@@ -12,7 +12,7 @@ import (
 // Client wraps the OpenAI client to provide secure inference through Tinfoil
 type Client struct {
 	*openai.Client
-	active     func() *client.SecureClient
+	secure     *client.SecureClient
 	httpClient *http.Client
 	transport  TransportMode
 }
@@ -27,7 +27,7 @@ func NewClient(openaiOpts ...option.RequestOption) (*Client, error) {
 }
 
 func createClientFromSecureClient(secureClient *client.SecureClient, mode TransportMode, baseURL, userCacheSecret string, openaiOpts ...option.RequestOption) (*Client, error) {
-	httpClient, active, err := secureHTTPClient(secureClient, mode, baseURL, userCacheSecret)
+	httpClient, err := secureHTTPClient(secureClient, mode, baseURL, userCacheSecret)
 	if err != nil {
 		return nil, err
 	}
@@ -46,18 +46,18 @@ func createClientFromSecureClient(secureClient *client.SecureClient, mode Transp
 	openaiClient := openai.NewClient(allOpts...)
 	return &Client{
 		Client:     &openaiClient,
-		active:     active,
+		secure:     secureClient,
 		httpClient: httpClient,
 		transport:  mode,
 	}, nil
 }
 
 func (c *Client) Enclave() string {
-	return c.active().Enclave()
+	return c.secure.Enclave()
 }
 
 func (c *Client) Repo() string {
-	return c.active().Repo()
+	return c.secure.Repo()
 }
 
 // Transport returns the transport mode used to secure traffic to the enclave.
@@ -67,12 +67,12 @@ func (c *Client) Transport() TransportMode {
 
 // Verify refreshes attestation and returns the verified state.
 func (c *Client) Verify() (*client.VerifiedDocumentV3, error) {
-	return c.active().Verify()
+	return c.secure.Verify()
 }
 
 // Verification returns a copy of the last successful verification.
 func (c *Client) Verification() *client.VerifiedDocumentV3 {
-	return c.active().Verification()
+	return c.secure.Verification()
 }
 
 // HTTPClient returns the underlying HTTP client used to reach the enclave. It

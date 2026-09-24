@@ -381,21 +381,28 @@ func TestUserCacheSecretTransportSkipsIneligibleRequests(t *testing.T) {
 	})
 }
 
-func TestUserCacheSecretTransportLeavesStreamingBodyUntouched(t *testing.T) {
-	const raw = `{"model":"m"}`
+func TestUserCacheSecretTransportInjectsIntoStreamingBody(t *testing.T) {
 	var got []byte
-	transport := captureTransport("s1", &got, nil)
+	var sent *http.Request
+	transport := captureTransport("s1", &got, &sent)
 	req, err := http.NewRequest(
 		http.MethodPost,
 		"https://enclave.example.com/v1/chat/completions",
-		io.NopCloser(strings.NewReader(raw)),
+		io.NopCloser(strings.NewReader(`{"model":"m"}`)),
 	)
 	require.NoError(t, err)
 	require.Nil(t, req.GetBody)
 
 	_, err = transport.RoundTrip(req)
 	require.NoError(t, err)
-	require.Equal(t, raw, string(got))
+	require.Equal(t, `{"model":"m","user_cache_secret":"s1"}`, string(got))
+	require.Equal(t, int64(len(got)), sent.ContentLength)
+	require.NotNil(t, sent.GetBody)
+	replay, err := sent.GetBody()
+	require.NoError(t, err)
+	replayed, err := io.ReadAll(replay)
+	require.NoError(t, err)
+	require.Equal(t, got, replayed)
 }
 
 func TestUserCacheSecretTransportNeverClobbersNonEmptyOrNonStringValues(t *testing.T) {

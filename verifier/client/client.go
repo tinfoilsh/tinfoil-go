@@ -15,8 +15,8 @@ import (
 )
 
 type SecureClient struct {
-	enclave, repo string
-	options       VerificationOptions
+	enclave, repo, relay string
+	options              VerificationOptions
 
 	stateMu    sync.RWMutex
 	state      *VerifiedDocumentV3
@@ -101,6 +101,11 @@ func NewDefaultClient(opts *VerificationOptions) (*SecureClient, error) {
 // ForEnclave keeps the repository reference and verification options.
 func (s *SecureClient) ForEnclave(enclave string) *SecureClient {
 	return &SecureClient{enclave: enclave, repo: s.repo, options: s.options}
+}
+
+// ViaRelay fetches attestation through relay, which forwards it to the enclave.
+func (s *SecureClient) ViaRelay(relay string) *SecureClient {
+	return &SecureClient{enclave: s.enclave, repo: s.repo, relay: relay, options: s.options}
 }
 
 // Enclave returns the enclave URL

@@ -256,7 +256,7 @@ type userCacheSecretTransport struct {
 }
 
 func (t *userCacheSecretTransport) RoundTrip(req *http.Request) (*http.Response, error) {
-	if t.secret == "" || !userCacheSecretPathEligible(req) || req.GetBody == nil {
+	if t.secret == "" || !userCacheSecretPathEligible(req) {
 		return t.transport.RoundTrip(req)
 	}
 

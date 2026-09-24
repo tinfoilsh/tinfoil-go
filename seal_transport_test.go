@@ -9,14 +9,20 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
-	"github.com/tinfoilsh/tinfoil-go/verifier/client"
 )
 
-func sealTestClient(t *testing.T) *client.SecureClient {
-	t.Helper()
-	s, err := client.NewSecureClient("initial.example", "org/repo", nil)
-	require.NoError(t, err)
-	return s
+const (
+	sealTestModel   = "test-model"
+	sealTestInitial = "initial.example"
+)
+
+func sealTestTransport(build func(host string) (http.RoundTripper, error)) *sealTransport {
+	return &sealTransport{
+		build: func(r replica) (http.RoundTripper, error) { return build(r.host) },
+		catalog: func() Catalog {
+			return Catalog{sealTestModel: {Repo: "tinfoilsh/test", Hosts: []string{sealTestInitial}}}
+		},
+	}
 }
 
 func sealMismatch(enclave string) *http.Response {
@@ -25,33 +31,39 @@ func sealMismatch(enclave string) *http.Response {
 	return resp
 }
 
-func TestSealRerouteUpdatesEnclaveAfterVerification(t *testing.T) {
-	initial := sealTestClient(t)
+func TestSealRerouteIsPerRequest(t *testing.T) {
 	verificationErr := errors.New("verification failed")
-	var nextBuilds int
-	seal, err := newSealTransport(initial, func(s *client.SecureClient) (http.RoundTripper, error) {
-		if s.Enclave() != initial.Enclave() {
+	var nextBuilds, initialHits int
+	seal := sealTestTransport(func(host string) (http.RoundTripper, error) {
+		if host != sealTestInitial {
 			nextBuilds++
 			if nextBuilds == 1 {
 				return nil, verificationErr
 			}
 		}
 		return roundTripFunc(func(req *http.Request) (*http.Response, error) {
-			if s.Enclave() == initial.Enclave() && req.URL.Path == "/reroute" {
+			if host == sealTestInitial {
+				initialHits++
 				return sealMismatch("next.example"), nil
 			}
 			return newResponse(http.StatusNoContent, ""), nil
 		}), nil
 	})
-	require.NoError(t, err)
-	c := &Client{active: seal.enclave, httpClient: &http.Client{Transport: seal}}
-	_, err = c.HTTPClient().Get("https://gateway.example/reroute")
+	get := func() (*http.Response, error) {
+		req, err := http.NewRequest(http.MethodGet, "https://gateway.example/reroute", nil)
+		require.NoError(t, err)
+		req.Header.Set(modelHeader, sealTestModel)
+		return seal.RoundTrip(req)
+	}
+	_, err := get()
 	require.ErrorIs(t, err, verificationErr)
-	require.Equal(t, initial.Enclave(), c.Enclave(), "failed verification must not change the enclave")
-	resp, err := c.HTTPClient().Get("https://gateway.example/reroute")
-	require.NoError(t, err)
-	resp.Body.Close()
-	require.Equal(t, "next.example", c.Enclave())
+	for range 2 {
+		resp, err := get()
+		require.NoError(t, err)
+		resp.Body.Close()
+	}
+	require.Equal(t, 3, initialHits, "every request starts from its own pick, not the last reroute")
+	require.Equal(t, 2, nextBuilds, "a failed verification is retried, a successful one is reused")
 }
 
 type sealTestBody struct {
@@ -85,13 +97,12 @@ func TestSealUploadReplay(t *testing.T) {
 			original := &sealTestBody{Reader: strings.NewReader(payload)}
 			replayed := &sealTestBody{Reader: strings.NewReader(payload)}
 			responseBody := &sealTestBody{Reader: strings.NewReader("")}
-			initial := sealTestClient(t)
 			var attempts int
-			seal, err := newSealTransport(initial, func(s *client.SecureClient) (http.RoundTripper, error) {
+			seal := sealTestTransport(func(host string) (http.RoundTripper, error) {
 				return roundTripFunc(func(req *http.Request) (*http.Response, error) {
 					defer req.Body.Close()
 					attempts++
-					if s.Enclave() == initial.Enclave() {
+					if host == sealTestInitial {
 						require.Same(t, original, req.Body)
 						require.Zero(t, original.reads, "headers must reach the transport before the upload is read")
 						resp := sealMismatch("next.example")
@@ -105,10 +116,10 @@ func TestSealUploadReplay(t *testing.T) {
 					return newResponse(http.StatusNoContent, ""), nil
 				}), nil
 			})
-			require.NoError(t, err)
 			req, err := http.NewRequest(http.MethodPost, "https://gateway.example/v1/audio/transcriptions", original)
 			require.NoError(t, err)
 			req.Header.Set("Content-Type", "multipart/form-data; boundary=test")
+			req.Header.Set(modelHeader, sealTestModel)
 			if tc.getBody {
 				req.GetBody = func() (io.ReadCloser, error) {
 					if tc.replayErr != nil {
@@ -146,37 +157,36 @@ func TestSealUploadReplay(t *testing.T) {
 func TestSealJSONRoutingPreservesInjectedBodyAcrossRetries(t *testing.T) {
 	for _, contentType := range []string{"application/json", "application/json; charset=utf-8"} {
 		t.Run("contentType="+contentType, func(t *testing.T) {
-			initial := sealTestClient(t)
 			var bodies []string
 			var prefixes []string
-			seal, err := newSealTransport(initial, func(s *client.SecureClient) (http.RoundTripper, error) {
+			seal := sealTestTransport(func(host string) (http.RoundTripper, error) {
 				return roundTripFunc(func(req *http.Request) (*http.Response, error) {
 					defer req.Body.Close()
 					body, err := io.ReadAll(req.Body)
 					require.NoError(t, err)
 					bodies = append(bodies, string(body))
 					require.Equal(t, "test-model", req.Header.Get(modelHeader))
-					require.Equal(t, s.Enclave(), req.Header.Get(sealHeader))
+					require.Equal(t, host, req.Header.Get(sealHeader))
 					prefixes = append(prefixes, req.Header.Get(cachePrefixHeader))
-					if s.Enclave() == initial.Enclave() {
+					if host == sealTestInitial {
 						return sealMismatch("next.example"), nil
 					}
 					return newResponse(http.StatusNoContent, ""), nil
 				}), nil
 			})
-			require.NoError(t, err)
-			rt := &userCacheSecretTransport{secret: "test-secret", transport: seal}
+			seal.secret = "test-secret"
 			req, err := http.NewRequest(http.MethodPost, "https://gateway.example/v1/chat/completions", strings.NewReader(`{"model":"test-model","messages":[{"role":"user","content":"hello"}]}`))
 			require.NoError(t, err)
 			req.Header.Set("Content-Type", contentType)
-			resp, err := rt.RoundTrip(req)
+			resp, err := seal.RoundTrip(req)
 			require.NoError(t, err)
 			resp.Body.Close()
 			require.Len(t, bodies, 2)
 			require.Equal(t, bodies[0], bodies[1])
 			var fields map[string]json.RawMessage
 			require.NoError(t, json.Unmarshal([]byte(bodies[0]), &fields))
-			require.JSONEq(t, `"test-secret"`, string(fields[userCacheSecretField]))
+			require.NotContains(t, fields, userCacheSecretField)
+			require.JSONEq(t, `"iVivfplnoh2hhpE9mmjygP5VqZiCFenuhHb9TfpBpxs"`, string(fields[cacheSaltField]))
 			require.NotEmpty(t, prefixes[0])
 			require.Equal(t, prefixes[0], prefixes[1])
 			require.Empty(t, req.Header.Get(modelHeader))
