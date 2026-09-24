@@ -51,14 +51,10 @@ type CatalogEntry struct {
 // verified against its repository before anything is sealed to it.
 type Catalog map[string]CatalogEntry
 
-// FetchCatalog reads the catalog of the gateway serving baseURL, keeping only
-// models with replicas of a tinfoilsh/ repository.
-func FetchCatalog(baseURL string) (Catalog, error) {
-	base, err := url.Parse(baseURL)
-	if err != nil || base.Host == "" {
-		return nil, &ConfigurationError{Err: fmt.Errorf("gateway base URL must be absolute: %q", baseURL)}
-	}
-	resp, err := (&http.Client{Timeout: catalogFetchTimeout}).Get("https://" + base.Host + catalogPath)
+// FetchCatalog reads the catalog of the gateway at host, keeping only models
+// with replicas of a tinfoilsh/ repository.
+func FetchCatalog(host string) (Catalog, error) {
+	resp, err := (&http.Client{Timeout: catalogFetchTimeout}).Get("https://" + host + catalogPath)
 	if err != nil {
 		return nil, &FetchError{Err: err}
 	}
@@ -95,7 +91,7 @@ func NewGateway(baseURL string, catalog func() Catalog, opts ...ClientOption) (*
 			opt(cfg)
 		}
 	}
-	if cfg.enclave != "" || cfg.repo != "" || cfg.transport == TransportTLS || cfg.baseURLSet {
+	if cfg.enclave != "" || cfg.repo != "" || cmp.Or(cfg.transport, TransportEHBP) != TransportEHBP || cfg.baseURLSet {
 		return nil, &ConfigurationError{Err: fmt.Errorf("a gateway takes its enclaves and repositories from its catalog and uses the EHBP transport")}
 	}
 	base, err := url.Parse(baseURL)
@@ -103,16 +99,15 @@ func NewGateway(baseURL string, catalog func() Catalog, opts ...ClientOption) (*
 		return nil, &ConfigurationError{Err: fmt.Errorf("gateway base URL must be an absolute HTTPS URL: %q", baseURL)}
 	}
 	if catalog == nil {
-		fetched, err := FetchCatalog(baseURL)
+		fetched, err := FetchCatalog(base.Host)
 		if err != nil {
 			return nil, err
 		}
 		catalog = func() Catalog { return fetched }
 	}
 	seal := &sealTransport{
-		catalog:  catalog,
-		secret:   resolveUserCacheSecret(cfg.userCacheSecret, cfg.userCacheSecretSet),
-		enclaves: map[replica]*sealedEnclave{},
+		catalog: catalog,
+		secret:  resolveUserCacheSecret(cfg.userCacheSecret, cfg.userCacheSecretSet),
 		build: func(r replica) (http.RoundTripper, error) {
 			secure, err := client.NewSecureClient(r.host, r.repo, &cfg.verification)
 			if err != nil {
@@ -140,42 +135,25 @@ func (g *Gateway) HTTPClient() *http.Client {
 
 type replica struct{ host, repo string }
 
-type sealedEnclave struct {
-	ready     chan struct{}
-	transport http.RoundTripper
-	err       error
-}
-
 // sealTransport picks each request's replica from its cache prefix, so a
 // conversation stays on one warm replica.
 type sealTransport struct {
-	build   func(replica) (http.RoundTripper, error)
-	catalog func() Catalog
-	secret  string
-
-	mu       sync.Mutex
-	enclaves map[replica]*sealedEnclave
+	build    func(replica) (http.RoundTripper, error)
+	catalog  func() Catalog
+	secret   string
+	enclaves sync.Map // replica to http.RoundTripper
 }
 
 func (t *sealTransport) enclave(r replica) (http.RoundTripper, error) {
-	t.mu.Lock()
-	e, ok := t.enclaves[r]
-	if !ok {
-		e = &sealedEnclave{ready: make(chan struct{})}
-		t.enclaves[r] = e
+	if rt, ok := t.enclaves.Load(r); ok {
+		return rt.(http.RoundTripper), nil
 	}
-	t.mu.Unlock()
-	if !ok {
-		e.transport, e.err = t.build(r)
-		if e.err != nil {
-			t.mu.Lock()
-			delete(t.enclaves, r)
-			t.mu.Unlock()
-		}
-		close(e.ready)
+	rt, err := t.build(r)
+	if err != nil {
+		return nil, err
 	}
-	<-e.ready
-	return e.transport, e.err
+	t.enclaves.Store(r, rt)
+	return rt, nil
 }
 
 // rank orders hosts by rendezvous score for a cache prefix, or randomly without one.

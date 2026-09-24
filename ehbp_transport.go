@@ -145,21 +145,19 @@ func NewClientWithOptions(opts ...ClientOption) (*Client, error) {
 }
 
 func secureHTTPClient(secureClient *client.SecureClient, mode TransportMode, baseURL, userCacheSecret string) (*http.Client, error) {
-	var (
-		httpClient *http.Client
-		err        error
-	)
+	var httpClient *http.Client
 	if mode == TransportTLS {
-		httpClient, err = secureClient.HTTPClient()
-	} else {
-		httpClient, err = ehbpHTTPClient(secureClient, baseURL)
-	}
-	if err != nil {
-		return nil, err
-	}
-	if mode == TransportTLS {
+		var err error
+		if httpClient, err = secureClient.HTTPClient(); err != nil {
+			return nil, err
+		}
 		if err := validateTLSBaseURL(baseURL, secureClient.Enclave()); err != nil {
 			return nil, &ConfigurationError{Err: err}
+		}
+	} else {
+		var err error
+		if httpClient, err = ehbpHTTPClient(secureClient, baseURL); err != nil {
+			return nil, err
 		}
 	}
 	return boundHTTPClient(httpClient, secureClient.Enclave(), baseURL, userCacheSecret)

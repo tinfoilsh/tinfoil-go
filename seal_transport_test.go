@@ -18,8 +18,7 @@ const (
 
 func sealTestTransport(build func(host string) (http.RoundTripper, error)) *sealTransport {
 	return &sealTransport{
-		build:    func(r replica) (http.RoundTripper, error) { return build(r.host) },
-		enclaves: map[replica]*sealedEnclave{},
+		build: func(r replica) (http.RoundTripper, error) { return build(r.host) },
 		catalog: func() Catalog {
 			return Catalog{sealTestModel: {Repo: "tinfoilsh/test", Hosts: []string{sealTestInitial}}}
 		},
@@ -187,7 +186,7 @@ func TestSealJSONRoutingPreservesInjectedBodyAcrossRetries(t *testing.T) {
 			var fields map[string]json.RawMessage
 			require.NoError(t, json.Unmarshal([]byte(bodies[0]), &fields))
 			require.NotContains(t, fields, userCacheSecretField)
-			require.JSONEq(t, `"`+deriveCacheSalt("test-secret")+`"`, string(fields[cacheSaltField]))
+			require.JSONEq(t, `"iVivfplnoh2hhpE9mmjygP5VqZiCFenuhHb9TfpBpxs"`, string(fields[cacheSaltField]))
 			require.NotEmpty(t, prefixes[0])
 			require.Equal(t, prefixes[0], prefixes[1])
 			require.Empty(t, req.Header.Get(modelHeader))
