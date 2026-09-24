@@ -16,6 +16,11 @@ const (
 	verificationRetryDelay       = time.Second
 )
 
+type enclaveEntry struct {
+	state      *enclaveState
+	refreshing *verificationCall
+}
+
 type enclaveState struct {
 	*VerifiedDocumentV3
 	rejected   bool
@@ -30,7 +35,7 @@ type verificationCall struct {
 
 // verifiedState shares one refresh (including its failure) across all waiters.
 // A key-rotation retry can reuse a newer snapshot installed by another caller.
-func (s *SecureClient) verifiedState(ctx context.Context, observed *enclaveState, force bool, retries int) (*enclaveState, error) {
+func (s *SecureClient) verifiedState(ctx context.Context, enclave string, force bool, retries int, adapter *refreshingTransport) (*enclaveState, error) {
 	if s == nil {
 		return nil, &ConfigurationError{Err: errors.New("secure client is required")}
 	}
@@ -38,16 +43,17 @@ func (s *SecureClient) verifiedState(ctx context.Context, observed *enclaveState
 		return nil, err
 	}
 	s.stateMu.Lock()
-	state := s.state
-	if state != nil && state.valid() && (!force || observed != nil && state != observed) {
+	entry := s.entry(enclave)
+	state := entry.state
+	if state != nil && state.valid() && !force {
 		s.stateMu.Unlock()
 		return state, nil
 	}
-	call := s.refreshing
+	call := entry.refreshing
 	if call == nil {
 		call = &verificationCall{done: make(chan struct{})}
-		s.refreshing = call
-		go s.refresh(call, retries)
+		entry.refreshing = call
+		go s.refresh(enclave, entry, call, retries, adapter)
 	}
 	s.stateMu.Unlock()
 
@@ -63,20 +69,16 @@ func (s *SecureClient) verifiedState(ctx context.Context, observed *enclaveState
 	return call.state, call.err
 }
 
-func (s *SecureClient) refresh(call *verificationCall, retries int) {
+func (s *SecureClient) refresh(enclave string, entry *enclaveEntry, call *verificationCall, retries int, adapter *refreshingTransport) {
 	s.stateMu.RLock()
-	previous := s.state
+	previous := entry.state
 	s.stateMu.RUnlock()
-	verify := s.verify
-	if verify == nil {
-		verify = s.fetchVerification
-	}
 	// The attestation fetch bounds its network I/O. Local verification has no
 	// SDK deadline; each caller can independently cancel its wait above.
 	var verified *VerifiedDocumentV3
 	var err, firstErr error
 	for attempt := 0; ; attempt++ {
-		verified, err = verify()
+		verified, err = s.fetchEnclaveVerification(enclave)
 		if err == nil && !time.Now().Before(verified.FreshnessExpiresAt) {
 			err = &AttestationError{Err: errFreshnessExpired}
 		}
@@ -87,6 +89,9 @@ func (s *SecureClient) refresh(call *verificationCall, retries int) {
 		time.Sleep(verificationRetryDelay)
 	}
 	state := &enclaveState{VerifiedDocumentV3: verified, transports: make(map[*refreshingTransport]http.RoundTripper)}
+	if err == nil {
+		verified.EnclaveHost = enclave
+	}
 	if err == nil && previous != nil {
 		for adapter := range previous.transports {
 			transport, buildErr := adapter.buildTransport(verified)
@@ -97,6 +102,9 @@ func (s *SecureClient) refresh(call *verificationCall, retries int) {
 			state.transports[adapter] = transport
 		}
 	}
+	if err == nil && adapter != nil && state.transports[adapter] == nil {
+		state.transports[adapter], err = adapter.buildTransport(verified)
+	}
 	s.stateMu.Lock()
 	if err == nil && !time.Now().Before(state.FreshnessExpiresAt) {
 		err = &AttestationError{Err: errFreshnessExpired}
@@ -105,11 +113,14 @@ func (s *SecureClient) refresh(call *verificationCall, retries int) {
 		err = errors.Join(err, firstErr)
 	}
 	if err == nil {
-		s.state = state
+		entry.state = state
 		call.state = state
 	}
 	call.err = err
-	s.refreshing = nil
+	entry.refreshing = nil
+	if err != nil && entry.state == nil {
+		delete(s.enclaves, enclave)
+	}
 	close(call.done)
 	s.stateMu.Unlock()
 	if err != nil {
@@ -148,4 +159,17 @@ func retryableVerification(err error) bool {
 	var fetch *FetchError
 	var attestation *AttestationError
 	return errors.As(err, &fetch) || errors.As(err, &attestation)
+}
+
+// entry is called with stateMu held.
+func (s *SecureClient) entry(enclave string) *enclaveEntry {
+	if s.enclaves == nil {
+		s.enclaves = make(map[string]*enclaveEntry)
+	}
+	entry := s.enclaves[enclave]
+	if entry == nil {
+		entry = &enclaveEntry{}
+		s.enclaves[enclave] = entry
+	}
+	return entry
 }

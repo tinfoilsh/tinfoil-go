@@ -51,7 +51,7 @@ func TestTransportExpirationAndUnchangedWitness(t *testing.T) {
 		s, err := NewSecureClient("enclave.example", "org/repo", &VerificationOptions{FreshnessMaxAge: time.Minute})
 		require.NoError(t, err)
 		deadline := witnessedAt.Add(time.Minute)
-		s.verify = func() (*VerifiedDocumentV3, error) {
+		s.verify = func(string) (*VerifiedDocumentV3, error) {
 			verifications++
 			return testState(freshnessExpiration(witnessedAt, witnessedAt.Add(time.Hour), s.options.FreshnessMaxAge), "key"), nil
 		}
@@ -76,7 +76,7 @@ func TestTransportExpirationAndUnchangedWitness(t *testing.T) {
 		require.ErrorIs(t, err, io.ErrClosedPipe, "admission failure must close the request body")
 		require.Equal(t, 1, requests, "expired keys must never authorize an application request")
 		require.Equal(t, 3, verifications)
-		require.Equal(t, deadline, s.state.FreshnessExpiresAt)
+		require.Equal(t, deadline, s.enclaves[s.enclave].state.FreshnessExpiresAt)
 	})
 }
 
@@ -86,8 +86,8 @@ func TestRefreshCoalescesRequestsAndExplicitVerify(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
 				release := make(chan struct{})
 				var attempts, requests atomic.Int32
-				s := &SecureClient{state: testEnclaveState(time.Now().Add(time.Minute), "old")}
-				s.verify = func() (*VerifiedDocumentV3, error) {
+				s := &SecureClient{enclaves: map[string]*enclaveEntry{"": {state: testEnclaveState(time.Now().Add(time.Minute), "old")}}}
+				s.verify = func(string) (*VerifiedDocumentV3, error) {
 					attempts.Add(1)
 					<-release
 					return testState(time.Now().Add(time.Hour), "new"), refreshErr
@@ -138,13 +138,13 @@ func errorString(err error) string {
 func TestRefreshWaitersCancelIndependentlyWithoutVerificationTimeout(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		release := make(chan struct{})
-		s := &SecureClient{verify: func() (*VerifiedDocumentV3, error) {
+		s := &SecureClient{verify: func(string) (*VerifiedDocumentV3, error) {
 			<-release
 			return testState(time.Now().Add(time.Hour), "key"), nil
 		}}
 		ctx, cancel := context.WithCancel(context.Background())
 		canceled, waiting := make(chan error, 1), make(chan error, 1)
-		go func() { _, err := s.verifiedState(ctx, nil, false, verificationRetries); canceled <- err }()
+		go func() { _, err := s.verifiedState(ctx, s.Enclave(), false, verificationRetries, nil); canceled <- err }()
 		go func() { _, err := s.Verify(); waiting <- err }()
 		synctest.Wait()
 		cancel()
@@ -186,7 +186,7 @@ func TestVerificationFetchStillTimesOut(t *testing.T) {
 
 func TestPreviouslyReturnedTransportsUseExplicitVerification(t *testing.T) {
 	var attempts int
-	s := &SecureClient{verify: func() (*VerifiedDocumentV3, error) {
+	s := &SecureClient{verify: func(string) (*VerifiedDocumentV3, error) {
 		attempts++
 		key := "old"
 		if attempts > 1 {
@@ -233,8 +233,8 @@ func TestKeyRotationRetriesShareRefresh(t *testing.T) {
 				release := make(chan struct{})
 				rotated := make(chan struct{})
 				var attempts, sends atomic.Int32
-				s := &SecureClient{state: testEnclaveState(time.Now().Add(time.Hour), "old")}
-				s.verify = func() (*VerifiedDocumentV3, error) {
+				s := &SecureClient{enclaves: map[string]*enclaveEntry{"": {state: testEnclaveState(time.Now().Add(time.Hour), "old")}}}
+				s.verify = func(string) (*VerifiedDocumentV3, error) {
 					attempt := attempts.Add(1)
 					<-release
 					if attempt == 1 {
@@ -305,7 +305,7 @@ func TestKeyRotationRetryLimits(t *testing.T) {
 				if tc.keyError {
 					original = fmt.Errorf("original key rejection: %w", errCertMismatch)
 				}
-				s := &SecureClient{state: testEnclaveState(time.Now().Add(time.Hour), "old"), verify: func() (*VerifiedDocumentV3, error) {
+				s := &SecureClient{enclaves: map[string]*enclaveEntry{"": {state: testEnclaveState(time.Now().Add(time.Hour), "old")}}, verify: func(string) (*VerifiedDocumentV3, error) {
 					refreshes++
 					if refreshes == 2 {
 						return nil, tc.retryErr
@@ -339,7 +339,7 @@ func TestKeyRotationRetryLimits(t *testing.T) {
 					require.ErrorIs(t, err, last, "preserve the replay failure alongside the original key rejection")
 				}
 				if tc.keyError {
-					require.True(t, s.state.rejected, "a rejected key must not be reused after recovery fails")
+					require.True(t, s.enclaves[s.enclave].state.rejected, "a rejected key must not be reused after recovery fails")
 				}
 				require.Equal(t, tc.sends, sends)
 				require.Equal(t, tc.refreshes, refreshes)
@@ -351,7 +351,7 @@ func TestKeyRotationRetryLimits(t *testing.T) {
 func TestExpirationDoesNotInterruptStream(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		deadline := time.Now().Add(time.Minute)
-		s := &SecureClient{state: testEnclaveState(deadline, "key"), verify: func() (*VerifiedDocumentV3, error) {
+		s := &SecureClient{enclaves: map[string]*enclaveEntry{"": {state: testEnclaveState(deadline, "key")}}, verify: func(string) (*VerifiedDocumentV3, error) {
 			return testState(deadline, "key"), nil
 		}}
 		reader, writer := io.Pipe()
@@ -381,7 +381,7 @@ func TestRedirectChecksExpiration(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		deadline := time.Now().Add(time.Minute)
 		var sends int
-		s := &SecureClient{state: testEnclaveState(deadline, "key"), verify: func() (*VerifiedDocumentV3, error) {
+		s := &SecureClient{enclaves: map[string]*enclaveEntry{"": {state: testEnclaveState(deadline, "key")}}, verify: func(string) (*VerifiedDocumentV3, error) {
 			return testState(deadline, "key"), nil
 		}}
 		transport, err := s.NewTransport(func(*VerifiedDocumentV3) (http.RoundTripper, error) {
@@ -421,13 +421,13 @@ func TestHTTPClientChecksExpirationOnReusedTLSConnections(t *testing.T) {
 			roots.AddCert(target.Certificate())
 			key, err := CertPubkeyFP(target.Certificate())
 			require.NoError(t, err)
-			s := &SecureClient{state: testEnclaveState(time.Now().Add(time.Hour), key), verify: func() (*VerifiedDocumentV3, error) {
+			s := &SecureClient{enclaves: map[string]*enclaveEntry{"": {state: testEnclaveState(time.Now().Add(time.Hour), key)}}, verify: func(string) (*VerifiedDocumentV3, error) {
 				return testState(time.Now().Add(-time.Second), key), nil
 			}}
 			hc, err := s.HTTPClient()
 			require.NoError(t, err)
 			defer hc.CloseIdleConnections()
-			base, err := s.state.transports[hc.Transport.(*refreshingTransport)].(*TLSBoundRoundTripper).getTransport()
+			base, err := s.enclaves[s.enclave].state.transports[hc.Transport.(*refreshingTransport)].(*TLSBoundRoundTripper).getTransport()
 			require.NoError(t, err)
 			base.Proxy = nil
 			base.TLSClientConfig.RootCAs = roots
@@ -450,7 +450,7 @@ func TestHTTPClientChecksExpirationOnReusedTLSConnections(t *testing.T) {
 			// Publish an expired snapshot without modifying the immutable snapshot
 			// held by the already-returned HTTP client and its open connection.
 			s.stateMu.Lock()
-			s.state = testEnclaveState(time.Now().Add(-time.Second), key)
+			s.enclaves[s.enclave].state = testEnclaveState(time.Now().Add(-time.Second), key)
 			s.stateMu.Unlock()
 			_, err = hc.Get(target.URL)
 			require.ErrorIs(t, err, errFreshnessExpired)

@@ -70,7 +70,7 @@ func TestProxyClientOptionsApply(t *testing.T) {
 }
 
 func TestNewClientWithOptionsRejectsInvalidBaseURL(t *testing.T) {
-	for _, baseURL := range []string{"", "proxy.example.com", "ftp://proxy.example.com", "://", "http://proxy.example.com/v1"} {
+	for _, baseURL := range []string{"", "proxy.example.com", "ftp://proxy.example.com", "://"} {
 		t.Run(baseURL, func(t *testing.T) {
 			_, err := NewClientWithOptions(WithBaseURL(baseURL))
 			var config *ConfigurationError
@@ -157,9 +157,10 @@ func TestEnclaveURLHeaderTransportInjectsHeader(t *testing.T) {
 		return newResponse(http.StatusOK, "ok"), nil
 	})
 
-	transport := &enclaveURLHeaderTransport{
-		enclaveURL: "https://enclave.example.com",
-		transport:  inner,
+	transport := &enclaveRoutingTransport{
+		enclave:     "enclave.example.com",
+		proxyOrigin: "https://proxy.example.com",
+		transport:   inner,
 	}
 
 	req, err := http.NewRequest(http.MethodPost, "https://proxy.example.com/v1/chat/completions", bytes.NewBufferString("payload"))
@@ -344,5 +345,71 @@ func TestLiveClientIntegration_LowLevelEHBP(t *testing.T) {
 			require.NoError(t, err)
 			require.Contains(t, string(data), "choices")
 		})
+	}
+}
+
+func TestEHBPClientRoutesWithVerifiedKey(t *testing.T) {
+	const proxy = "http://proxy.example"
+	current := "first.example"
+	var identity *ehbpidentity.Identity
+	original := http.DefaultTransport
+	defer func() { http.DefaultTransport = original }()
+	http.DefaultTransport = roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		require.Equal(t, current, req.Header.Get(sealHeader), "seal header must match the verified HPKE key")
+		if req.URL.Host == "proxy.example" {
+			require.Equal(t, "https://"+current, req.Header.Get(enclaveURLHeader))
+		} else {
+			require.Equal(t, current, req.URL.Host)
+			require.Equal(t, current, req.Host)
+			require.Empty(t, req.Header.Get(enclaveURLHeader))
+		}
+		require.Equal(t, "/v1/chat?stream=true", req.URL.RequestURI())
+		require.Equal(t, "Bearer test", req.Header.Get("Authorization"))
+		response := httptest.NewRecorder()
+		identity.Middleware()(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			body, err := io.ReadAll(r.Body)
+			require.NoError(t, err)
+			require.Equal(t, "payload", string(body), "the destination must own the verified HPKE key")
+			_, _ = io.WriteString(w, "ok")
+		})).ServeHTTP(response, req)
+		return response.Result(), nil
+	})
+	var active http.RoundTripper
+	var rebuild func(*client.VerifiedDocumentV3) (http.RoundTripper, error)
+	verifier := transportVerifierFunc(func(build func(*client.VerifiedDocumentV3) (http.RoundTripper, error), _ func(error) bool) (http.RoundTripper, error) {
+		rebuild = build
+		return roundTripFunc(func(req *http.Request) (*http.Response, error) { return active.RoundTrip(req) }), nil
+	})
+	httpClient, err := ehbpHTTPClient(verifier, proxy)
+	require.NoError(t, err)
+	hc := httpClient
+	origins, err := allowedOrigins(current, proxy)
+	require.NoError(t, err)
+	hc.Transport = &hostBoundRoundTripper{allowedOrigins: origins, enclave: current, currentEnclave: func() string { return current }, transport: hc.Transport}
+	for _, host := range []string{"first.example", "replacement.example"} {
+		current = host
+		identity, err = ehbpidentity.NewIdentity()
+		require.NoError(t, err)
+		active, err = rebuild(&client.VerifiedDocumentV3{EnclaveHost: host, CryptoMaterial: []document.CryptoMaterialItem{{ID: document.CryptoMaterialIDHPKE, Format: document.KeyX25519HPKEV1Format, Data: identity.MarshalPublicKeyHex()}}})
+		require.NoError(t, err)
+		for _, target := range []string{"https://first.example", "https://" + current, proxy} {
+			req, _ := http.NewRequest(http.MethodPost, target+"/v1/chat?stream=true", bytes.NewBufferString("payload"))
+			req.Header.Set("Authorization", "Bearer test")
+			req.Header.Set(sealHeader, "first.example")
+			resp, err := hc.Do(req)
+			require.NoError(t, err)
+			body, err := io.ReadAll(resp.Body)
+			resp.Body.Close()
+			require.NoError(t, err)
+			require.Equal(t, "ok", string(body))
+			require.Equal(t, target+"/v1/chat?stream=true", req.URL.String())
+			require.Empty(t, req.Header.Get(enclaveURLHeader), "do not mutate the original request")
+			require.Equal(t, "first.example", req.Header.Get(sealHeader))
+		}
+	}
+	for _, target := range []string{"https://foreign.example", "http://replacement.example"} {
+		_, err := hc.Get(target)
+		var config *ConfigurationError
+		require.ErrorAs(t, err, &config, "reselection must not relax the origin restriction")
 	}
 }

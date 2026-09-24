@@ -57,7 +57,7 @@ func TestInitializationRecovery(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
 				s := &SecureClient{}
 				var attempts int
-				s.verify = func() (*VerifiedDocumentV3, error) {
+				s.verify = func(string) (*VerifiedDocumentV3, error) {
 					attempts++
 					assert.Nil(t, s.Verification(), "failed attempts must not publish state")
 					if attempts == 1 {
@@ -88,7 +88,7 @@ func TestInitializationRetryIsShared(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		var attempts int
 		release := make(chan struct{})
-		s := &SecureClient{verify: func() (*VerifiedDocumentV3, error) {
+		s := &SecureClient{verify: func(string) (*VerifiedDocumentV3, error) {
 			attempts++
 			if attempts == 1 {
 				<-release
@@ -112,14 +112,14 @@ func TestInitializationRetryIsShared(t *testing.T) {
 func TestRefreshRejectsExpiredPublication(t *testing.T) {
 	s := &SecureClient{}
 	deadline := make(chan time.Time, 1)
-	s.verify = func() (*VerifiedDocumentV3, error) {
+	s.verify = func(string) (*VerifiedDocumentV3, error) {
 		s.stateMu.Lock()
 		expires := time.Now().Add(20 * time.Millisecond)
 		deadline <- expires
 		return testState(expires, "late"), nil
 	}
 	call := &verificationCall{done: make(chan struct{})}
-	go s.refresh(call, verificationRetries)
+	go s.refresh(s.Enclave(), &enclaveEntry{}, call, verificationRetries, nil)
 	// Keep publication blocked until after the otherwise valid result expires.
 	time.Sleep(time.Until(<-deadline) + time.Millisecond)
 	s.stateMu.Unlock()

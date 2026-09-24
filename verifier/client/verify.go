@@ -161,12 +161,15 @@ func freshnessExpiration(codeWitnessedAt, platformWitnessedAt time.Time, maxAge 
 	return expiresAt
 }
 
-func (s *SecureClient) fetchVerification() (*VerifiedDocumentV3, error) {
+func (s *SecureClient) fetchEnclaveVerification(enclave string) (*VerifiedDocumentV3, error) {
+	if s.verify != nil {
+		return s.verify(enclave)
+	}
 	nonce, err := document.RandomNonce()
 	if err != nil {
 		return nil, err
 	}
-	docBytes, err := document.FetchVia(s.enclave, s.relay, nonce)
+	docBytes, err := document.FetchVia(enclave, s.relay, nonce)
 	if err != nil {
 		return nil, err
 	}
@@ -180,7 +183,7 @@ func (s *SecureClient) fetchVerification() (*VerifiedDocumentV3, error) {
 		return nil, err
 	}
 	verified.ConfigRepo, _, _ = strings.Cut(s.repo, "@")
-	verified.EnclaveHost = s.enclave
+	verified.EnclaveHost = enclave
 	verified.Verifier = currentVerifierIdentity()
 	verified.VerifiedAt = time.Now().UTC().Format(time.RFC3339Nano)
 	return verified, nil
@@ -188,7 +191,10 @@ func (s *SecureClient) fetchVerification() (*VerifiedDocumentV3, error) {
 
 // Verify refreshes the client's verified measurements and keys.
 func (s *SecureClient) Verify() (*VerifiedDocumentV3, error) {
-	state, err := s.verifiedState(context.Background(), nil, true, verificationRetries)
+	if s == nil {
+		return nil, &ConfigurationError{Err: fmt.Errorf("secure client is required")}
+	}
+	state, err := s.verifiedState(context.Background(), s.Enclave(), true, verificationRetries, nil)
 	if err != nil {
 		return nil, err
 	}

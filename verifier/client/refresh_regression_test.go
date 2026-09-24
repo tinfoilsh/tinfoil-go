@@ -12,7 +12,7 @@ import (
 
 func TestTransportDiscardsSnapshotRefreshedDuringBuild(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		s := &SecureClient{state: testEnclaveState(time.Now().Add(time.Hour), "old"), verify: func() (*VerifiedDocumentV3, error) {
+		s := &SecureClient{enclaves: map[string]*enclaveEntry{"": {state: testEnclaveState(time.Now().Add(time.Hour), "old")}}, verify: func(string) (*VerifiedDocumentV3, error) {
 			return testState(time.Now().Add(time.Hour), "new"), nil
 		}}
 		release := make(chan struct{})
@@ -47,7 +47,7 @@ func TestTransportDiscardsSnapshotRefreshedDuringBuild(t *testing.T) {
 }
 
 func TestPlaintextRequestDoesNotRefresh(t *testing.T) {
-	s := &SecureClient{state: testEnclaveState(time.Now().Add(time.Hour), "key"), verify: func() (*VerifiedDocumentV3, error) {
+	s := &SecureClient{enclaves: map[string]*enclaveEntry{"": {state: testEnclaveState(time.Now().Add(time.Hour), "key")}}, verify: func(string) (*VerifiedDocumentV3, error) {
 		t.Error("re-verification cannot make a plaintext URL acceptable")
 		return nil, errNoTLS
 	}}
@@ -61,7 +61,7 @@ func TestRefreshPublishesVerificationAndTransportTogether(t *testing.T) {
 	for _, buildErr := range []error{nil, errors.New("transport construction failed")} {
 		t.Run(errorString(buildErr), func(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
-				s := &SecureClient{state: testEnclaveState(time.Now().Add(time.Hour), "old"), verify: func() (*VerifiedDocumentV3, error) {
+				s := &SecureClient{enclaves: map[string]*enclaveEntry{"": {state: testEnclaveState(time.Now().Add(time.Hour), "old")}}, verify: func(string) (*VerifiedDocumentV3, error) {
 					return testState(time.Now().Add(time.Hour), "new"), nil
 				}}
 				release := make(chan struct{})
@@ -103,17 +103,17 @@ func TestRefreshPublishesVerificationAndTransportTogether(t *testing.T) {
 }
 
 func TestHTTPClientReusesTransportConfiguration(t *testing.T) {
-	s := &SecureClient{state: testEnclaveState(time.Now().Add(time.Hour), "key")}
+	s := &SecureClient{enclaves: map[string]*enclaveEntry{"": {state: testEnclaveState(time.Now().Add(time.Hour), "key")}}}
 	first, err := s.HTTPClient()
 	require.NoError(t, err)
 	second, err := s.HTTPClient()
 	require.NoError(t, err)
 	require.Same(t, first.Transport, second.Transport)
-	require.Len(t, s.state.transports, 1)
+	require.Len(t, s.enclaves[s.enclave].state.transports, 1)
 }
 
 func TestRefreshRejectsExpiryBeforeTransportConstruction(t *testing.T) {
-	s := &SecureClient{state: testEnclaveState(time.Now().Add(time.Hour), "old"), verify: func() (*VerifiedDocumentV3, error) {
+	s := &SecureClient{enclaves: map[string]*enclaveEntry{"": {state: testEnclaveState(time.Now().Add(time.Hour), "old")}}, verify: func(string) (*VerifiedDocumentV3, error) {
 		return testState(time.Now().Add(-time.Second), "expired"), nil
 	}}
 	var builds int
@@ -131,7 +131,7 @@ func TestRefreshRejectsExpiryBeforeTransportConstruction(t *testing.T) {
 func TestLateRejectionDoesNotInvalidateReplacement(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		var verifications int
-		s := &SecureClient{state: testEnclaveState(time.Now().Add(time.Hour), "old"), verify: func() (*VerifiedDocumentV3, error) {
+		s := &SecureClient{enclaves: map[string]*enclaveEntry{"": {state: testEnclaveState(time.Now().Add(time.Hour), "old")}}, verify: func(string) (*VerifiedDocumentV3, error) {
 			verifications++
 			return testState(time.Now().Add(time.Hour), "new"), nil
 		}}
@@ -157,7 +157,7 @@ func TestLateRejectionDoesNotInvalidateReplacement(t *testing.T) {
 		require.NoError(t, err)
 		close(release)
 		require.NoError(t, <-finished)
-		require.False(t, s.state.rejected)
+		require.False(t, s.enclaves[s.enclave].state.rejected)
 		require.Equal(t, "new", s.Verification().CodeTag)
 		require.Equal(t, 1, verifications)
 	})

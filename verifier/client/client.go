@@ -20,10 +20,9 @@ type SecureClient struct {
 	options              VerificationOptions
 
 	stateMu      sync.RWMutex
-	state        *enclaveState
-	refreshing   *verificationCall
+	enclaves     map[string]*enclaveEntry
 	tlsTransport *refreshingTransport
-	verify       func() (*VerifiedDocumentV3, error)
+	verify       func(string) (*VerifiedDocumentV3, error)
 }
 
 var (
@@ -91,7 +90,7 @@ func NewDefaultClient(opts *VerificationOptions) (*SecureClient, error) {
 	routers, _ := fetchRouters()
 	for _, routerURL := range routers {
 		client := fallback.ForEnclave(routerURL)
-		_, err := client.verifiedState(context.Background(), nil, true, candidateVerificationRetries)
+		_, err := client.verifiedState(context.Background(), routerURL, true, candidateVerificationRetries, nil)
 		if err == nil {
 			return client, nil
 		}
@@ -107,11 +106,13 @@ func (s *SecureClient) ForEnclave(enclave string) *SecureClient {
 
 // ViaRelay fetches attestation through relay, which forwards it to the enclave.
 func (s *SecureClient) ViaRelay(relay string) *SecureClient {
-	return &SecureClient{enclave: s.enclave, repo: s.repo, relay: relay, options: s.options}
+	return &SecureClient{enclave: s.Enclave(), repo: s.repo, relay: relay, options: s.options}
 }
 
 // Enclave returns the enclave URL
 func (s *SecureClient) Enclave() string {
+	s.stateMu.RLock()
+	defer s.stateMu.RUnlock()
 	return s.enclave
 }
 
@@ -124,10 +125,11 @@ func (s *SecureClient) Repo() string {
 func (s *SecureClient) Verification() *VerifiedDocumentV3 {
 	s.stateMu.RLock()
 	defer s.stateMu.RUnlock()
-	if s.state == nil {
+	entry := s.enclaves[s.enclave]
+	if entry == nil || entry.state == nil {
 		return nil
 	}
-	return cloneVerification(s.state.VerifiedDocumentV3)
+	return cloneVerification(entry.state.VerifiedDocumentV3)
 }
 
 // VerificationJSON returns the last verification as JSON.
@@ -151,7 +153,7 @@ func (s *SecureClient) HTTPClient() (*http.Client, error) {
 			if err != nil {
 				return nil, err
 			}
-			return &TLSBoundRoundTripper{ExpectedPublicKey: key}, nil
+			return &TLSBoundRoundTripper{ExpectedPublicKey: key, enclave: verified.EnclaveHost}, nil
 		}, isKeyError: isCertificateError}
 	}
 	transport := s.tlsTransport
@@ -199,4 +201,12 @@ func (s *SecureClient) Request(method, url, headersJSON string, body []byte) (re
 		return nil, err
 	}
 	return toResponse(resp)
+}
+
+func (s *SecureClient) ready(ctx context.Context, transport *refreshingTransport, rejected *enclaveState) (*enclaveState, error) {
+	enclave := s.Enclave()
+	if rejected != nil {
+		enclave = rejected.EnclaveHost
+	}
+	return s.prepareTransport(ctx, enclave, transport, verificationRetries)
 }

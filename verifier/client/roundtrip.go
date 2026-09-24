@@ -21,6 +21,7 @@ var (
 
 type TLSBoundRoundTripper struct {
 	ExpectedPublicKey string
+	enclave           string
 	once              sync.Once
 	transport         *http.Transport
 	err               error
@@ -76,6 +77,11 @@ func (t *TLSBoundRoundTripper) RoundTrip(r *http.Request) (*http.Response, error
 
 	if r.URL == nil || r.URL.Scheme != "https" {
 		return nil, &ConfigurationError{Err: errNoTLS}
+	}
+
+	if t.enclave != "" && r.URL.Host != t.enclave {
+		r = r.Clone(r.Context())
+		r.URL.Host, r.Host = t.enclave, t.enclave
 	}
 
 	transport, err := t.getTransport()
