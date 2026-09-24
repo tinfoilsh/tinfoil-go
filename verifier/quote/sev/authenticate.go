@@ -184,9 +184,9 @@ func Authenticate(doc *document.Document, opts *Options) (result *Quote, err err
 	if err := json.Unmarshal(entry.Data, &data, json.RejectUnknownMembers(true)); err != nil {
 		return nil, fmt.Errorf("parsing amd-vcek collateral entry %q: %w", entry.ID, err)
 	}
-	vcekDER, err := base64.StdEncoding.DecodeString(data.VCEKDERBase64)
+	vcekDER, err := data.VCEKDER()
 	if err != nil {
-		return nil, fmt.Errorf("decoding vcek_der_base64: %w", err)
+		return nil, fmt.Errorf("amd-vcek collateral entry %q: %w", entry.ID, err)
 	}
 	// An empty VCEK would make the library try to fetch one.
 	if len(vcekDER) == 0 {
@@ -204,9 +204,9 @@ func Authenticate(doc *document.Document, opts *Options) (result *Quote, err err
 	if err := json.Unmarshal(crlEntry.Data, &crl, json.RejectUnknownMembers(true)); err != nil {
 		return nil, fmt.Errorf("parsing amd-crl collateral entry %q: %w", crlEntry.ID, err)
 	}
-	crlDER, err := base64.StdEncoding.DecodeString(crl.CRLDERBase64)
+	crlDER, err := crl.CRLDER()
 	if err != nil {
-		return nil, fmt.Errorf("decoding crl_der_base64: %w", err)
+		return nil, fmt.Errorf("amd-crl collateral entry %q: %w", crlEntry.ID, err)
 	}
 	if len(crlDER) == 0 {
 		return nil, fmt.Errorf("amd-crl collateral entry %q carries an empty CRL", crlEntry.ID)

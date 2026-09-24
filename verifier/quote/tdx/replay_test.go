@@ -134,3 +134,15 @@ func testCRL(t *testing.T, thisUpdate, nextUpdate time.Time) []byte {
 	require.NoError(t, err)
 	return crlDER
 }
+
+func TestPCSReplayGetterRejectsNonCanonicalBody(t *testing.T) {
+	encoded := base64.StdEncoding.EncodeToString([]byte(`{"tcbInfo":{"tcbEvaluationDataNumber":19}}`))
+	getter, err := newPCSReplayGetter([]document.PCSResponse{{
+		URL:        "https://api.trustedservices.intel.com/tdx/certification/v4/tcb?fmspc=90c06f000000",
+		BodyBase64: encoded[:8] + "\n" + encoded[8:],
+	}}, time.Now())
+	require.NoError(t, err)
+
+	_, _, err = getter.Get("https://api.trustedservices.intel.com/tdx/certification/v4/tcb?fmspc=90c06f000000")
+	assert.ErrorContains(t, err, "body_base64 is not canonical base64")
+}

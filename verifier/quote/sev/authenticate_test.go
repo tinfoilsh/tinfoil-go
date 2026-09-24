@@ -2,6 +2,7 @@ package sev
 
 import (
 	"encoding/base64"
+	"encoding/json/v2"
 	"encoding/pem"
 	"testing"
 	"time"
@@ -12,6 +13,7 @@ import (
 	"github.com/tinfoilsh/go-sev-guest/proto/sevsnp"
 	"github.com/tinfoilsh/go-sev-guest/verify"
 
+	"github.com/tinfoilsh/tinfoil-go/verifier/document"
 	sevtestdata "github.com/tinfoilsh/tinfoil-go/verifier/internal/testdata"
 )
 
@@ -84,4 +86,37 @@ func TestDecodeCertChainRejectsEmptyCertificate(t *testing.T) {
 
 	_, _, err := decodeCertChain(chain)
 	assert.ErrorContains(t, err, "empty CERTIFICATE block")
+}
+
+func TestAuthenticateRejectsNonCanonicalCollateralBase64(t *testing.T) {
+	entry := func(id, format string, payload any) document.CollateralEntry {
+		data, err := json.Marshal(payload)
+		require.NoError(t, err)
+		return document.CollateralEntry{ID: id, Role: document.RoleEndorsement, Format: format, Subjects: []string{document.SubjectCPU}, Data: data}
+	}
+	vcek := base64.StdEncoding.EncodeToString([]byte("vcek der"))
+	crl := base64.StdEncoding.EncodeToString([]byte("crl der"))
+
+	tests := []struct {
+		name    string
+		vcek    string
+		crl     string
+		wantErr string
+	}{
+		{name: "vcek", vcek: vcek + "\n", crl: crl, wantErr: `amd-vcek collateral entry "cpu-endorsement": vcek_der_base64 is not canonical base64`},
+		{name: "crl", vcek: vcek, crl: crl + "\n", wantErr: `amd-crl collateral entry "cpu-crl": crl_der_base64 is not canonical base64`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			doc := &document.Document{
+				CPUEvidence: document.CPUEvidence{Format: document.SEVSNPReportV1Format},
+				Collateral: []document.CollateralEntry{
+					entry("cpu-endorsement", document.CollateralAMDVCEKV1Format, document.AMDVCEKCollateral{VCEKDERBase64: tt.vcek, CertChainPEM: string(askArkTurinPEM)}),
+					entry("cpu-crl", document.CollateralAMDCRLV1Format, document.AMDCRLCollateral{CRLDERBase64: tt.crl}),
+				},
+			}
+			_, err := Authenticate(doc, nil)
+			assert.ErrorContains(t, err, tt.wantErr)
+		})
+	}
 }

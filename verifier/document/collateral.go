@@ -35,9 +35,19 @@ type AMDVCEKCollateral struct {
 	CertChainPEM  string `json:"cert_chain_pem"`
 }
 
+// VCEKDER decodes VCEKDERBase64, rejecting non-canonical base64.
+func (c *AMDVCEKCollateral) VCEKDER() ([]byte, error) {
+	return decodeCanonicalBase64("vcek_der_base64", c.VCEKDERBase64)
+}
+
 // AMDCRLCollateral is the data of a CollateralAMDCRLV1Format entry.
 type AMDCRLCollateral struct {
 	CRLDERBase64 string `json:"crl_der_base64"`
+}
+
+// CRLDER decodes CRLDERBase64, rejecting non-canonical base64.
+func (c *AMDCRLCollateral) CRLDER() ([]byte, error) {
+	return decodeCanonicalBase64("crl_der_base64", c.CRLDERBase64)
 }
 
 // IntelPCSCollateral is the data of a CollateralIntelPCSV1Format entry:
@@ -53,6 +63,11 @@ type PCSResponse struct {
 	URL        string              `json:"url"`
 	Headers    map[string][]string `json:"headers"`
 	BodyBase64 string              `json:"body_base64"`
+}
+
+// Body decodes BodyBase64, rejecting non-canonical base64.
+func (r *PCSResponse) Body() ([]byte, error) {
+	return decodeCanonicalBase64("body_base64", r.BodyBase64)
 }
 
 // SigstoreCollateral is the data of a sigstore-code or sigstore-platform

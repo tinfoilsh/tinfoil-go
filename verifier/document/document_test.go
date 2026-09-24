@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -267,6 +268,32 @@ func TestParseRejectsNonCanonicalBase64(t *testing.T) {
 
 	_, err = Parse(tampered)
 	assert.ErrorContains(t, err, "crypto_material is not canonical base64")
+}
+
+func TestParseRejectsNonCanonicalReportBase64(t *testing.T) {
+	nonce := testNonce()
+	built, docBytes := buildTestDocument(t, nonce)
+	encoded := built.CPUEvidence.ReportBase64
+	require.True(t, strings.HasSuffix(encoded, "AQE="))
+
+	// Each variant decodes to the same report bytes as the original.
+	for name, variant := range map[string]string{
+		"embedded newline":     encoded[:8] + "\n" + encoded[8:],
+		"trailing CRLF":        encoded + "\r\n",
+		"nonzero padding bits": strings.TrimSuffix(encoded, "AQE=") + "AQF=",
+	} {
+		t.Run(name, func(t *testing.T) {
+			original, err := json.Marshal(encoded)
+			require.NoError(t, err)
+			replacement, err := json.Marshal(variant)
+			require.NoError(t, err)
+			tampered := bytes.Replace(docBytes, original, replacement, 1)
+			require.NotEqual(t, docBytes, tampered)
+
+			_, err = Parse(tampered)
+			assert.ErrorContains(t, err, "cpu_evidence.report_base64")
+		})
+	}
 }
 
 func TestParseRejectsOddLengthUnknownFormatData(t *testing.T) {
