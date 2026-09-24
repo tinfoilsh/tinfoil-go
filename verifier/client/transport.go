@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"time"
 )
 
 // NewTransport admits requests only with unexpired verification. build must
@@ -29,13 +28,17 @@ func (s *SecureClient) NewTransport(build func(*VerifiedDocumentV3) (http.RoundT
 
 func (s *SecureClient) registerTransport(t *refreshingTransport) error {
 	for {
-		state, err := s.verifiedState(context.Background(), nil, false)
+		state, err := s.verifiedState(context.Background(), nil, false, verificationRetries)
 		if err != nil {
 			return err
 		}
 		s.stateMu.RLock()
+		valid := state.valid()
 		registered := state.transports[t] != nil
 		s.stateMu.RUnlock()
+		if !valid {
+			continue
+		}
 		if registered {
 			return nil
 		}
@@ -45,7 +48,7 @@ func (s *SecureClient) registerTransport(t *refreshingTransport) error {
 		}
 		s.stateMu.Lock()
 		call := s.refreshing
-		if s.state == state && call == nil && time.Now().Before(state.FreshnessExpiresAt) {
+		if s.state == state && call == nil && state.valid() {
 			if state.transports == nil {
 				state.transports = make(map[*refreshingTransport]http.RoundTripper)
 			}
@@ -87,7 +90,7 @@ func (t *refreshingTransport) buildTransport(verified *VerifiedDocumentV3) (http
 
 func (t *refreshingTransport) admit(ctx context.Context) (http.RoundTripper, *enclaveState, error) {
 	for {
-		state, err := t.client.verifiedState(ctx, nil, false)
+		state, err := t.client.verifiedState(ctx, nil, false, verificationRetries)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -96,7 +99,7 @@ func (t *refreshingTransport) admit(ctx context.Context) (http.RoundTripper, *en
 		}
 		t.client.stateMu.RLock()
 		transport := state.transports[t]
-		valid := time.Now().Before(state.FreshnessExpiresAt)
+		valid := state.valid()
 		t.client.stateMu.RUnlock()
 		if valid {
 			return transport, state, nil
@@ -114,25 +117,33 @@ func (t *refreshingTransport) RoundTrip(req *http.Request) (*http.Response, erro
 	if err == nil || t.isKeyError == nil || !t.isKeyError(err) {
 		return resp, err
 	}
+	t.client.invalidate(state)
 	retry, bodyErr := resetRequestBody(req)
 	if bodyErr != nil {
-		return resp, err
+		return resp, errors.Join(bodyErr, err)
 	}
 	if resp != nil && resp.Body != nil {
 		resp.Body.Close()
 	}
-	if _, refreshErr := t.client.verifiedState(req.Context(), state, true); refreshErr != nil {
+	if _, refreshErr := t.client.verifiedState(req.Context(), state, true, verificationRetries); refreshErr != nil {
 		closeRequestBody(retry)
-		return nil, errors.Join(err, refreshErr)
+		return nil, errors.Join(refreshErr, err)
 	}
 	// Each explicit retry is a new admission. In-flight responses/streams keep
 	// their original transport and are not canceled when its witnesses expire.
-	transport, _, refreshErr := t.admit(req.Context())
+	transport, state, refreshErr := t.admit(req.Context())
 	if refreshErr != nil {
 		closeRequestBody(retry)
-		return nil, errors.Join(err, refreshErr)
+		return nil, errors.Join(refreshErr, err)
 	}
-	return transport.RoundTrip(retry)
+	resp, retryErr := transport.RoundTrip(retry)
+	if retryErr != nil {
+		if t.isKeyError(retryErr) {
+			t.client.invalidate(state)
+		}
+		return resp, errors.Join(retryErr, err)
+	}
+	return resp, nil
 }
 
 func (t *refreshingTransport) CloseIdleConnections() {

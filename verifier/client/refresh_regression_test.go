@@ -127,3 +127,38 @@ func TestRefreshRejectsExpiryBeforeTransportConstruction(t *testing.T) {
 	require.Equal(t, 1, builds)
 	require.Equal(t, "old", s.Verification().CodeTag)
 }
+
+func TestLateRejectionDoesNotInvalidateReplacement(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		var verifications int
+		s := &SecureClient{state: testEnclaveState(time.Now().Add(time.Hour), "old"), verify: func() (*VerifiedDocumentV3, error) {
+			verifications++
+			return testState(time.Now().Add(time.Hour), "new"), nil
+		}}
+		release := make(chan struct{})
+		transport, err := s.NewTransport(func(verified *VerifiedDocumentV3) (http.RoundTripper, error) {
+			return roundTripFunc(func(*http.Request) (*http.Response, error) {
+				if verified.CodeTag == "old" {
+					<-release
+					return nil, errCertMismatch
+				}
+				return testResponse(), nil
+			}), nil
+		}, isCertificateError)
+		require.NoError(t, err)
+		finished := make(chan error, 1)
+		go func() {
+			req, _ := http.NewRequest(http.MethodGet, "https://enclave.example", nil)
+			_, err := transport.RoundTrip(req)
+			finished <- err
+		}()
+		synctest.Wait()
+		_, err = s.Verify()
+		require.NoError(t, err)
+		close(release)
+		require.NoError(t, <-finished)
+		require.False(t, s.state.rejected)
+		require.Equal(t, "new", s.Verification().CodeTag)
+		require.Equal(t, 1, verifications)
+	})
+}

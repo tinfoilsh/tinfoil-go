@@ -3,6 +3,7 @@ package client
 import (
 	"bytes"
 	"cmp"
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -90,7 +91,7 @@ func NewDefaultClient(opts *VerificationOptions) (*SecureClient, error) {
 	routers, _ := fetchRouters()
 	for _, routerURL := range routers {
 		client := fallback.ForEnclave(routerURL)
-		_, err := client.Verify()
+		_, err := client.verifiedState(context.Background(), nil, true, candidateVerificationRetries)
 		if err == nil {
 			return client, nil
 		}
