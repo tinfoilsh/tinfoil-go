@@ -81,7 +81,7 @@ func WithTransport(mode TransportMode) ClientOption {
 // differs from the enclave's, the SDK adds the X-Tinfoil-Enclave-Url header so
 // the proxy can forward the encrypted request to the right enclave. Only
 // supported with the EHBP transport unless it uses the verified enclave's
-// HTTPS origin.
+// HTTPS origin. HTTP forwarding proxies receive unencrypted request headers.
 func WithBaseURL(baseURL string) ClientOption {
 	return func(c *clientConfig) {
 		c.baseURL = baseURL
