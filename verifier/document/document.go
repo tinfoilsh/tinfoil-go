@@ -161,6 +161,9 @@ func (c *CPUEvidence) parse() error {
 	if c.Format == "" || c.ReportBase64 == "" {
 		return fmt.Errorf("cpu_evidence is incomplete")
 	}
+	if _, err := decodeCanonicalBase64("cpu_evidence.report_base64", c.ReportBase64); err != nil {
+		return err
+	}
 	return nil
 }
 

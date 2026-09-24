@@ -184,7 +184,7 @@ func (g *pcsReplayGetter) Get(requestURL string) (map[string][]string, []byte, e
 	if !ok {
 		return nil, nil, fmt.Errorf("intel-pcs collateral has no captured response for %s", requestURL)
 	}
-	body, err := base64.StdEncoding.DecodeString(resp.BodyBase64)
+	body, err := resp.Body()
 	if err != nil {
 		return nil, nil, fmt.Errorf("decoding captured PCS response body for %s: %w", requestURL, err)
 	}
