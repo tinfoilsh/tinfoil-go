@@ -138,9 +138,6 @@ func (s *SecureClient) VerificationJSON() (string, error) {
 
 // HTTPClient returns an HTTP client that only accepts TLS connections to the verified enclave
 func (s *SecureClient) HTTPClient() (*http.Client, error) {
-	if s == nil {
-		return nil, &ConfigurationError{Err: fmt.Errorf("secure client is required")}
-	}
 	s.stateMu.Lock()
 	if s.tlsTransport == nil {
 		s.tlsTransport = &clientTransport{client: s, build: func(verified *VerifiedDocumentV3) (http.RoundTripper, error) {
