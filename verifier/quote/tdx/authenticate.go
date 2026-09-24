@@ -15,6 +15,7 @@ import (
 	"net/textproto"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
 
 	tdxabi "github.com/google/go-tdx-guest/abi"
@@ -269,20 +270,13 @@ func (r *tcbEvaluationRecorder) minimum() (int, error) {
 //go:embed sgx_root_ca.pem
 var sgxRootCACertPEM []byte
 
-var intelRootCertPool *x509.CertPool
-
-func init() {
-	root, _ := pem.Decode(sgxRootCACertPEM)
-	if root == nil {
-		panic("embedded Intel root certificate is not valid PEM")
-	}
-	cert, err := x509.ParseCertificate(root.Bytes)
-	if err != nil {
-		panic("failed to parse Intel root certificate: " + err.Error())
-	}
-	intelRootCertPool = x509.NewCertPool()
-	intelRootCertPool.AddCert(cert)
-}
+// embeddedIntelRoots parses the embedded Intel SGX root on first use. A
+// malformed embedded root surfaces as a verification error rather than a
+// panic during package initialization, so it cannot abort a process that
+// merely imports this package.
+var embeddedIntelRoots = sync.OnceValues(func() (*x509.CertPool, error) {
+	return poolFromPEM(sgxRootCACertPEM)
+})
 
 func poolFromPEM(rootPEM []byte) (*x509.CertPool, error) {
 	block, _ := pem.Decode(rootPEM)
@@ -322,11 +316,11 @@ func (o *Options) now() time.Time {
 
 func (o *Options) roots() (*x509.CertPool, error) {
 	if o == nil {
-		return intelRootCertPool, nil
+		return embeddedIntelRoots()
 	}
 	rootPEM := o.overrides.root()
 	if rootPEM == nil {
-		return intelRootCertPool, nil
+		return embeddedIntelRoots()
 	}
 	return poolFromPEM(rootPEM)
 }
