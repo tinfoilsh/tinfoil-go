@@ -12,7 +12,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"github.com/tinfoilsh/tinfoil-go/internal/testutil"
-	"github.com/tinfoilsh/tinfoil-go/verifier/envelope"
+	"github.com/tinfoilsh/tinfoil-go/verifier/document"
 	"github.com/tinfoilsh/tinfoil-go/verifier/measurement"
 	"github.com/tinfoilsh/tinfoil-go/verifier/provenance"
 )
@@ -70,9 +70,9 @@ func TestClientFreshnessMaxAge(t *testing.T) {
 func TestLiveVerifyFreshnessExpiration(t *testing.T) {
 	testutil.RequireLive(t, enclaveEnvVar, repoEnvVar)
 	host, repo := os.Getenv(enclaveEnvVar), os.Getenv(repoEnvVar)
-	nonce, err := envelope.RandomNonce()
+	nonce, err := document.RandomNonce()
 	require.NoError(t, err)
-	raw, err := envelope.Fetch(host, nonce)
+	raw, err := document.Fetch(host, nonce)
 	require.NoError(t, err)
 	verified, err := VerifyDocumentV3(raw, nonce, repo, nil)
 	require.NoError(t, err)
@@ -103,20 +103,20 @@ func TestLiveVerifyFreshnessExpiration(t *testing.T) {
 	require.NoError(t, err)
 	_, err = s.Verify()
 	require.ErrorAs(t, err, &attestation)
-	doc, err := envelope.Parse(raw)
+	doc, err := document.Parse(raw)
 	require.NoError(t, err)
-	codeRef, err := doc.ReferenceValuesCollateral(envelope.CollateralSigstoreCodeV1Format)
+	codeRef, err := doc.ReferenceValuesCollateral(document.CollateralSigstoreCodeV1Format)
 	require.NoError(t, err)
 	code, err := provenance.AuthenticateCode(codeRef.SigstoreBundle, repo, codeRef.Tag, codeRef.Digest)
 	require.NoError(t, err)
-	platformRef, err := doc.ReferenceValuesCollateral(envelope.CollateralSigstorePlatformV1Format)
+	platformRef, err := doc.ReferenceValuesCollateral(document.CollateralSigstorePlatformV1Format)
 	require.NoError(t, err)
 	platform, err := provenance.AuthenticatePlatformEndorsements(platformRef.SigstoreBundle, platformRef.Repo, platformRef.Tag, platformRef.Digest)
 	require.NoError(t, err)
 	matched := false
 	for id, artifact := range map[string]*provenance.AuthenticatedArtifact{
-		envelope.FreshnessCollateralIDCode:     &code.AuthenticatedArtifact,
-		envelope.FreshnessCollateralIDPlatform: &platform.AuthenticatedArtifact,
+		document.FreshnessCollateralIDCode:     &code.AuthenticatedArtifact,
+		document.FreshnessCollateralIDPlatform: &platform.AuthenticatedArtifact,
 	} {
 		collateral, err := doc.FreshnessCollateral(id)
 		require.NoError(t, err)

@@ -18,7 +18,7 @@ import (
 	ehbpidentity "github.com/tinfoilsh/encrypted-http-body-protocol/identity"
 	"github.com/tinfoilsh/tinfoil-go/internal/testutil"
 	"github.com/tinfoilsh/tinfoil-go/verifier/client"
-	"github.com/tinfoilsh/tinfoil-go/verifier/envelope"
+	"github.com/tinfoilsh/tinfoil-go/verifier/document"
 )
 
 type roundTripFunc func(*http.Request) (*http.Response, error)
@@ -261,7 +261,7 @@ func TestEHBPClientPreservesAdmissionAndRebuildsProxyHeader(t *testing.T) {
 	require.Empty(t, seen, "failed admission must not reach the proxy")
 
 	for _, host := range []string{"old.example", "new.example"} {
-		transport, err := rebuild(&client.VerifiedDocumentV3{EnclaveHost: host, CryptoMaterial: []envelope.CryptoMaterialItem{{ID: envelope.CryptoMaterialIDHPKE, Format: envelope.KeyX25519HPKEV1Format, Data: strings.Repeat("01", 32)}}})
+		transport, err := rebuild(&client.VerifiedDocumentV3{EnclaveHost: host, CryptoMaterial: []document.CryptoMaterialItem{{ID: document.CryptoMaterialIDHPKE, Format: document.KeyX25519HPKEV1Format, Data: strings.Repeat("01", 32)}}})
 		require.NoError(t, err)
 		req, err := http.NewRequest(http.MethodGet, proxy.URL, nil)
 		require.NoError(t, err)

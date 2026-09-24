@@ -1,9 +1,9 @@
-// Package envelope defines the v3 attestation document wire format and its
-// strict parsing and challenge verification. Verifying the envelope
+// Package document defines the v3 attestation document wire format and its
+// strict parsing and challenge verification. Checking the document
 // authenticates nothing by itself: the CPU quote must prove the hardware
 // bound the recomputed REPORT_DATA before any part of the document is
 // trusted.
-package envelope
+package document
 
 import (
 	"context"

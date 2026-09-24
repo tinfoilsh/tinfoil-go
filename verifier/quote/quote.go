@@ -5,7 +5,7 @@
 //     not yet appraised.
 //  2. Assemble: resolve the complete policy — every value the quote must
 //     attest, as one object. Entries differ only in which verified source
-//     resolves them (policy artifact, code provenance, envelope); that
+//     resolves them (policy artifact, code provenance, document); that
 //     distinction ends here. Assembly fails if any entry cannot be
 //     resolved.
 //  3. Validate: one comparison of the quote against the assembled policy,
@@ -18,7 +18,7 @@ import (
 	"strings"
 
 	"github.com/tinfoilsh/tinfoil-go/verifier"
-	"github.com/tinfoilsh/tinfoil-go/verifier/envelope"
+	"github.com/tinfoilsh/tinfoil-go/verifier/document"
 	"github.com/tinfoilsh/tinfoil-go/verifier/measurement"
 	"github.com/tinfoilsh/tinfoil-go/verifier/policy"
 	"github.com/tinfoilsh/tinfoil-go/verifier/quote/sev"
@@ -62,13 +62,13 @@ type AssembledPolicy struct {
 // vendor root, from the document's own endorsement collateral — no network
 // fetches. Callers must assemble a policy and validate before trusting the
 // platform.
-func Authenticate(doc *envelope.Document) (result *Authenticated, err error) {
+func Authenticate(doc *document.Document) (result *Authenticated, err error) {
 	defer func() { err = verifier.WrapAttestation(err) }()
 	if doc == nil {
 		return nil, &verifier.ConfigurationError{Err: fmt.Errorf("document is required")}
 	}
 	switch doc.CPUEvidence.Format {
-	case envelope.SEVSNPReportV1Format:
+	case document.SEVSNPReportV1Format:
 		q, err := sev.Authenticate(doc)
 		if err != nil {
 			return nil, err
@@ -79,7 +79,7 @@ func Authenticate(doc *envelope.Document) (result *Authenticated, err error) {
 			Measurement: q.Measurement,
 			sev:         q,
 		}, nil
-	case envelope.TDXQuoteV1Format:
+	case document.TDXQuoteV1Format:
 		q, err := tdx.Authenticate(doc)
 		if err != nil {
 			return nil, err
@@ -158,7 +158,7 @@ func (p *AssembledPolicy) Validate() (err error) {
 }
 
 // Verify composes Authenticate, Assemble, and Validate.
-func Verify(doc *envelope.Document, endorsements *policy.Artifact, code, pins *measurement.Measurement, shape *policy.Shape, reportData [64]byte) (*AssembledPolicy, *Authenticated, error) {
+func Verify(doc *document.Document, endorsements *policy.Artifact, code, pins *measurement.Measurement, shape *policy.Shape, reportData [64]byte) (*AssembledPolicy, *Authenticated, error) {
 	q, err := Authenticate(doc)
 	if err != nil {
 		return nil, nil, err

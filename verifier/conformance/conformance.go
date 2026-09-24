@@ -19,7 +19,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/tinfoilsh/tinfoil-go/verifier/envelope"
+	"github.com/tinfoilsh/tinfoil-go/verifier/document"
 	"github.com/tinfoilsh/tinfoil-go/verifier/measurement"
 	"github.com/tinfoilsh/tinfoil-go/verifier/provenance"
 	"github.com/tinfoilsh/tinfoil-go/verifier/quote"
@@ -148,16 +148,16 @@ func Run(stage string, in Input) (Output, int) {
 	case StageVerify:
 		return verifyFull(doc, nonce, in.Repo, rts, prov, appraisal)
 	case StageCheckEnvelope:
-		if _, _, err := envelope.Check(doc, nonce); err != nil {
+		if _, _, err := document.Check(doc, nonce); err != nil {
 			return reject(stage, "ENVELOPE_REJECTED")
 		}
 		return Output{Stage: stage, Accepted: true}, ExitAccepted
 	case StageAuthenticateProvenance:
-		parsed, err := envelope.Parse(doc)
+		parsed, err := document.Parse(doc)
 		if err != nil {
 			return malformed(stage)
 		}
-		codeRef, err := parsed.ReferenceValuesCollateral(envelope.CollateralSigstoreCodeV1Format)
+		codeRef, err := parsed.ReferenceValuesCollateral(document.CollateralSigstoreCodeV1Format)
 		if err != nil {
 			return reject(stage, "PROVENANCE_REJECTED")
 		}
@@ -170,11 +170,11 @@ func Run(stage string, in Input) (Output, int) {
 			CodeMeasurement: toMeasurement(code.Measurement),
 		}}, ExitAccepted
 	case StageAssemblePolicy:
-		parsed, err := envelope.Parse(doc)
+		parsed, err := document.Parse(doc)
 		if err != nil {
 			return malformed(stage)
 		}
-		platRef, err := parsed.ReferenceValuesCollateral(envelope.CollateralSigstorePlatformV1Format)
+		platRef, err := parsed.ReferenceValuesCollateral(document.CollateralSigstorePlatformV1Format)
 		if err != nil {
 			return reject(stage, "PROVENANCE_REJECTED")
 		}
@@ -183,7 +183,7 @@ func Run(stage string, in Input) (Output, int) {
 		}
 		return Output{Stage: stage, Accepted: true}, ExitAccepted
 	case StageAuthenticateQuote:
-		parsed, err := envelope.Parse(doc)
+		parsed, err := document.Parse(doc)
 		if err != nil {
 			return malformed(stage)
 		}
@@ -206,7 +206,7 @@ func Run(stage string, in Input) (Output, int) {
 
 // verifyFull composes the whole flow; the first failing step names the layer.
 func verifyFull(doc, nonce []byte, repo string, rts roots, prov provAuth, appraisal time.Time) (Output, int) {
-	parsed, reportData, err := envelope.Check(doc, nonce)
+	parsed, reportData, err := document.Check(doc, nonce)
 	if err != nil {
 		return reject(StageVerify, "ENVELOPE_REJECTED")
 	}
@@ -247,13 +247,13 @@ func verifyFull(doc, nonce []byte, repo string, rts roots, prov provAuth, apprai
 }
 
 // boundKeys returns the endorsed TLS SPKI fingerprint and HPKE public key from
-// the verified crypto material (hash-bound into the quote via envelope.Check).
-func boundKeys(doc *envelope.Document) (tlsFP, hpke string) {
+// the verified crypto material (hash-bound into the quote via document.Check).
+func boundKeys(doc *document.Document) (tlsFP, hpke string) {
 	for _, it := range doc.CryptoMaterialItems() {
 		switch {
-		case it.ID == envelope.CryptoMaterialIDTLS && it.Format == envelope.KeySPKIFPSHA256V1Format:
+		case it.ID == document.CryptoMaterialIDTLS && it.Format == document.KeySPKIFPSHA256V1Format:
 			tlsFP = it.Data
-		case it.ID == envelope.CryptoMaterialIDHPKE && it.Format == envelope.KeyX25519HPKEV1Format:
+		case it.ID == document.CryptoMaterialIDHPKE && it.Format == document.KeyX25519HPKEV1Format:
 			hpke = it.Data
 		}
 	}
@@ -262,8 +262,8 @@ func boundKeys(doc *envelope.Document) (tlsFP, hpke string) {
 
 // authReferenceValues authenticates the code and platform artifacts and their
 // freshness proofs, mirroring the production reference-values step.
-func authReferenceValues(doc *envelope.Document, repo string, prov provAuth, appraisal time.Time) (*provenance.Code, *provenance.PlatformEndorsements, error) {
-	codeRef, err := doc.ReferenceValuesCollateral(envelope.CollateralSigstoreCodeV1Format)
+func authReferenceValues(doc *document.Document, repo string, prov provAuth, appraisal time.Time) (*provenance.Code, *provenance.PlatformEndorsements, error) {
+	codeRef, err := doc.ReferenceValuesCollateral(document.CollateralSigstoreCodeV1Format)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -271,14 +271,14 @@ func authReferenceValues(doc *envelope.Document, repo string, prov provAuth, app
 	if err != nil {
 		return nil, nil, err
 	}
-	codeFresh, err := doc.FreshnessCollateral(envelope.FreshnessCollateralIDCode)
+	codeFresh, err := doc.FreshnessCollateral(document.FreshnessCollateralIDCode)
 	if err != nil {
 		return nil, nil, err
 	}
 	if _, err := prov.freshness(codeFresh.SigstoreBundle, &code.AuthenticatedArtifact, appraisal, 0); err != nil {
 		return nil, nil, err
 	}
-	platRef, err := doc.ReferenceValuesCollateral(envelope.CollateralSigstorePlatformV1Format)
+	platRef, err := doc.ReferenceValuesCollateral(document.CollateralSigstorePlatformV1Format)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -286,7 +286,7 @@ func authReferenceValues(doc *envelope.Document, repo string, prov provAuth, app
 	if err != nil {
 		return nil, nil, err
 	}
-	platFresh, err := doc.FreshnessCollateral(envelope.FreshnessCollateralIDPlatform)
+	platFresh, err := doc.FreshnessCollateral(document.FreshnessCollateralIDPlatform)
 	if err != nil {
 		return nil, nil, err
 	}

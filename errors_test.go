@@ -12,7 +12,7 @@ import (
 	tinfoil "github.com/tinfoilsh/tinfoil-go"
 	"github.com/tinfoilsh/tinfoil-go/verifier"
 	"github.com/tinfoilsh/tinfoil-go/verifier/client"
-	"github.com/tinfoilsh/tinfoil-go/verifier/envelope"
+	"github.com/tinfoilsh/tinfoil-go/verifier/document"
 	"github.com/tinfoilsh/tinfoil-go/verifier/measurement"
 	"github.com/tinfoilsh/tinfoil-go/verifier/policy"
 	"github.com/tinfoilsh/tinfoil-go/verifier/quote"
@@ -76,7 +76,7 @@ func TestPublicInputErrors(t *testing.T) {
 	require.NoError(t, err)
 	_, err = s.Request("GET", "://", "", nil)
 	require.ErrorAs(t, err, &config)
-	_, err = envelope.Fetch("", make([]byte, envelope.NonceSize))
+	_, err = document.Fetch("", make([]byte, document.NonceSize))
 	require.ErrorAs(t, err, &config)
 	_, err = quote.Authenticate(nil)
 	require.ErrorAs(t, err, &config)
@@ -102,7 +102,7 @@ func TestPublicInputErrors(t *testing.T) {
 	require.ErrorAs(t, err, &config)
 
 	var attestation *tinfoil.AttestationError
-	_, err = client.VerifyDocumentV3([]byte(`{}`), make([]byte, envelope.NonceSize), "org/repo", nil)
+	_, err = client.VerifyDocumentV3([]byte(`{}`), make([]byte, document.NonceSize), "org/repo", nil)
 	require.ErrorAs(t, err, &attestation, "malformed evidence is not a caller configuration error")
 }
 
