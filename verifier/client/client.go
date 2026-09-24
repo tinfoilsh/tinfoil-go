@@ -5,25 +5,35 @@ import (
 	"cmp"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"sync"
 	"time"
 
 	"github.com/tinfoilsh/tinfoil-go/verifier/measurement"
 	"github.com/tinfoilsh/tinfoil-go/verifier/provenance"
-	"github.com/tinfoilsh/tinfoil-go/verifier/util"
 )
 
 type SecureClient struct {
 	enclave, repo, relay string
 	options              VerificationOptions
+	autoSelect           bool
 
 	stateMu      sync.RWMutex
 	enclaves     map[string]*enclaveEntry
+	selecting    *selectionCall
+	selection    uint64
 	tlsTransport *refreshingTransport
 	verify       func(string) (*VerifiedDocumentV3, error)
 }
+
+const (
+	fallbackEnclave         = "inference.tinfoil.sh"
+	routerDiscoveryTimeout  = 30 * time.Second
+	maxRouterDiscoveryBytes = 32 << 20
+)
 
 var (
 	defaultRouterRepo = "tinfoilsh/confidential-model-router"
@@ -31,13 +41,30 @@ var (
 )
 
 func fetchRouters() ([]string, error) {
-	resp, _, err := util.Get(defaultRouterURL)
+	ctx, cancel := context.WithTimeout(context.Background(), routerDiscoveryTimeout)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, defaultRouterURL, nil)
 	if err != nil {
 		return nil, err
 	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode > 299 {
+		return nil, fmt.Errorf("HTTP GET %s: %d %s", defaultRouterURL, resp.StatusCode, resp.Status)
+	}
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxRouterDiscoveryBytes+1))
+	if err != nil {
+		return nil, err
+	}
+	if len(body) > maxRouterDiscoveryBytes {
+		return nil, fmt.Errorf("router discovery response exceeds %d bytes", maxRouterDiscoveryBytes)
+	}
 
 	var routers []string
-	if err := json.Unmarshal(resp, &routers); err != nil {
+	if err := json.Unmarshal(body, &routers); err != nil {
 		return nil, err
 	}
 
@@ -83,20 +110,15 @@ func NewSecureClient(enclave, repo string, opts *VerificationOptions) (*SecureCl
 
 // NewDefaultClient applies opts to every discovered router and fallback.
 func NewDefaultClient(opts *VerificationOptions) (*SecureClient, error) {
-	fallback, err := NewSecureClient("inference.tinfoil.sh", defaultRouterRepo, opts)
+	s, err := NewSecureClient(fallbackEnclave, defaultRouterRepo, opts)
 	if err != nil {
 		return nil, err
 	}
-	routers, _ := fetchRouters()
-	for _, routerURL := range routers {
-		client := fallback.ForEnclave(routerURL)
-		_, err := client.verifiedState(context.Background(), routerURL, true, candidateVerificationRetries, nil)
-		if err == nil {
-			return client, nil
-		}
+	s.autoSelect = true
+	if _, err := s.selectRouter(context.Background(), nil); err != nil {
+		return nil, err
 	}
-
-	return fallback, nil
+	return s, nil
 }
 
 // ForEnclave keeps the repository reference and verification options.
@@ -203,10 +225,100 @@ func (s *SecureClient) Request(method, url, headersJSON string, body []byte) (re
 	return toResponse(resp)
 }
 
+type selectionCall struct {
+	done       chan struct{}
+	generation uint64
+	observed   *enclaveState
+	state      *enclaveState
+	err        error
+}
+
 func (s *SecureClient) ready(ctx context.Context, transport *refreshingTransport, rejected *enclaveState) (*enclaveState, error) {
-	enclave := s.Enclave()
+	s.stateMu.Lock()
+	enclave := s.enclave
+	state := s.entry(enclave).state
+	reselect := s.autoSelect && (state == nil || state.rejected) && (rejected == nil || state == rejected)
+	s.stateMu.Unlock()
+	if reselect {
+		selected, err := s.selectRouter(ctx, transport)
+		if err != nil {
+			return nil, err
+		}
+		return s.prepareTransport(ctx, selected.EnclaveHost, transport, verificationRetries)
+	}
 	if rejected != nil {
 		enclave = rejected.EnclaveHost
 	}
 	return s.prepareTransport(ctx, enclave, transport, verificationRetries)
+}
+
+func (s *SecureClient) selectRouter(ctx context.Context, transport *refreshingTransport) (*enclaveState, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	s.stateMu.Lock()
+	observed := s.entry(s.enclave).state
+	call := s.selecting
+	if call == nil || call.generation != s.selection || call.observed != observed {
+		call = &selectionCall{done: make(chan struct{}), generation: s.selection, observed: observed}
+		s.selecting = call
+		go s.discoverRouter(call, transport)
+	}
+	s.stateMu.Unlock()
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case <-call.done:
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	return call.state, call.err
+}
+
+func (s *SecureClient) discoverRouter(call *selectionCall, transport *refreshingTransport) {
+	var state *enclaveState
+	var err, firstErr error
+	for attempt := 0; ; attempt++ {
+		routers, discoveryErr := fetchRouters()
+		var failures []error
+		if discoveryErr != nil {
+			failures = append(failures, &FetchError{Err: fmt.Errorf("discovering routers: %w", discoveryErr)})
+		}
+		for _, enclave := range append(routers, fallbackEnclave) {
+			state, err = s.prepareTransport(context.Background(), enclave, transport, candidateVerificationRetries)
+			if err == nil {
+				break
+			}
+			failures = append(failures, fmt.Errorf("verifying router %q: %w", enclave, err))
+		}
+		if err != nil {
+			err = errors.Join(err, errors.Join(failures...))
+		}
+		if attempt == verificationRetries || !retryableVerification(err) {
+			break
+		}
+		firstErr = err
+		time.Sleep(verificationRetryDelay)
+	}
+	s.stateMu.Lock()
+	defer s.stateMu.Unlock()
+	if err == nil && !state.valid() {
+		err = &AttestationError{Err: errFreshnessExpired}
+	}
+	if err != nil && firstErr != nil {
+		err = errors.Join(err, firstErr)
+	}
+	if err == nil {
+		if s.selection == call.generation && s.entry(s.enclave).state == call.observed {
+			s.enclave = state.EnclaveHost
+			s.selection++
+		}
+		call.state = state
+	}
+	call.err = err
+	if s.selecting == call {
+		s.selecting = nil
+	}
+	close(call.done)
 }
