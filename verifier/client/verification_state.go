@@ -67,6 +67,9 @@ func (s *SecureClient) refresh(call *verificationCall) {
 	// The attestation fetch bounds its network I/O. Local verification has no
 	// SDK deadline; each caller can independently cancel its wait above.
 	verified, err := verify()
+	if err == nil && !time.Now().Before(verified.FreshnessExpiresAt) {
+		err = &AttestationError{Err: errFreshnessExpired}
+	}
 	state := &enclaveState{VerifiedDocumentV3: verified, transports: make(map[*refreshingTransport]http.RoundTripper)}
 	if err == nil && previous != nil {
 		for adapter := range previous.transports {
