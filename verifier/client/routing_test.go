@@ -251,11 +251,13 @@ func TestPendingRouterSelectionDoesNotReplaceNewerSelection(t *testing.T) {
 		}
 		_, err = s.Verify()
 		require.NoError(t, err)
+		s.invalidate(s.enclaves["a.example"].state)
 		finished := make(chan error, 1)
 		go func() { _, err := s.selectRouter(context.Background(), nil); finished <- err }()
 		synctest.Wait()
 		_, err = s.Verify()
 		require.NoError(t, err)
+		s.invalidate(s.enclaves["a.example"].state)
 		next = "c.example"
 		_, err = s.selectRouter(context.Background(), nil)
 		require.NoError(t, err)
@@ -265,4 +267,46 @@ func TestPendingRouterSelectionDoesNotReplaceNewerSelection(t *testing.T) {
 		require.Equal(t, "c.example", s.Verification().EnclaveHost)
 		require.True(t, s.enclaves["b.example"].state.valid())
 	})
+}
+
+func TestRouterSelectionStopsForFatalErrors(t *testing.T) {
+	cause := errors.New("cannot configure transport")
+	for _, failure := range []error{cause, &ConfigurationError{Err: cause}} {
+		t.Run(errorString(failure), func(t *testing.T) {
+			original := http.DefaultClient
+			t.Cleanup(func() { http.DefaultClient = original })
+			var discoveries, attempts int
+			http.DefaultClient = &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+				discoveries++
+				return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(`["a.example", "b.example"]`))}, nil
+			})}
+			s, err := NewSecureClient("a.example", "org/repo", nil)
+			require.NoError(t, err)
+			s.verify = func(string) (*VerifiedDocumentV3, error) {
+				attempts++
+				return nil, failure
+			}
+			_, err = s.selectRouter(context.Background(), nil)
+			require.ErrorIs(t, err, cause)
+			require.Equal(t, 1, attempts)
+			require.Equal(t, 1, discoveries)
+		})
+	}
+}
+
+func TestRouterSelectionReusesCompletedRecovery(t *testing.T) {
+	s, err := NewSecureClient("a.example", "org/repo", nil)
+	require.NoError(t, err)
+	s.verify = func(string) (*VerifiedDocumentV3, error) { return testState(time.Now().Add(time.Hour), "fresh"), nil }
+	_, err = s.Verify()
+	require.NoError(t, err)
+	original := http.DefaultClient
+	t.Cleanup(func() { http.DefaultClient = original })
+	http.DefaultClient = &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+		t.Error("a completed recovery should prevent further discovery")
+		return nil, errors.New("unexpected discovery")
+	})}
+	state, err := s.selectRouter(context.Background(), nil)
+	require.NoError(t, err)
+	require.Same(t, s.enclaves["a.example"].state, state)
 }

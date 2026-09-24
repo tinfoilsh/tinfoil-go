@@ -258,6 +258,10 @@ func (s *SecureClient) selectRouter(ctx context.Context, transport *refreshingTr
 	}
 	s.stateMu.Lock()
 	observed := s.entry(s.enclave).state
+	if observed != nil && observed.valid() {
+		s.stateMu.Unlock()
+		return observed, nil
+	}
 	call := s.selecting
 	if call == nil || call.generation != s.selection || call.observed != observed {
 		call = &selectionCall{done: make(chan struct{}), generation: s.selection, observed: observed}
@@ -291,6 +295,9 @@ func (s *SecureClient) discoverRouter(call *selectionCall, transport *refreshing
 				break
 			}
 			failures = append(failures, fmt.Errorf("verifying router %q: %w", enclave, err))
+			if !retryableVerification(err) {
+				break
+			}
 		}
 		if err != nil {
 			err = errors.Join(err, errors.Join(failures...))
