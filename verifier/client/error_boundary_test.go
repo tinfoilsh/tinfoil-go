@@ -52,7 +52,7 @@ func TestRequestPreservesTLSCategoryAndMobilePrefix(t *testing.T) {
 			transport.TLSClientConfig = &tls.Config{RootCAs: roots}
 			http.DefaultTransport = transport
 			t.Cleanup(func() { http.DefaultTransport = original; transport.CloseIdleConnections() })
-			s := &SecureClient{state: testState(time.Now().Add(time.Hour), "wrong-pin")}
+			s := &SecureClient{state: testEnclaveState(time.Now().Add(time.Hour), "wrong-pin")}
 			var refreshes int
 			s.verify = func() (*VerifiedDocumentV3, error) {
 				refreshes++
