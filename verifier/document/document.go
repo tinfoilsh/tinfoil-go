@@ -9,16 +9,13 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
-	"encoding/base64"
 	"encoding/hex"
 	"encoding/json/jsontext"
 	"encoding/json/v2"
-	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
-	"regexp"
 	"slices"
 	"time"
 
@@ -90,16 +87,6 @@ const (
 	CollateralSigstoreFreshnessV1Format = "https://tinfoil.sh/collateral/sigstore-freshness/v1"
 )
 
-// Collateral roles (RATS, RFC 9334).
-const (
-	// RoleEndorsement labels hardware-vendor material used to
-	// cryptographically verify evidence (e.g. AMD VCEK chains, Intel PCS).
-	RoleEndorsement = "endorsement"
-	// RoleReferenceValues labels Tinfoil-signed expectations used to
-	// appraise verified evidence.
-	RoleReferenceValues = "reference-values"
-)
-
 // Conventional identifiers.
 const (
 	// CryptoMaterialIDTLS is the conventional id of the TLS key fingerprint.
@@ -144,11 +131,37 @@ type Challenge struct {
 	ReportDataAlgorithm string `json:"report_data_algorithm"`
 }
 
+func (c *Challenge) parse() error {
+	if c.ReportDataAlgorithm != ReportDataV1Algorithm {
+		return fmt.Errorf("unsupported challenge.report_data_algorithm %q", c.ReportDataAlgorithm)
+	}
+	if _, err := decodeLowerHex("challenge.nonce", c.Nonce, NonceSize); err != nil {
+		return err
+	}
+	if _, err := decodeLowerHex("challenge.report_data", c.ReportData, 64); err != nil {
+		return err
+	}
+	return nil
+}
+
 // CPUEvidence is the hardware quote and the endorsed-section hashes it binds.
 type CPUEvidence struct {
 	Format       string         `json:"format"`
 	ReportBase64 string         `json:"report_base64"`
 	Endorsed     EndorsedHashes `json:"endorsed"`
+}
+
+func (c *CPUEvidence) parse() error {
+	if _, err := decodeLowerHex("cpu_evidence.endorsed.crypto_material_hash", c.Endorsed.CryptoMaterialHash, 32); err != nil {
+		return err
+	}
+	if _, err := decodeLowerHex("cpu_evidence.endorsed.device_evidence_hash", c.Endorsed.DeviceEvidenceHash, 32); err != nil {
+		return err
+	}
+	if c.Format == "" || c.ReportBase64 == "" {
+		return fmt.Errorf("cpu_evidence is incomplete")
+	}
+	return nil
 }
 
 // EndorsedHashes are the SHA-256 hashes of the two endorsed sections,
@@ -172,6 +185,57 @@ type CryptoMaterialItem struct {
 	Data   string `json:"data"`
 }
 
+func parseCryptoMaterial(encoded string) (*CryptoMaterialSection, []byte, error) {
+	if encoded == "" {
+		return nil, nil, fmt.Errorf("crypto_material section is missing")
+	}
+	cryptoBytes, err := decodeCanonicalBase64("crypto_material", encoded)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	var cm CryptoMaterialSection
+	if err := json.Unmarshal(cryptoBytes, &cm, json.RejectUnknownMembers(true)); err != nil {
+		return nil, nil, fmt.Errorf("parsing crypto_material: %w", err)
+	}
+	if cm.Format != CryptoMaterialV1Format {
+		return nil, nil, fmt.Errorf("unsupported crypto_material section format %q", cm.Format)
+	}
+	if cm.Items == nil {
+		return nil, nil, fmt.Errorf("crypto_material.items is missing")
+	}
+	seen := make(map[string]bool, len(cm.Items))
+	for _, item := range cm.Items {
+		if item.ID == "" || item.Format == "" {
+			return nil, nil, fmt.Errorf("crypto_material item is incomplete")
+		}
+		if seen[item.ID] {
+			return nil, nil, fmt.Errorf("duplicate crypto_material item id %q", item.ID)
+		}
+		seen[item.ID] = true
+		switch item.Format {
+		case KeySPKIFPSHA256V1Format, KeyX25519HPKEV1Format:
+			// Known key formats are exactly 32 bytes; reject short, empty,
+			// or odd-length material before callers trust it.
+			if _, err := decodeLowerHex(fmt.Sprintf("crypto_material item %q data", item.ID), item.Data, 32); err != nil {
+				return nil, nil, err
+			}
+		default:
+			// Unknown formats still must carry non-empty, decodable
+			// lowercase hex: the character class alone would admit
+			// odd-length strings that no hex decoder accepts.
+			if item.Data == "" {
+				return nil, nil, fmt.Errorf("crypto_material item %q data is empty", item.ID)
+			}
+			if !lowerHexRE.MatchString(item.Data) || len(item.Data)%2 != 0 {
+				return nil, nil, fmt.Errorf("crypto_material item %q data is not lowercase hex", item.ID)
+			}
+		}
+	}
+
+	return &cm, cryptoBytes, nil
+}
+
 // DeviceEvidenceSection is the endorsed device_evidence section envelope.
 // Empty device evidence is Items: [] — the section is always present.
 type DeviceEvidenceSection struct {
@@ -189,89 +253,37 @@ type DeviceEvidenceItem struct {
 	Evidence jsontext.Value `json:"evidence"`
 }
 
-// CollateralEntry is one self-describing collateral record. Collateral is
-// unendorsed transport: every entry is authenticated by its own signature
-// chain during verification, so a tampered entry can only cause rejection.
-type CollateralEntry struct {
-	ID       string         `json:"id"`
-	Role     string         `json:"role"`
-	Format   string         `json:"format"`
-	Subjects []string       `json:"subjects,omitempty"`
-	Data     jsontext.Value `json:"data"`
-}
-
-// AMDVCEKCollateral is the data of a CollateralAMDVCEKV1Format entry.
-type AMDVCEKCollateral struct {
-	VCEKDERBase64 string `json:"vcek_der_base64"`
-	CertChainPEM  string `json:"cert_chain_pem"`
-}
-
-// AMDCRLCollateral is the data of a CollateralAMDCRLV1Format entry.
-type AMDCRLCollateral struct {
-	CRLDERBase64 string `json:"crl_der_base64"`
-}
-
-// IntelPCSCollateral is the data of a CollateralIntelPCSV1Format entry:
-// Intel PCS responses captured verbatim so a verifier can replay them
-// instead of fetching. Headers are included because Intel delivers issuer
-// chains in response headers.
-type IntelPCSCollateral struct {
-	Responses []PCSResponse `json:"responses"`
-}
-
-// PCSResponse is one captured Intel PCS response.
-type PCSResponse struct {
-	URL        string              `json:"url"`
-	Headers    map[string][]string `json:"headers"`
-	BodyBase64 string              `json:"body_base64"`
-}
-
-// SigstoreCollateral is the data of a sigstore-code or sigstore-platform
-// reference-values entry. Repo and Tag are informational; trust comes from
-// verifying SigstoreBundle against the expected signing identity and Digest.
-type SigstoreCollateral struct {
-	Repo           string         `json:"repo"`
-	Tag            string         `json:"tag"`
-	Digest         string         `json:"digest"`
-	SigstoreBundle jsontext.Value `json:"sigstore_bundle"`
-}
-
-// FreshnessCollateral carries the independently signed witness bundle for
-// the Sigstore artifact selected by its collateral entry ID.
-type FreshnessCollateral struct {
-	SigstoreBundle jsontext.Value `json:"sigstore_bundle"`
-}
-
-var lowerHexRE = regexp.MustCompile(`^[0-9a-f]*$`)
-
-// decodeLowerHex decodes a required lowercase hex field of an exact byte length.
-func decodeLowerHex(name, value string, wantLen int) ([]byte, error) {
-	if !lowerHexRE.MatchString(value) {
-		return nil, fmt.Errorf("%s is not lowercase hex", name)
+func parseDeviceEvidence(encoded string) (*DeviceEvidenceSection, []byte, error) {
+	if encoded == "" {
+		return nil, nil, fmt.Errorf("device_evidence section is missing")
 	}
-	b, err := hex.DecodeString(value)
+	deviceBytes, err := decodeCanonicalBase64("device_evidence", encoded)
 	if err != nil {
-		return nil, fmt.Errorf("%s is not hex: %w", name, err)
+		return nil, nil, err
 	}
-	if len(b) != wantLen {
-		return nil, fmt.Errorf("%s must be %d bytes, got %d", name, wantLen, len(b))
-	}
-	return b, nil
-}
 
-// decodeCanonicalBase64 decodes a required standard-base64 field and rejects
-// non-canonical encodings. Strict() rejects non-zero padding bits but still
-// skips \r and \n, so the round-trip comparison is what guarantees exactly
-// one accepted encoding per byte string.
-func decodeCanonicalBase64(name, value string) ([]byte, error) {
-	b, err := base64.StdEncoding.Strict().DecodeString(value)
-	if err != nil {
-		return nil, fmt.Errorf("decoding %s: %w", name, err)
+	var de DeviceEvidenceSection
+	if err := json.Unmarshal(deviceBytes, &de, json.RejectUnknownMembers(true)); err != nil {
+		return nil, nil, fmt.Errorf("parsing device_evidence: %w", err)
 	}
-	if base64.StdEncoding.EncodeToString(b) != value {
-		return nil, fmt.Errorf("%s is not canonical base64", name)
+	if de.Format != DeviceEvidenceV1Format {
+		return nil, nil, fmt.Errorf("unsupported device_evidence section format %q", de.Format)
 	}
-	return b, nil
+	if de.Items == nil {
+		return nil, nil, fmt.Errorf("device_evidence.items is missing")
+	}
+	seen := make(map[string]bool, len(de.Items))
+	for _, item := range de.Items {
+		if item.ID == "" {
+			return nil, nil, fmt.Errorf("device_evidence item has no id")
+		}
+		if seen[item.ID] {
+			return nil, nil, fmt.Errorf("duplicate device_evidence item id %q", item.ID)
+		}
+		seen[item.ID] = true
+	}
+
+	return &de, deviceBytes, nil
 }
 
 // ComputeReportData derives the 64-byte REPORT_DATA per the
@@ -316,117 +328,33 @@ func Parse(docBytes []byte) (result *Document, err error) {
 	if doc.Format != AttestationV3Format {
 		return nil, fmt.Errorf("unsupported document format %q", doc.Format)
 	}
-	if doc.Challenge.ReportDataAlgorithm != ReportDataV1Algorithm {
-		return nil, fmt.Errorf("unsupported report_data_algorithm %q", doc.Challenge.ReportDataAlgorithm)
-	}
-	if _, err := decodeLowerHex("challenge.nonce", doc.Challenge.Nonce, NonceSize); err != nil {
+
+	if err := doc.Challenge.parse(); err != nil {
 		return nil, err
 	}
-	if _, err := decodeLowerHex("challenge.report_data", doc.Challenge.ReportData, 64); err != nil {
+
+	if err := doc.CPUEvidence.parse(); err != nil {
 		return nil, err
 	}
-	if _, err := decodeLowerHex("cpu_evidence.endorsed.crypto_material_hash", doc.CPUEvidence.Endorsed.CryptoMaterialHash, 32); err != nil {
-		return nil, err
-	}
-	if _, err := decodeLowerHex("cpu_evidence.endorsed.device_evidence_hash", doc.CPUEvidence.Endorsed.DeviceEvidenceHash, 32); err != nil {
-		return nil, err
-	}
-	if doc.CPUEvidence.Format == "" || doc.CPUEvidence.ReportBase64 == "" {
-		return nil, fmt.Errorf("cpu_evidence is incomplete")
-	}
-	if doc.CryptoMaterial == "" {
-		return nil, fmt.Errorf("crypto_material section is missing")
-	}
-	if doc.DeviceEvidence == "" {
-		return nil, fmt.Errorf("device_evidence section is missing")
-	}
-	cryptoBytes, err := decodeCanonicalBase64("crypto_material", doc.CryptoMaterial)
-	if err != nil {
-		return nil, err
-	}
-	deviceBytes, err := decodeCanonicalBase64("device_evidence", doc.DeviceEvidence)
+
+	cm, cryptoBytes, err := parseCryptoMaterial(doc.CryptoMaterial)
 	if err != nil {
 		return nil, err
 	}
 
-	var cm CryptoMaterialSection
-	if err := json.Unmarshal(cryptoBytes, &cm, json.RejectUnknownMembers(true)); err != nil {
-		return nil, fmt.Errorf("parsing crypto_material: %w", err)
-	}
-	if cm.Format != CryptoMaterialV1Format {
-		return nil, fmt.Errorf("unsupported crypto_material section format %q", cm.Format)
-	}
-	if cm.Items == nil {
-		return nil, fmt.Errorf("crypto_material.items is missing")
-	}
-	seen := make(map[string]bool, len(cm.Items))
-	for _, item := range cm.Items {
-		if item.ID == "" || item.Format == "" {
-			return nil, fmt.Errorf("crypto_material item is incomplete")
-		}
-		if seen[item.ID] {
-			return nil, fmt.Errorf("duplicate crypto_material item id %q", item.ID)
-		}
-		seen[item.ID] = true
-		switch item.Format {
-		case KeySPKIFPSHA256V1Format, KeyX25519HPKEV1Format:
-			// Known key formats are exactly 32 bytes; reject short, empty,
-			// or odd-length material before callers trust it.
-			if _, err := decodeLowerHex(fmt.Sprintf("crypto_material item %q data", item.ID), item.Data, 32); err != nil {
-				return nil, err
-			}
-		default:
-			// Unknown formats still must carry non-empty, decodable
-			// lowercase hex: the character class alone would admit
-			// odd-length strings that no hex decoder accepts.
-			if item.Data == "" {
-				return nil, fmt.Errorf("crypto_material item %q data is empty", item.ID)
-			}
-			if !lowerHexRE.MatchString(item.Data) || len(item.Data)%2 != 0 {
-				return nil, fmt.Errorf("crypto_material item %q data is not lowercase hex", item.ID)
-			}
-		}
+	de, deviceBytes, err := parseDeviceEvidence(doc.DeviceEvidence)
+	if err != nil {
+		return nil, err
 	}
 
-	var de DeviceEvidenceSection
-	if err := json.Unmarshal(deviceBytes, &de, json.RejectUnknownMembers(true)); err != nil {
-		return nil, fmt.Errorf("parsing device_evidence: %w", err)
-	}
-	if de.Format != DeviceEvidenceV1Format {
-		return nil, fmt.Errorf("unsupported device_evidence section format %q", de.Format)
-	}
-	if de.Items == nil {
-		return nil, fmt.Errorf("device_evidence.items is missing")
-	}
-	seen = make(map[string]bool, len(de.Items))
-	for _, item := range de.Items {
-		if item.ID == "" {
-			return nil, fmt.Errorf("device_evidence item has no id")
-		}
-		if seen[item.ID] {
-			return nil, fmt.Errorf("duplicate device_evidence item id %q", item.ID)
-		}
-		seen[item.ID] = true
-	}
-
-	seen = make(map[string]bool, len(doc.Collateral))
-	for i, entry := range doc.Collateral {
-		if entry.ID == "" || entry.Format == "" {
-			return nil, fmt.Errorf("collateral entry %d is incomplete", i)
-		}
-		if seen[entry.ID] {
-			return nil, fmt.Errorf("duplicate collateral entry id %q", entry.ID)
-		}
-		seen[entry.ID] = true
-		if entry.Role != RoleEndorsement && entry.Role != RoleReferenceValues {
-			return nil, fmt.Errorf("collateral entry %q has unknown role %q", entry.ID, entry.Role)
-		}
+	if err := validateCollateral(doc.Collateral); err != nil {
+		return nil, err
 	}
 
 	doc.cryptoMaterialBytes = cryptoBytes
 	doc.deviceEvidenceBytes = deviceBytes
-	doc.cryptoMaterial = &cm
-	doc.deviceEvidence = &de
+	doc.cryptoMaterial = cm
+	doc.deviceEvidence = de
 	return &doc, nil
 }
 
@@ -557,61 +485,3 @@ const (
 	attestationFetchTimeout = 30 * time.Second
 	maxAttestationBytes     = 32 << 20
 )
-
-// EndorsementCollateral returns the first endorsement-role collateral entry
-// with the given format whose subjects include subject.
-func (d *Document) EndorsementCollateral(format, subject string) (*CollateralEntry, bool) {
-	entry := d.findCollateral(RoleEndorsement, format, func(entry *CollateralEntry) bool {
-		return slices.Contains(entry.Subjects, subject)
-	})
-	return entry, entry != nil
-}
-
-// ReferenceValuesCollateral returns the first reference-values collateral
-// entry with the given format, parsed as a Sigstore collateral payload. A
-// document without such an entry returns an error wrapping
-// ErrCollateralNotFound.
-func (d *Document) ReferenceValuesCollateral(format string) (*SigstoreCollateral, error) {
-	entry := d.findCollateral(RoleReferenceValues, format, nil)
-	if entry == nil {
-		return nil, fmt.Errorf("%w: document carries no %s reference-values entry", ErrCollateralNotFound, format)
-	}
-	return decodeCollateral[SigstoreCollateral](entry)
-}
-
-// FreshnessCollateral returns the reference-values freshness payload with the
-// requested artifact ID. Parse validates collateral ID uniqueness.
-func (d *Document) FreshnessCollateral(id string) (*FreshnessCollateral, error) {
-	entry := d.findCollateral(RoleReferenceValues, CollateralSigstoreFreshnessV1Format, func(entry *CollateralEntry) bool {
-		return entry.ID == id
-	})
-	if entry == nil {
-		return nil, fmt.Errorf("%w: document carries no %s reference-values entry %q", ErrCollateralNotFound, CollateralSigstoreFreshnessV1Format, id)
-	}
-	return decodeCollateral[FreshnessCollateral](entry)
-}
-
-// findCollateral selects the first matching entry; Parse validates uniqueness.
-func (d *Document) findCollateral(role, format string, match func(*CollateralEntry) bool) *CollateralEntry {
-	for i := range d.Collateral {
-		entry := &d.Collateral[i]
-		if entry.Role == role && entry.Format == format && (match == nil || match(entry)) {
-			return entry
-		}
-	}
-	return nil
-}
-
-func decodeCollateral[T any](entry *CollateralEntry) (*T, error) {
-	var payload T
-	if err := json.Unmarshal(entry.Data, &payload, json.RejectUnknownMembers(true)); err != nil {
-		return nil, fmt.Errorf("parsing %s collateral entry %q: %w", entry.Format, entry.ID, err)
-	}
-	return &payload, nil
-}
-
-// ErrCollateralNotFound reports that a document carries no collateral entry
-// of the requested role and format. Low-level callers may use errors.Is to
-// distinguish absence from malformed collateral. Verification classifies missing
-// required collateral as an AttestationError while preserving this cause.
-var ErrCollateralNotFound = errors.New("collateral entry not found")
