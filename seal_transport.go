@@ -30,6 +30,7 @@ const (
 	cachePrefixHeader = "X-Tinfoil-Cache-Prefix"
 	sealHeader        = "X-Tinfoil-Seal"
 	maxSealRedirects  = 3
+	maxRerouted       = 1024
 
 	catalogPath         = "/catalog"
 	catalogFetchTimeout = 10 * time.Second
@@ -135,13 +136,16 @@ func (g *Gateway) HTTPClient() *http.Client {
 
 type replica struct{ host, repo string }
 
-// sealTransport picks each request's replica from its cache prefix, so a
-// conversation stays on one warm replica.
+// sealTransport picks each request's replica from its cache prefix, or from
+// where the gateway last rerouted that prefix, so a conversation stays on one
+// warm replica.
 type sealTransport struct {
 	build    func(replica) (http.RoundTripper, error)
 	catalog  func() Catalog
 	secret   string
 	enclaves sync.Map // replica to http.RoundTripper
+	mu       sync.Mutex
+	rerouted map[string]string // cache prefix to host
 }
 
 func (t *sealTransport) enclave(r replica) (http.RoundTripper, error) {
@@ -156,8 +160,26 @@ func (t *sealTransport) enclave(r replica) (http.RoundTripper, error) {
 	return rt, nil
 }
 
+func (t *sealTransport) reroutedHost(prefix string) string {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.rerouted[prefix]
+}
+
+func (t *sealTransport) remember(prefix, host string) {
+	if prefix == "" {
+		return
+	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if t.rerouted == nil || len(t.rerouted) == maxRerouted {
+		t.rerouted = map[string]string{}
+	}
+	t.rerouted[prefix] = host
+}
+
 // rank orders hosts by rendezvous score for a cache prefix, or randomly without one.
-func rank(hosts []string, prefix string) []string {
+func rank(hosts []string, prefix, first string) []string {
 	hosts = slices.Clone(hosts)
 	if prefix == "" {
 		rand.Shuffle(len(hosts), func(i, j int) { hosts[i], hosts[j] = hosts[j], hosts[i] })
@@ -168,6 +190,10 @@ func rank(hosts []string, prefix string) []string {
 		return binary.BigEndian.Uint64(sum[:])
 	}
 	slices.SortFunc(hosts, func(a, b string) int { return cmp.Compare(score(b), score(a)) })
+	if i := slices.Index(hosts, first); i > 0 {
+		copy(hosts[1:i+1], hosts[:i])
+		hosts[0] = first
+	}
 	return hosts
 }
 
@@ -186,7 +212,8 @@ func (t *sealTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	var host string
 	var transport http.RoundTripper
 	var err error
-	for _, host = range rank(entry.Hosts, req.Header.Get(cachePrefixHeader)) {
+	prefix := req.Header.Get(cachePrefixHeader)
+	for _, host = range rank(entry.Hosts, prefix, t.reroutedHost(prefix)) {
 		if transport, err = t.enclave(replica{host, entry.Repo}); err == nil {
 			break
 		}
@@ -219,6 +246,7 @@ func (t *sealTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 		if transport, err = t.enclave(replica{routed, entry.Repo}); err != nil {
 			return nil, fmt.Errorf("following gateway route to enclave %s: %w", routed, err)
 		}
+		t.remember(prefix, routed)
 		host = routed
 	}
 }
