@@ -9,8 +9,6 @@ import (
 	"github.com/tinfoilsh/tinfoil-go/verifier"
 	"github.com/tinfoilsh/tinfoil-go/verifier/document"
 	"github.com/tinfoilsh/tinfoil-go/verifier/measurement"
-	"github.com/tinfoilsh/tinfoil-go/verifier/provenance"
-	"github.com/tinfoilsh/tinfoil-go/verifier/quote"
 )
 
 // VerifiedDocumentV3 contains verified measurements, transport keys, and witness expiry.
@@ -51,16 +49,7 @@ func (v *VerifiedDocumentV3) CryptoMaterialData(id, format string) (string, erro
 	if v == nil {
 		return "", &ConfigurationError{Err: fmt.Errorf("verified document is required")}
 	}
-	for _, item := range v.CryptoMaterial {
-		if item.ID != id {
-			continue
-		}
-		if item.Format != format {
-			return "", &AttestationError{Err: fmt.Errorf("crypto_material item %q has format %q, want %q", id, item.Format, format)}
-		}
-		return item.Data, nil
-	}
-	return "", &AttestationError{Err: fmt.Errorf("document endorses no %q crypto material", id)}
+	return verifier.CryptoMaterialData(v.CryptoMaterial, id, format)
 }
 
 func (v *VerifiedDocumentV3) validateTransportKeys() error {
@@ -79,86 +68,37 @@ func (v *VerifiedDocumentV3) validateTransportKeys() error {
 // VerifyDocumentV3 verifies a nonce-bound document with the supplied policy.
 // A nil policy uses defaults. repo is a trusted owner/name[@tag][@sha256:digest].
 // Callers must bind traffic to the returned keys and enforce FreshnessExpiresAt.
+//
+// Go callers should prefer verifier.Verifier, which this wraps: it takes
+// functional options rather than the struct the Swift bindings need, and
+// returns only what the document proved. This entry point stays for the
+// gomobile surface, which cannot express either, and for callers already
+// built on it.
 func VerifyDocumentV3(docBytes, nonce []byte, repo string, opts *VerificationOptions) (*VerifiedDocumentV3, error) {
-	if _, _, _, err := provenance.ParseReference(repo); err != nil {
-		return nil, &ConfigurationError{Err: err}
-	}
-	options, err := opts.normalized()
+	core, err := opts.verifier()
 	if err != nil {
 		return nil, err
 	}
-	doc, expectedReportData, err := document.Check(docBytes, nonce)
+	verified, err := core.VerifyV3(docBytes, nonce, repo)
 	if err != nil {
 		return nil, err
 	}
+	return fromVerification(verified), nil
+}
 
-	code, endorsements, freshnessExpiresAt, err := authenticateReferenceValues(doc, repo, options.FreshnessMaxAge)
-	if err != nil {
-		return nil, verifier.WrapAttestation(fmt.Errorf("reference values: %w", err))
-	}
-
-	_, authenticated, err := quote.Verify(doc, endorsements.Artifact, code.Measurement, options.PinnedRegisters, code.Shape, expectedReportData, nil)
-	if err != nil {
-		return nil, err
-	}
-
+// fromVerification copies what the document proved. The fields describing the
+// act of verifying — ConfigRepo, EnclaveHost, Verifier, VerifiedAt — are left
+// unset; fetchVerification fills them, and VerifyDocumentV3 leaves them empty
+// because it contacts no enclave.
+func fromVerification(v *verifier.Verification) *VerifiedDocumentV3 {
 	return &VerifiedDocumentV3{
-		CodeDigest:         code.Digest,
-		CodeTag:            code.Tag,
-		CodeMeasurement:    code.Measurement,
-		EnclaveMeasurement: authenticated.Measurement,
-		CryptoMaterial:     doc.CryptoMaterialItems(),
-		FreshnessExpiresAt: freshnessExpiresAt,
-	}, nil
-}
-
-func authenticateReferenceValues(doc *document.Document, repo string, maxAge time.Duration) (*provenance.Code, *provenance.PlatformEndorsements, time.Time, error) {
-	codeRef, err := doc.ReferenceValuesCollateral(document.CollateralSigstoreCodeV1Format)
-	if err != nil {
-		return nil, nil, time.Time{}, err
+		CodeDigest:         v.CodeDigest,
+		CodeTag:            v.CodeTag,
+		CodeMeasurement:    v.CodeMeasurement,
+		EnclaveMeasurement: v.EnclaveMeasurement,
+		CryptoMaterial:     v.CryptoMaterial,
+		FreshnessExpiresAt: v.FreshnessExpiresAt,
 	}
-	code, err := provenance.AuthenticateCode(codeRef.SigstoreBundle, repo, codeRef.Tag, codeRef.Digest)
-	if err != nil {
-		return nil, nil, time.Time{}, fmt.Errorf("verifying code measurement: %w", err)
-	}
-	codeFreshnessRef, err := doc.FreshnessCollateral(document.FreshnessCollateralIDCode)
-	if err != nil {
-		return nil, nil, time.Time{}, err
-	}
-	appraisalTime := time.Now()
-	codeWitnessedAt, err := provenance.AuthenticateFreshness(codeFreshnessRef.SigstoreBundle, &code.AuthenticatedArtifact, appraisalTime, maxAge)
-	if err != nil {
-		return nil, nil, time.Time{}, fmt.Errorf("verifying code freshness: %w", err)
-	}
-
-	platformRef, err := doc.ReferenceValuesCollateral(document.CollateralSigstorePlatformV1Format)
-	if err != nil {
-		return nil, nil, time.Time{}, err
-	}
-	endorsements, err := provenance.AuthenticatePlatformEndorsements(platformRef.SigstoreBundle, platformRef.Repo, platformRef.Tag, platformRef.Digest)
-	if err != nil {
-		return nil, nil, time.Time{}, fmt.Errorf("verifying platform endorsements: %w", err)
-	}
-	freshnessRef, err := doc.FreshnessCollateral(document.FreshnessCollateralIDPlatform)
-	if err != nil {
-		return nil, nil, time.Time{}, err
-	}
-	platformWitnessedAt, err := provenance.AuthenticateFreshness(freshnessRef.SigstoreBundle, &endorsements.AuthenticatedArtifact, appraisalTime, maxAge)
-	if err != nil {
-		return nil, nil, time.Time{}, fmt.Errorf("verifying platform freshness: %w", err)
-	}
-
-	return code, endorsements, freshnessExpiration(codeWitnessedAt, platformWitnessedAt, maxAge), nil
-}
-
-// freshnessExpiration uses authenticated witness times, never local verification time.
-func freshnessExpiration(codeWitnessedAt, platformWitnessedAt time.Time, maxAge time.Duration) time.Time {
-	expiresAt := codeWitnessedAt.Add(maxAge)
-	platformExpiresAt := platformWitnessedAt.Add(maxAge)
-	if platformExpiresAt.Before(expiresAt) {
-		expiresAt = platformExpiresAt
-	}
-	return expiresAt
 }
 
 func (s *SecureClient) fetchVerification() (*VerifiedDocumentV3, error) {
@@ -171,10 +111,11 @@ func (s *SecureClient) fetchVerification() (*VerifiedDocumentV3, error) {
 		return nil, err
 	}
 
-	verified, err := VerifyDocumentV3(docBytes, nonce, s.repo, &s.options)
+	core, err := s.core.VerifyV3(docBytes, nonce, s.repo)
 	if err != nil {
 		return nil, err
 	}
+	verified := fromVerification(core)
 
 	if err := verified.validateTransportKeys(); err != nil {
 		return nil, err

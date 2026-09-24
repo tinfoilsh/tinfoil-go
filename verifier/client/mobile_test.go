@@ -27,7 +27,8 @@ func TestMobileVerificationOptions(t *testing.T) {
 		require.NoError(t, err)
 		mobileClient, err := NewSecureClient("enclave.example", "org/repo", parsed)
 		require.NoError(t, err)
-		require.Equal(t, goClient.options, mobileClient.options)
+		require.Equal(t, goClient.core.FreshnessMaxAge(), mobileClient.core.FreshnessMaxAge())
+		require.Equal(t, goClient.core.PinnedRegisters(), mobileClient.core.PinnedRegisters())
 	}
 }
 
