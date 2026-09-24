@@ -1,4 +1,4 @@
-package envelope
+package document
 
 import (
 	"bytes"
@@ -21,7 +21,7 @@ func testNonce() []byte {
 }
 
 // buildTestDocument assembles a well-formed document around a dummy quote
-// so envelope logic can be tested without hardware. This is a test-local
+// so document logic can be tested without hardware. This is a test-local
 // reimplementation of what production builders (cvmimage) do: serialize the
 // endorsed sections once, hash those bytes, base64-wrap them, and walk the
 // REPORT_DATA ladder.

@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/tinfoilsh/tinfoil-go/verifier"
-	"github.com/tinfoilsh/tinfoil-go/verifier/envelope"
+	"github.com/tinfoilsh/tinfoil-go/verifier/document"
 	"github.com/tinfoilsh/tinfoil-go/verifier/measurement"
 	"github.com/tinfoilsh/tinfoil-go/verifier/provenance"
 	"github.com/tinfoilsh/tinfoil-go/verifier/quote"
@@ -26,7 +26,7 @@ type VerifiedDocumentV3 struct {
 	// proven to match the expectations.
 	EnclaveMeasurement *measurement.Measurement
 	// CryptoMaterial holds the endorsed key items (hash-bound into the quote).
-	CryptoMaterial []envelope.CryptoMaterialItem
+	CryptoMaterial []document.CryptoMaterialItem
 	// FreshnessExpiresAt is the earlier authenticated code/platform witness
 	// deadline. Cached verification must not authorize new requests at or
 	// after this time; re-verifying the same witness does not extend it.
@@ -36,13 +36,13 @@ type VerifiedDocumentV3 struct {
 // TLSPublicKeyFP returns the endorsed TLS key fingerprint (the id=tls
 // crypto_material entry), or an error if the document does not endorse one.
 func (v *VerifiedDocumentV3) TLSPublicKeyFP() (string, error) {
-	return v.CryptoMaterialData(envelope.CryptoMaterialIDTLS, envelope.KeySPKIFPSHA256V1Format)
+	return v.CryptoMaterialData(document.CryptoMaterialIDTLS, document.KeySPKIFPSHA256V1Format)
 }
 
 // HPKEPublicKey returns the endorsed HPKE public key (the id=hpke
 // crypto_material entry), or an error if the document does not endorse one.
 func (v *VerifiedDocumentV3) HPKEPublicKey() (string, error) {
-	return v.CryptoMaterialData(envelope.CryptoMaterialIDHPKE, envelope.KeyX25519HPKEV1Format)
+	return v.CryptoMaterialData(document.CryptoMaterialIDHPKE, document.KeyX25519HPKEV1Format)
 }
 
 // CryptoMaterialData returns the endorsed lowercase-hex data for exactly id and
@@ -68,7 +68,7 @@ func (v *VerifiedDocumentV3) validateTransportKeys() error {
 		return err
 	}
 	for _, item := range v.CryptoMaterial {
-		if item.ID == envelope.CryptoMaterialIDHPKE {
+		if item.ID == document.CryptoMaterialIDHPKE {
 			_, err := v.HPKEPublicKey()
 			return err
 		}
@@ -87,7 +87,7 @@ func VerifyDocumentV3(docBytes, nonce []byte, repo string, opts *VerificationOpt
 	if err != nil {
 		return nil, err
 	}
-	doc, expectedReportData, err := envelope.Check(docBytes, nonce)
+	doc, expectedReportData, err := document.Check(docBytes, nonce)
 	if err != nil {
 		return nil, err
 	}
@@ -112,8 +112,8 @@ func VerifyDocumentV3(docBytes, nonce []byte, repo string, opts *VerificationOpt
 	}, nil
 }
 
-func authenticateReferenceValues(doc *envelope.Document, repo string, maxAge time.Duration) (*provenance.Code, *provenance.PlatformEndorsements, time.Time, error) {
-	codeRef, err := doc.ReferenceValuesCollateral(envelope.CollateralSigstoreCodeV1Format)
+func authenticateReferenceValues(doc *document.Document, repo string, maxAge time.Duration) (*provenance.Code, *provenance.PlatformEndorsements, time.Time, error) {
+	codeRef, err := doc.ReferenceValuesCollateral(document.CollateralSigstoreCodeV1Format)
 	if err != nil {
 		return nil, nil, time.Time{}, err
 	}
@@ -121,7 +121,7 @@ func authenticateReferenceValues(doc *envelope.Document, repo string, maxAge tim
 	if err != nil {
 		return nil, nil, time.Time{}, fmt.Errorf("verifying code measurement: %w", err)
 	}
-	codeFreshnessRef, err := doc.FreshnessCollateral(envelope.FreshnessCollateralIDCode)
+	codeFreshnessRef, err := doc.FreshnessCollateral(document.FreshnessCollateralIDCode)
 	if err != nil {
 		return nil, nil, time.Time{}, err
 	}
@@ -131,7 +131,7 @@ func authenticateReferenceValues(doc *envelope.Document, repo string, maxAge tim
 		return nil, nil, time.Time{}, fmt.Errorf("verifying code freshness: %w", err)
 	}
 
-	platformRef, err := doc.ReferenceValuesCollateral(envelope.CollateralSigstorePlatformV1Format)
+	platformRef, err := doc.ReferenceValuesCollateral(document.CollateralSigstorePlatformV1Format)
 	if err != nil {
 		return nil, nil, time.Time{}, err
 	}
@@ -139,7 +139,7 @@ func authenticateReferenceValues(doc *envelope.Document, repo string, maxAge tim
 	if err != nil {
 		return nil, nil, time.Time{}, fmt.Errorf("verifying platform endorsements: %w", err)
 	}
-	freshnessRef, err := doc.FreshnessCollateral(envelope.FreshnessCollateralIDPlatform)
+	freshnessRef, err := doc.FreshnessCollateral(document.FreshnessCollateralIDPlatform)
 	if err != nil {
 		return nil, nil, time.Time{}, err
 	}
@@ -162,11 +162,11 @@ func freshnessExpiration(codeWitnessedAt, platformWitnessedAt time.Time, maxAge 
 }
 
 func (s *SecureClient) fetchVerification() (*VerifiedDocumentV3, error) {
-	nonce, err := envelope.RandomNonce()
+	nonce, err := document.RandomNonce()
 	if err != nil {
 		return nil, err
 	}
-	docBytes, err := envelope.Fetch(s.enclave, nonce)
+	docBytes, err := document.Fetch(s.enclave, nonce)
 	if err != nil {
 		return nil, err
 	}

@@ -18,7 +18,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 	ehbpidentity "github.com/tinfoilsh/encrypted-http-body-protocol/identity"
-	"github.com/tinfoilsh/tinfoil-go/verifier/envelope"
+	"github.com/tinfoilsh/tinfoil-go/verifier/document"
 )
 
 type roundTripFunc func(*http.Request) (*http.Response, error)
@@ -28,9 +28,9 @@ func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) { retu
 func testState(deadline time.Time, key string) *VerifiedDocumentV3 {
 	return &VerifiedDocumentV3{
 		CodeTag: key, FreshnessExpiresAt: deadline,
-		CryptoMaterial: []envelope.CryptoMaterialItem{
-			{ID: envelope.CryptoMaterialIDTLS, Format: envelope.KeySPKIFPSHA256V1Format, Data: key},
-			{ID: envelope.CryptoMaterialIDHPKE, Format: envelope.KeyX25519HPKEV1Format, Data: key},
+		CryptoMaterial: []document.CryptoMaterialItem{
+			{ID: document.CryptoMaterialIDTLS, Format: document.KeySPKIFPSHA256V1Format, Data: key},
+			{ID: document.CryptoMaterialIDHPKE, Format: document.KeyX25519HPKEV1Format, Data: key},
 		},
 	}
 }

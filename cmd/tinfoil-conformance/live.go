@@ -10,7 +10,7 @@ import (
 
 	"github.com/tinfoilsh/tinfoil-go/verifier/client"
 	"github.com/tinfoilsh/tinfoil-go/verifier/conformance"
-	"github.com/tinfoilsh/tinfoil-go/verifier/envelope"
+	"github.com/tinfoilsh/tinfoil-go/verifier/document"
 )
 
 const stageLive = "live-verify"
@@ -34,12 +34,12 @@ func runLive() int {
 		return conformance.ExitMalformed
 	}
 
-	nonce, err := envelope.RandomNonce()
+	nonce, err := document.RandomNonce()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "nonce: %v\n", err)
 		return conformance.ExitInternal
 	}
-	doc, err := envelope.Fetch(req.Host, nonce)
+	doc, err := document.Fetch(req.Host, nonce)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "fetching attestation from %s: %v\n", req.Host, err)
 		return conformance.ExitInternal

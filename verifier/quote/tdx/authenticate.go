@@ -23,7 +23,7 @@ import (
 	tdxtrust "github.com/google/go-tdx-guest/verify/trust"
 
 	"github.com/tinfoilsh/tinfoil-go/verifier"
-	"github.com/tinfoilsh/tinfoil-go/verifier/envelope"
+	"github.com/tinfoilsh/tinfoil-go/verifier/document"
 	"github.com/tinfoilsh/tinfoil-go/verifier/measurement"
 )
 
@@ -47,7 +47,7 @@ func (q *Quote) Identity() string { return q.identity }
 // SGX root, replaying the document's captured PCS collateral — no network
 // fetches. Callers must assemble a policy and validate before trusting the
 // platform.
-func Authenticate(doc *envelope.Document) (result *Quote, err error) {
+func Authenticate(doc *document.Document) (result *Quote, err error) {
 	defer func() { err = verifier.WrapAttestation(err) }()
 	if doc == nil {
 		return nil, &verifier.ConfigurationError{Err: fmt.Errorf("document is required")}
@@ -81,11 +81,11 @@ func Authenticate(doc *envelope.Document) (result *Quote, err error) {
 
 	// The recorder observes the tcbEvaluationDataNumber of the collateral
 	// actually used, so the policy floor is enforced on verified bytes.
-	entry, ok := doc.EndorsementCollateral(envelope.CollateralIntelPCSV1Format, envelope.SubjectCPU)
+	entry, ok := doc.EndorsementCollateral(document.CollateralIntelPCSV1Format, document.SubjectCPU)
 	if !ok {
 		return nil, fmt.Errorf("document carries no intel-pcs endorsement collateral for the cpu")
 	}
-	var data envelope.IntelPCSCollateral
+	var data document.IntelPCSCollateral
 	if err := json.Unmarshal(entry.Data, &data, json.RejectUnknownMembers(true)); err != nil {
 		return nil, fmt.Errorf("parsing intel-pcs collateral entry %q: %w", entry.ID, err)
 	}
@@ -150,11 +150,11 @@ func pcsCollateralKey(rawURL string) (string, error) {
 }
 
 type pcsReplayGetter struct {
-	responses map[string]*envelope.PCSResponse
+	responses map[string]*document.PCSResponse
 }
 
-func newPCSReplayGetter(responses []envelope.PCSResponse) (*pcsReplayGetter, error) {
-	m := make(map[string]*envelope.PCSResponse, len(responses))
+func newPCSReplayGetter(responses []document.PCSResponse) (*pcsReplayGetter, error) {
+	m := make(map[string]*document.PCSResponse, len(responses))
 	for i := range responses {
 		key, err := pcsCollateralKey(responses[i].URL)
 		if err != nil {

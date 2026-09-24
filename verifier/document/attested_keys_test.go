@@ -1,4 +1,4 @@
-package envelope
+package document
 
 import (
 	"encoding/hex"

@@ -143,7 +143,7 @@ func TestValidate(t *testing.T) {
 	require.NoError(t, err)
 	assert.Error(t, e.Validate(quote))
 
-	// A REPORT_DATA differing from the envelope's expectation must reject.
+	// A REPORT_DATA differing from the document's expectation must reject.
 	badReportData := reportData
 	badReportData[0] ^= 1
 	e, _, err = Assemble(a, matching, shape, quote, code, badReportData)
