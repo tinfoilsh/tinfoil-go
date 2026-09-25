@@ -44,21 +44,17 @@ func (t *routerTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 		closeRequestBody(req)
 		return nil, &ConfigurationError{Err: fmt.Errorf("refusing to send request to %q: client is bound to enclave %q", origin, selected.secure.Enclave())}
 	}
-	recovery := &recoveryTransport{transport: t.bound(selected)}
+	recovery := &recoveryTransport{transport: &enclaveDestination{client: selected, proxy: t.proxy}}
 	if t.selectNew != nil {
 		recovery.recover = func(ctx context.Context) (http.RoundTripper, error) {
 			next, err := t.reselect(ctx, selected)
 			if err != nil {
 				return nil, err
 			}
-			return t.bound(next), nil
+			return &enclaveDestination{client: next, proxy: t.proxy}, nil
 		}
 	}
 	return recovery.RoundTrip(req)
-}
-
-func (t *routerTransport) bound(selected *enclaveClient) http.RoundTripper {
-	return &enclaveDestination{client: selected, proxy: t.proxy}
 }
 
 type enclaveDestination struct {
@@ -72,6 +68,7 @@ func (t *enclaveDestination) RoundTrip(req *http.Request) (*http.Response, error
 		req.URL.Scheme, req.URL.Host = "https", t.client.secure.Enclave()
 	}
 	req.Host = req.URL.Host
+	req.Header.Set(sealHeader, t.client.secure.Enclave())
 	return t.client.transport.RoundTrip(req)
 }
 

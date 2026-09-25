@@ -42,6 +42,7 @@ func TestRouterRecoverySelectsIndependentClient(t *testing.T) {
 					}
 					require.Equal(t, wantHost, req.URL.Host)
 					require.Equal(t, wantHost, req.Host)
+					require.Equal(t, "next.example", req.Header.Get(sealHeader))
 					require.Equal(t, "/v1/chat?stream=true", req.URL.RequestURI())
 					require.Equal(t, "Bearer test", req.Header.Get("Authorization"))
 					body, err := io.ReadAll(req.Body)
@@ -62,10 +63,12 @@ func TestRouterRecoverySelectsIndependentClient(t *testing.T) {
 				}
 				req, _ := http.NewRequest(http.MethodPost, target+"/v1/chat?stream=true", strings.NewReader("payload"))
 				req.Header.Set("Authorization", "Bearer test")
+				req.Header.Set(sealHeader, "old.example")
 				_, err = transport.RoundTrip(req)
 				require.Equal(t, 1, selections)
 				require.Equal(t, "old.example", old.secure.Enclave(), "selection cannot mutate the original client")
 				require.Equal(t, target+"/v1/chat?stream=true", req.URL.String())
+				require.Equal(t, "old.example", req.Header.Get(sealHeader))
 				if recoveryErr != nil {
 					require.ErrorIs(t, err, first)
 					require.ErrorIs(t, err, last)
