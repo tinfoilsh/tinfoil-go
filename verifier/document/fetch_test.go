@@ -23,9 +23,9 @@ func TestFetchSizeLimitAndRedirects(t *testing.T) {
 	for _, size := range []int{limit, limit + 1} {
 		redirects := 0
 		http.DefaultClient = &http.Client{
-			CheckRedirect: func(*http.Request, []*http.Request) error { redirects++; return nil },
 			Transport: fetchTransport(func(r *http.Request) (*http.Response, error) {
 				if r.URL.Path != "/redirect" {
+					redirects++
 					return &http.Response{StatusCode: http.StatusFound, Header: http.Header{"Location": {"/redirect"}}, Body: http.NoBody}, nil
 				}
 				return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(strings.Repeat("x", size)))}, nil
@@ -65,4 +65,36 @@ func TestFetchTimeout(t *testing.T) {
 			require.Equal(t, timeout, time.Since(start))
 		})
 	}
+}
+
+func TestFetchRejectsNonHTTPSRedirect(t *testing.T) {
+	original := http.DefaultClient
+	t.Cleanup(func() { http.DefaultClient = original })
+	var schemes []string
+	http.DefaultClient = &http.Client{
+		CheckRedirect: func(*http.Request, []*http.Request) error { return nil },
+		Transport: fetchTransport(func(r *http.Request) (*http.Response, error) {
+			schemes = append(schemes, r.URL.Scheme)
+			if r.URL.Scheme != "https" {
+				return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader("plaintext document"))}, nil
+			}
+			return &http.Response{StatusCode: http.StatusFound, Header: http.Header{"Location": {"http://enclave.example/redirect"}}, Body: http.NoBody}, nil
+		}),
+	}
+	_, err := Fetch("enclave.example", testNonce())
+	require.ErrorContains(t, err, "refusing redirect to non-HTTPS URL")
+	require.Equal(t, []string{"https"}, schemes)
+}
+
+func TestFetchKeepsDefaultRedirectLimit(t *testing.T) {
+	original := http.DefaultClient
+	t.Cleanup(func() { http.DefaultClient = original })
+	requests := 0
+	http.DefaultClient = &http.Client{Transport: fetchTransport(func(r *http.Request) (*http.Response, error) {
+		requests++
+		return &http.Response{StatusCode: http.StatusFound, Header: http.Header{"Location": {"/loop"}}, Body: http.NoBody}, nil
+	})}
+	_, err := Fetch("enclave.example", testNonce())
+	require.ErrorContains(t, err, "stopped after 10 redirects")
+	require.Equal(t, 10, requests)
 }

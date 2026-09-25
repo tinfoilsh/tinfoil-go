@@ -3,6 +3,7 @@ package document
 import (
 	"context"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -14,7 +15,8 @@ import (
 
 // Fetch retrieves a v3 attestation document from an enclave host using a
 // fresh challenge nonce, returning the raw response bytes for verification.
-// It uses http.DefaultClient with a 30-second deadline and a 32 MiB body limit.
+// It uses http.DefaultClient with a 30-second deadline and a 32 MiB body limit,
+// and follows redirects only to HTTPS URLs.
 func Fetch(host string, nonce []byte) ([]byte, error) {
 	return FetchVia(host, "", nonce)
 }
@@ -44,7 +46,17 @@ func FetchVia(host, relay string, nonce []byte) (result []byte, err error) {
 	if err != nil {
 		return nil, &errs.ConfigurationError{Err: fmt.Errorf("invalid enclave host: %w", err)}
 	}
-	resp, err := http.DefaultClient.Do(req)
+	client := *http.DefaultClient
+	client.CheckRedirect = func(req *http.Request, via []*http.Request) error {
+		if req.URL.Scheme != "https" {
+			return fmt.Errorf("refusing redirect to non-HTTPS URL %s", req.URL.Redacted())
+		}
+		if len(via) >= 10 {
+			return errors.New("stopped after 10 redirects")
+		}
+		return nil
+	}
+	resp, err := client.Do(req)
 	if err != nil {
 		return nil, err
 	}
