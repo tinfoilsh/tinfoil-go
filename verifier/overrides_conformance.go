@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/tinfoilsh/tinfoil-go/verifier/provenance"
 	"github.com/tinfoilsh/tinfoil-go/verifier/quote"
 )
 
@@ -28,6 +29,25 @@ func DangerousTestOnlyWithClock(now func() time.Time) Option {
 			return fmt.Errorf("clock must not be nil")
 		}
 		v.now = now
+		return nil
+	}
+}
+
+// DangerousTestOnlyWithSigstoreRoot replaces the embedded Sigstore trusted
+// root, so the conformance harness can authenticate reference values signed by
+// a synthetic CA. A supplied root destroys the guarantee that those values came
+// from Tinfoil's release workflows, which is why this exists only in the
+// conformance build. A nil rootJSON keeps the embedded root.
+func DangerousTestOnlyWithSigstoreRoot(rootJSON []byte) Option {
+	return func(v *Verifier) error {
+		if rootJSON == nil {
+			return nil
+		}
+		client, err := provenance.NewClientFromJSON(rootJSON)
+		if err != nil {
+			return err
+		}
+		v.provenance = client
 		return nil
 	}
 }
