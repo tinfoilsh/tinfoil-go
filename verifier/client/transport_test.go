@@ -252,6 +252,16 @@ func TestKeyRejectionInvalidatesWithoutReplay(t *testing.T) {
 			require.Equal(t, 1, sends)
 			require.Zero(t, refreshes)
 			if s.state.rejected {
+				verify := s.verify
+				failure := errors.New("refresh failed")
+				s.verify = func() (*VerifiedDocumentV3, error) { return nil, failure }
+				req, _ = http.NewRequest(http.MethodGet, "https://enclave.example", nil)
+				_, err = transport.RoundTrip(req)
+				require.ErrorIs(t, err, failure)
+				require.True(t, s.state.rejected)
+				require.Equal(t, "old", s.Verification().CodeTag)
+				require.Equal(t, 1, sends, "failed refresh must not authorize the rejected state")
+				s.verify = verify
 				req, _ = http.NewRequest(http.MethodPost, "https://enclave.example", bytes.NewBufferString("another request"))
 				_, err = transport.RoundTrip(req)
 				require.ErrorIs(t, err, mode.err)

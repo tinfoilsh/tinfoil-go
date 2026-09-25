@@ -160,6 +160,7 @@ func secureHTTPClient(secureClient *client.SecureClient, mode TransportMode, bas
 			return nil, err
 		}
 	}
+	httpClient.Transport = &recoveryTransport{transport: httpClient.Transport}
 	return boundHTTPClient(httpClient, secureClient.Enclave(), baseURL, userCacheSecret)
 }
 

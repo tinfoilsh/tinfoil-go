@@ -2,6 +2,7 @@ package tinfoil
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
@@ -129,4 +130,32 @@ func TestRequestRecoveryDiscardsErrorResponses(t *testing.T) {
 			require.Equal(t, 1, body.closes)
 		}
 	}
+}
+
+func TestPreparedRequestBodyCanReplay(t *testing.T) {
+	var bodies []string
+	transport := &recoveryTransport{transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		body, err := io.ReadAll(req.Body)
+		req.Body.Close()
+		require.NoError(t, err)
+		bodies = append(bodies, string(body))
+		if len(bodies) == 1 {
+			return nil, testKeyRejection{errors.New("rotated")}
+		}
+		return newResponse(http.StatusOK, "ok"), nil
+	})}
+	hc, err := boundHTTPClient(&http.Client{Transport: transport}, "enclave.example", "", "cache-secret")
+	require.NoError(t, err)
+	req, err := http.NewRequest(http.MethodPost, "https://enclave.example/v1/chat/completions", io.NopCloser(strings.NewReader(`{"model":"gpt-oss-120b"}`)))
+	require.NoError(t, err)
+	require.Nil(t, req.GetBody)
+	resp, err := hc.Do(req)
+	require.NoError(t, err)
+	resp.Body.Close()
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	require.Len(t, bodies, 2)
+	require.Equal(t, bodies[0], bodies[1])
+	var fields map[string]any
+	require.NoError(t, json.Unmarshal([]byte(bodies[1]), &fields))
+	require.Equal(t, "cache-secret", fields[userCacheSecretField])
 }
