@@ -96,6 +96,9 @@ func (t *routerTransport) reselect(ctx context.Context, observed *enclaveClient)
 			t.selecting = nil
 			close(call.done)
 			t.mu.Unlock()
+			if err == nil {
+				closeIdleConnections(observed.transport)
+			}
 		}()
 	}
 	t.mu.Unlock()
@@ -108,7 +111,5 @@ func (t *routerTransport) reselect(ctx context.Context, observed *enclaveClient)
 }
 
 func (t *routerTransport) CloseIdleConnections() {
-	if closer, ok := t.current().transport.(interface{ CloseIdleConnections() }); ok {
-		closer.CloseIdleConnections()
-	}
+	closeIdleConnections(t.current().transport)
 }
