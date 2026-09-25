@@ -42,14 +42,25 @@ type Verifier struct {
 	pinnedRegisters *measurement.Measurement
 	freshnessMaxAge time.Duration
 	now             func() time.Time
+
+	// provenance authenticates reference values against its own copy of the
+	// trusted root. New builds one from the embedded root; only the
+	// conformance build can replace it.
+	provenance *provenance.Client
 }
 
 // New builds a Verifier from opts. With no options it appraises against the
 // release measurements alone, with the seven-day freshness bound.
 func New(opts ...Option) (*Verifier, error) {
+	// Build default provenance.Client with embedded roots
+	provenanceClient, err := provenance.NewDefaultClient()
+	if err != nil {
+		return nil, configurationError(err)
+	}
 	v := &Verifier{
 		freshnessMaxAge: provenance.MaxFreshnessAge,
 		now:             time.Now,
+		provenance:      provenanceClient,
 	}
 	for _, opt := range opts {
 		if opt == nil {
@@ -77,8 +88,8 @@ func (v *Verifier) PinnedRegisters() *measurement.Measurement {
 // nonce it generated, and repo. On success it must bind its traffic to the
 // returned keys and stop authorizing new requests at FreshnessExpiresAt.
 func (v *Verifier) VerifyV3(docBytes, nonce []byte, repo string) (*Verification, error) {
-	if v == nil {
-		return nil, &errs.ConfigurationError{Err: fmt.Errorf("verifier is required")}
+	if v == nil || v.now == nil || v.provenance == nil {
+		return nil, &errs.ConfigurationError{Err: fmt.Errorf("verifier must be built with New")}
 	}
 	if _, _, _, err := provenance.ParseReference(repo); err != nil {
 		return nil, &errs.ConfigurationError{Err: err}
@@ -117,7 +128,7 @@ func (v *Verifier) authenticateReferenceValues(doc *document.Document, repo stri
 	if err != nil {
 		return nil, nil, time.Time{}, err
 	}
-	code, err := provenance.AuthenticateCode(codeRef.SigstoreBundle, repo, codeRef.Tag, codeRef.Digest)
+	code, err := v.provenance.AuthenticateCode(codeRef.SigstoreBundle, repo, codeRef.Tag, codeRef.Digest)
 	if err != nil {
 		return nil, nil, time.Time{}, fmt.Errorf("verifying code measurement: %w", err)
 	}
@@ -125,7 +136,7 @@ func (v *Verifier) authenticateReferenceValues(doc *document.Document, repo stri
 	if err != nil {
 		return nil, nil, time.Time{}, err
 	}
-	codeWitnessedAt, err := provenance.AuthenticateFreshness(codeFreshnessRef.SigstoreBundle, &code.AuthenticatedArtifact, appraisalTime, v.freshnessMaxAge)
+	codeWitnessedAt, err := v.provenance.AuthenticateFreshness(codeFreshnessRef.SigstoreBundle, &code.AuthenticatedArtifact, appraisalTime, v.freshnessMaxAge)
 	if err != nil {
 		return nil, nil, time.Time{}, fmt.Errorf("verifying code freshness: %w", err)
 	}
@@ -134,7 +145,7 @@ func (v *Verifier) authenticateReferenceValues(doc *document.Document, repo stri
 	if err != nil {
 		return nil, nil, time.Time{}, err
 	}
-	endorsements, err := provenance.AuthenticatePlatformEndorsements(platformRef.SigstoreBundle, platformRef.Repo, platformRef.Tag, platformRef.Digest)
+	endorsements, err := v.provenance.AuthenticatePlatformEndorsements(platformRef.SigstoreBundle, platformRef.Repo, platformRef.Tag, platformRef.Digest)
 	if err != nil {
 		return nil, nil, time.Time{}, fmt.Errorf("verifying platform endorsements: %w", err)
 	}
@@ -142,7 +153,7 @@ func (v *Verifier) authenticateReferenceValues(doc *document.Document, repo stri
 	if err != nil {
 		return nil, nil, time.Time{}, err
 	}
-	platformWitnessedAt, err := provenance.AuthenticateFreshness(freshnessRef.SigstoreBundle, &endorsements.AuthenticatedArtifact, appraisalTime, v.freshnessMaxAge)
+	platformWitnessedAt, err := v.provenance.AuthenticateFreshness(freshnessRef.SigstoreBundle, &endorsements.AuthenticatedArtifact, appraisalTime, v.freshnessMaxAge)
 	if err != nil {
 		return nil, nil, time.Time{}, fmt.Errorf("verifying platform freshness: %w", err)
 	}

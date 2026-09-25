@@ -89,14 +89,18 @@ func TestNewIgnoresNilOption(t *testing.T) {
 	assert.Equal(t, time.Hour, v.FreshnessMaxAge())
 }
 
-// A caller that ignores New's error holds a nil *Verifier. Verifying with it
-// must report a configuration error rather than panicking once a well-formed
-// document gets past the parse and the receiver is first dereferenced.
-func TestVerifyV3RejectsNilVerifier(t *testing.T) {
-	var v *Verifier
-	verified, err := v.VerifyV3([]byte("{}"), make([]byte, 32), "org/repo")
-	require.Nil(t, verified)
-	var configuration *errs.ConfigurationError
-	require.ErrorAs(t, err, &configuration)
-	require.ErrorContains(t, err, "verifier is required")
+// A caller that ignores New's error holds a nil *Verifier, and a zero value
+// carries neither a trust root nor a clock. Verifying with either must report a
+// configuration error rather than panicking once a well-formed document gets
+// past the parse and the receiver is first dereferenced.
+func TestVerifyV3RejectsUnbuiltVerifier(t *testing.T) {
+	for name, v := range map[string]*Verifier{"nil": nil, "zero value": {}} {
+		t.Run(name, func(t *testing.T) {
+			verified, err := v.VerifyV3([]byte("{}"), make([]byte, 32), "org/repo")
+			require.Nil(t, verified)
+			var configuration *errs.ConfigurationError
+			require.ErrorAs(t, err, &configuration)
+			require.ErrorContains(t, err, "verifier must be built with New")
+		})
+	}
 }
