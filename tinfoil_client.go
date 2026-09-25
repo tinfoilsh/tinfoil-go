@@ -32,6 +32,8 @@ func createClientFromSecureClient(secureClient *client.SecureClient, mode Transp
 		return nil, err
 	}
 
+	httpClient.Transport = &recoveryTransport{transport: httpClient.Transport}
+
 	resolvedBaseURL := baseURL
 	if resolvedBaseURL == "" {
 		resolvedBaseURL = fmt.Sprintf("https://%s/v1/", secureClient.Enclave())

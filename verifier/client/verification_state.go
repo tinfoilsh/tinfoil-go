@@ -29,14 +29,13 @@ type verificationCall struct {
 }
 
 // verifiedState shares one refresh (including its failure) across all waiters.
-// A key-rotation retry can reuse a newer snapshot installed by another caller.
-func (s *SecureClient) verifiedState(ctx context.Context, observed *enclaveState, force bool, retries int) (*enclaveState, error) {
+func (s *SecureClient) verifiedState(ctx context.Context, force bool, retries int) (*enclaveState, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
 	s.stateMu.Lock()
 	state := s.state
-	if state != nil && state.valid() && (!force || observed != nil && state != observed) {
+	if state != nil && state.valid() && !force {
 		s.stateMu.Unlock()
 		return state, nil
 	}
