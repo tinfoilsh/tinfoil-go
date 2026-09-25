@@ -18,6 +18,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/tinfoilsh/tinfoil-go/verifier"
 	"github.com/tinfoilsh/tinfoil-go/verifier/document"
 	"github.com/tinfoilsh/tinfoil-go/verifier/measurement"
 	"github.com/tinfoilsh/tinfoil-go/verifier/provenance"
@@ -131,17 +132,24 @@ func Run(stage string, in Input) (Output, int) {
 	if err != nil {
 		return malformed(stage)
 	}
-	prov, err := newProvAuth(rts.sigstore)
+	prov, err := newProvClient(rts.sigstore)
 	if err != nil {
 		return malformed(stage)
 	}
 	quoteOpts := &quote.Options{}
 	quoteOpts.DangerousTestOnlySetClock(appraisal)
 	quoteOpts.DangerousTestOnlySetRoots(rts.amd, rts.intel)
+	core, err := verifier.New(
+		verifier.DangerousTestOnlyWithClock(func() time.Time { return appraisal }),
+		verifier.DangerousTestOnlyWithSigstoreRoot(rts.sigstore),
+	)
+	if err != nil {
+		return malformed(stage)
+	}
 
 	switch stage {
 	case StageVerify:
-		return verifyFull(doc, nonce, in.Repo, quoteOpts, prov, appraisal)
+		return verifyFull(doc, nonce, in.Repo, quoteOpts, core)
 	case StageCheckEnvelope:
 		if _, _, err := document.Check(doc, nonce); err != nil {
 			return reject(stage, "ENVELOPE_REJECTED")
@@ -156,7 +164,7 @@ func Run(stage string, in Input) (Output, int) {
 		if err != nil {
 			return reject(stage, "PROVENANCE_REJECTED")
 		}
-		code, err := prov.code(codeRef.SigstoreBundle, in.Repo, codeRef.Tag, codeRef.Digest)
+		code, err := prov.AuthenticateCode(codeRef.SigstoreBundle, in.Repo, codeRef.Tag, codeRef.Digest)
 		if err != nil {
 			return reject(stage, "PROVENANCE_REJECTED")
 		}
@@ -173,7 +181,7 @@ func Run(stage string, in Input) (Output, int) {
 		if err != nil {
 			return reject(stage, "PROVENANCE_REJECTED")
 		}
-		if _, err := prov.platform(platRef.SigstoreBundle, platRef.Repo, platRef.Tag, platRef.Digest); err != nil {
+		if _, err := prov.AuthenticatePlatformEndorsements(platRef.SigstoreBundle, platRef.Repo, platRef.Tag, platRef.Digest); err != nil {
 			return reject(stage, "PROVENANCE_REJECTED")
 		}
 		return Output{Stage: stage, Accepted: true}, ExitAccepted
@@ -195,12 +203,12 @@ func Run(stage string, in Input) (Output, int) {
 }
 
 // verifyFull composes the whole flow; the first failing step names the layer.
-func verifyFull(doc, nonce []byte, repo string, quoteOpts *quote.Options, prov provAuth, appraisal time.Time) (Output, int) {
+func verifyFull(doc, nonce []byte, repo string, quoteOpts *quote.Options, core *verifier.Verifier) (Output, int) {
 	parsed, reportData, err := document.Check(doc, nonce)
 	if err != nil {
 		return reject(StageVerify, "ENVELOPE_REJECTED")
 	}
-	code, endorsements, err := authReferenceValues(parsed, repo, prov, appraisal)
+	code, endorsements, _, err := core.ReferenceValues(parsed, repo)
 	if err != nil {
 		return reject(StageVerify, "PROVENANCE_REJECTED")
 	}
@@ -245,42 +253,6 @@ func boundKeys(doc *document.Document) (tlsFP, hpke string) {
 	return
 }
 
-// authReferenceValues authenticates the code and platform artifacts and their
-// freshness proofs, mirroring the production reference-values step.
-func authReferenceValues(doc *document.Document, repo string, prov provAuth, appraisal time.Time) (*provenance.Code, *provenance.PlatformEndorsements, error) {
-	codeRef, err := doc.ReferenceValuesCollateral(document.CollateralSigstoreCodeV1Format)
-	if err != nil {
-		return nil, nil, err
-	}
-	code, err := prov.code(codeRef.SigstoreBundle, repo, codeRef.Tag, codeRef.Digest)
-	if err != nil {
-		return nil, nil, err
-	}
-	codeFresh, err := doc.FreshnessCollateral(document.FreshnessCollateralIDCode)
-	if err != nil {
-		return nil, nil, err
-	}
-	if _, err := prov.freshness(codeFresh.SigstoreBundle, &code.AuthenticatedArtifact, appraisal, 0); err != nil {
-		return nil, nil, err
-	}
-	platRef, err := doc.ReferenceValuesCollateral(document.CollateralSigstorePlatformV1Format)
-	if err != nil {
-		return nil, nil, err
-	}
-	endorsements, err := prov.platform(platRef.SigstoreBundle, platRef.Repo, platRef.Tag, platRef.Digest)
-	if err != nil {
-		return nil, nil, err
-	}
-	platFresh, err := doc.FreshnessCollateral(document.FreshnessCollateralIDPlatform)
-	if err != nil {
-		return nil, nil, err
-	}
-	if _, err := prov.freshness(platFresh.SigstoreBundle, &endorsements.AuthenticatedArtifact, appraisal, 0); err != nil {
-		return nil, nil, err
-	}
-	return code, endorsements, nil
-}
-
 // roots are the injected synthetic anchors; a nil field selects the embedded
 // production root.
 type roots struct {
@@ -311,24 +283,19 @@ func (in Input) roots() (roots, error) {
 	return r, nil
 }
 
-// provAuth authenticates provenance against an injected Sigstore root, or the
-// embedded root when none was supplied. The package functions and the
-// per-client methods share signatures, so this is just method-value binding.
-type provAuth struct {
-	code      func(bundleJSON []byte, repo, tag, hexDigest string) (*provenance.Code, error)
-	platform  func(bundleJSON []byte, repo, tag, hexDigest string) (*provenance.PlatformEndorsements, error)
-	freshness func(bundleJSON []byte, expected *provenance.AuthenticatedArtifact, now time.Time, maxAge time.Duration) (time.Time, error)
-}
-
-func newProvAuth(sigstoreRootJSON []byte) (provAuth, error) {
+// newProvClient returns a provenance.Client that authenticates provenance
+// against an injected Sigstore root, or the embedded root when none was
+// supplied. The block stages drive provenance one layer at a time, so they
+// hold a provenance client rather than a whole verifier.
+func newProvClient(sigstoreRootJSON []byte) (*provenance.Client, error) {
 	if sigstoreRootJSON == nil {
-		return provAuth{provenance.AuthenticateCode, provenance.AuthenticatePlatformEndorsements, provenance.AuthenticateFreshness}, nil
+		return provenance.NewDefaultClient()
 	}
-	c, err := provenance.NewClientFromJSON(sigstoreRootJSON)
+	client, err := provenance.NewClientFromJSON(sigstoreRootJSON)
 	if err != nil {
-		return provAuth{}, fmt.Errorf("sigstore_trusted_root_json_b64: %w", err)
+		return nil, fmt.Errorf("sigstore_trusted_root_json_b64: %w", err)
 	}
-	return provAuth{c.AuthenticateCode, c.AuthenticatePlatformEndorsements, c.AuthenticateFreshness}, nil
+	return client, nil
 }
 
 func toMeasurement(m *measurement.Measurement) Measurement {

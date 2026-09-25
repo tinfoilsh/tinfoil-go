@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/tinfoilsh/tinfoil-go/verifier/document"
 	"github.com/tinfoilsh/tinfoil-go/verifier/provenance"
 	"github.com/tinfoilsh/tinfoil-go/verifier/quote"
 )
@@ -50,4 +51,15 @@ func DangerousTestOnlyWithSigstoreRoot(rootJSON []byte) Option {
 		v.provenance = client
 		return nil
 	}
+}
+
+// ReferenceValues authenticates the document's code and platform artifacts and
+// their freshness witnesses, under this verifier's policy and clock.
+//
+// VerifyV3 returns one error for the whole flow, but the conformance adapter
+// must report which layer rejected a document, so it drives the layers itself.
+// Exposing this step lets it do that against the same code production runs,
+// rather than against its own copy.
+func (v *Verifier) ReferenceValues(doc *document.Document, repo string) (*provenance.Code, *provenance.PlatformEndorsements, time.Time, error) {
+	return v.authenticateReferenceValues(doc, repo, v.now())
 }
