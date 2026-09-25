@@ -36,7 +36,7 @@ func createClientFromSecureClient(secureClient *client.SecureClient, mode Transp
 		selected: &enclaveClient{secure: secureClient, transport: httpClient.Transport},
 		origins:  origins,
 	}
-	if baseURL != "" && mode == TransportEHBP {
+	if _, forwarding := enclaveURLHeaderValue(baseURL, secureClient.Enclave()); forwarding && mode == TransportEHBP {
 		requests.proxy, _ = originOf(baseURL)
 	}
 	httpClient.Transport = requests

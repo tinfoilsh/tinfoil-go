@@ -24,8 +24,12 @@ func routerClient(t *testing.T, host string, transport http.RoundTripper) *encla
 }
 
 func TestRouterRecoverySelectsIndependentClient(t *testing.T) {
-	for _, proxy := range []string{"", "http://proxy.example"} {
-		t.Run(proxy, func(t *testing.T) {
+	for _, baseURL := range []string{"", "https://old.example", "http://proxy.example"} {
+		t.Run(baseURL, func(t *testing.T) {
+			proxy := ""
+			if _, forwarding := enclaveURLHeaderValue(baseURL, "old.example"); forwarding {
+				proxy, _ = originOf(baseURL)
+			}
 			first, last := errors.New("old key"), errors.New("replacement unavailable")
 			for _, recoveryErr := range []error{nil, last} {
 				var sends, selections int

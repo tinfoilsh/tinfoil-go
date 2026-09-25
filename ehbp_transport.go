@@ -158,7 +158,11 @@ func NewClientWithOptions(opts ...ClientOption) (*Client, error) {
 			if err != nil {
 				return nil, err
 			}
-			httpClient, err := secureHTTPClient(secure, cfg.transport, cfg.baseURL, secret)
+			baseURL := cfg.baseURL
+			if result.requests.proxy == "" {
+				baseURL = ""
+			}
+			httpClient, err := secureHTTPClient(secure, cfg.transport, baseURL, secret)
 			if err != nil {
 				return nil, err
 			}
