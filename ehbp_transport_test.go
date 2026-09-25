@@ -70,7 +70,7 @@ func TestProxyClientOptionsApply(t *testing.T) {
 }
 
 func TestNewClientWithOptionsRejectsInvalidBaseURL(t *testing.T) {
-	for _, baseURL := range []string{"", "proxy.example.com", "ftp://proxy.example.com", "://", "http://proxy.example.com/v1"} {
+	for _, baseURL := range []string{"", "proxy.example.com", "ftp://proxy.example.com", "://"} {
 		t.Run(baseURL, func(t *testing.T) {
 			_, err := NewClientWithOptions(WithBaseURL(baseURL))
 			var config *ConfigurationError
@@ -78,6 +78,12 @@ func TestNewClientWithOptionsRejectsInvalidBaseURL(t *testing.T) {
 			require.Contains(t, err.Error(), "invalid base URL")
 		})
 	}
+}
+
+func TestTLSRejectsPlaintextBaseURL(t *testing.T) {
+	_, err := NewClientWithOptions(WithBaseURL("http://proxy.example/v1"), WithTransport(TransportTLS))
+	var config *ConfigurationError
+	require.ErrorAs(t, err, &config)
 }
 
 func TestNewClientWithOptionsRequiresEnclaveForCustomRepo(t *testing.T) {

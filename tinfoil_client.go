@@ -12,18 +12,14 @@ import (
 // Client wraps the OpenAI client to provide secure inference through Tinfoil
 type Client struct {
 	*openai.Client
-	secure     *client.SecureClient
+	requests   *routerTransport
 	httpClient *http.Client
 	transport  TransportMode
 }
 
 // NewClient creates a new secure OpenAI client using default parameters
 func NewClient(openaiOpts ...option.RequestOption) (*Client, error) {
-	secureClient, err := client.NewDefaultClient(nil)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create secure client: %w", err)
-	}
-	return createClientFromSecureClient(secureClient, defaultTransportMode, "", resolveUserCacheSecret("", false), openaiOpts...)
+	return NewClientWithOptions(WithOpenAIOptions(openaiOpts...))
 }
 
 func createClientFromSecureClient(secureClient *client.SecureClient, mode TransportMode, baseURL, userCacheSecret string, openaiOpts ...option.RequestOption) (*Client, error) {
@@ -31,6 +27,19 @@ func createClientFromSecureClient(secureClient *client.SecureClient, mode Transp
 	if err != nil {
 		return nil, err
 	}
+
+	origins, err := allowedOrigins(secureClient.Enclave(), baseURL)
+	if err != nil {
+		return nil, &ConfigurationError{Err: err}
+	}
+	requests := &routerTransport{
+		selected: &enclaveClient{secure: secureClient, transport: httpClient.Transport},
+		origins:  origins,
+	}
+	if baseURL != "" && mode == TransportEHBP {
+		requests.proxy, _ = originOf(baseURL)
+	}
+	httpClient.Transport = requests
 
 	resolvedBaseURL := baseURL
 	if resolvedBaseURL == "" {
@@ -46,18 +55,18 @@ func createClientFromSecureClient(secureClient *client.SecureClient, mode Transp
 	openaiClient := openai.NewClient(allOpts...)
 	return &Client{
 		Client:     &openaiClient,
-		secure:     secureClient,
+		requests:   requests,
 		httpClient: httpClient,
 		transport:  mode,
 	}, nil
 }
 
 func (c *Client) Enclave() string {
-	return c.secure.Enclave()
+	return c.requests.current().secure.Enclave()
 }
 
 func (c *Client) Repo() string {
-	return c.secure.Repo()
+	return c.requests.current().secure.Repo()
 }
 
 // Transport returns the transport mode used to secure traffic to the enclave.
@@ -67,12 +76,12 @@ func (c *Client) Transport() TransportMode {
 
 // Verify refreshes attestation and returns the verified state.
 func (c *Client) Verify() (*client.VerifiedDocumentV3, error) {
-	return c.secure.Verify()
+	return c.requests.current().secure.Verify()
 }
 
 // Verification returns a copy of the last successful verification.
 func (c *Client) Verification() *client.VerifiedDocumentV3 {
-	return c.secure.Verification()
+	return c.requests.current().secure.Verification()
 }
 
 // HTTPClient returns the underlying HTTP client used to reach the enclave. It

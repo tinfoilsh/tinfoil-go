@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"sync"
 	"time"
@@ -12,7 +13,6 @@ import (
 	"github.com/tinfoilsh/tinfoil-go/verifier"
 	"github.com/tinfoilsh/tinfoil-go/verifier/measurement"
 	"github.com/tinfoilsh/tinfoil-go/verifier/provenance"
-	"github.com/tinfoilsh/tinfoil-go/verifier/util"
 )
 
 type SecureClient struct {
@@ -33,15 +33,37 @@ var (
 	defaultRouterURL  = "https://atc.tinfoil.sh/routers"
 )
 
+const (
+	routerFetchTimeout    = 30 * time.Second
+	maxRouterResponseSize = 32 << 20
+)
+
 func fetchRouters() ([]string, error) {
-	resp, _, err := util.Get(defaultRouterURL)
+	ctx, cancel := context.WithTimeout(context.Background(), routerFetchTimeout)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, defaultRouterURL, nil)
 	if err != nil {
-		return nil, err
+		return nil, &FetchError{Err: err}
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil, &FetchError{Err: err}
 	}
 
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, &FetchError{Err: fmt.Errorf("router discovery: %s", resp.Status)}
+	}
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxRouterResponseSize+1))
+	if err != nil {
+		return nil, &FetchError{Err: err}
+	}
+	if len(body) > maxRouterResponseSize {
+		return nil, &FetchError{Err: fmt.Errorf("router discovery response exceeds %d bytes", maxRouterResponseSize)}
+	}
 	var routers []string
-	if err := json.Unmarshal(resp, &routers); err != nil {
-		return nil, err
+	if err := json.Unmarshal(body, &routers); err != nil {
+		return nil, &FetchError{Err: err}
 	}
 
 	return routers, nil
@@ -80,7 +102,8 @@ func NewSecureClient(enclave, repo string, opts *VerificationOptions) (*SecureCl
 	return &SecureClient{enclave: enclave, repo: repo, core: core}, nil
 }
 
-// NewDefaultClient applies opts to every discovered router and fallback.
+// NewDefaultClient selects a fixed-enclave client, applying opts to every candidate.
+// The returned client does not rediscover routers or change its endpoint.
 func NewDefaultClient(opts *VerificationOptions) (*SecureClient, error) {
 	fallback, err := NewSecureClient("inference.tinfoil.sh", defaultRouterRepo, opts)
 	if err != nil {
@@ -92,6 +115,9 @@ func NewDefaultClient(opts *VerificationOptions) (*SecureClient, error) {
 		_, err := client.verifiedState(context.Background(), true, candidateVerificationRetries)
 		if err == nil {
 			return client, nil
+		}
+		if !retryableVerification(err) {
+			return nil, err
 		}
 	}
 

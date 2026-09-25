@@ -1,6 +1,7 @@
 package tinfoil
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net/http"
@@ -12,6 +13,7 @@ import (
 // admits each attempt through the selected SecureClient's current state.
 type recoveryTransport struct {
 	transport http.RoundTripper
+	recover   func(context.Context) (http.RoundTripper, error)
 }
 
 func (t *recoveryTransport) RoundTrip(req *http.Request) (*http.Response, error) {
@@ -26,11 +28,20 @@ func (t *recoveryTransport) RoundTrip(req *http.Request) (*http.Response, error)
 	if bodyErr != nil {
 		return nil, errors.Join(bodyErr, err)
 	}
+	transport := t.transport
+	if t.recover != nil {
+		var recoveryErr error
+		transport, recoveryErr = t.recover(req.Context())
+		if recoveryErr != nil {
+			closeRequestBody(retry)
+			return nil, errors.Join(recoveryErr, err)
+		}
+	}
 	if cancelErr := req.Context().Err(); cancelErr != nil {
 		closeRequestBody(retry)
 		return nil, errors.Join(cancelErr, err)
 	}
-	resp, retryErr := t.transport.RoundTrip(retry)
+	resp, retryErr := transport.RoundTrip(retry)
 	if retryErr != nil {
 		if resp != nil && resp.Body != nil {
 			resp.Body.Close()

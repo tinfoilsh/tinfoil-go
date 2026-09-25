@@ -5,6 +5,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"slices"
 	"strings"
 
 	"github.com/openai/openai-go/v3/option"
@@ -75,13 +76,13 @@ func WithTransport(mode TransportMode) ClientOption {
 	return func(c *clientConfig) { c.transport = mode }
 }
 
-// WithBaseURL routes requests through the given HTTPS base URL (for example your own
+// WithBaseURL routes requests through the given HTTP(S) base URL (for example your own
 // proxy) instead of sending them directly to the enclave. Request bodies stay
 // encrypted end-to-end to the verified enclave; when the base URL's origin
 // differs from the enclave's, the SDK adds the X-Tinfoil-Enclave-Url header so
 // the proxy can forward the encrypted request to the right enclave. Only
 // supported with the EHBP transport unless it uses the verified enclave's
-// HTTPS origin.
+// HTTPS origin. HTTP forwarding proxies can read request headers, including credentials.
 func WithBaseURL(baseURL string) ClientOption {
 	return func(c *clientConfig) {
 		c.baseURL = baseURL
@@ -121,12 +122,18 @@ func NewClientWithOptions(opts ...ClientOption) (*Client, error) {
 		if err != nil {
 			return nil, &ConfigurationError{Err: fmt.Errorf("invalid base URL: %w", err)}
 		}
-		if !strings.HasPrefix(origin, "https://") {
+		if cfg.transport == TransportTLS && !strings.HasPrefix(origin, "https://") {
 			return nil, &ConfigurationError{Err: fmt.Errorf("invalid base URL: HTTPS is required to protect request headers")}
 		}
 	}
 	if cfg.enclave == "" && cfg.repo != defaultConfigRepo {
 		return nil, &ConfigurationError{Err: fmt.Errorf("custom repository requires an enclave")}
+	}
+
+	if cfg.verification.PinnedRegisters != nil {
+		pins := *cfg.verification.PinnedRegisters
+		pins.Registers = slices.Clone(pins.Registers)
+		cfg.verification.PinnedRegisters = &pins
 	}
 
 	var secureClient *client.SecureClient
@@ -140,8 +147,25 @@ func NewClientWithOptions(opts ...ClientOption) (*Client, error) {
 		return nil, err
 	}
 
-	return createClientFromSecureClient(secureClient, cfg.transport, cfg.baseURL,
-		resolveUserCacheSecret(cfg.userCacheSecret, cfg.userCacheSecretSet), cfg.openaiOpts...)
+	secret := resolveUserCacheSecret(cfg.userCacheSecret, cfg.userCacheSecretSet)
+	result, err := createClientFromSecureClient(secureClient, cfg.transport, cfg.baseURL, secret, cfg.openaiOpts...)
+	if err != nil {
+		return nil, err
+	}
+	if cfg.enclave == "" {
+		result.requests.selectNew = func() (*enclaveClient, error) {
+			secure, err := client.NewDefaultClient(&cfg.verification)
+			if err != nil {
+				return nil, err
+			}
+			httpClient, err := secureHTTPClient(secure, cfg.transport, cfg.baseURL, secret)
+			if err != nil {
+				return nil, err
+			}
+			return &enclaveClient{secure: secure, transport: httpClient.Transport}, nil
+		}
+	}
+	return result, nil
 }
 
 func secureHTTPClient(secureClient *client.SecureClient, mode TransportMode, baseURL, userCacheSecret string) (*http.Client, error) {
@@ -330,8 +354,8 @@ func validateTLSBaseURL(baseURL, enclave string) error {
 // delegating to the wrapped transport. EHBP leaves request headers in
 // plaintext, so the header reaches the proxy while the body stays sealed to the
 // enclave's HPKE key. The value is captured when the transport is built; a
-// re-verification that swaps in a different enclave rebuilds this transport with
-// the new value, which also keeps every retry pointed at the right enclave.
+// refresh rebuilds it for the same enclave. Selecting another SecureClient
+// builds a separate transport with that client's forwarding destination.
 type enclaveURLHeaderTransport struct {
 	enclaveURL string
 	transport  http.RoundTripper
