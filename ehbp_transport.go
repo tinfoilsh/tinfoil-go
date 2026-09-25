@@ -188,7 +188,7 @@ func secureHTTPClient(secureClient *client.SecureClient, mode TransportMode, bas
 			return nil, err
 		}
 	}
-	return boundHTTPClient(httpClient, secureClient.Enclave(), baseURL, "")
+	return httpClient, nil
 }
 
 func boundHTTPClient(httpClient *http.Client, enclave, baseURL, userCacheSecret string) (*http.Client, error) {
