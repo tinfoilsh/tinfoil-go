@@ -48,7 +48,7 @@ func TestTransportExpirationAndUnchangedWitness(t *testing.T) {
 		deadline := witnessedAt.Add(time.Minute)
 		s.verify = func() (*VerifiedDocumentV3, error) {
 			verifications++
-			return testState(freshnessExpiration(witnessedAt, witnessedAt.Add(time.Hour), s.options.FreshnessMaxAge), "key"), nil
+			return testState(witnessedAt.Add(s.core.FreshnessMaxAge()), "key"), nil
 		}
 		transport, err := s.NewTransport(func(*VerifiedDocumentV3) (http.RoundTripper, error) {
 			return roundTripFunc(func(*http.Request) (*http.Response, error) {

@@ -2,13 +2,13 @@ package client
 
 import (
 	"bytes"
-	"cmp"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"sync"
 	"time"
 
+	"github.com/tinfoilsh/tinfoil-go/verifier"
 	"github.com/tinfoilsh/tinfoil-go/verifier/measurement"
 	"github.com/tinfoilsh/tinfoil-go/verifier/provenance"
 	"github.com/tinfoilsh/tinfoil-go/verifier/util"
@@ -16,7 +16,9 @@ import (
 
 type SecureClient struct {
 	enclave, repo, relay string
-	options              VerificationOptions
+	// core is the immutable verification policy, shared by every client
+	// derived from this one.
+	core *verifier.Verifier
 
 	stateMu    sync.RWMutex
 	state      *VerifiedDocumentV3
@@ -51,20 +53,16 @@ type VerificationOptions struct {
 	FreshnessMaxAge time.Duration `json:"freshness_max_age_ns,omitempty"`
 }
 
-func (input *VerificationOptions) normalized() (VerificationOptions, error) {
-	var opts VerificationOptions
-	if input != nil {
-		opts = *input
+// verifier builds the immutable policy these options describe, validating
+// them once. A nil receiver selects the defaults.
+func (input *VerificationOptions) verifier() (*verifier.Verifier, error) {
+	if input == nil {
+		return verifier.New()
 	}
-	if opts.FreshnessMaxAge < 0 {
-		return VerificationOptions{}, &ConfigurationError{Err: fmt.Errorf("freshness maximum age must not be negative")}
-	}
-	opts.FreshnessMaxAge = cmp.Or(opts.FreshnessMaxAge, provenance.MaxFreshnessAge)
-	opts.PinnedRegisters = cloneMeasurement(opts.PinnedRegisters)
-	if err := measurement.ValidatePins(opts.PinnedRegisters); err != nil {
-		return VerificationOptions{}, &ConfigurationError{Err: err}
-	}
-	return opts, nil
+	return verifier.New(
+		verifier.WithPinnedRegisters(input.PinnedRegisters),
+		verifier.WithFreshnessMaxAge(input.FreshnessMaxAge),
+	)
 }
 
 // NewSecureClient creates a secure client for an enclave and repository
@@ -73,11 +71,11 @@ func NewSecureClient(enclave, repo string, opts *VerificationOptions) (*SecureCl
 	if _, _, _, err := provenance.ParseReference(repo); err != nil {
 		return nil, &ConfigurationError{Err: err}
 	}
-	options, err := opts.normalized()
+	core, err := opts.verifier()
 	if err != nil {
 		return nil, err
 	}
-	return &SecureClient{enclave: enclave, repo: repo, options: options}, nil
+	return &SecureClient{enclave: enclave, repo: repo, core: core}, nil
 }
 
 // NewDefaultClient applies opts to every discovered router and fallback.
@@ -100,12 +98,12 @@ func NewDefaultClient(opts *VerificationOptions) (*SecureClient, error) {
 
 // ForEnclave keeps the repository reference and verification options.
 func (s *SecureClient) ForEnclave(enclave string) *SecureClient {
-	return &SecureClient{enclave: enclave, repo: s.repo, options: s.options}
+	return &SecureClient{enclave: enclave, repo: s.repo, core: s.core}
 }
 
 // ViaRelay fetches attestation through relay, which forwards it to the enclave.
 func (s *SecureClient) ViaRelay(relay string) *SecureClient {
-	return &SecureClient{enclave: s.enclave, repo: s.repo, relay: relay, options: s.options}
+	return &SecureClient{enclave: s.enclave, repo: s.repo, relay: relay, core: s.core}
 }
 
 // Enclave returns the enclave URL

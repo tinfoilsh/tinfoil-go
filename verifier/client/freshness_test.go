@@ -17,30 +17,10 @@ import (
 	"github.com/tinfoilsh/tinfoil-go/verifier/provenance"
 )
 
-func TestFreshnessExpiration(t *testing.T) {
-	issuedAt := time.Date(2026, time.August, 6, 12, 0, 0, 0, time.UTC)
-	later := issuedAt.Add(time.Hour)
-	for _, tt := range []struct {
-		name                string
-		codeWitnessedAt     time.Time
-		platformWitnessedAt time.Time
-	}{
-		{"code expires first", issuedAt, later},
-		{"platform expires first", later, issuedAt},
-		{"same issuance time", issuedAt, issuedAt},
-	} {
-		t.Run(tt.name, func(t *testing.T) {
-			for _, maxAge := range []time.Duration{24 * time.Hour, provenance.MaxFreshnessAge, 30 * 24 * time.Hour} {
-				require.Equal(t, issuedAt.Add(maxAge), freshnessExpiration(tt.codeWitnessedAt, tt.platformWitnessedAt, maxAge))
-			}
-		})
-	}
-}
-
 func TestClientFreshnessMaxAge(t *testing.T) {
 	defaults, err := NewSecureClient("enclave.example", "org/repo", nil)
 	require.NoError(t, err)
-	require.Equal(t, 7*24*time.Hour, defaults.options.FreshnessMaxAge)
+	require.Equal(t, provenance.MaxFreshnessAge, defaults.core.FreshnessMaxAge())
 	for _, maxAge := range []time.Duration{-time.Nanosecond, -time.Hour} {
 		opts := VerificationOptions{FreshnessMaxAge: maxAge}
 		s, err := NewSecureClient("enclave.example", "org/repo", &opts)
@@ -62,8 +42,8 @@ func TestClientFreshnessMaxAge(t *testing.T) {
 		s, err := NewDefaultClient(&opts)
 		require.NoError(t, err)
 		require.Equal(t, "inference.tinfoil.sh", s.Enclave())
-		require.Equal(t, cmp.Or(maxAge, 7*24*time.Hour), s.options.FreshnessMaxAge)
-		require.Equal(t, opts.PinnedRegisters, s.options.PinnedRegisters)
+		require.Equal(t, cmp.Or(maxAge, provenance.MaxFreshnessAge), s.core.FreshnessMaxAge())
+		require.Equal(t, opts.PinnedRegisters, s.core.PinnedRegisters())
 	}
 }
 

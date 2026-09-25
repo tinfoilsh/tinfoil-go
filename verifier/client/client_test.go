@@ -22,14 +22,17 @@ func TestClientOptionsCopyPinnedRegisters(t *testing.T) {
 	require.NoError(t, err)
 	second, err := NewSecureClient("enclave.example", "org/repo", &opts)
 	require.NoError(t, err)
+
+	// Mutating the caller's options and measurement after construction must
+	// not reach either client. That the accessor also copies on the way out is
+	// the verifier package's contract, covered by its own tests.
 	opts.FreshnessMaxAge = time.Minute
 	pins.Type = measurement.SevGuestV2
 	pins.Registers[4] = "changed"
-	assert.Equal(t, measurement.TdxGuestV2, first.options.PinnedRegisters.Type)
-	assert.Equal(t, register, first.options.PinnedRegisters.Registers[4])
-	first.options.PinnedRegisters.Registers[4] = "changed again"
-	assert.Equal(t, register, second.options.PinnedRegisters.Registers[4])
-	assert.Equal(t, time.Hour, second.options.FreshnessMaxAge)
+	assert.Equal(t, measurement.TdxGuestV2, first.core.PinnedRegisters().Type)
+	assert.Equal(t, register, first.core.PinnedRegisters().Registers[4])
+	assert.Equal(t, register, second.core.PinnedRegisters().Registers[4])
+	assert.Equal(t, time.Hour, second.core.FreshnessMaxAge())
 }
 
 func TestLiveVerify(t *testing.T) {

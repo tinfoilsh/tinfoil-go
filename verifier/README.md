@@ -93,7 +93,8 @@ collateral. Verification then runs offline using the embedded trust roots:
 The TLS pin runs for direct HTTPS and HTTPS-over-CONNECT connections. Fetching
 the document does not require a separate direct TLS probe. Code and platform
 witnesses have a seven-day maximum age by default; the earliest authenticated
-expiry is exposed by `Verify` and `VerifyDocumentV3` as `FreshnessExpiresAt`.
+expiry is exposed by `VerifyV3`, `Verify` and `VerifyDocumentV3` as
+`FreshnessExpiresAt`.
 Callers using these APIs must retain the deadline and stop authorizing new
 requests at or after it, then verify again before accepting more requests.
 Re-verifying unchanged witnesses does not extend their deadline.
@@ -109,6 +110,43 @@ timeout. A waiting request can cancel without canceling other waiters.
 
 A request admitted before expiration may finish, including a streaming response.
 Expiration does not interrupt that request. There is no background refresh.
+
+### Verifying a document you already hold
+
+`verifier.Verifier` appraises a document offline. It opens no connections,
+holds no cache and is immutable, so it is safe for concurrent use — fetching
+the document, caching the result and enforcing its deadline stay with the
+caller.
+
+It is not independent of time. `VerifyV3` samples the appraisal clock once and
+judges the freshness witnesses against that instant; the CPU evidence layer
+reads the clock separately for vendor certificate and CRL validity windows,
+because a production build cannot pass an instant down to it. So the same
+document is accepted today and rejected once its witnesses go stale. What a
+successful verification reports does not drift, though: `FreshnessExpiresAt` is
+derived from the authenticated witness timestamps, never from the local clock.
+
+```go
+import "github.com/tinfoilsh/tinfoil-go/verifier"
+
+v, err := verifier.New()
+if err != nil {
+    return err
+}
+verified, err := v.VerifyV3(documentBytes, expectedNonce, trustedRepo)
+if err != nil {
+    return err
+}
+```
+
+The nonce and the repository reference are caller-owned expectations; the
+document cannot supply either. After success, bind service traffic to the
+returned TLS/HPKE material and stop authorizing new requests at
+`FreshnessExpiresAt`.
+
+`client.VerifyDocumentV3` wraps this with the `VerificationOptions` struct the
+Swift bindings need, and `client.SecureClient` adds fetching, caching and
+transport binding on top.
 
 ### Migration from v2
 
@@ -126,27 +164,43 @@ entry points are removed; use an explicit enclave/repository and `Verify`.
 V3 verification obtains collateral from the enclave document, so it no longer
 fetches reference values through the old bundle service.
 
-For an already fetched document, use:
-
-```go
-verified, err := client.VerifyDocumentV3(documentBytes, expectedNonce, trustedRepo, nil)
-```
-
-The repository and nonce are caller-owned expectations. After success, bind
-service traffic to the returned TLS/HPKE material and honor `FreshnessExpiresAt`.
-This low-level function does not open a service connection or enforce a cache's
-expiration on the caller's behalf. Swift callers using the removed bundle APIs
-also need to migrate before adopting the v3 framework.
+For an already fetched document, use `verifier.Verifier` — see [Verifying a
+document you already hold](#verifying-a-document-you-already-hold).
+`client.VerifyDocumentV3` remains for callers already built on it. Neither
+opens a service connection or enforces a cache's expiration on the caller's
+behalf. Swift callers using the removed bundle APIs also need to migrate before
+adopting the v3 framework.
 
 ## Verification options
 
-Pass `*client.VerificationOptions` to the constructors and verification APIs to set register pins
-or `FreshnessMaxAge`. Empty pin entries retain defaults; TDX order is
-`[MRTD, RTMR0, RTMR1, RTMR2, RTMR3]`. Pins cannot override release or platform measurements.
+Register pins and the freshness bound are fixed when a verifier is built and
+cannot change afterwards. Empty pin entries retain defaults; TDX order is
+`[MRTD, RTMR0, RTMR1, RTMR2, RTMR3]`. Pins cannot override release or platform
+measurements, and `FreshnessMaxAge` defaults to seven days.
+
+`verifier.New` takes functional options:
 
 ```go
-import "github.com/tinfoilsh/tinfoil-go/verifier/measurement"
+import (
+    "time"
 
+    "github.com/tinfoilsh/tinfoil-go/verifier"
+    "github.com/tinfoilsh/tinfoil-go/verifier/measurement"
+)
+
+v, err := verifier.New(
+    verifier.WithPinnedRegisters(&measurement.Measurement{
+        Type:      measurement.TdxGuestV2,
+        Registers: []string{4: rtmr3},
+    }),
+    verifier.WithFreshnessMaxAge(24*time.Hour),
+)
+```
+
+`client` takes the same policy as a struct, because the Swift bindings need a
+type they can construct and pass across the FFI boundary:
+
+```go
 opts := client.VerificationOptions{
     PinnedRegisters: &measurement.Measurement{
         Type:      measurement.TdxGuestV2,
@@ -179,12 +233,13 @@ See the [tinfoil-js documentation](https://github.com/tinfoilsh/tinfoil-js) for 
 - Code, platform and freshness provenance: `provenance/`.
 - Strict platform-policy parsing: `policy/`.
 - CPU authentication and expectation enforcement: `quote/sev/` and `quote/tdx/`.
-- End-to-end verification: `client/verify.go`.
+- End-to-end verification: `verifier.go`.
+- Fetching, caching and freshness enforcement: `client/`.
 - Per-connection TLS pinning: `client/roundtrip.go`.
 
 ## Arbitrary endorsed material
 
-A successful `Verify` or `VerifyDocumentV3` result retains every endorsed
+A successful `VerifyV3`, `Verify` or `VerifyDocumentV3` result retains every endorsed
 `CryptoMaterial` item. Select by exact ID and format:
 
 ```go
