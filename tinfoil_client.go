@@ -23,7 +23,7 @@ func NewClient(openaiOpts ...option.RequestOption) (*Client, error) {
 }
 
 func createClientFromSecureClient(secureClient *client.SecureClient, mode TransportMode, baseURL, userCacheSecret string, openaiOpts ...option.RequestOption) (*Client, error) {
-	httpClient, err := secureHTTPClient(secureClient, mode, baseURL, userCacheSecret)
+	httpClient, err := secureHTTPClient(secureClient, mode, baseURL)
 	if err != nil {
 		return nil, err
 	}
@@ -35,6 +35,7 @@ func createClientFromSecureClient(secureClient *client.SecureClient, mode Transp
 	requests := &routerTransport{
 		selected: &enclaveClient{secure: secureClient, transport: httpClient.Transport},
 		origins:  origins,
+		secret:   userCacheSecret,
 	}
 	if _, forwarding := enclaveURLHeaderValue(baseURL, secureClient.Enclave()); forwarding && mode == TransportEHBP {
 		requests.proxy, _ = originOf(baseURL)

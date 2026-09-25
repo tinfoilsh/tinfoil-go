@@ -22,6 +22,7 @@ type routerTransport struct {
 	selecting *routerSelection
 	origins   map[string]struct{}
 	proxy     string
+	secret    string
 }
 
 type routerSelection struct {
@@ -54,7 +55,11 @@ func (t *routerTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 			return &enclaveDestination{client: next, proxy: t.proxy}, nil
 		}
 	}
-	return recovery.RoundTrip(req)
+	var prepared http.RoundTripper = recovery
+	if t.secret != "" {
+		prepared = &userCacheSecretTransport{secret: t.secret, transport: recovery}
+	}
+	return prepared.RoundTrip(req)
 }
 
 type enclaveDestination struct {

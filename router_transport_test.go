@@ -188,3 +188,31 @@ func TestRouterSelectionBindsEHBPKeyAndDestination(t *testing.T) {
 		})
 	}
 }
+
+func TestRouterRecoveryReplaysPreparedBody(t *testing.T) {
+	var bodies []string
+	send := roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		body, err := io.ReadAll(req.Body)
+		req.Body.Close()
+		require.NoError(t, err)
+		bodies = append(bodies, string(body))
+		if req.URL.Host == "old.example" {
+			return nil, testKeyRejection{errors.New("rotated")}
+		}
+		return newResponse(http.StatusOK, "ok"), nil
+	})
+	old, next := routerClient(t, "old.example", send), routerClient(t, "next.example", send)
+	origins, err := allowedOrigins(old.secure.Enclave(), "")
+	require.NoError(t, err)
+	transport := &routerTransport{selected: old, origins: origins, secret: "cache-secret", selectNew: func() (*enclaveClient, error) { return next, nil }}
+	req, err := http.NewRequest(http.MethodPost, "https://old.example/v1/chat/completions", io.NopCloser(strings.NewReader(`{"model":"gpt-oss-120b"}`)))
+	require.NoError(t, err)
+	require.Nil(t, req.GetBody)
+	resp, err := transport.RoundTrip(req)
+	require.NoError(t, err)
+	resp.Body.Close()
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	require.Len(t, bodies, 2)
+	require.Equal(t, bodies[0], bodies[1])
+	require.Contains(t, bodies[1], `"user_cache_secret":"cache-secret"`)
+}

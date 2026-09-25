@@ -162,7 +162,7 @@ func NewClientWithOptions(opts ...ClientOption) (*Client, error) {
 			if result.requests.proxy == "" {
 				baseURL = ""
 			}
-			httpClient, err := secureHTTPClient(secure, cfg.transport, baseURL, secret)
+			httpClient, err := secureHTTPClient(secure, cfg.transport, baseURL)
 			if err != nil {
 				return nil, err
 			}
@@ -172,7 +172,7 @@ func NewClientWithOptions(opts ...ClientOption) (*Client, error) {
 	return result, nil
 }
 
-func secureHTTPClient(secureClient *client.SecureClient, mode TransportMode, baseURL, userCacheSecret string) (*http.Client, error) {
+func secureHTTPClient(secureClient *client.SecureClient, mode TransportMode, baseURL string) (*http.Client, error) {
 	var httpClient *http.Client
 	if mode == TransportTLS {
 		var err error
@@ -188,8 +188,7 @@ func secureHTTPClient(secureClient *client.SecureClient, mode TransportMode, bas
 			return nil, err
 		}
 	}
-	httpClient.Transport = &recoveryTransport{transport: httpClient.Transport}
-	return boundHTTPClient(httpClient, secureClient.Enclave(), baseURL, userCacheSecret)
+	return boundHTTPClient(httpClient, secureClient.Enclave(), baseURL, "")
 }
 
 func boundHTTPClient(httpClient *http.Client, enclave, baseURL, userCacheSecret string) (*http.Client, error) {
