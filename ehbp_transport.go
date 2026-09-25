@@ -216,6 +216,10 @@ type hostBoundRoundTripper struct {
 	transport      http.RoundTripper
 }
 
+func (t *hostBoundRoundTripper) CloseIdleConnections() {
+	closeIdleConnections(t.transport)
+}
+
 func (t *hostBoundRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
 	origin := normalizedOrigin(req.URL)
 	if _, ok := t.allowedOrigins[origin]; !ok {
@@ -330,6 +334,10 @@ func validateTLSBaseURL(baseURL, enclave string) error {
 type enclaveURLHeaderTransport struct {
 	enclaveURL string
 	transport  http.RoundTripper
+}
+
+func (t *enclaveURLHeaderTransport) CloseIdleConnections() {
+	closeIdleConnections(t.transport)
 }
 
 func (t *enclaveURLHeaderTransport) RoundTrip(req *http.Request) (*http.Response, error) {

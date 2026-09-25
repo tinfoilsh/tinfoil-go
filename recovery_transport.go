@@ -19,12 +19,12 @@ func (t *recoveryTransport) RoundTrip(req *http.Request) (*http.Response, error)
 	if !client.IsKeyRejection(err) {
 		return resp, err
 	}
-	retry, bodyErr := resetRequestBody(req)
-	if bodyErr != nil {
-		return resp, errors.Join(bodyErr, err)
-	}
 	if resp != nil && resp.Body != nil {
 		resp.Body.Close()
+	}
+	retry, bodyErr := resetRequestBody(req)
+	if bodyErr != nil {
+		return nil, errors.Join(bodyErr, err)
 	}
 	if cancelErr := req.Context().Err(); cancelErr != nil {
 		closeRequestBody(retry)
@@ -32,13 +32,20 @@ func (t *recoveryTransport) RoundTrip(req *http.Request) (*http.Response, error)
 	}
 	resp, retryErr := t.transport.RoundTrip(retry)
 	if retryErr != nil {
-		return resp, errors.Join(retryErr, err)
+		if resp != nil && resp.Body != nil {
+			resp.Body.Close()
+		}
+		return nil, errors.Join(retryErr, err)
 	}
 	return resp, nil
 }
 
 func (t *recoveryTransport) CloseIdleConnections() {
-	if closer, ok := t.transport.(interface{ CloseIdleConnections() }); ok {
+	closeIdleConnections(t.transport)
+}
+
+func closeIdleConnections(transport http.RoundTripper) {
+	if closer, ok := transport.(interface{ CloseIdleConnections() }); ok {
 		closer.CloseIdleConnections()
 	}
 }
