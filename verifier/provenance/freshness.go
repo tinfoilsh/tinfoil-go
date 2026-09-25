@@ -48,7 +48,7 @@ type freshnessStatement struct {
 }
 
 func AuthenticateFreshness(bundleJSON []byte, expected *AuthenticatedArtifact, now time.Time, maxAge time.Duration) (time.Time, error) {
-	c, err := getDefaultClient()
+	c, err := NewDefaultClient()
 	if err != nil {
 		return time.Time{}, err
 	}

@@ -13,7 +13,6 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
-	"sync"
 
 	protobundle "github.com/sigstore/protobuf-specs/gen/pb-go/bundle/v1"
 	"github.com/sigstore/sigstore-go/pkg/bundle"
@@ -56,26 +55,18 @@ type Client struct {
 //go:embed trusted_root.json
 var embeddedTrustedRoot []byte
 
-// defaultClient is built once from the embedded trusted root. Verification
-// never fetches trust material over the network; the embedded copy is
-// refreshed by the rootfetch tool.
-var (
-	defaultClient     *Client
-	defaultClientErr  error
-	defaultClientOnce sync.Once
-)
-
-func getDefaultClient() (*Client, error) {
-	defaultClientOnce.Do(func() {
-		defaultClient, defaultClientErr = NewClientFromJSON(embeddedTrustedRoot)
-	})
-	return defaultClient, defaultClientErr
+// NewDefaultClient builds a client from the embedded trusted root. Callers
+// hold their own rather than sharing one, so which root a verification used is
+// a property of the object doing it. Verification never fetches trust material
+// over the network; the embedded copy is refreshed by the rootfetch tool.
+func NewDefaultClient() (*Client, error) {
+	return NewClientFromJSON(embeddedTrustedRoot)
 }
 
 // AuthenticateCode verifies code provenance using the embedded trust root and
 // the caller's owner/name[@tag][@sha256:digest] reference.
 func AuthenticateCode(bundleJSON []byte, ref, tag, hexDigest string) (*Code, error) {
-	c, err := getDefaultClient()
+	c, err := NewDefaultClient()
 	if err != nil {
 		return nil, err
 	}
@@ -86,7 +77,7 @@ func AuthenticateCode(bundleJSON []byte, ref, tag, hexDigest string) (*Code, err
 // against the embedded trust root and the publisher's pinned signing
 // identity, returning the parsed policy artifact.
 func AuthenticateEndorsements(bundleJSON []byte, hexDigest string) (*policy.Artifact, error) {
-	c, err := getDefaultClient()
+	c, err := NewDefaultClient()
 	if err != nil {
 		return nil, err
 	}
@@ -109,7 +100,7 @@ type PlatformEndorsements struct {
 }
 
 func AuthenticatePlatformEndorsements(bundleJSON []byte, repo, tag, hexDigest string) (*PlatformEndorsements, error) {
-	c, err := getDefaultClient()
+	c, err := NewDefaultClient()
 	if err != nil {
 		return nil, err
 	}

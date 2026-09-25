@@ -112,7 +112,7 @@ func TestAuthenticateCodeRejectsInvalidReference(t *testing.T) {
 
 func testClient(t *testing.T) *Client {
 	t.Helper()
-	client, err := getDefaultClient()
+	client, err := NewDefaultClient()
 	require.NoError(t, err)
 	return client
 }
