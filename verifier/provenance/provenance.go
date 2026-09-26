@@ -361,17 +361,6 @@ func measurementFromStatement(statement *in_toto.Statement) (*measurement.Measur
 	}
 }
 
-// AuthenticateEndorsements authenticates a platform-endorsements bundle
-// against the publisher identity and returns the parsed, validated
-// artifact.
-func (c *Client) AuthenticateEndorsements(bundleJSON []byte, hexDigest string) (*policy.Artifact, error) {
-	verified, err := c.AuthenticatePlatformEndorsements(bundleJSON, platformEndorsementsRepo, "", hexDigest)
-	if err != nil {
-		return nil, err
-	}
-	return verified.Artifact, nil
-}
-
 func (c *Client) AuthenticatePlatformEndorsements(bundleJSON []byte, repo, tag, hexDigest string) (*PlatformEndorsements, error) {
 	result, _, err := c.verifyBundleWithIdentity(bundleJSON, platformEndorsementsIdentity, hexDigest)
 	if err != nil {
