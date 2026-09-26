@@ -14,7 +14,7 @@ if [[ ${#frameworks[@]} -eq 0 ]]; then
   printf 'expected framework slices under %s, found %d\n' "$output" "${#frameworks[@]}" >&2
   exit 1
 fi
-public_headers=(Client.objc.h Measurement.objc.h Universe.objc.h)
+public_headers=(Mobile.objc.h Universe.objc.h)
 header_exclusions=()
 for header in "${public_headers[@]}"; do
   header_exclusions+=(! -name "$header")
@@ -25,7 +25,8 @@ for header in "${public_headers[@]}"; do
     fi
   done
 done
-# Internal implementation packages must not become Objective-C API.
+# Only verifier/mobile is bound; every other package is an implementation
+# dependency and must not become Objective-C API.
 unexpected_headers="$(find "$output" -type f -name '*.objc.h' "${header_exclusions[@]}")"
 if [[ -n "$unexpected_headers" ]]; then
   printf 'internal verifier headers unexpectedly exported:\n%s\n' "$unexpected_headers" >&2
