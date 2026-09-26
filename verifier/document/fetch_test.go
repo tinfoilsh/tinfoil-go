@@ -3,8 +3,11 @@ package document
 import (
 	"context"
 	"io"
+	"net"
 	"net/http"
+	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"testing/synctest"
 	"time"
@@ -97,4 +100,67 @@ func TestFetchKeepsDefaultRedirectLimit(t *testing.T) {
 	_, err := Fetch("enclave.example", testNonce())
 	require.ErrorContains(t, err, "stopped after 10 redirects")
 	require.Equal(t, 10, requests)
+}
+
+func TestFetchUsesFreshConnectionAfterCutover(t *testing.T) {
+	for _, tc := range []struct {
+		name             string
+		http2            bool
+		defaultTransport bool
+	}{
+		{"HTTP1/client_transport", false, false},
+		{"HTTP1/default_transport", false, true},
+		{"HTTP2/client_transport", true, false},
+		{"HTTP2/default_transport", true, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			newReplica := func(name string) *httptest.Server {
+				server := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					_, _ = io.WriteString(w, name+" "+r.Proto)
+				}))
+				server.EnableHTTP2 = tc.http2
+				server.StartTLS()
+				t.Cleanup(server.Close)
+				return server
+			}
+			oldServer, newServer := newReplica("old"), newReplica("new")
+			var address atomic.Value
+			address.Store(oldServer.Listener.Addr().String())
+			transport := oldServer.Client().Transport.(*http.Transport)
+			transport.DialContext = func(ctx context.Context, network, _ string) (net.Conn, error) {
+				return (&net.Dialer{}).DialContext(ctx, network, address.Load().(string))
+			}
+			originalClient, originalTransport := http.DefaultClient, http.DefaultTransport
+			http.DefaultClient = &http.Client{Transport: transport}
+			if tc.defaultTransport {
+				http.DefaultClient.Transport = nil
+				http.DefaultTransport = transport
+			}
+			t.Cleanup(func() {
+				transport.CloseIdleConnections()
+				http.DefaultClient, http.DefaultTransport = originalClient, originalTransport
+			})
+			protocol := "HTTP/1.1"
+			if tc.http2 {
+				protocol = "HTTP/2.0"
+			}
+			sharedFetch := func() string {
+				response, err := http.DefaultClient.Get(oldServer.URL)
+				require.NoError(t, err)
+				defer response.Body.Close()
+				body, err := io.ReadAll(response.Body)
+				require.NoError(t, err)
+				return string(body)
+			}
+			require.Equal(t, "old "+protocol, sharedFetch())
+			address.Store(newServer.Listener.Addr().String())
+			host := strings.TrimPrefix(oldServer.URL, "https://")
+			for _, relay := range []string{"", host} {
+				body, err := FetchVia(host, relay, testNonce())
+				require.NoError(t, err)
+				require.Equal(t, "new "+protocol, string(body))
+			}
+			require.Equal(t, "old "+protocol, sharedFetch(), "attestation must not close the shared connection pool")
+		})
+	}
 }

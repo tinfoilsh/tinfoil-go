@@ -47,6 +47,15 @@ func FetchVia(host, relay string, nonce []byte) (result []byte, err error) {
 		return nil, &errs.ConfigurationError{Err: fmt.Errorf("invalid enclave host: %w", err)}
 	}
 	client := *http.DefaultClient
+	if client.Transport == nil {
+		client.Transport = http.DefaultTransport
+	}
+	// A pooled connection may still reach a draining replica after a cutover.
+	if transport, ok := client.Transport.(*http.Transport); ok {
+		transport = transport.Clone()
+		defer transport.CloseIdleConnections()
+		client.Transport = transport
+	}
 	client.CheckRedirect = func(req *http.Request, via []*http.Request) error {
 		if req.URL.Scheme != "https" {
 			return fmt.Errorf("refusing redirect to non-HTTPS URL %s", req.URL.Redacted())
