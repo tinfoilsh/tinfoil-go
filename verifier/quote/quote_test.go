@@ -19,7 +19,6 @@ import (
 	"github.com/tinfoilsh/tinfoil-go/verifier/measurement"
 	"github.com/tinfoilsh/tinfoil-go/verifier/policy"
 	"github.com/tinfoilsh/tinfoil-go/verifier/quote/tdx"
-	"github.com/tinfoilsh/tinfoil-go/verifier/util"
 )
 
 // testShape is an arbitrary required shape for paths that do not consume it
@@ -97,7 +96,7 @@ func loadSEVFixture(t *testing.T) (*document.Document, [64]byte) {
 // CRL exactly as the builder does.
 func appendLiveCRL(t *testing.T, doc *document.Document) {
 	t.Helper()
-	crlBytes, _, err := util.Get("https://kdsintf.amd.com/vcek/v1/Genoa/crl")
+	crlBytes, err := testutil.Get("https://kdsintf.amd.com/vcek/v1/Genoa/crl")
 	require.NoError(t, err)
 	crlData, err := json.Marshal(document.AMDCRLCollateral{
 		CRLDERBase64: base64.StdEncoding.EncodeToString(crlBytes),

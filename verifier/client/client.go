@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"sync"
 	"time"
@@ -11,7 +12,6 @@ import (
 	"github.com/tinfoilsh/tinfoil-go/verifier"
 	"github.com/tinfoilsh/tinfoil-go/verifier/measurement"
 	"github.com/tinfoilsh/tinfoil-go/verifier/provenance"
-	"github.com/tinfoilsh/tinfoil-go/verifier/util"
 )
 
 type SecureClient struct {
@@ -32,13 +32,21 @@ var (
 )
 
 func fetchRouters() ([]string, error) {
-	resp, _, err := util.Get(defaultRouterURL)
+	resp, err := http.Get(defaultRouterURL)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode > 299 {
+		return nil, fmt.Errorf("fetching routers from %s: %d %s", defaultRouterURL, resp.StatusCode, resp.Status)
+	}
+	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return nil, err
 	}
 
 	var routers []string
-	if err := json.Unmarshal(resp, &routers); err != nil {
+	if err := json.Unmarshal(body, &routers); err != nil {
 		return nil, err
 	}
 

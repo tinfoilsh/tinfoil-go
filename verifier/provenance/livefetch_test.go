@@ -9,13 +9,13 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/tinfoilsh/tinfoil-go/verifier/util"
+	"github.com/tinfoilsh/tinfoil-go/internal/testutil"
 )
 
 const githubProxy = "https://github-proxy.tinfoil.sh"
 
 func fetchLatestDigest(repo string) (string, error) {
-	releaseResponse, _, err := util.Get(githubProxy + "/repos/" + repo + "/releases/latest")
+	releaseResponse, err := testutil.Get(githubProxy + "/repos/" + repo + "/releases/latest")
 	if err != nil {
 		return "", err
 	}
@@ -26,7 +26,7 @@ func fetchLatestDigest(repo string) (string, error) {
 		return "", err
 	}
 
-	digest, _, err := util.Get(fmt.Sprintf("%s/repos/%s/releases/download/%s/tinfoil.hash", githubProxy, repo, release.TagName))
+	digest, err := testutil.Get(fmt.Sprintf("%s/repos/%s/releases/download/%s/tinfoil.hash", githubProxy, repo, release.TagName))
 	if err != nil {
 		return "", err
 	}
@@ -34,7 +34,7 @@ func fetchLatestDigest(repo string) (string, error) {
 }
 
 func fetchAttestationBundle(repo, digest string) ([]byte, error) {
-	bundleResponse, _, err := util.Get(githubProxy + "/repos/" + repo + "/attestations/sha256:" + digest)
+	bundleResponse, err := testutil.Get(githubProxy + "/repos/" + repo + "/attestations/sha256:" + digest)
 	if err != nil {
 		return nil, err
 	}
