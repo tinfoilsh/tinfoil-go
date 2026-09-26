@@ -63,27 +63,6 @@ func NewDefaultClient() (*Client, error) {
 	return NewClientFromJSON(embeddedTrustedRoot)
 }
 
-// AuthenticateCode verifies code provenance using the embedded trust root and
-// the caller's owner/name[@tag][@sha256:digest] reference.
-func AuthenticateCode(bundleJSON []byte, ref, tag, hexDigest string) (*Code, error) {
-	c, err := NewDefaultClient()
-	if err != nil {
-		return nil, err
-	}
-	return c.AuthenticateCode(bundleJSON, ref, tag, hexDigest)
-}
-
-// AuthenticateEndorsements authenticates a platform-endorsements bundle
-// against the embedded trust root and the publisher's pinned signing
-// identity, returning the parsed policy artifact.
-func AuthenticateEndorsements(bundleJSON []byte, hexDigest string) (*policy.Artifact, error) {
-	c, err := NewDefaultClient()
-	if err != nil {
-		return nil, err
-	}
-	return c.AuthenticateEndorsements(bundleJSON, hexDigest)
-}
-
 // AuthenticatedArtifact is release identity recovered from a verified
 // Sigstore statement and its signing certificate.
 type AuthenticatedArtifact struct {
@@ -99,16 +78,8 @@ type PlatformEndorsements struct {
 	Artifact *policy.Artifact
 }
 
-func AuthenticatePlatformEndorsements(bundleJSON []byte, repo, tag, hexDigest string) (*PlatformEndorsements, error) {
-	c, err := NewDefaultClient()
-	if err != nil {
-		return nil, err
-	}
-	return c.AuthenticatePlatformEndorsements(bundleJSON, repo, tag, hexDigest)
-}
-
-// NewClientFromJSON builds a client from a Sigstore trusted-root document;
-// verification normally uses the embedded copy via the package functions.
+// NewClientFromJSON builds a client from a Sigstore trusted-root document.
+// Verification uses the embedded copy, via NewDefaultClient.
 func NewClientFromJSON(trustRootJSON []byte) (*Client, error) {
 	return newClientFromJSON(trustRootJSON,
 		verify.WithSignedCertificateTimestamps(1),
