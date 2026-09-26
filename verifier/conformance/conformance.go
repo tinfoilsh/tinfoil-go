@@ -5,10 +5,15 @@
 // language-neutral wire contract below. Every SDK implements the same
 // Input/Output shapes and exit codes so the suite drives them identically.
 //
-// The full-verify stage composes the verification flow step by step (rather
-// than calling client.VerifyDocumentV3) so it can attribute a rejection to the
-// failing layer. Synthetic roots and the appraisal clock travel as ordinary
-// per-call options, so the adapter mutates no production state.
+// The full-verify stage drives the layers itself rather than making one
+// VerifyV3 call, because a rejection has to name the layer that produced it
+// and a single call yields a single error. The reference-values step is not
+// its own: it goes through verifier.Verifier, so the shared fixtures appraise
+// the code that production runs. The remaining steps are direct calls into the
+// same document and quote packages the verifier uses.
+//
+// Synthetic roots and the appraisal clock travel as ordinary per-call options,
+// so the adapter mutates no production state.
 package conformance
 
 import (
