@@ -21,8 +21,9 @@ func TestLiveLatestPlatformEndorsements(t *testing.T) {
 	bundleJSON, err := fetchAttestationBundle(platformEndorsementsRepo, digest)
 	require.NoError(t, err)
 
-	artifact, err := client.AuthenticateEndorsements(bundleJSON, digest)
+	endorsements, err := client.AuthenticatePlatformEndorsements(bundleJSON, platformEndorsementsRepo, "", digest)
 	require.NoError(t, err)
+	artifact := endorsements.Artifact
 
 	assert.NotEmpty(t, artifact.Machines)
 	assert.NotEmpty(t, artifact.Policies)
