@@ -35,6 +35,10 @@ func testState(deadline time.Time, key string) *VerifiedDocumentV3 {
 	}
 }
 
+func testEnclaveState(deadline time.Time, key string) *enclaveState {
+	return &enclaveState{VerifiedDocumentV3: testState(deadline, key)}
+}
+
 func testResponse() *http.Response {
 	return &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: http.NoBody}
 }
@@ -81,7 +85,7 @@ func TestRefreshCoalescesRequestsAndExplicitVerify(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
 				release := make(chan struct{})
 				var attempts, requests atomic.Int32
-				s := &SecureClient{state: testState(time.Now().Add(time.Minute), "old")}
+				s := &SecureClient{state: testEnclaveState(time.Now().Add(time.Minute), "old")}
 				s.verify = func() (*VerifiedDocumentV3, error) {
 					attempts.Add(1)
 					<-release
@@ -224,7 +228,7 @@ func TestKeyRotationRetriesShareRefresh(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
 				release := make(chan struct{})
 				var attempts, sends atomic.Int32
-				s := &SecureClient{state: testState(time.Now().Add(time.Hour), "old")}
+				s := &SecureClient{state: testEnclaveState(time.Now().Add(time.Hour), "old")}
 				s.verify = func() (*VerifiedDocumentV3, error) {
 					attempts.Add(1)
 					<-release
@@ -286,7 +290,7 @@ func TestKeyRotationRetryLimits(t *testing.T) {
 			if tc.keyError {
 				original = errCertMismatch
 			}
-			s := &SecureClient{state: testState(time.Now().Add(time.Hour), "old"), verify: func() (*VerifiedDocumentV3, error) {
+			s := &SecureClient{state: testEnclaveState(time.Now().Add(time.Hour), "old"), verify: func() (*VerifiedDocumentV3, error) {
 				refreshes++
 				return testState(time.Now().Add(time.Hour), "new"), tc.refreshErr
 			}}
@@ -316,7 +320,7 @@ func TestKeyRotationRetryLimits(t *testing.T) {
 func TestExpirationDoesNotInterruptStream(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		deadline := time.Now().Add(time.Minute)
-		s := &SecureClient{state: testState(deadline, "key"), verify: func() (*VerifiedDocumentV3, error) {
+		s := &SecureClient{state: testEnclaveState(deadline, "key"), verify: func() (*VerifiedDocumentV3, error) {
 			return testState(deadline, "key"), nil
 		}}
 		reader, writer := io.Pipe()
@@ -346,7 +350,7 @@ func TestRedirectChecksExpiration(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		deadline := time.Now().Add(time.Minute)
 		var sends int
-		s := &SecureClient{state: testState(deadline, "key"), verify: func() (*VerifiedDocumentV3, error) {
+		s := &SecureClient{state: testEnclaveState(deadline, "key"), verify: func() (*VerifiedDocumentV3, error) {
 			return testState(deadline, "key"), nil
 		}}
 		transport, err := s.NewTransport(func(*VerifiedDocumentV3) (http.RoundTripper, error) {
@@ -386,13 +390,13 @@ func TestHTTPClientChecksExpirationOnReusedTLSConnections(t *testing.T) {
 			roots.AddCert(target.Certificate())
 			key, err := CertPubkeyFP(target.Certificate())
 			require.NoError(t, err)
-			s := &SecureClient{state: testState(time.Now().Add(time.Hour), key), verify: func() (*VerifiedDocumentV3, error) {
+			s := &SecureClient{state: testEnclaveState(time.Now().Add(time.Hour), key), verify: func() (*VerifiedDocumentV3, error) {
 				return testState(time.Now().Add(-time.Second), key), nil
 			}}
 			hc, err := s.HTTPClient()
 			require.NoError(t, err)
 			defer hc.CloseIdleConnections()
-			base, err := hc.Transport.(*refreshingTransport).transport.(*TLSBoundRoundTripper).getTransport()
+			base, err := s.state.transports[hc.Transport.(*clientTransport)].(*TLSBoundRoundTripper).getTransport()
 			require.NoError(t, err)
 			base.Proxy = nil
 			base.TLSClientConfig.RootCAs = roots
@@ -415,7 +419,7 @@ func TestHTTPClientChecksExpirationOnReusedTLSConnections(t *testing.T) {
 			// Publish an expired snapshot without modifying the immutable snapshot
 			// held by the already-returned HTTP client and its open connection.
 			s.stateMu.Lock()
-			s.state = testState(time.Now().Add(-time.Second), key)
+			s.state = testEnclaveState(time.Now().Add(-time.Second), key)
 			s.stateMu.Unlock()
 			_, err = hc.Get(target.URL)
 			require.ErrorIs(t, err, errFreshnessExpired)

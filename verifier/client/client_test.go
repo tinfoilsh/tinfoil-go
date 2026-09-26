@@ -63,7 +63,7 @@ func TestClientVerificationJSON(t *testing.T) {
 		EnclaveMeasurement: enclaveMeasurement,
 	}
 	client := &SecureClient{
-		state: verified,
+		state: &enclaveState{VerifiedDocumentV3: verified},
 	}
 
 	encoded, err := client.VerificationJSON()

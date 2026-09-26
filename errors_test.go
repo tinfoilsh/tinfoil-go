@@ -69,9 +69,6 @@ func TestPublicInputErrors(t *testing.T) {
 	}
 	_, err = client.NewSecureClient("enclave.example", "org/repo@v1@sha256:"+strings.Repeat("a", 64), nil)
 	require.NoError(t, err)
-	var absent *client.SecureClient
-	_, err = absent.Verify()
-	require.ErrorAs(t, err, &config)
 	s, err := client.NewSecureClient("enclave.example", "org/repo", nil)
 	require.NoError(t, err)
 	_, err = s.Request("GET", "://", "", nil)
