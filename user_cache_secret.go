@@ -255,6 +255,10 @@ type userCacheSecretTransport struct {
 	transport http.RoundTripper
 }
 
+func (t *userCacheSecretTransport) CloseIdleConnections() {
+	closeIdleConnections(t.transport)
+}
+
 func (t *userCacheSecretTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	if t.secret == "" || !userCacheSecretPathEligible(req) {
 		return t.transport.RoundTrip(req)

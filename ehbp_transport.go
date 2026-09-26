@@ -160,6 +160,7 @@ func secureHTTPClient(secureClient *client.SecureClient, mode TransportMode, bas
 			return nil, err
 		}
 	}
+	httpClient.Transport = &recoveryTransport{transport: httpClient.Transport}
 	return boundHTTPClient(httpClient, secureClient.Enclave(), baseURL, userCacheSecret)
 }
 
@@ -214,6 +215,10 @@ type hostBoundRoundTripper struct {
 	allowedOrigins map[string]struct{}
 	enclave        string
 	transport      http.RoundTripper
+}
+
+func (t *hostBoundRoundTripper) CloseIdleConnections() {
+	closeIdleConnections(t.transport)
 }
 
 func (t *hostBoundRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
@@ -330,6 +335,10 @@ func validateTLSBaseURL(baseURL, enclave string) error {
 type enclaveURLHeaderTransport struct {
 	enclaveURL string
 	transport  http.RoundTripper
+}
+
+func (t *enclaveURLHeaderTransport) CloseIdleConnections() {
+	closeIdleConnections(t.transport)
 }
 
 func (t *enclaveURLHeaderTransport) RoundTrip(req *http.Request) (*http.Response, error) {

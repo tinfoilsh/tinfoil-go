@@ -129,7 +129,7 @@ func (s *SecureClient) fetchVerification() (*VerifiedDocumentV3, error) {
 
 // Verify refreshes the client's verified measurements and keys.
 func (s *SecureClient) Verify() (*VerifiedDocumentV3, error) {
-	state, err := s.verifiedState(context.Background(), nil, true, verificationRetries)
+	state, err := s.verifiedState(context.Background(), true, verificationRetries)
 	if err != nil {
 		return nil, err
 	}

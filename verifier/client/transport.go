@@ -10,8 +10,10 @@ import (
 )
 
 // NewTransport admits requests only with unexpired verification. build must
-// bind its transport to the supplied attested keys. isKeyError identifies an
-// error safe to retry after re-verification; nil disables key-rotation retries.
+// bind its transport to the supplied attested keys. isKeyError identifies a
+// rejection before application processing; nil disables key-rejection detection.
+// Rejection invalidates the affected state and is reported through IsKeyRejection.
+// Request replay belongs to the caller.
 // All transports from this client share its verification and refresh state.
 // build receives a detached result and must only construct its bound transport;
 // it must not call the client's verification, transport setup, or request methods.
@@ -28,7 +30,7 @@ func (s *SecureClient) NewTransport(build func(*VerifiedDocumentV3) (http.RoundT
 
 func (s *SecureClient) registerTransport(t *clientTransport) error {
 	for {
-		state, err := s.verifiedState(context.Background(), nil, false, verificationRetries)
+		state, err := s.verifiedState(context.Background(), false, verificationRetries)
 		if err != nil {
 			return err
 		}
@@ -90,7 +92,7 @@ func (t *clientTransport) buildTransport(verified *VerifiedDocumentV3) (http.Rou
 
 func (t *clientTransport) admit(ctx context.Context) (http.RoundTripper, *enclaveState, error) {
 	for {
-		state, err := t.client.verifiedState(ctx, nil, false, verificationRetries)
+		state, err := t.client.verifiedState(ctx, false, verificationRetries)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -118,32 +120,7 @@ func (t *clientTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 		return resp, err
 	}
 	t.client.invalidate(state)
-	retry, bodyErr := resetRequestBody(req)
-	if bodyErr != nil {
-		return resp, errors.Join(bodyErr, err)
-	}
-	if resp != nil && resp.Body != nil {
-		resp.Body.Close()
-	}
-	if _, refreshErr := t.client.verifiedState(req.Context(), state, true, verificationRetries); refreshErr != nil {
-		closeRequestBody(retry)
-		return nil, errors.Join(refreshErr, err)
-	}
-	// Each explicit retry is a new admission. In-flight responses/streams keep
-	// their original transport and are not canceled when its witnesses expire.
-	transport, state, refreshErr := t.admit(req.Context())
-	if refreshErr != nil {
-		closeRequestBody(retry)
-		return nil, errors.Join(refreshErr, err)
-	}
-	resp, retryErr := transport.RoundTrip(retry)
-	if retryErr != nil {
-		if t.isKeyError(retryErr) {
-			t.client.invalidate(state)
-		}
-		return resp, errors.Join(retryErr, err)
-	}
-	return resp, nil
+	return resp, &keyRejectionError{err}
 }
 
 func (t *clientTransport) CloseIdleConnections() {
@@ -165,21 +142,18 @@ func closeRequestBody(req *http.Request) {
 	}
 }
 
-func resetRequestBody(req *http.Request) (*http.Request, error) {
-	if req.Body == nil || req.Body == http.NoBody {
-		return req, nil
-	}
-	if req.GetBody == nil {
-		return nil, fmt.Errorf("cannot retry request after key rotation: body is not replayable")
-	}
-	body, err := req.GetBody()
-	if err != nil {
-		return nil, err
-	}
-	retry := req.Clone(req.Context())
-	retry.Body = body
-	return retry, nil
+// IsKeyRejection reports a binding rejection before application processing.
+// The affected state has already been invalidated. A caller may recover and
+// replay once if its request body is replayable; the original cause is preserved.
+func IsKeyRejection(err error) bool {
+	var rejection interface{ KeyRejected() bool }
+	return errors.As(err, &rejection) && rejection.KeyRejected()
 }
+
+type keyRejectionError struct{ error }
+
+func (e *keyRejectionError) Unwrap() error     { return e.error }
+func (e *keyRejectionError) KeyRejected() bool { return true }
 
 func isCertificateError(err error) bool {
 	var certInvalidErr x509.CertificateInvalidError

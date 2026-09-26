@@ -6,7 +6,6 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"errors"
-	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptrace"
@@ -144,7 +143,7 @@ func TestRefreshWaitersCancelIndependentlyWithoutVerificationTimeout(t *testing.
 		}}
 		ctx, cancel := context.WithCancel(context.Background())
 		canceled, waiting := make(chan error, 1), make(chan error, 1)
-		go func() { _, err := s.verifiedState(ctx, nil, false, verificationRetries); canceled <- err }()
+		go func() { _, err := s.verifiedState(ctx, false, verificationRetries); canceled <- err }()
 		go func() { _, err := s.Verify(); waiting <- err }()
 		synctest.Wait()
 		cancel()
@@ -219,131 +218,55 @@ func TestPreviouslyReturnedTransportsUseExplicitVerification(t *testing.T) {
 	require.Equal(t, 2, attempts)
 }
 
-func TestKeyRotationRetriesShareRefresh(t *testing.T) {
+func TestKeyRejectionInvalidatesWithoutReplay(t *testing.T) {
 	for _, mode := range []struct {
 		name    string
-		keyErr  error
+		err     error
 		matches func(error) bool
 	}{
 		{"TLS", errCertMismatch, isCertificateError},
 		{"EHBP", ehbpidentity.NewKeyConfigError(errors.New("rotated")), ehbpidentity.IsKeyConfigError},
+		{"network", errors.New("connection refused"), isCertificateError},
 	} {
 		t.Run(mode.name, func(t *testing.T) {
-			synctest.Test(t, func(t *testing.T) {
-				release := make(chan struct{})
-				rotated := make(chan struct{})
-				var attempts, sends atomic.Int32
-				s := &SecureClient{state: testEnclaveState(time.Now().Add(time.Hour), "old")}
-				s.verify = func() (*VerifiedDocumentV3, error) {
-					attempt := attempts.Add(1)
-					<-release
-					if attempt == 1 {
-						return nil, &FetchError{Err: errors.New("temporarily unavailable")}
-					}
-					return testState(time.Now().Add(time.Hour), "new"), nil
-				}
-				transport, err := s.NewTransport(func(verified *VerifiedDocumentV3) (http.RoundTripper, error) {
-					return roundTripFunc(func(req *http.Request) (*http.Response, error) {
-						defer req.Body.Close()
-						body, err := io.ReadAll(req.Body)
-						if err != nil || string(body) != "payload" {
-							return nil, errors.New("body was not replayed")
-						}
-						sends.Add(1)
-						if verified.CryptoMaterial[1].Data == "old" {
-							<-rotated
-							return nil, mode.keyErr
-						}
-						return testResponse(), nil
-					}), nil
-				}, mode.matches)
-				require.NoError(t, err)
-				results := make(chan error, 17)
-				for range 16 {
-					go func() {
-						req, _ := http.NewRequest(http.MethodPost, "https://enclave.example", bytes.NewBufferString("payload"))
-						_, err := transport.RoundTrip(req)
-						results <- err
-					}()
-				}
-				go func() { _, err := s.Verify(); results <- err }()
-				synctest.Wait()
-				close(rotated)
-				synctest.Wait()
-				require.EqualValues(t, 1, attempts.Load())
-				close(release)
-				for range 17 {
-					require.NoError(t, <-results)
-				}
-				require.EqualValues(t, 32, sends.Load())
-				require.EqualValues(t, 2, attempts.Load())
-			})
-		})
-	}
-}
-
-func TestKeyRotationRetryLimits(t *testing.T) {
-	failed := errors.New("verification failed")
-	last := errors.New("retry failed")
-	for _, tc := range []struct {
-		name                 string
-		keyError, replayable bool
-		refreshErr, retryErr error
-		sends, refreshes     int
-	}{
-		{"other error", false, true, nil, nil, 1, 0},
-		{"unreplayable body", true, false, nil, nil, 1, 0},
-		{"retry only once", true, true, nil, nil, 2, 1},
-		{"native refresh failure", true, true, failed, nil, 1, 1},
-		{"configuration failure", true, true, &ConfigurationError{Err: failed}, nil, 1, 1},
-		{"both verification attempts fail", true, true, &FetchError{Err: failed}, &AttestationError{Err: last}, 1, 2},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			synctest.Test(t, func(t *testing.T) {
-				var sends, refreshes int
-				original := errors.New("connection refused")
-				if tc.keyError {
-					original = fmt.Errorf("original key rejection: %w", errCertMismatch)
-				}
-				s := &SecureClient{state: testEnclaveState(time.Now().Add(time.Hour), "old"), verify: func() (*VerifiedDocumentV3, error) {
-					refreshes++
-					if refreshes == 2 {
-						return nil, tc.retryErr
-					}
-					return testState(time.Now().Add(time.Hour), "new"), tc.refreshErr
-				}}
-				transport, err := s.NewTransport(func(*VerifiedDocumentV3) (http.RoundTripper, error) {
-					return roundTripFunc(func(req *http.Request) (*http.Response, error) {
-						req.Body.Close()
-						sends++
-						if sends == 2 {
-							return nil, errors.Join(errCertMismatch, last)
-						}
-						return nil, original
-					}), nil
-				}, isCertificateError)
-				require.NoError(t, err)
-				req, _ := http.NewRequest(http.MethodPost, "https://enclave.example", bytes.NewBufferString("payload"))
-				if !tc.replayable {
-					req.GetBody = nil
-				}
+			var sends, refreshes int
+			s := &SecureClient{state: testEnclaveState(time.Now().Add(time.Hour), "old"), verify: func() (*VerifiedDocumentV3, error) {
+				refreshes++
+				return testState(time.Now().Add(time.Hour), "new"), nil
+			}}
+			transport, err := s.NewTransport(func(*VerifiedDocumentV3) (http.RoundTripper, error) {
+				return roundTripFunc(func(req *http.Request) (*http.Response, error) {
+					req.Body.Close()
+					sends++
+					return nil, mode.err
+				}), nil
+			}, mode.matches)
+			require.NoError(t, err)
+			req, _ := http.NewRequest(http.MethodPost, "https://enclave.example", bytes.NewBufferString("payload"))
+			req.GetBody = nil
+			_, err = transport.RoundTrip(req)
+			require.ErrorIs(t, err, mode.err)
+			require.Equal(t, mode.matches(mode.err), IsKeyRejection(err))
+			require.Equal(t, mode.matches(mode.err), s.state.rejected)
+			require.Equal(t, "old", s.Verification().CodeTag)
+			require.Equal(t, 1, sends)
+			require.Zero(t, refreshes)
+			if s.state.rejected {
+				verify := s.verify
+				failure := errors.New("refresh failed")
+				s.verify = func() (*VerifiedDocumentV3, error) { return nil, failure }
+				req, _ = http.NewRequest(http.MethodGet, "https://enclave.example", nil)
 				_, err = transport.RoundTrip(req)
-				require.ErrorIs(t, err, original)
-				if tc.refreshErr != nil {
-					require.ErrorIs(t, err, tc.refreshErr)
-				}
-				if tc.retryErr != nil {
-					require.ErrorIs(t, err, tc.retryErr)
-				}
-				if sends == 2 {
-					require.ErrorIs(t, err, last, "preserve the replay failure alongside the original key rejection")
-				}
-				if tc.keyError {
-					require.True(t, s.state.rejected, "a rejected key must not be reused after recovery fails")
-				}
-				require.Equal(t, tc.sends, sends)
-				require.Equal(t, tc.refreshes, refreshes)
-			})
+				require.ErrorIs(t, err, failure)
+				require.True(t, s.state.rejected)
+				require.Equal(t, "old", s.Verification().CodeTag)
+				require.Equal(t, 1, sends, "failed refresh must not authorize the rejected state")
+				s.verify = verify
+				req, _ = http.NewRequest(http.MethodPost, "https://enclave.example", bytes.NewBufferString("another request"))
+				_, err = transport.RoundTrip(req)
+				require.ErrorIs(t, err, mode.err)
+				require.Equal(t, 1, refreshes, "a later request must establish fresh state")
+			}
 		})
 	}
 }

@@ -118,7 +118,7 @@ func NewGateway(baseURL string, catalog func() Catalog, opts ...ClientOption) (*
 			if err != nil {
 				return nil, err
 			}
-			return httpClient.Transport, nil
+			return &recoveryTransport{transport: httpClient.Transport}, nil
 		},
 	}
 	httpClient, err := boundHTTPClient(&http.Client{Transport: seal}, "", baseURL, "")

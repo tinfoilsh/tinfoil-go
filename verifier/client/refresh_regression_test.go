@@ -156,7 +156,7 @@ func TestLateRejectionDoesNotInvalidateReplacement(t *testing.T) {
 		_, err = s.Verify()
 		require.NoError(t, err)
 		close(release)
-		require.NoError(t, <-finished)
+		require.ErrorIs(t, <-finished, errCertMismatch)
 		require.False(t, s.state.rejected)
 		require.Equal(t, "new", s.Verification().CodeTag)
 		require.Equal(t, 1, verifications)

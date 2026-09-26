@@ -89,7 +89,7 @@ func NewDefaultClient(opts *VerificationOptions) (*SecureClient, error) {
 	routers, _ := fetchRouters()
 	for _, routerURL := range routers {
 		client := fallback.ForEnclave(routerURL)
-		_, err := client.verifiedState(context.Background(), nil, true, candidateVerificationRetries)
+		_, err := client.verifiedState(context.Background(), true, candidateVerificationRetries)
 		if err == nil {
 			return client, nil
 		}
