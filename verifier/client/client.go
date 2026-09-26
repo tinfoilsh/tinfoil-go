@@ -33,8 +33,22 @@ var (
 	defaultRouterURL  = "https://atc.tinfoil.sh/routers"
 )
 
+const (
+	routerFetchTimeout = 30 * time.Second
+	maxRouterBytes     = 32 << 20
+)
+
+// fetchRouters is bounded the same way attestation fetching is: discovery runs
+// before anything is verified, so an unresponsive or oversized reply must not
+// stall client construction or exhaust memory.
 func fetchRouters() ([]string, error) {
-	resp, err := http.Get(defaultRouterURL)
+	ctx, cancel := context.WithTimeout(context.Background(), routerFetchTimeout)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, defaultRouterURL, nil)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return nil, err
 	}
@@ -42,9 +56,12 @@ func fetchRouters() ([]string, error) {
 	if resp.StatusCode > 299 {
 		return nil, fmt.Errorf("fetching routers from %s: %d %s", defaultRouterURL, resp.StatusCode, resp.Status)
 	}
-	body, err := io.ReadAll(resp.Body)
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxRouterBytes+1))
 	if err != nil {
 		return nil, err
+	}
+	if len(body) > maxRouterBytes {
+		return nil, fmt.Errorf("router list from %s exceeds %d bytes", defaultRouterURL, maxRouterBytes)
 	}
 
 	var routers []string
