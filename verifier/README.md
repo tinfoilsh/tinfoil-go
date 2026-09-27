@@ -118,13 +118,19 @@ holds no cache and is immutable, so it is safe for concurrent use — fetching
 the document, caching the result and enforcing its deadline stay with the
 caller.
 
-It is not independent of time. `VerifyV3` samples the appraisal clock once and
+By default, `VerifyV3` samples the appraisal clock once and
 judges the freshness witnesses against that instant; the CPU evidence layer
 reads the clock separately for vendor certificate and CRL validity windows,
 because a production build cannot pass an instant down to it. So the same
 document is accepted today and rejected once its witnesses go stale. What a
 successful verification reports does not drift, though: `FreshnessExpiresAt` is
 derived from the authenticated witness timestamps, never from the local clock.
+
+For archived documents, `verifier.WithIgnoreFreshness()` skips both freshness
+witness checks and leaves `FreshnessExpiresAt` zero. Code and platform
+provenance, CPU evidence, and certificate/collateral validity checks still apply.
+This option is only available on the core verifier; it does not authorize live
+SDK requests with expired evidence.
 
 ```go
 import "github.com/tinfoilsh/tinfoil-go/verifier"
