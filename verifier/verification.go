@@ -24,6 +24,7 @@ type Verification struct {
 	// FreshnessExpiresAt is the earlier authenticated code/platform witness
 	// deadline. Cached verification must not authorize new requests at or
 	// after this time; re-verifying the same witness does not extend it.
+	// It is zero when WithIgnoreFreshness skips witness verification.
 	FreshnessExpiresAt time.Time
 }
 

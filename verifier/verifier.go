@@ -35,12 +35,13 @@ import (
 // witnesses against that instant. The CPU evidence layer reads the clock
 // separately for vendor certificate and CRL validity windows, because a
 // production build has no way to pass an instant down to it (see
-// overrides.go); only the conformance build threads one through. Either way,
-// the same document is accepted today and rejected once its witnesses go
-// stale.
+// overrides.go); only the conformance build threads one through. Unless
+// freshness is explicitly ignored, the same document is accepted today and
+// rejected once its witnesses go stale.
 type Verifier struct {
 	pinnedRegisters *measurement.Measurement
 	freshnessMaxAge time.Duration
+	ignoreFreshness bool
 	now             func() time.Time
 
 	// provenance authenticates reference values against its own copy of the
@@ -132,15 +133,6 @@ func (v *Verifier) authenticateReferenceValues(doc *document.Document, repo stri
 	if err != nil {
 		return nil, nil, time.Time{}, fmt.Errorf("verifying code measurement: %w", err)
 	}
-	codeFreshnessRef, err := doc.FreshnessCollateral(document.FreshnessCollateralIDCode)
-	if err != nil {
-		return nil, nil, time.Time{}, err
-	}
-	codeWitnessedAt, err := v.provenance.AuthenticateFreshness(codeFreshnessRef.SigstoreBundle, &code.AuthenticatedArtifact, appraisalTime, v.freshnessMaxAge)
-	if err != nil {
-		return nil, nil, time.Time{}, fmt.Errorf("verifying code freshness: %w", err)
-	}
-
 	platformRef, err := doc.ReferenceValuesCollateral(document.CollateralSigstorePlatformV1Format)
 	if err != nil {
 		return nil, nil, time.Time{}, err
@@ -148,6 +140,18 @@ func (v *Verifier) authenticateReferenceValues(doc *document.Document, repo stri
 	endorsements, err := v.provenance.AuthenticatePlatformEndorsements(platformRef.SigstoreBundle, platformRef.Repo, platformRef.Tag, platformRef.Digest)
 	if err != nil {
 		return nil, nil, time.Time{}, fmt.Errorf("verifying platform endorsements: %w", err)
+	}
+	if v.ignoreFreshness {
+		return code, endorsements, time.Time{}, nil
+	}
+
+	codeFreshnessRef, err := doc.FreshnessCollateral(document.FreshnessCollateralIDCode)
+	if err != nil {
+		return nil, nil, time.Time{}, err
+	}
+	codeWitnessedAt, err := v.provenance.AuthenticateFreshness(codeFreshnessRef.SigstoreBundle, &code.AuthenticatedArtifact, appraisalTime, v.freshnessMaxAge)
+	if err != nil {
+		return nil, nil, time.Time{}, fmt.Errorf("verifying code freshness: %w", err)
 	}
 	freshnessRef, err := doc.FreshnessCollateral(document.FreshnessCollateralIDPlatform)
 	if err != nil {
