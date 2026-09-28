@@ -3,6 +3,7 @@ name: Mobile SDK
 on:
   pull_request:
     paths:
+      - 'mobile/**'
       - 'verifier/**'
       - 'go.mod'
       - 'go.sum'
