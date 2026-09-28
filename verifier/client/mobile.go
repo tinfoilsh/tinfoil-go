@@ -41,6 +41,10 @@ func ParseVerificationOptionsJSON(raw string) (*VerificationOptions, error) {
 
 // VerifyDocumentV3JSON returns the verified keys, measurements, and witness deadline.
 // Callers must bind traffic to the keys and enforce FreshnessExpiresAt.
+//
+// Deprecated: the JSON form existed for the gomobile surface, which now binds
+// the mobile package and marshals its own schema. Go callers should use
+// verifier.New and Verifier.VerifyV3.
 func VerifyDocumentV3JSON(docBytes, nonce []byte, repo string, opts *VerificationOptions) (string, error) {
 	verified, err := VerifyDocumentV3(docBytes, nonce, repo, opts)
 	if err != nil {
