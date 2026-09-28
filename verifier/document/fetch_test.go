@@ -2,6 +2,7 @@ package document
 
 import (
 	"context"
+	"encoding/hex"
 	"io"
 	"net"
 	"net/http"
@@ -13,7 +14,43 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
+	"github.com/tinfoilsh/tinfoil-go/internal/sdkinfo"
 )
+
+func TestFetchReportsSDKIdentity(t *testing.T) {
+	const responseBody = "attestation response"
+	requests := make(chan *http.Request, 1)
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests <- r.Clone(r.Context())
+		_, _ = io.WriteString(w, responseBody)
+	}))
+	defer server.Close()
+	original := http.DefaultClient
+	http.DefaultClient = server.Client()
+	t.Cleanup(func() { http.DefaultClient = original })
+	host := strings.TrimPrefix(server.URL, "https://")
+	for _, relay := range []bool{false, true} {
+		var body []byte
+		var err error
+		if relay {
+			body, err = FetchVia("enclave.example", host, testNonce())
+		} else {
+			body, err = Fetch(host, testNonce())
+		}
+		require.NoError(t, err)
+		require.Equal(t, responseBody, string(body))
+		request := <-requests
+		require.Equal(t, "/.well-known/tinfoil-attestation", request.URL.Path)
+		require.Equal(t, hex.EncodeToString(testNonce()), request.URL.Query().Get("nonce"))
+		require.Equal(t, "tinfoil-go", request.Header.Get("Tinfoil-SDK"))
+		require.Equal(t, sdkinfo.Version(), request.Header.Get("Tinfoil-SDK-Version"))
+		if relay {
+			require.Equal(t, "enclave.example", request.URL.Query().Get("enclave"))
+		} else {
+			require.Empty(t, request.URL.Query().Get("enclave"))
+		}
+	}
+}
 
 type fetchTransport func(*http.Request) (*http.Response, error)
 

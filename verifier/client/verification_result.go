@@ -1,16 +1,12 @@
 package client
 
 import (
-	"runtime/debug"
-	"strings"
-
+	"github.com/tinfoilsh/tinfoil-go/internal/sdkinfo"
 	"github.com/tinfoilsh/tinfoil-go/verifier/document"
 	"github.com/tinfoilsh/tinfoil-go/verifier/measurement"
 )
 
 const (
-	verifierName       = "tinfoil-go"
-	verifierModulePath = "github.com/tinfoilsh/tinfoil-go"
 	// Version is the Tinfoil Go SDK release version.
 	Version = "0.15.7"
 )
@@ -22,33 +18,7 @@ type SoftwareIdentity struct {
 }
 
 func currentVerifierIdentity() SoftwareIdentity {
-	return SoftwareIdentity{Name: verifierName, Version: verifierVersion(debug.ReadBuildInfo())}
-}
-
-func verifierVersion(info *debug.BuildInfo, ok bool) string {
-	if !ok {
-		return "unknown"
-	}
-	if info.Main.Path == verifierModulePath {
-		return buildModuleVersion(&info.Main)
-	}
-	for _, dependency := range info.Deps {
-		if dependency.Path == verifierModulePath {
-			return buildModuleVersion(dependency)
-		}
-	}
-	return "unknown"
-}
-
-func buildModuleVersion(module *debug.Module) string {
-	if module.Replace != nil {
-		module = module.Replace
-	}
-	version := strings.TrimPrefix(module.Version, "v")
-	if version == "" || version == "(devel)" {
-		return "devel"
-	}
-	return version
+	return SoftwareIdentity{Name: sdkinfo.Name, Version: sdkinfo.Version()}
 }
 
 func cloneMeasurement(value *measurement.Measurement) *measurement.Measurement {
