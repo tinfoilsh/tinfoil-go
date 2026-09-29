@@ -33,7 +33,7 @@ var testShape = &policy.Shape{CPUs: 1, MemoryMB: 1, Disks: 1}
 // Skips when the workspace fixture directory is not present.
 func loadSEVFixture(t *testing.T) (*document.Document, [64]byte) {
 	t.Helper()
-	root := filepath.Join("..", "..", "..", "..", "..", "attestation-samples", "inference.tinfoil.sh")
+	root := filepath.Join("..", "..", "..", "..", "attestation-samples", "inference.tinfoil.sh")
 	freshBytes, err := os.ReadFile(filepath.Join(root, "fresh.json"))
 	if os.IsNotExist(err) {
 		t.Skip("live inference fixture not collected")
