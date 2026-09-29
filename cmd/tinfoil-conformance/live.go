@@ -8,7 +8,7 @@ import (
 	"io"
 	"os"
 
-	"github.com/tinfoilsh/tinfoil-go/verifier/client"
+	"github.com/tinfoilsh/tinfoil-go/verifier"
 	"github.com/tinfoilsh/tinfoil-go/verifier/conformance"
 	"github.com/tinfoilsh/tinfoil-go/verifier/document"
 )
@@ -22,16 +22,23 @@ type liveRequest struct {
 }
 
 // runLive verifies a live enclave through the SDK's public production entry
-// point — client.VerifyDocumentV3 with embedded roots and the current time,
-// never the adapter's composed flow or injected seams — then asserts the live
-// connection's SPKI fingerprint equals the endorsed one before reporting the
-// facts with channel_binding "tls-spki".
+// point — verifier.New with no options, so the embedded roots, the current
+// time and the default freshness bound, never the adapter's composed flow or
+// its injected seams — then asserts the live connection's SPKI fingerprint
+// equals the endorsed one before reporting the facts with channel_binding
+// "tls-spki".
 func runLive() int {
 	var req liveRequest
 	dec := json.NewDecoder(os.Stdin)
 	if err := dec.Decode(&req); err != nil || dec.Decode(new(any)) != io.EOF || req.Host == "" || req.Repo == "" {
 		writeJSON(conformance.Output{Stage: stageLive, Rejection: &conformance.Rejection{Code: "MALFORMED_INPUT"}})
 		return conformance.ExitMalformed
+	}
+
+	v, err := verifier.New()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "building verifier: %v\n", err)
+		return conformance.ExitInternal
 	}
 
 	nonce, err := document.RandomNonce()
@@ -45,7 +52,7 @@ func runLive() int {
 		return conformance.ExitInternal
 	}
 
-	verified, err := client.VerifyDocumentV3(doc, nonce, req.Repo, nil)
+	verified, err := v.VerifyV3(doc, nonce, req.Repo)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "live verification: %v\n", err)
 		return rejectLive(conformance.RejectionCode(err))
