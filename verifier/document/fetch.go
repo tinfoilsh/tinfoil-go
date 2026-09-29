@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"time"
 
+	"github.com/tinfoilsh/tinfoil-go/internal/sdkinfo"
 	"github.com/tinfoilsh/tinfoil-go/verifier/errs"
 )
 
@@ -46,6 +47,8 @@ func FetchVia(host, relay string, nonce []byte) (result []byte, err error) {
 	if err != nil {
 		return nil, &errs.ConfigurationError{Err: fmt.Errorf("invalid enclave host: %w", err)}
 	}
+	req.Header.Set(sdkNameHeader, sdkinfo.Name)
+	req.Header.Set(sdkVersionHeader, sdkinfo.Version())
 	client := *http.DefaultClient
 	if client.Transport == nil {
 		client.Transport = http.DefaultTransport
@@ -85,6 +88,8 @@ func FetchVia(host, relay string, nonce []byte) (result []byte, err error) {
 
 const (
 	attestationEndpoint     = "/.well-known/tinfoil-attestation"
+	sdkNameHeader           = "Tinfoil-SDK"
+	sdkVersionHeader        = "Tinfoil-SDK-Version"
 	attestationFetchTimeout = 30 * time.Second
 	maxAttestationBytes     = 32 << 20
 )
