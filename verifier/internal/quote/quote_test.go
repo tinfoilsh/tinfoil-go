@@ -25,13 +25,13 @@ import (
 // (SEV assembly).
 var testShape = &policy.Shape{CPUs: 1, MemoryMB: 1, Disks: 1}
 
-// loadSEVFixture builds a v3 document around a live-captured production
-// Genoa report, its VCEK collateral, and a live-fetched AMD CRL (captured
+// loadSEVFixture builds CPU evidence from a live-captured production Genoa
+// report, its VCEK collateral, and a live-fetched AMD CRL (captured
 // documents predate the amd-crl entry). The captured report predates the v3
 // REPORT_DATA ladder, so the expected REPORT_DATA is taken from the report
 // itself; the document ladder is covered by the document package tests.
 // Skips when the workspace fixture directory is not present.
-func loadSEVFixture(t *testing.T) (*document.Document, [64]byte) {
+func loadSEVFixture(t *testing.T) (CPUEvidence, CPUEndorsements, [64]byte) {
 	t.Helper()
 	root := filepath.Join("..", "..", "..", "..", "attestation-samples", "inference.tinfoil.sh")
 	freshBytes, err := os.ReadFile(filepath.Join(root, "fresh.json"))
@@ -68,47 +68,22 @@ func loadSEVFixture(t *testing.T) (*document.Document, [64]byte) {
 	var reportData [64]byte
 	copy(reportData[:], parsedReport.ReportData)
 
-	vcekData, err := json.Marshal(document.AMDVCEKCollateral{
-		VCEKDERBase64: material.Collateral.CPUVendor.SEVSNP.VCEKDERBase64,
-		CertChainPEM:  material.Collateral.CPUVendor.SEVSNP.CertChainPEM,
-	})
+	vcekDER, err := base64.StdEncoding.DecodeString(material.Collateral.CPUVendor.SEVSNP.VCEKDERBase64)
 	require.NoError(t, err)
-
-	doc := &document.Document{
-		Format: document.AttestationV3Format,
-		CPUEvidence: document.CPUEvidence{
-			Format:       document.SEVSNPReportV1Format,
-			ReportBase64: fresh.CPU.Report,
-		},
-		Collateral: []document.CollateralEntry{{
-			ID:       "cpu-endorsement",
-			Role:     document.RoleEndorsement,
-			Format:   document.CollateralAMDVCEKV1Format,
-			Subjects: []string{document.SubjectCPU},
-			Data:     vcekData,
-		}},
+	evidence := CPUEvidence{Format: document.SEVSNPReportV1Format, Report: reportBytes}
+	endorsements := CPUEndorsements{
+		AMDVCEK: &AMDVCEK{VCEKDER: vcekDER, CertChainPEM: material.Collateral.CPUVendor.SEVSNP.CertChainPEM},
+		AMDCRL:  liveCRL(t),
 	}
-	appendLiveCRL(t, doc)
-	return doc, reportData
+	return evidence, endorsements, reportData
 }
 
-// appendLiveCRL adds the required amd-crl collateral entry, fetching the
-// CRL exactly as the builder does.
-func appendLiveCRL(t *testing.T, doc *document.Document) {
+// liveCRL fetches the Genoa amd-crl collateral exactly as the builder does.
+func liveCRL(t *testing.T) *AMDCRL {
 	t.Helper()
 	crlBytes, err := testutil.Get("https://kdsintf.amd.com/vcek/v1/Genoa/crl")
 	require.NoError(t, err)
-	crlData, err := json.Marshal(document.AMDCRLCollateral{
-		CRLDERBase64: base64.StdEncoding.EncodeToString(crlBytes),
-	})
-	require.NoError(t, err)
-	doc.Collateral = append(doc.Collateral, document.CollateralEntry{
-		ID:       "cpu-crl",
-		Role:     document.RoleEndorsement,
-		Format:   document.CollateralAMDCRLV1Format,
-		Subjects: []string{document.SubjectCPU},
-		Data:     crlData,
-	})
+	return &AMDCRL{CRLDER: crlBytes}
 }
 
 func loadEndorsementArtifact(t *testing.T) *policy.Artifact {
@@ -122,15 +97,15 @@ func loadEndorsementArtifact(t *testing.T) *policy.Artifact {
 
 func TestLiveVerifySEV(t *testing.T) {
 	testutil.RequireLive(t)
-	doc, reportData := loadSEVFixture(t)
+	evidence, endorsements, reportData := loadSEVFixture(t)
 	artifact := loadEndorsementArtifact(t)
 
 	// The fixture predates per-release code provenance, so the expected
 	// launch measurement is the quote's own; the equality path is still
 	// exercised, and the mismatch case is covered below.
-	q, err := Authenticate(doc, nil)
+	q, err := Authenticate(evidence, endorsements, nil)
 	require.NoError(t, err)
-	assembled, verified, err := Verify(doc, artifact, asCode(q.Measurement), nil, testShape, reportData, nil)
+	assembled, verified, err := Verify(evidence, endorsements, artifact, asCode(q.Measurement), nil, testShape, reportData, nil)
 	require.NoError(t, err)
 	assert.Equal(t, policy.PlatformSEVSNP, verified.Platform())
 	assert.Equal(t, "amd-genoa-prod", assembled.PolicyName)
@@ -143,13 +118,13 @@ func TestLiveVerifySEV(t *testing.T) {
 	// Wrong REPORT_DATA must reject even with a valid signature.
 	wrongReportData := reportData
 	wrongReportData[0] ^= 0xff
-	_, _, err = Verify(doc, artifact, asCode(q.Measurement), nil, testShape, wrongReportData, nil)
+	_, _, err = Verify(evidence, endorsements, artifact, asCode(q.Measurement), nil, testShape, wrongReportData, nil)
 	assert.ErrorContains(t, err, "REPORT_DATA")
 
 	// A launch measurement differing from the code expectation must reject.
 	wrongMeasurement := asCode(q.Measurement)
 	wrongMeasurement.Registers[0] = strings.Repeat("ab", 48)
-	_, _, err = Verify(doc, artifact, wrongMeasurement, nil, testShape, reportData, nil)
+	_, _, err = Verify(evidence, endorsements, artifact, wrongMeasurement, nil, testShape, reportData, nil)
 	assert.Error(t, err)
 
 	// An assembly without the required code expectation must reject.
@@ -163,20 +138,20 @@ func TestLiveVerifySEV(t *testing.T) {
 	// A machine absent from the artifact must reject.
 	unendorsed := *artifact
 	unendorsed.Machines = map[string]string{}
-	_, _, err = Verify(doc, &unendorsed, asCode(q.Measurement), nil, testShape, reportData, nil)
+	_, _, err = Verify(evidence, endorsements, &unendorsed, asCode(q.Measurement), nil, testShape, reportData, nil)
 	assert.ErrorContains(t, err, "not endorsed")
 
-	// v3 is single-request: a document without its endorsement collateral is
+	// v3 is single-request: evidence without its endorsement collateral is
 	// rejected, never patched up with a network fetch.
-	noVCEK := *doc
-	noVCEK.Collateral = nil
-	_, _, err = Verify(&noVCEK, artifact, asCode(q.Measurement), nil, testShape, reportData, nil)
+	noVCEK := endorsements
+	noVCEK.AMDVCEK = nil
+	_, _, err = Verify(evidence, noVCEK, artifact, asCode(q.Measurement), nil, testShape, reportData, nil)
 	assert.ErrorContains(t, err, "no amd-vcek endorsement collateral")
 
-	// A document without the CRL collateral must reject.
-	noCRL := *doc
-	noCRL.Collateral = doc.Collateral[:1]
-	_, _, err = Verify(&noCRL, artifact, asCode(q.Measurement), nil, testShape, reportData, nil)
+	// Evidence without the CRL collateral must reject.
+	noCRL := endorsements
+	noCRL.AMDCRL = nil
+	_, _, err = Verify(evidence, noCRL, artifact, asCode(q.Measurement), nil, testShape, reportData, nil)
 	assert.ErrorContains(t, err, "no amd-crl endorsement collateral")
 }
 
@@ -190,29 +165,22 @@ func TestVerifySEVRejectsBadCRL(t *testing.T) {
 	require.NoError(t, json.Unmarshal(raw, &fixture))
 	chain, err := os.ReadFile(filepath.Join("sev", "turin_cert_chain.pem"))
 	require.NoError(t, err)
-	vcek, err := json.Marshal(document.AMDVCEKCollateral{VCEKDERBase64: fixture.VCEK, CertChainPEM: string(chain)})
+	report, err := base64.StdEncoding.DecodeString(fixture.Report)
 	require.NoError(t, err)
-
-	badCRL, err := json.Marshal(document.AMDCRLCollateral{
-		CRLDERBase64: base64.StdEncoding.EncodeToString([]byte("not a crl")),
-	})
+	vcekDER, err := base64.StdEncoding.DecodeString(fixture.VCEK)
 	require.NoError(t, err)
-	doc := &document.Document{
-		CPUEvidence: document.CPUEvidence{Format: document.SEVSNPReportV1Format, ReportBase64: fixture.Report},
-		Collateral: []document.CollateralEntry{
-			{ID: "cpu-endorsement", Role: document.RoleEndorsement, Format: document.CollateralAMDVCEKV1Format, Subjects: []string{document.SubjectCPU}, Data: vcek},
-			{ID: "cpu-crl", Role: document.RoleEndorsement, Format: document.CollateralAMDCRLV1Format, Subjects: []string{document.SubjectCPU}, Data: badCRL},
-		},
+	evidence := CPUEvidence{Format: document.SEVSNPReportV1Format, Report: report}
+	endorsements := CPUEndorsements{
+		AMDVCEK: &AMDVCEK{VCEKDER: vcekDER, CertChainPEM: string(chain)},
+		AMDCRL:  &AMDCRL{CRLDER: []byte("not a crl")},
 	}
-	_, err = Authenticate(doc, nil)
+	_, err = Authenticate(evidence, endorsements, nil)
 	assert.ErrorContains(t, err, "parsing amd-crl collateral")
 }
 
 func TestVerifyUnknownFormat(t *testing.T) {
-	doc := &document.Document{
-		CPUEvidence: document.CPUEvidence{Format: "https://tinfoil.sh/format/unknown/v1"},
-	}
-	_, _, err := Verify(doc, &policy.Artifact{}, &measurement.Measurement{}, nil, testShape, [64]byte{}, nil)
+	evidence := CPUEvidence{Format: "https://tinfoil.sh/format/unknown/v1"}
+	_, _, err := Verify(evidence, CPUEndorsements{}, &policy.Artifact{}, &measurement.Measurement{}, nil, testShape, [64]byte{}, nil)
 	assert.Error(t, err)
 	assert.Contains(t, fmt.Sprint(err), "unsupported cpu_evidence format")
 }

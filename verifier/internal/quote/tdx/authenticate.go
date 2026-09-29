@@ -7,7 +7,6 @@ import (
 	"bytes"
 	"crypto/x509"
 	_ "embed"
-	"encoding/base64"
 	"encoding/hex"
 	"encoding/json/v2"
 	"encoding/pem"
@@ -44,15 +43,20 @@ type Quote struct {
 // Identity is the authenticated machines-map lookup key (PPID, lowercase hex).
 func (q *Quote) Identity() string { return q.identity }
 
+// Evidence is a TDX quote with the Intel PCS responses captured to
+// authenticate it.
+type Evidence struct {
+	// Quote is the raw TDX quote.
+	Quote []byte
+	// PCS holds the captured Intel PCS responses, replayed instead of fetched.
+	PCS []document.PCSResponse
+}
+
 // Authenticate verifies the quote's signature chain up to the pinned Intel
-// SGX root, replaying the document's captured PCS collateral — no network
-// fetches. Callers must assemble a policy and validate before trusting the
-// platform.
-func Authenticate(doc *document.Document, opts *Options) (result *Quote, err error) {
+// SGX root, replaying the captured PCS collateral — no network fetches.
+// Callers must assemble a policy and validate before trusting the platform.
+func Authenticate(ev Evidence, opts *Options) (result *Quote, err error) {
 	defer func() { err = errs.WrapAttestation(err) }()
-	if doc == nil {
-		return nil, &errs.ConfigurationError{Err: fmt.Errorf("document is required")}
-	}
 	// Sampled once so the replayed CRL windows and the library's own validity
 	// checks appraise the same instant.
 	now := opts.now()
@@ -60,11 +64,7 @@ func Authenticate(doc *document.Document, opts *Options) (result *Quote, err err
 	if err != nil {
 		return nil, err
 	}
-	rawQuote, err := base64.StdEncoding.DecodeString(doc.CPUEvidence.ReportBase64)
-	if err != nil {
-		return nil, fmt.Errorf("decoding TDX quote: %w", err)
-	}
-	parsed, err := tdxabi.QuoteToProto(rawQuote)
+	parsed, err := tdxabi.QuoteToProto(ev.Quote)
 	if err != nil {
 		return nil, fmt.Errorf("parsing TDX quote: %w", err)
 	}
@@ -89,15 +89,7 @@ func Authenticate(doc *document.Document, opts *Options) (result *Quote, err err
 
 	// The recorder observes the tcbEvaluationDataNumber of the collateral
 	// actually used, so the policy floor is enforced on verified bytes.
-	entry, ok := doc.EndorsementCollateral(document.CollateralIntelPCSV1Format, document.SubjectCPU)
-	if !ok {
-		return nil, fmt.Errorf("document carries no intel-pcs endorsement collateral for the cpu")
-	}
-	var data document.IntelPCSCollateral
-	if err := json.Unmarshal(entry.Data, &data, json.RejectUnknownMembers(true)); err != nil {
-		return nil, fmt.Errorf("parsing intel-pcs collateral entry %q: %w", entry.ID, err)
-	}
-	inner, err := newPCSReplayGetter(data.Responses, now)
+	inner, err := newPCSReplayGetter(ev.PCS, now)
 	if err != nil {
 		return nil, err
 	}

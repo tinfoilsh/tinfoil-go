@@ -194,7 +194,11 @@ func Run(stage string, in Input) (Output, int) {
 		if err != nil {
 			return malformed(stage)
 		}
-		auth, err := quote.Authenticate(parsed, quoteOpts)
+		evidence, endorsements, err := quote.EvidenceFromDocument(parsed)
+		if err != nil {
+			return reject(stage, "QUOTE_REJECTED")
+		}
+		auth, err := quote.Authenticate(evidence, endorsements, quoteOpts)
 		if err != nil {
 			return reject(stage, "QUOTE_REJECTED")
 		}
