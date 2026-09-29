@@ -3,6 +3,8 @@ package tinfoil
 import (
 	"bytes"
 	"cmp"
+	"crypto/hkdf"
+	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/binary"
@@ -13,6 +15,7 @@ import (
 	"maps"
 	"math/rand/v2"
 	"mime"
+	"mime/multipart"
 	"net/http"
 	"net/url"
 	"slices"
@@ -27,11 +30,12 @@ import (
 )
 
 const (
-	modelHeader       = "X-Tinfoil-Model"
-	cachePrefixHeader = "X-Tinfoil-Cache-Prefix"
-	sealHeader        = "X-Tinfoil-Seal"
-	maxSealRedirects  = 3
-	maxRerouted       = 1024
+	modelHeader          = "X-Tinfoil-Model"
+	cachePrefixHeader    = "X-Tinfoil-Cache-Prefix"
+	sealHeader           = "X-Tinfoil-Seal"
+	maxSealRedirects     = 3
+	maxRerouted          = 1024
+	maxMultipartBodySize = 64 << 20
 
 	catalogPath         = "/catalog"
 	catalogFetchTimeout = 10 * time.Second
@@ -40,7 +44,8 @@ const (
 	// Derived client-side: no router sits between a gateway client and the engine.
 	cacheSaltField = "cache_salt"
 	// Separates the salt from the secret's other use, the cache-prefix hash.
-	cacheSaltDomainTag = "tinfoil/client-cache-salt/v1"
+	cacheSaltDomainTag  = "tinfoil/client-cache-salt/v2"
+	cacheRouteDomainTag = "tinfoil/client-cache-route/v2"
 )
 
 type CatalogEntry struct {
@@ -361,12 +366,20 @@ func (t *sealTransport) prepare(req *http.Request) error {
 	if req.Method != http.MethodPost || req.Body == nil || req.Body == http.NoBody {
 		return nil
 	}
-	mediaType, _, err := mime.ParseMediaType(req.Header.Get("Content-Type"))
-	if err != nil || mediaType != "application/json" {
+	mediaType, params, err := mime.ParseMediaType(req.Header.Get("Content-Type"))
+	if err != nil {
 		return nil
 	}
-	// Only inspect JSON inference requests. Uploads keep their original body
-	// and use GetBody if a seal mismatch requires another attempt.
+	if mediaType == "multipart/form-data" {
+		// Explicit routing keeps uploads streaming; callers provide GetBody for retries.
+		if req.Header.Get(modelHeader) != "" {
+			return nil
+		}
+		return prepareMultipart(req, params["boundary"])
+	}
+	if mediaType != "application/json" {
+		return nil
+	}
 	scoped := userCacheSecretPathEligible(req)
 	body, err := io.ReadAll(req.Body)
 	req.Body.Close()
@@ -380,39 +393,104 @@ func (t *sealTransport) prepare(req *http.Request) error {
 			req.Header.Set(modelHeader, model)
 		}
 		if scoped {
-			body = t.scopeCache(req.Header, fields, body)
+			body, err = t.scopeCache(req.Header, fields, body)
+			if err != nil {
+				return err
+			}
 		}
 	}
+	setGatewayBody(req, body)
+	return nil
+}
+
+func setGatewayBody(req *http.Request, body []byte) {
 	req.ContentLength = int64(len(body))
 	req.GetBody = func() (io.ReadCloser, error) {
 		return io.NopCloser(bytes.NewReader(body)), nil
 	}
 	req.Body, _ = req.GetBody()
+}
+
+func prepareMultipart(req *http.Request, boundary string) error {
+	defer req.Body.Close()
+	if boundary == "" {
+		return &ConfigurationError{Err: fmt.Errorf("multipart upload is missing its boundary")}
+	}
+	body, err := io.ReadAll(http.MaxBytesReader(nil, req.Body, maxMultipartBodySize))
+	if err != nil {
+		return fmt.Errorf("reading multipart upload: %w", err)
+	}
+	reader := multipart.NewReader(bytes.NewReader(body), boundary)
+	var model string
+	for {
+		part, err := reader.NextRawPart()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return &ConfigurationError{Err: fmt.Errorf("invalid multipart upload: %w", err)}
+		}
+		if part.FormName() == "model" {
+			if model != "" || part.FileName() != "" {
+				return &ConfigurationError{Err: fmt.Errorf("multipart upload must contain exactly one model field, not a file")}
+			}
+			value, err := io.ReadAll(part)
+			if err != nil {
+				return &ConfigurationError{Err: fmt.Errorf("reading multipart model: %w", err)}
+			}
+			model = string(value)
+			if strings.TrimSpace(model) == "" {
+				return &ConfigurationError{Err: fmt.Errorf("multipart model must not be empty")}
+			}
+		} else if _, err := io.Copy(io.Discard, part); err != nil {
+			return &ConfigurationError{Err: fmt.Errorf("reading multipart field: %w", err)}
+		}
+	}
+	if model == "" {
+		return &ConfigurationError{Err: fmt.Errorf("multipart upload is missing its model field")}
+	}
+	req.Header.Set(modelHeader, model)
+	setGatewayBody(req, body)
 	return nil
 }
 
 // The engine only needs the salt; the secret itself never leaves the client.
-func (t *sealTransport) scopeCache(h http.Header, fields map[string]json.RawMessage, body []byte) []byte {
+func (t *sealTransport) scopeCache(h http.Header, fields map[string]json.RawMessage, body []byte) ([]byte, error) {
 	var secret string
 	json.Unmarshal(fields[userCacheSecretField], &secret)
 	if secret = cmp.Or(secret, t.secret); secret == "" {
-		return body
+		return body, nil
 	}
-	if head := promptHead(fields); head != nil && h.Get(cachePrefixHeader) == "" {
-		sum := sha256.Sum256(slices.Concat([]byte(secret), []byte{0}, head))
-		h.Set(cachePrefixHeader, hex.EncodeToString(sum[:]))
+	scheme, apiKey, _ := strings.Cut(h.Get("Authorization"), " ")
+	if !strings.EqualFold(scheme, "Bearer") {
+		apiKey = ""
+	}
+	apiKey = strings.TrimSpace(apiKey)
+	salt, err := deriveCacheSalt(secret, apiKey)
+	if err != nil {
+		return nil, err
+	}
+	h.Del(cachePrefixHeader)
+	if head := promptHead(fields); head != nil {
+		key, err := hkdf.Key(sha256.New, []byte(secret), []byte(apiKey), cacheRouteDomainTag, sha256.Size)
+		if err != nil {
+			return nil, fmt.Errorf("deriving cache routing key: %w", err)
+		}
+		mac := hmac.New(sha256.New, key)
+		mac.Write(head)
+		h.Set(cachePrefixHeader, hex.EncodeToString(mac.Sum(nil)))
 	}
 	delete(fields, userCacheSecretField)
-	fields[cacheSaltField], _ = json.Marshal(deriveCacheSalt(secret))
-	if scoped, err := json.Marshal(fields); err == nil {
-		return scoped
-	}
-	return body
+	fields[cacheSaltField], _ = json.Marshal(salt)
+	return json.Marshal(fields)
 }
 
-func deriveCacheSalt(secret string) string {
-	sum := sha256.Sum256([]byte(cacheSaltDomainTag + "\x00" + secret))
-	return base64.RawURLEncoding.EncodeToString(sum[:])
+func deriveCacheSalt(secret, apiKey string) (string, error) {
+	key, err := hkdf.Key(sha256.New, []byte(secret), []byte(apiKey), cacheSaltDomainTag, sha256.Size)
+	if err != nil {
+		return "", fmt.Errorf("deriving cache salt: %w", err)
+	}
+	return base64.RawURLEncoding.EncodeToString(key), nil
 }
 
 // The first element is the prefix later turns of a conversation share.

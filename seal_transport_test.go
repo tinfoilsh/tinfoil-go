@@ -178,6 +178,7 @@ func TestSealJSONRoutingPreservesInjectedBodyAcrossRetries(t *testing.T) {
 			req, err := http.NewRequest(http.MethodPost, "https://gateway.example/v1/chat/completions", strings.NewReader(`{"model":"test-model","messages":[{"role":"user","content":"hello"}]}`))
 			require.NoError(t, err)
 			req.Header.Set("Content-Type", contentType)
+			req.Header.Set("Authorization", "Bearer test-api-key")
 			resp, err := seal.RoundTrip(req)
 			require.NoError(t, err)
 			resp.Body.Close()
@@ -186,7 +187,8 @@ func TestSealJSONRoutingPreservesInjectedBodyAcrossRetries(t *testing.T) {
 			var fields map[string]json.RawMessage
 			require.NoError(t, json.Unmarshal([]byte(bodies[0]), &fields))
 			require.NotContains(t, fields, userCacheSecretField)
-			require.JSONEq(t, `"iVivfplnoh2hhpE9mmjygP5VqZiCFenuhHb9TfpBpxs"`, string(fields[cacheSaltField]))
+			require.JSONEq(t, `"DpKycpNLBpMrAyjpNCVBx66rSpZVwsZJPz5Ty66bBy8"`, string(fields[cacheSaltField]))
+			require.Equal(t, "ede1ce81b1779c5d9431ab8d3a073b06a8507da5cc3178ff385c13cef8ff02f6", prefixes[0])
 			require.NotEmpty(t, prefixes[0])
 			require.Equal(t, prefixes[0], prefixes[1])
 			require.Empty(t, req.Header.Get(modelHeader))
