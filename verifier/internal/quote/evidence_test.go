@@ -35,6 +35,35 @@ func TestEvidenceFromDocumentDecodesSEVCollateral(t *testing.T) {
 	assert.Nil(t, en.IntelPCS)
 }
 
+func TestEvidenceFromDocumentDecodesTDXCollateral(t *testing.T) {
+	quote := []byte("quote")
+	pcs := document.IntelPCSCollateral{Responses: []document.PCSResponse{{
+		URL:        "https://api.trustedservices.intel.com/tdx/certification/v4/qe/identity",
+		Headers:    map[string][]string{"Sgx-Enclave-Identity-Issuer-Chain": {"chain"}},
+		BodyBase64: base64.StdEncoding.EncodeToString([]byte(`{"enclaveIdentity":{}}`)),
+	}}}
+	doc := &document.Document{
+		CPUEvidence: document.CPUEvidence{Format: document.TDXQuoteV1Format, ReportBase64: base64.StdEncoding.EncodeToString(quote)},
+		Collateral:  []document.CollateralEntry{collateralEntry(t, "pcs", document.CollateralIntelPCSV1Format, pcs)},
+	}
+	ev, en, err := EvidenceFromDocument(doc)
+	require.NoError(t, err)
+	assert.Equal(t, CPUEvidence{Format: document.TDXQuoteV1Format, Report: quote}, ev)
+	assert.Equal(t, &pcs, en.IntelPCS)
+	assert.Nil(t, en.AMDVCEK)
+	assert.Nil(t, en.AMDCRL)
+}
+
+func TestEvidenceFromDocumentRejectsMalformedIntelPCS(t *testing.T) {
+	malformed := document.CollateralEntry{ID: "pcs", Role: document.RoleEndorsement, Format: document.CollateralIntelPCSV1Format, Subjects: []string{document.SubjectCPU}, Data: []byte(`{"unknown":1}`)}
+	doc := &document.Document{
+		CPUEvidence: document.CPUEvidence{Format: document.TDXQuoteV1Format},
+		Collateral:  []document.CollateralEntry{malformed},
+	}
+	_, _, err := EvidenceFromDocument(doc)
+	assert.ErrorContains(t, err, `parsing intel-pcs collateral entry "pcs"`)
+}
+
 func TestEvidenceFromDocumentLeavesMissingCollateralNil(t *testing.T) {
 	for _, format := range []string{document.SEVSNPReportV1Format, document.TDXQuoteV1Format} {
 		doc := &document.Document{CPUEvidence: document.CPUEvidence{Format: format}}
