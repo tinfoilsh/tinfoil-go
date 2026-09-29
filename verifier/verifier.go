@@ -49,6 +49,10 @@ type Verifier struct {
 	// trusted root. New builds one from the embedded root; only the
 	// conformance build can replace it.
 	provenance *provenance.Client
+
+	// overrides is empty in a production build; the conformance build uses it
+	// to carry synthetic vendor roots down to the CPU evidence layer.
+	overrides overrides
 }
 
 // New builds a Verifier from opts. With no options it appraises against the
@@ -90,15 +94,34 @@ func (v *Verifier) PinnedRegisters() *measurement.Measurement {
 // nonce it generated, and repo. On success it must bind its traffic to the
 // returned keys and stop authorizing new requests at FreshnessExpiresAt.
 func (v *Verifier) VerifyV3(docBytes, nonce []byte, repo string) (*Verification, error) {
+	verified, _, err := v.verifyV3(docBytes, nonce, repo)
+	return verified, err
+}
+
+// layer names the verification step that rejected a document. It travels
+// beside the error rather than inside it, so it changes nothing about how
+// errors are classified or displayed; only the conformance build reads it.
+type layer string
+
+const (
+	layerNone       layer = ""
+	layerEnvelope   layer = "envelope"
+	layerProvenance layer = "provenance"
+	layerQuote      layer = "quote"
+	layerPolicy     layer = "policy"
+)
+
+// verifyV3 is VerifyV3, also reporting which layer rejected the document.
+func (v *Verifier) verifyV3(docBytes, nonce []byte, repo string) (*Verification, layer, error) {
 	if v == nil || v.now == nil || v.provenance == nil {
-		return nil, &errs.ConfigurationError{Err: fmt.Errorf("verifier must be built with New")}
+		return nil, layerNone, &errs.ConfigurationError{Err: fmt.Errorf("verifier must be built with New")}
 	}
 	if _, _, _, err := provenance.ParseReference(repo); err != nil {
-		return nil, &errs.ConfigurationError{Err: err}
+		return nil, layerProvenance, &errs.ConfigurationError{Err: err}
 	}
 	doc, expectedReportData, err := document.Check(docBytes, nonce)
 	if err != nil {
-		return nil, err
+		return nil, layerEnvelope, err
 	}
 
 	// Sampled once, so freshness appraisal and the CPU evidence windows judge
@@ -107,12 +130,19 @@ func (v *Verifier) VerifyV3(docBytes, nonce []byte, repo string) (*Verification,
 
 	code, endorsements, freshnessExpiresAt, err := v.authenticateReferenceValues(doc, repo, now)
 	if err != nil {
-		return nil, errs.WrapAttestation(fmt.Errorf("reference values: %w", err))
+		return nil, layerProvenance, errs.WrapAttestation(fmt.Errorf("reference values: %w", err))
 	}
 
-	_, authenticated, err := quote.Verify(doc, endorsements.Artifact, code.Measurement, v.pinnedRegisters, code.Shape, expectedReportData, v.quoteOptions(now))
+	authenticated, err := quote.Authenticate(doc, v.quoteOptions(now))
 	if err != nil {
-		return nil, err
+		return nil, layerQuote, err
+	}
+	assembled, err := quote.Assemble(endorsements.Artifact, code.Measurement, v.pinnedRegisters, code.Shape, expectedReportData, authenticated)
+	if err != nil {
+		return nil, layerPolicy, err
+	}
+	if err := assembled.Validate(); err != nil {
+		return nil, layerPolicy, err
 	}
 
 	return &Verification{
@@ -122,7 +152,7 @@ func (v *Verifier) VerifyV3(docBytes, nonce []byte, repo string) (*Verification,
 		EnclaveMeasurement: authenticated.Measurement,
 		CryptoMaterial:     doc.CryptoMaterialItems(),
 		FreshnessExpiresAt: freshnessExpiresAt,
-	}, nil
+	}, layerNone, nil
 }
 
 func (v *Verifier) authenticateReferenceValues(doc *document.Document, repo string, appraisalTime time.Time) (*provenance.Code, *provenance.PlatformEndorsements, time.Time, error) {

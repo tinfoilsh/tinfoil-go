@@ -5,12 +5,10 @@
 // language-neutral wire contract below. Every SDK implements the same
 // Input/Output shapes and exit codes so the suite drives them identically.
 //
-// The full-verify stage drives the layers itself rather than making one
-// VerifyV3 call, because a rejection has to name the layer that produced it
-// and a single call yields a single error. The reference-values step is not
-// its own: it goes through verifier.Verifier, so the shared fixtures appraise
-// the code that production runs. The remaining steps are direct calls into the
-// same document and quote packages the verifier uses.
+// The full-verify stage is one Verifier.VerifyV3WithLayer call, so the shared
+// fixtures appraise exactly the code production runs; the layer it reports
+// names the rejection. The block stages isolate a single layer by calling into
+// the document, provenance and quote packages the verifier uses.
 //
 // Synthetic roots and the appraisal clock travel as ordinary per-call options,
 // so the adapter mutates no production state.
@@ -147,6 +145,7 @@ func Run(stage string, in Input) (Output, int) {
 	core, err := verifier.New(
 		verifier.DangerousTestOnlyWithClock(func() time.Time { return appraisal }),
 		verifier.DangerousTestOnlyWithSigstoreRoot(rts.sigstore),
+		verifier.DangerousTestOnlyWithVendorRoots(rts.amd, rts.intel),
 	)
 	if err != nil {
 		return malformed(stage)
@@ -154,7 +153,7 @@ func Run(stage string, in Input) (Output, int) {
 
 	switch stage {
 	case StageVerify:
-		return verifyFull(doc, nonce, in.Repo, quoteOpts, core)
+		return verifyFull(doc, nonce, in.Repo, core)
 	case StageCheckEnvelope:
 		if _, _, err := document.Check(doc, nonce); err != nil {
 			return reject(stage, "ENVELOPE_REJECTED")
@@ -207,55 +206,31 @@ func Run(stage string, in Input) (Output, int) {
 	}
 }
 
-// verifyFull composes the whole flow; the first failing step names the layer.
-func verifyFull(doc, nonce []byte, repo string, quoteOpts *quote.Options, core *verifier.Verifier) (Output, int) {
-	parsed, reportData, err := document.Check(doc, nonce)
+// verifyFull runs the whole flow through the verifier; the layer it reports
+// names the rejection.
+func verifyFull(doc, nonce []byte, repo string, core *verifier.Verifier) (Output, int) {
+	verified, layer, err := core.VerifyV3WithLayer(doc, nonce, repo)
 	if err != nil {
-		return reject(StageVerify, "ENVELOPE_REJECTED")
-	}
-	code, endorsements, _, err := core.ReferenceValues(parsed, repo)
-	if err != nil {
-		return reject(StageVerify, "PROVENANCE_REJECTED")
-	}
-	auth, err := quote.Authenticate(parsed, quoteOpts)
-	if err != nil {
-		return reject(StageVerify, "QUOTE_REJECTED")
-	}
-	assembled, err := quote.Assemble(endorsements.Artifact, code.Measurement, nil, code.Shape, reportData, auth)
-	if err != nil {
-		return reject(StageVerify, "POLICY_REJECTED")
-	}
-	if err := assembled.Validate(); err != nil {
-		return reject(StageVerify, "POLICY_REJECTED")
+		return reject(StageVerify, RejectionCode(layer))
 	}
 	// A document that verifies but endorses no usable channel keys is useless
 	// to every real client (SecureClient rejects at binding), so the full
 	// stage requires both — mirroring the deployed end-to-end behavior.
-	tlsFP, hpke := boundKeys(parsed)
-	if tlsFP == "" || hpke == "" {
+	tlsFP, err := verified.TLSPublicKeyFP()
+	if err != nil {
+		return reject(StageVerify, "ENVELOPE_REJECTED")
+	}
+	hpke, err := verified.HPKEPublicKey()
+	if err != nil {
 		return reject(StageVerify, "ENVELOPE_REJECTED")
 	}
 	return Output{Stage: StageVerify, Accepted: true, Outputs: &AcceptOutputs{
-		CodeDigest:         code.Digest,
-		CodeMeasurement:    toMeasurement(code.Measurement),
-		EnclaveMeasurement: toMeasurement(auth.Measurement),
+		CodeDigest:         verified.CodeDigest,
+		CodeMeasurement:    toMeasurement(verified.CodeMeasurement),
+		EnclaveMeasurement: toMeasurement(verified.EnclaveMeasurement),
 		TLSPublicKeyFP:     tlsFP,
 		HPKEPublicKey:      hpke,
 	}}, ExitAccepted
-}
-
-// boundKeys returns the endorsed TLS SPKI fingerprint and HPKE public key from
-// the verified crypto material (hash-bound into the quote via document.Check).
-func boundKeys(doc *document.Document) (tlsFP, hpke string) {
-	for _, it := range doc.CryptoMaterialItems() {
-		switch {
-		case it.ID == document.CryptoMaterialIDTLS && it.Format == document.KeySPKIFPSHA256V1Format:
-			tlsFP = it.Data
-		case it.ID == document.CryptoMaterialIDHPKE && it.Format == document.KeyX25519HPKEV1Format:
-			hpke = it.Data
-		}
-	}
-	return
 }
 
 // roots are the injected synthetic anchors; a nil field selects the embedded
