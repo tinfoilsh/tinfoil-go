@@ -14,10 +14,6 @@ import (
 	"github.com/tinfoilsh/tinfoil-go/verifier/client"
 	"github.com/tinfoilsh/tinfoil-go/verifier/document"
 	"github.com/tinfoilsh/tinfoil-go/verifier/measurement"
-	"github.com/tinfoilsh/tinfoil-go/verifier/policy"
-	"github.com/tinfoilsh/tinfoil-go/verifier/quote"
-	"github.com/tinfoilsh/tinfoil-go/verifier/quote/sev"
-	"github.com/tinfoilsh/tinfoil-go/verifier/quote/tdx"
 )
 
 func TestErrorContract(t *testing.T) {
@@ -75,25 +71,6 @@ func TestPublicInputErrors(t *testing.T) {
 	require.ErrorAs(t, err, &config)
 	_, err = document.Fetch("", make([]byte, document.NonceSize))
 	require.ErrorAs(t, err, &config)
-	_, err = quote.Authenticate(nil, nil)
-	require.ErrorAs(t, err, &config)
-	_, err = quote.Assemble(nil, nil, nil, nil, [64]byte{}, nil)
-	require.ErrorAs(t, err, &config)
-	_, err = quote.Assemble(&policy.Artifact{}, nil, nil, nil, [64]byte{}, &quote.Authenticated{})
-	require.ErrorAs(t, err, &config)
-	_, err = sev.Assemble(&policy.SEVSNPPolicy{}, &sev.Quote{}, "", [64]byte{})
-	require.ErrorAs(t, err, &config)
-	_, _, err = tdx.Assemble(&policy.Artifact{}, &policy.TDXPolicy{}, &policy.Shape{}, &tdx.Quote{}, [5]string{}, [64]byte{})
-	require.ErrorAs(t, err, &config)
-	for _, assembled := range []*quote.AssembledPolicy{nil, {}} {
-		require.ErrorAs(t, assembled.Validate(), &config)
-	}
-	for _, expected := range []*sev.Expectations{nil, {}} {
-		require.ErrorAs(t, expected.Validate(nil), &config)
-	}
-	for _, expected := range []*tdx.Expectations{nil, {}} {
-		require.ErrorAs(t, expected.Validate(nil), &config)
-	}
 	var verified *client.VerifiedDocumentV3
 	_, err = verified.TLSPublicKeyFP()
 	require.ErrorAs(t, err, &config)

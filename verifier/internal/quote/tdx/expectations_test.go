@@ -21,7 +21,7 @@ const inf7PPID = "3b064a0f58d5dd3688780aeb40e0b5d2"
 
 func loadFixture(t *testing.T) *policy.Artifact {
 	t.Helper()
-	data, err := os.ReadFile(filepath.Join("..", "..", "policy", "testdata", "platform-endorsements.json"))
+	data, err := os.ReadFile(filepath.Join("..", "..", "..", "policy", "testdata", "platform-endorsements.json"))
 	require.NoError(t, err)
 	a, err := policy.Parse(data)
 	require.NoError(t, err)

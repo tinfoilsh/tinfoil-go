@@ -22,7 +22,7 @@ import (
 
 func tdxFixturePolicy(t *testing.T) string {
 	t.Helper()
-	metaBytes, err := os.ReadFile(filepath.Join("..", "..", "..", "attestation-samples", "inf14-tdx-v3", "metadata.json"))
+	metaBytes, err := os.ReadFile(filepath.Join("..", "..", "..", "..", "attestation-samples", "inf14-tdx-v3", "metadata.json"))
 	require.NoError(t, err)
 	var meta struct {
 		Policy string `json:"policy"`

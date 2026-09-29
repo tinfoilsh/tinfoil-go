@@ -16,9 +16,9 @@ import (
 
 	"github.com/tinfoilsh/tinfoil-go/verifier/document"
 	"github.com/tinfoilsh/tinfoil-go/verifier/errs"
+	"github.com/tinfoilsh/tinfoil-go/verifier/internal/quote/tdx"
 	"github.com/tinfoilsh/tinfoil-go/verifier/measurement"
 	"github.com/tinfoilsh/tinfoil-go/verifier/policy"
-	"github.com/tinfoilsh/tinfoil-go/verifier/quote/tdx"
 )
 
 // testShape is an arbitrary required shape for paths that do not consume it
@@ -33,7 +33,7 @@ var testShape = &policy.Shape{CPUs: 1, MemoryMB: 1, Disks: 1}
 // Skips when the workspace fixture directory is not present.
 func loadSEVFixture(t *testing.T) (*document.Document, [64]byte) {
 	t.Helper()
-	root := filepath.Join("..", "..", "..", "..", "attestation-samples", "inference.tinfoil.sh")
+	root := filepath.Join("..", "..", "..", "..", "..", "attestation-samples", "inference.tinfoil.sh")
 	freshBytes, err := os.ReadFile(filepath.Join(root, "fresh.json"))
 	if os.IsNotExist(err) {
 		t.Skip("live inference fixture not collected")
@@ -113,7 +113,7 @@ func appendLiveCRL(t *testing.T, doc *document.Document) {
 
 func loadEndorsementArtifact(t *testing.T) *policy.Artifact {
 	t.Helper()
-	artifactBytes, err := os.ReadFile(filepath.Join("..", "policy", "testdata", "platform-endorsements.json"))
+	artifactBytes, err := os.ReadFile(filepath.Join("..", "..", "policy", "testdata", "platform-endorsements.json"))
 	require.NoError(t, err)
 	artifact, err := policy.Parse(artifactBytes)
 	require.NoError(t, err)

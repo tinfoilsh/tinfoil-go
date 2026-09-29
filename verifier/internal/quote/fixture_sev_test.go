@@ -22,7 +22,7 @@ import (
 // value unreproducible without re-capturing on hardware).
 func loadLiveFixture(t *testing.T, dir string) (*document.Document, [64]byte, []byte) {
 	t.Helper()
-	root := filepath.Join("..", "..", "..", "attestation-samples", dir)
+	root := filepath.Join("..", "..", "..", "..", "attestation-samples", dir)
 	docBytes, err := os.ReadFile(filepath.Join(root, "fresh-v3.json"))
 	if os.IsNotExist(err) {
 		t.Skipf("live fixture %s not collected", dir)
