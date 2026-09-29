@@ -1,6 +1,6 @@
 package verifier
 
-import "github.com/tinfoilsh/tinfoil-go/verifier/errs"
+import "github.com/tinfoilsh/tinfoil-go/verifier/internal/errs"
 
 // Error identifies an SDK error; upstream API errors retain their own types.
 type Error = errs.Error

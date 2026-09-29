@@ -5,7 +5,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/tinfoilsh/tinfoil-go/verifier/errs"
+	"github.com/tinfoilsh/tinfoil-go/verifier/internal/errs"
 	"github.com/tinfoilsh/tinfoil-go/verifier/internal/policy"
 	"github.com/tinfoilsh/tinfoil-go/verifier/internal/quote/sev"
 	"github.com/tinfoilsh/tinfoil-go/verifier/internal/quote/tdx"
