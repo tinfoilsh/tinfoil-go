@@ -4,32 +4,26 @@ package conformance
 
 import (
 	"crypto/tls"
-	"errors"
 	"net"
-	"strings"
 	"time"
 
 	"github.com/tinfoilsh/tinfoil-go/verifier/client"
 )
 
-// RejectionCode maps a verification error to the wire rejection code.
-//
-// This function works by trying to match against error strings. As the code
-// stands today, only the reference-values step is tagged with a "reference
-// values:" substring. The document and cpu-evidence layers add no marker of
-// their own, so anything else is attributed to the envelope.
-//
-// The match is anchored at the start of each error in the unwrap chain rather
-// than run across the whole message. Document fields are quoted into error
-// text, so a document that names its own format "reference values:" would
-// otherwise have an envelope failure reported as a provenance one.
-func RejectionCode(err error) string {
-	for e := err; e != nil; e = errors.Unwrap(e) {
-		if strings.HasPrefix(e.Error(), "reference values:") {
-			return "PROVENANCE_REJECTED"
-		}
+// RejectionCode maps the layer Verifier.VerifyV3WithLayer reports to the wire
+// rejection code. A rejection with no layer, which only an unusable Verifier
+// produces, is attributed to the envelope.
+func RejectionCode(layer string) string {
+	switch layer {
+	case "provenance":
+		return "PROVENANCE_REJECTED"
+	case "quote":
+		return "QUOTE_REJECTED"
+	case "policy":
+		return "POLICY_REJECTED"
+	default:
+		return "ENVELOPE_REJECTED"
 	}
-	return "ENVELOPE_REJECTED"
 }
 
 // TLSSPKIFingerprint dials host:443 and returns the SDK's canonical SPKI

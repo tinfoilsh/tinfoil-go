@@ -21,12 +21,13 @@ type liveRequest struct {
 	Repo string `json:"repo"`
 }
 
-// runLive verifies a live enclave through the SDK's public production entry
-// point — verifier.New with no options, so the embedded roots, the current
-// time and the default freshness bound, never the adapter's composed flow or
-// its injected seams — then asserts the live connection's SPKI fingerprint
-// equals the endorsed one before reporting the facts with channel_binding
-// "tls-spki".
+// runLive verifies a live enclave through the SDK's production verifier —
+// verifier.New with no options, so the embedded roots, the current time and
+// the default freshness bound, never the adapter's injected seams — then
+// asserts the live connection's SPKI fingerprint equals the endorsed one
+// before reporting the facts with channel_binding "tls-spki". It calls
+// VerifyV3WithLayer, which runs exactly VerifyV3 and also names the layer
+// that rejected a document.
 func runLive() int {
 	var req liveRequest
 	dec := json.NewDecoder(os.Stdin)
@@ -52,10 +53,10 @@ func runLive() int {
 		return conformance.ExitInternal
 	}
 
-	verified, err := v.VerifyV3(doc, nonce, req.Repo)
+	verified, layer, err := v.VerifyV3WithLayer(doc, nonce, req.Repo)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "live verification: %v\n", err)
-		return rejectLive(conformance.RejectionCode(err))
+		return rejectLive(conformance.RejectionCode(layer))
 	}
 	tlsFP, err := verified.TLSPublicKeyFP()
 	if err != nil {
