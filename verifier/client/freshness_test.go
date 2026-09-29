@@ -12,8 +12,8 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/tinfoilsh/tinfoil-go/internal/testutil"
 	"github.com/tinfoilsh/tinfoil-go/verifier/document"
+	"github.com/tinfoilsh/tinfoil-go/verifier/internal/provenance"
 	"github.com/tinfoilsh/tinfoil-go/verifier/measurement"
-	"github.com/tinfoilsh/tinfoil-go/verifier/provenance"
 )
 
 func TestClientFreshnessMaxAge(t *testing.T) {

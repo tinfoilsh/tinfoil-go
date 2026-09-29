@@ -3,8 +3,8 @@
 package quote
 
 import (
-	"github.com/tinfoilsh/tinfoil-go/verifier/quote/sev"
-	"github.com/tinfoilsh/tinfoil-go/verifier/quote/tdx"
+	"github.com/tinfoilsh/tinfoil-go/verifier/internal/quote/sev"
+	"github.com/tinfoilsh/tinfoil-go/verifier/internal/quote/tdx"
 )
 
 // overrides carries nothing in a production build: neither the verification

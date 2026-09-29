@@ -24,8 +24,8 @@ import (
 	in_toto "github.com/in-toto/attestation/go/v1"
 	"google.golang.org/protobuf/types/known/structpb"
 
+	"github.com/tinfoilsh/tinfoil-go/verifier/internal/policy"
 	"github.com/tinfoilsh/tinfoil-go/verifier/measurement"
-	"github.com/tinfoilsh/tinfoil-go/verifier/policy"
 )
 
 const (
@@ -52,6 +52,7 @@ type Client struct {
 	verifierOptions []verify.VerifierOption
 }
 
+//go:generate go run ../rootfetch/main.go -o trusted_root.json
 //go:embed trusted_root.json
 var embeddedTrustedRoot []byte
 

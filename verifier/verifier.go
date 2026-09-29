@@ -8,8 +8,9 @@
 // that does those things.
 //
 // This package also re-exports the SDK's error categories, which are defined
-// in verifier/errs so the lower-level verification packages can classify their
-// errors without importing this one, which imports them in turn.
+// in verifier/internal/errs so the lower-level verification packages can
+// classify their errors without importing this one, which imports them in
+// turn.
 package verifier
 
 import (
@@ -17,10 +18,10 @@ import (
 	"time"
 
 	"github.com/tinfoilsh/tinfoil-go/verifier/document"
-	"github.com/tinfoilsh/tinfoil-go/verifier/errs"
+	"github.com/tinfoilsh/tinfoil-go/verifier/internal/errs"
+	"github.com/tinfoilsh/tinfoil-go/verifier/internal/provenance"
+	"github.com/tinfoilsh/tinfoil-go/verifier/internal/quote"
 	"github.com/tinfoilsh/tinfoil-go/verifier/measurement"
-	"github.com/tinfoilsh/tinfoil-go/verifier/provenance"
-	"github.com/tinfoilsh/tinfoil-go/verifier/quote"
 )
 
 // Verifier appraises attestation documents against a fixed policy.

@@ -14,7 +14,7 @@ import (
 	"fmt"
 	"slices"
 
-	"github.com/tinfoilsh/tinfoil-go/verifier/errs"
+	"github.com/tinfoilsh/tinfoil-go/verifier/internal/errs"
 )
 
 // Attestation document v3 (predicate https://tinfoil.sh/predicate/attestation/v3).

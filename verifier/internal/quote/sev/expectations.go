@@ -12,8 +12,8 @@ import (
 	"github.com/tinfoilsh/go-sev-guest/proto/sevsnp"
 	sevvalidate "github.com/tinfoilsh/go-sev-guest/validate"
 
-	"github.com/tinfoilsh/tinfoil-go/verifier/errs"
-	"github.com/tinfoilsh/tinfoil-go/verifier/policy"
+	"github.com/tinfoilsh/tinfoil-go/verifier/internal/errs"
+	"github.com/tinfoilsh/tinfoil-go/verifier/internal/policy"
 )
 
 const (

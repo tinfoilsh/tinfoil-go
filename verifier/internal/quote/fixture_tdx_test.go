@@ -16,13 +16,13 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/tinfoilsh/tinfoil-go/verifier/document"
+	"github.com/tinfoilsh/tinfoil-go/verifier/internal/policy"
 	"github.com/tinfoilsh/tinfoil-go/verifier/measurement"
-	"github.com/tinfoilsh/tinfoil-go/verifier/policy"
 )
 
 func tdxFixturePolicy(t *testing.T) string {
 	t.Helper()
-	metaBytes, err := os.ReadFile(filepath.Join("..", "..", "..", "attestation-samples", "inf14-tdx-v3", "metadata.json"))
+	metaBytes, err := os.ReadFile(filepath.Join("..", "..", "..", "..", "attestation-samples", "inf14-tdx-v3", "metadata.json"))
 	require.NoError(t, err)
 	var meta struct {
 		Policy string `json:"policy"`

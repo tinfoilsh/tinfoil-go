@@ -7,9 +7,9 @@ import (
 
 	tdxvalidate "github.com/google/go-tdx-guest/validate"
 
-	"github.com/tinfoilsh/tinfoil-go/verifier/errs"
+	"github.com/tinfoilsh/tinfoil-go/verifier/internal/errs"
+	"github.com/tinfoilsh/tinfoil-go/verifier/internal/policy"
 	"github.com/tinfoilsh/tinfoil-go/verifier/measurement"
-	"github.com/tinfoilsh/tinfoil-go/verifier/policy"
 )
 
 // Expectations is the fully translated TDX expected state, resolved at

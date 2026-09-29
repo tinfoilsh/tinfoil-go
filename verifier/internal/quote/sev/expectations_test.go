@@ -12,8 +12,8 @@ import (
 	sevabi "github.com/tinfoilsh/go-sev-guest/abi"
 	"github.com/tinfoilsh/go-sev-guest/proto/sevsnp"
 
+	"github.com/tinfoilsh/tinfoil-go/verifier/internal/policy"
 	sevtestdata "github.com/tinfoilsh/tinfoil-go/verifier/internal/testdata"
-	"github.com/tinfoilsh/tinfoil-go/verifier/policy"
 )
 
 const (

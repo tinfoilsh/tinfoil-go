@@ -5,8 +5,8 @@ package quote
 import (
 	"time"
 
-	"github.com/tinfoilsh/tinfoil-go/verifier/quote/sev"
-	"github.com/tinfoilsh/tinfoil-go/verifier/quote/tdx"
+	"github.com/tinfoilsh/tinfoil-go/verifier/internal/quote/sev"
+	"github.com/tinfoilsh/tinfoil-go/verifier/internal/quote/tdx"
 )
 
 // overrides carries the conformance build's replacements for the verification

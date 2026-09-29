@@ -13,7 +13,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/tinfoilsh/tinfoil-go/verifier/policy"
+	"github.com/tinfoilsh/tinfoil-go/verifier/internal/policy"
 )
 
 // Real production identifier (public by design in the endorsement artifact).

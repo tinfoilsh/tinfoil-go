@@ -5,7 +5,7 @@ package verifier
 import (
 	"time"
 
-	"github.com/tinfoilsh/tinfoil-go/verifier/quote"
+	"github.com/tinfoilsh/tinfoil-go/verifier/internal/quote"
 )
 
 // quoteOptions carries nothing to the CPU evidence layer in a production

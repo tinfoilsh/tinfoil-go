@@ -15,10 +15,10 @@ import (
 	"github.com/tinfoilsh/tinfoil-go/internal/testutil"
 
 	"github.com/tinfoilsh/tinfoil-go/verifier/document"
-	"github.com/tinfoilsh/tinfoil-go/verifier/errs"
+	"github.com/tinfoilsh/tinfoil-go/verifier/internal/errs"
+	"github.com/tinfoilsh/tinfoil-go/verifier/internal/policy"
+	"github.com/tinfoilsh/tinfoil-go/verifier/internal/quote/tdx"
 	"github.com/tinfoilsh/tinfoil-go/verifier/measurement"
-	"github.com/tinfoilsh/tinfoil-go/verifier/policy"
-	"github.com/tinfoilsh/tinfoil-go/verifier/quote/tdx"
 )
 
 // testShape is an arbitrary required shape for paths that do not consume it

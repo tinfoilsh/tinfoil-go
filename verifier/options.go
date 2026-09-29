@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/tinfoilsh/tinfoil-go/verifier/errs"
+	"github.com/tinfoilsh/tinfoil-go/verifier/internal/errs"
 	"github.com/tinfoilsh/tinfoil-go/verifier/measurement"
 )
 
