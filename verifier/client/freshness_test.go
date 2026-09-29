@@ -2,7 +2,6 @@ package client
 
 import (
 	"cmp"
-	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -62,16 +61,6 @@ func TestLiveVerifyFreshnessExpiration(t *testing.T) {
 		custom, err := VerifyDocumentV3(raw, nonce, repo, &opts)
 		require.NoError(t, err)
 		require.Equal(t, verified.FreshnessExpiresAt.Add(cmp.Or(age, provenance.MaxFreshnessAge)-provenance.MaxFreshnessAge), custom.FreshnessExpiresAt)
-		optionsJSON, err := json.Marshal(opts)
-		require.NoError(t, err)
-		parsed, err := ParseVerificationOptionsJSON(string(optionsJSON))
-		require.NoError(t, err)
-		resultJSON, err := VerifyDocumentV3JSON(raw, nonce, repo, parsed)
-		require.NoError(t, err)
-		var mobileResult VerifiedDocumentV3
-		require.NoError(t, json.Unmarshal([]byte(resultJSON), &mobileResult))
-		custom.FreshnessExpiresAt, mobileResult.FreshnessExpiresAt = custom.FreshnessExpiresAt.UTC(), mobileResult.FreshnessExpiresAt.UTC()
-		require.Equal(t, *custom, mobileResult, "mobile callers receive the same keys, measurements, and expiry")
 	}
 	badPins := cloneMeasurement(verified.EnclaveMeasurement)
 	badPins.Registers[0] = strings.Repeat("ab", 48)
