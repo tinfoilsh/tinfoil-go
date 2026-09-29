@@ -22,7 +22,9 @@ import (
 
 	"github.com/openai/openai-go/v3"
 	"github.com/openai/openai-go/v3/option"
+	"github.com/tinfoilsh/tinfoil-go/verifier"
 	"github.com/tinfoilsh/tinfoil-go/verifier/client"
+	"github.com/tinfoilsh/tinfoil-go/verifier/provenance"
 )
 
 const (
@@ -42,18 +44,16 @@ const (
 	cacheSaltDomainTag = "tinfoil/client-cache-salt/v1"
 )
 
-// CatalogEntry lists a model's repository and replica hosts.
 type CatalogEntry struct {
 	Repo  string   `json:"repo"`
 	Hosts []string `json:"hosts"`
 }
 
-// Catalog maps model names to their entries. It is untrusted: each replica is
-// verified against its repository before anything is sealed to it.
+// Catalog maps model names to untrusted repository and replica entries.
 type Catalog map[string]CatalogEntry
 
 // FetchCatalog reads the catalog of the gateway at host, keeping only models
-// with replicas of a tinfoilsh/ repository.
+// with replicas of a bare tinfoilsh/ repository, without a tag or digest.
 func FetchCatalog(host string) (Catalog, error) {
 	resp, err := (&http.Client{Timeout: catalogFetchTimeout}).Get("https://" + host + catalogPath)
 	if err != nil {
@@ -72,7 +72,8 @@ func FetchCatalog(host string) (Catalog, error) {
 }
 
 func (e CatalogEntry) trusted() bool {
-	return strings.HasPrefix(e.Repo, trustedRepoOwner) && len(e.Hosts) > 0
+	repo, tag, digest, err := provenance.ParseReference(e.Repo)
+	return err == nil && tag == "" && digest == "" && strings.HasPrefix(repo, trustedRepoOwner) && len(e.Hosts) > 0
 }
 
 // Gateway is an OpenAI client that seals each request to a verified replica
@@ -80,24 +81,45 @@ func (e CatalogEntry) trusted() bool {
 type Gateway struct {
 	*openai.Client
 	httpClient *http.Client
+	seal       *sealTransport
 }
 
-// NewGateway reads catalog on every request, so a long-running caller can
-// refresh it; nil fetches it once. It accepts WithVerificationOptions,
-// WithUserCacheSecret and WithOpenAIOptions.
-func NewGateway(baseURL string, catalog func() Catalog, opts ...ClientOption) (*Gateway, error) {
+type GatewayOptions struct {
+	// Routing overrides and non-EHBP transports are rejected.
+	ClientOptions []ClientOption
+	ModelPins     map[string]ModelPin
+	// Requires at least one pin.
+	PinnedModelsOnly bool
+}
+
+// ModelPin pins a model to tinfoilsh/name[@tag][@sha256:digest].
+// Nil Verification inherits gateway defaults; non-nil replaces them.
+// Zero FreshnessMaxAge in a replacement uses the SDK's seven-day default.
+type ModelPin struct {
+	Repo         string
+	Verification *client.VerificationOptions
+}
+
+// NewGateway copies opts and reads catalog on every request; nil fetches it once.
+// Catalog callbacks must return immutable maps safe for concurrent readers.
+// Replicas are verified on first use.
+func NewGateway(baseURL string, catalog func() Catalog, opts GatewayOptions) (*Gateway, error) {
 	cfg := &clientConfig{}
-	for _, opt := range opts {
+	for _, opt := range opts.ClientOptions {
 		if opt != nil {
 			opt(cfg)
 		}
 	}
-	if cfg.enclave != "" || cfg.repo != "" || cmp.Or(cfg.transport, TransportEHBP) != TransportEHBP || cfg.baseURLSet {
-		return nil, &ConfigurationError{Err: fmt.Errorf("a gateway takes its enclaves and repositories from its catalog and uses the EHBP transport")}
-	}
 	base, err := url.Parse(baseURL)
 	if err != nil || base.Scheme != "https" || base.Host == "" {
 		return nil, &ConfigurationError{Err: fmt.Errorf("gateway base URL must be an absolute HTTPS URL: %q", baseURL)}
+	}
+	if cfg.enclave != "" || cfg.repo != "" || cfg.baseURLSet || cmp.Or(cfg.transport, TransportEHBP) != TransportEHBP {
+		return nil, &ConfigurationError{Err: fmt.Errorf("gateway client options cannot set an enclave, repository, base URL, or non-EHBP transport")}
+	}
+	policy, err := newGatewayPolicy(opts, cfg.verification)
+	if err != nil {
+		return nil, &ConfigurationError{Err: err}
 	}
 	if catalog == nil {
 		fetched, err := FetchCatalog(base.Host)
@@ -108,9 +130,14 @@ func NewGateway(baseURL string, catalog func() Catalog, opts ...ClientOption) (*
 	}
 	seal := &sealTransport{
 		catalog: catalog,
+		policy:  policy,
 		secret:  resolveUserCacheSecret(cfg.userCacheSecret, cfg.userCacheSecretSet),
 		build: func(r replica) (http.RoundTripper, error) {
-			secure, err := client.NewSecureClient(r.host, r.repo, &cfg.verification)
+			verification := policy.defaults
+			if pin, pinned := policy.pins[r.model]; pinned {
+				verification = pin.verification
+			}
+			secure, err := client.NewSecureClient(r.host, r.ref, &verification)
 			if err != nil {
 				return nil, err
 			}
@@ -126,7 +153,7 @@ func NewGateway(baseURL string, catalog func() Catalog, opts ...ClientOption) (*
 		return nil, err
 	}
 	openaiClient := openai.NewClient(append(cfg.openaiOpts, option.WithHTTPClient(httpClient), option.WithBaseURL(baseURL))...)
-	return &Gateway{Client: &openaiClient, httpClient: httpClient}, nil
+	return &Gateway{Client: &openaiClient, httpClient: httpClient, seal: seal}, nil
 }
 
 // HTTPClient seals requests to a replica of the model named in their body.
@@ -134,14 +161,94 @@ func (g *Gateway) HTTPClient() *http.Client {
 	return g.httpClient
 }
 
-type replica struct{ host, repo string }
+// Serves checks the current catalog against the gateway policy without verifying replicas.
+func (g *Gateway) Serves(model string) bool {
+	_, _, err := g.seal.policy.resolve(model, g.seal.catalog())
+	return err == nil
+}
 
-// sealTransport picks each request's replica from its cache prefix, or from
-// where the gateway last rerouted that prefix, so a conversation stays on one
-// warm replica.
+type modelPolicy struct {
+	repo, ref    string
+	verification client.VerificationOptions
+}
+
+type gatewayPolicy struct {
+	pins       map[string]modelPolicy
+	pinnedOnly bool
+	defaults   client.VerificationOptions
+}
+
+func newGatewayPolicy(opts GatewayOptions, defaults client.VerificationOptions) (gatewayPolicy, error) {
+	if opts.PinnedModelsOnly && len(opts.ModelPins) == 0 {
+		return gatewayPolicy{}, fmt.Errorf("pinned-only mode requires at least one model pin")
+	}
+	defaults, err := snapshotVerificationOptions(defaults)
+	if err != nil {
+		return gatewayPolicy{}, fmt.Errorf("gateway verification options: %w", err)
+	}
+	p := gatewayPolicy{pins: make(map[string]modelPolicy), pinnedOnly: opts.PinnedModelsOnly, defaults: defaults}
+	for model, pin := range opts.ModelPins {
+		if strings.TrimSpace(model) == "" {
+			return gatewayPolicy{}, fmt.Errorf("model pin name must not be empty")
+		}
+		repo, _, _, err := provenance.ParseReference(pin.Repo)
+		if err != nil {
+			return gatewayPolicy{}, fmt.Errorf("model %q: %w", model, err)
+		}
+		if !strings.HasPrefix(repo, trustedRepoOwner) {
+			return gatewayPolicy{}, fmt.Errorf("model %q repository %q must belong to %s", model, repo, trustedRepoOwner)
+		}
+		verification := defaults
+		if pin.Verification != nil {
+			verification, err = snapshotVerificationOptions(*pin.Verification)
+			if err != nil {
+				return gatewayPolicy{}, fmt.Errorf("model %q: %w", model, err)
+			}
+		}
+		p.pins[model] = modelPolicy{repo: repo, ref: pin.Repo, verification: verification}
+	}
+	return p, nil
+}
+
+func snapshotVerificationOptions(opts client.VerificationOptions) (client.VerificationOptions, error) {
+	v, err := verifier.New(
+		verifier.WithPinnedRegisters(opts.PinnedRegisters),
+		verifier.WithFreshnessMaxAge(opts.FreshnessMaxAge),
+	)
+	if err != nil {
+		return client.VerificationOptions{}, err
+	}
+	return client.VerificationOptions{
+		PinnedRegisters: v.PinnedRegisters(),
+		FreshnessMaxAge: v.FreshnessMaxAge(),
+	}, nil
+}
+
+func (p *gatewayPolicy) resolve(model string, catalog Catalog) ([]string, replica, error) {
+	pin, pinned := p.pins[model]
+	if p.pinnedOnly && !pinned {
+		return nil, replica{}, &ConfigurationError{Err: fmt.Errorf("model %q is not pinned", model)}
+	}
+	entry := catalog[model]
+	if !entry.trusted() {
+		return nil, replica{}, &ConfigurationError{Err: fmt.Errorf("model %q has no valid bare %s repository with replicas in the gateway catalog", model, trustedRepoOwner)}
+	}
+	if pinned {
+		if entry.Repo != pin.repo {
+			return nil, replica{}, &AttestationError{Err: fmt.Errorf("model %q: expected repository %q, gateway offered %q", model, pin.repo, entry.Repo)}
+		}
+		return entry.Hosts, replica{ref: pin.ref, model: model}, nil
+	}
+	return entry.Hosts, replica{ref: entry.Repo}, nil
+}
+
+type replica struct{ host, ref, model string }
+
+// Cache prefixes keep conversations on the same replica across requests.
 type sealTransport struct {
 	build    func(replica) (http.RoundTripper, error)
 	catalog  func() Catalog
+	policy   gatewayPolicy
 	secret   string
 	enclaves sync.Map // replica to http.RoundTripper
 	mu       sync.Mutex
@@ -203,27 +310,27 @@ func (t *sealTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 		return nil, err
 	}
 	model := req.Header.Get(modelHeader)
-	entry := t.catalog()[model]
-	if !entry.trusted() {
-		return nil, &ConfigurationError{Err: fmt.Errorf("model %q has no %s replicas in the gateway catalog", model, trustedRepoOwner)}
+	hosts, r, err := t.policy.resolve(model, t.catalog())
+	if err != nil {
+		closeRequestBody(req)
+		return nil, err
 	}
 	hasBody := req.Body != nil && req.Body != http.NoBody
 	replayable := !hasBody || req.GetBody != nil
-	var host string
 	var transport http.RoundTripper
-	var err error
 	prefix := req.Header.Get(cachePrefixHeader)
-	for _, host = range rank(entry.Hosts, prefix, t.reroutedHost(prefix)) {
-		if transport, err = t.enclave(replica{host, entry.Repo}); err == nil {
+	for _, r.host = range rank(hosts, prefix, t.reroutedHost(prefix)) {
+		if transport, err = t.enclave(r); err == nil {
 			break
 		}
 	}
 	if err != nil {
+		closeRequestBody(req)
 		return nil, err
 	}
 	for redirects := 0; ; redirects++ {
 		out := req.Clone(req.Context())
-		out.Header.Set(sealHeader, host)
+		out.Header.Set(sealHeader, r.host)
 		if redirects > 0 && hasBody {
 			var err error
 			out.Body, err = req.GetBody()
@@ -236,18 +343,18 @@ func (t *sealTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 			return nil, err
 		}
 		routed := resp.Header.Get(sealHeader)
-		if resp.StatusCode != http.StatusPreconditionFailed || routed == "" || routed == host || !replayable {
+		if resp.StatusCode != http.StatusPreconditionFailed || routed == "" || routed == r.host || !replayable {
 			return resp, nil
 		}
 		resp.Body.Close()
 		if redirects == maxSealRedirects {
 			return nil, &FetchError{Err: fmt.Errorf("gateway kept routing away from the enclave the request was sealed to (last: %s)", routed)}
 		}
-		if transport, err = t.enclave(replica{routed, entry.Repo}); err != nil {
+		r.host = routed
+		if transport, err = t.enclave(r); err != nil {
 			return nil, fmt.Errorf("following gateway route to enclave %s: %w", routed, err)
 		}
 		t.remember(prefix, routed)
-		host = routed
 	}
 }
 
