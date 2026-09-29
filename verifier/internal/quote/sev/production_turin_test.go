@@ -14,7 +14,7 @@ import (
 	"github.com/tinfoilsh/go-sev-guest/proto/sevsnp"
 	"github.com/tinfoilsh/go-sev-guest/verify"
 
-	"github.com/tinfoilsh/tinfoil-go/verifier/policy"
+	"github.com/tinfoilsh/tinfoil-go/verifier/internal/policy"
 )
 
 // These snapshots came from successfully verified v3 documents. The component

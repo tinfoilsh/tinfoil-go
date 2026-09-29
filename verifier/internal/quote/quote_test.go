@@ -16,9 +16,9 @@ import (
 
 	"github.com/tinfoilsh/tinfoil-go/verifier/document"
 	"github.com/tinfoilsh/tinfoil-go/verifier/errs"
+	"github.com/tinfoilsh/tinfoil-go/verifier/internal/policy"
 	"github.com/tinfoilsh/tinfoil-go/verifier/internal/quote/tdx"
 	"github.com/tinfoilsh/tinfoil-go/verifier/measurement"
-	"github.com/tinfoilsh/tinfoil-go/verifier/policy"
 )
 
 // testShape is an arbitrary required shape for paths that do not consume it
@@ -113,7 +113,7 @@ func appendLiveCRL(t *testing.T, doc *document.Document) {
 
 func loadEndorsementArtifact(t *testing.T) *policy.Artifact {
 	t.Helper()
-	artifactBytes, err := os.ReadFile(filepath.Join("..", "..", "policy", "testdata", "platform-endorsements.json"))
+	artifactBytes, err := os.ReadFile(filepath.Join("..", "policy", "testdata", "platform-endorsements.json"))
 	require.NoError(t, err)
 	artifact, err := policy.Parse(artifactBytes)
 	require.NoError(t, err)

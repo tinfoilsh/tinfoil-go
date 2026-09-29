@@ -13,7 +13,7 @@ import (
 	"github.com/tinfoilsh/tinfoil-go/internal/testutil"
 
 	"github.com/tinfoilsh/tinfoil-go/verifier/document"
-	"github.com/tinfoilsh/tinfoil-go/verifier/policy"
+	"github.com/tinfoilsh/tinfoil-go/verifier/internal/policy"
 )
 
 // loadLiveFixture reads a captured v3 document and its nonce, and verifies

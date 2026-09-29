@@ -19,10 +19,10 @@ import (
 
 	"github.com/tinfoilsh/tinfoil-go/verifier/document"
 	"github.com/tinfoilsh/tinfoil-go/verifier/errs"
+	"github.com/tinfoilsh/tinfoil-go/verifier/internal/policy"
 	"github.com/tinfoilsh/tinfoil-go/verifier/internal/quote/sev"
 	"github.com/tinfoilsh/tinfoil-go/verifier/internal/quote/tdx"
 	"github.com/tinfoilsh/tinfoil-go/verifier/measurement"
-	"github.com/tinfoilsh/tinfoil-go/verifier/policy"
 )
 
 // Authenticated is a signature-verified quote, not yet compared against

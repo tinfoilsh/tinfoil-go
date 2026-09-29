@@ -12,8 +12,8 @@ import (
 	sevabi "github.com/tinfoilsh/go-sev-guest/abi"
 	"github.com/tinfoilsh/go-sev-guest/proto/sevsnp"
 
+	"github.com/tinfoilsh/tinfoil-go/verifier/internal/policy"
 	sevtestdata "github.com/tinfoilsh/tinfoil-go/verifier/internal/testdata"
-	"github.com/tinfoilsh/tinfoil-go/verifier/policy"
 )
 
 const (
@@ -24,7 +24,7 @@ const (
 
 func loadFixture(t *testing.T) *policy.Artifact {
 	t.Helper()
-	data, err := os.ReadFile(filepath.Join("..", "..", "..", "policy", "testdata", "platform-endorsements.json"))
+	data, err := os.ReadFile(filepath.Join("..", "..", "policy", "testdata", "platform-endorsements.json"))
 	require.NoError(t, err)
 	a, err := policy.Parse(data)
 	require.NoError(t, err)
