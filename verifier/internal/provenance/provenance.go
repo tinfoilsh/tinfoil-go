@@ -52,6 +52,7 @@ type Client struct {
 	verifierOptions []verify.VerifierOption
 }
 
+//go:generate go run ../../rootfetch/main.go -o trusted_root.json
 //go:embed trusted_root.json
 var embeddedTrustedRoot []byte
 

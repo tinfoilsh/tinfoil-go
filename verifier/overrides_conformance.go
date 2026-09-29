@@ -7,8 +7,8 @@ import (
 	"time"
 
 	"github.com/tinfoilsh/tinfoil-go/verifier/document"
+	"github.com/tinfoilsh/tinfoil-go/verifier/internal/provenance"
 	"github.com/tinfoilsh/tinfoil-go/verifier/internal/quote"
-	"github.com/tinfoilsh/tinfoil-go/verifier/provenance"
 )
 
 // quoteOptions hands the CPU evidence layer the instant this verification is

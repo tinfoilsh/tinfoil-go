@@ -11,7 +11,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/tinfoilsh/tinfoil-go/internal/testutil"
 	"github.com/tinfoilsh/tinfoil-go/verifier/document"
-	"github.com/tinfoilsh/tinfoil-go/verifier/provenance"
+	"github.com/tinfoilsh/tinfoil-go/verifier/internal/provenance"
 )
 
 func TestFreshnessExpiration(t *testing.T) {

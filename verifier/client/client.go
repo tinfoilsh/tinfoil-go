@@ -11,8 +11,8 @@ import (
 	"time"
 
 	"github.com/tinfoilsh/tinfoil-go/verifier"
+	"github.com/tinfoilsh/tinfoil-go/verifier/internal/provenance"
 	"github.com/tinfoilsh/tinfoil-go/verifier/measurement"
-	"github.com/tinfoilsh/tinfoil-go/verifier/provenance"
 )
 
 type SecureClient struct {
