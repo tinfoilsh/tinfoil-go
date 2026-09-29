@@ -24,7 +24,6 @@ import (
 	"github.com/openai/openai-go/v3/option"
 	"github.com/tinfoilsh/tinfoil-go/verifier"
 	"github.com/tinfoilsh/tinfoil-go/verifier/client"
-	"github.com/tinfoilsh/tinfoil-go/verifier/provenance"
 )
 
 const (
@@ -72,7 +71,7 @@ func FetchCatalog(host string) (Catalog, error) {
 }
 
 func (e CatalogEntry) trusted() bool {
-	repo, tag, digest, err := provenance.ParseReference(e.Repo)
+	repo, tag, digest, err := verifier.ParseReference(e.Repo)
 	return err == nil && tag == "" && digest == "" && strings.HasPrefix(repo, trustedRepoOwner) && len(e.Hosts) > 0
 }
 
@@ -191,7 +190,7 @@ func newGatewayPolicy(opts GatewayOptions, defaults client.VerificationOptions) 
 		if strings.TrimSpace(model) == "" {
 			return gatewayPolicy{}, fmt.Errorf("model pin name must not be empty")
 		}
-		repo, _, _, err := provenance.ParseReference(pin.Repo)
+		repo, _, _, err := verifier.ParseReference(pin.Repo)
 		if err != nil {
 			return gatewayPolicy{}, fmt.Errorf("model %q: %w", model, err)
 		}
