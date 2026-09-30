@@ -30,7 +30,7 @@ import (
 	"github.com/sigstore/sigstore-go/pkg/testing/ca"
 	"github.com/sigstore/sigstore/pkg/signature"
 	"github.com/stretchr/testify/require"
-	"github.com/tinfoilsh/tinfoil-go/config/endorsement"
+	"github.com/tinfoilsh/tinfoil-go/tinfoil-config/endorsement"
 	f_log "github.com/transparency-dev/formats/log"
 	"github.com/transparency-dev/merkle/rfc6962"
 	"golang.org/x/mod/sumdb/note"

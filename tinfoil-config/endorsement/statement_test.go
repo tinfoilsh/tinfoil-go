@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
-	"github.com/tinfoilsh/tinfoil-go/config/endorsement"
+	"github.com/tinfoilsh/tinfoil-go/tinfoil-config/endorsement"
 )
 
 const (

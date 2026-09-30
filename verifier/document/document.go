@@ -97,7 +97,7 @@ const (
 	// Sigstore reference-values entry it refreshes.
 	FreshnessCollateralIDCode     = "code-freshness"
 	FreshnessCollateralIDPlatform = "platform-freshness"
-	ConfigCollateralID            = "config"
+	ConfigCollateralID            = "tinfoil-config"
 )
 
 // NonceSize is the required challenge nonce size in bytes.
