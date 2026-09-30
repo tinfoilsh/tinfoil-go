@@ -79,6 +79,11 @@ func New(opts ...Option) (*Verifier, error) {
 	return v, nil
 }
 
+// ParseReference validates owner/name[@tag][@sha256:digest] and returns its parts.
+func ParseReference(ref string) (repo, tag, digest string, err error) {
+	return provenance.ParseReference(ref)
+}
+
 // FreshnessMaxAge reports the configured witness age bound.
 func (v *Verifier) FreshnessMaxAge() time.Duration { return v.freshnessMaxAge }
 
