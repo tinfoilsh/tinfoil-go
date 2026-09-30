@@ -113,8 +113,11 @@ func TestStrictStatementDecoding(t *testing.T) {
 			require.Error(t, err)
 		})
 	}
-	_, err := endorsement.ParseStatement(make([]byte, endorsement.MaxStatementSize+1))
-	require.Error(t, err)
+	padded := append(bytes.Clone(payload), bytes.Repeat([]byte(" "), endorsement.MaxStatementSize-len(payload))...)
+	_, err := endorsement.ParseStatement(padded)
+	require.NoError(t, err)
+	_, err = endorsement.ParseStatement(append(padded, ' '))
+	require.ErrorContains(t, err, "statement size is outside allowed bounds")
 }
 
 func TestRenewalChangesApprovalWithoutChangingArtifact(t *testing.T) {
