@@ -396,7 +396,7 @@ func TestParseRejectsDuplicateCollateralIDs(t *testing.T) {
 	assert.ErrorContains(t, err, `duplicate collateral entry id "cpu-endorsement"`)
 }
 
-func TestFreshnessCollateralSelectsArtifactID(t *testing.T) {
+func TestFreshnessSelectsArtifactID(t *testing.T) {
 	doc := &Document{Collateral: []CollateralEntry{
 		{
 			ID:     FreshnessCollateralIDCode,
@@ -412,18 +412,55 @@ func TestFreshnessCollateralSelectsArtifactID(t *testing.T) {
 		},
 	}}
 
-	code, err := doc.FreshnessCollateral(FreshnessCollateralIDCode)
+	code, err := doc.Freshness(FreshnessCollateralIDCode)
 	require.NoError(t, err)
-	assert.Contains(t, string(code.SigstoreBundle), "code")
+	assert.Contains(t, string(code.Bundle), "code")
 
-	platform, err := doc.FreshnessCollateral(FreshnessCollateralIDPlatform)
+	platform, err := doc.Freshness(FreshnessCollateralIDPlatform)
 	require.NoError(t, err)
-	assert.Contains(t, string(platform.SigstoreBundle), "platform")
+	assert.Contains(t, string(platform.Bundle), "platform")
 
 	for _, id := range []string{"", "missing-freshness"} {
-		_, err = doc.FreshnessCollateral(id)
+		_, err = doc.Freshness(id)
 		assert.ErrorIs(t, err, ErrCollateralNotFound)
 	}
+}
+
+func TestSigstoreReferences(t *testing.T) {
+	entry := func(format, repo string) CollateralEntry {
+		return CollateralEntry{
+			ID:     format,
+			Role:   RoleReferenceValues,
+			Format: format,
+			Data:   json.RawMessage(`{"repo":"` + repo + `","tag":"v1","digest":"` + strings.Repeat("ab", 32) + `","sigstore_bundle":{"mediaType":"` + repo + `"}}`),
+		}
+	}
+	doc := &Document{Collateral: []CollateralEntry{
+		entry(CollateralSigstoreCodeV1Format, "org/code"),
+		entry(CollateralSigstorePlatformV1Format, "org/platform"),
+	}}
+
+	code, err := doc.SigstoreCode()
+	require.NoError(t, err)
+	assert.Equal(t, "org/code", code.Repo)
+	assert.Equal(t, "v1", code.Tag)
+	assert.Equal(t, strings.Repeat("ab", 32), code.Digest)
+	assert.Contains(t, string(code.Bundle), "org/code")
+
+	platform, err := doc.SigstorePlatform()
+	require.NoError(t, err)
+	assert.Equal(t, "org/platform", platform.Repo)
+
+	_, err = (&Document{}).SigstoreCode()
+	assert.ErrorIs(t, err, ErrCollateralNotFound)
+	_, err = (&Document{}).SigstorePlatform()
+	assert.ErrorIs(t, err, ErrCollateralNotFound)
+
+	malformed := entry(CollateralSigstoreCodeV1Format, "org/code")
+	malformed.Data = json.RawMessage(`{"repo":"org/code","unknown":1}`)
+	_, err = (&Document{Collateral: []CollateralEntry{malformed}}).SigstoreCode()
+	assert.ErrorContains(t, err, "parsing "+CollateralSigstoreCodeV1Format+" collateral entry")
+	assert.NotErrorIs(t, err, ErrCollateralNotFound, "malformed is not missing")
 }
 
 func TestParseRejectsDuplicateFreshnessArtifactID(t *testing.T) {

@@ -165,19 +165,19 @@ func (v *Verifier) verifyV3(docBytes, nonce []byte, repo string) (*Verification,
 }
 
 func (v *Verifier) authenticateReferenceValues(doc *document.Document, repo string, appraisalTime time.Time) (*provenance.Code, *provenance.PlatformEndorsements, time.Time, error) {
-	codeRef, err := doc.ReferenceValuesCollateral(document.CollateralSigstoreCodeV1Format)
+	codeRef, err := doc.SigstoreCode()
 	if err != nil {
 		return nil, nil, time.Time{}, err
 	}
-	code, err := v.provenance.AuthenticateCode(codeRef.SigstoreBundle, repo, codeRef.Tag, codeRef.Digest)
+	code, err := v.provenance.AuthenticateCode(codeRef.Bundle, repo, codeRef.Tag, codeRef.Digest)
 	if err != nil {
 		return nil, nil, time.Time{}, fmt.Errorf("verifying code measurement: %w", err)
 	}
-	platformRef, err := doc.ReferenceValuesCollateral(document.CollateralSigstorePlatformV1Format)
+	platformRef, err := doc.SigstorePlatform()
 	if err != nil {
 		return nil, nil, time.Time{}, err
 	}
-	endorsements, err := v.provenance.AuthenticatePlatformEndorsements(platformRef.SigstoreBundle, platformRef.Repo, platformRef.Tag, platformRef.Digest)
+	endorsements, err := v.provenance.AuthenticatePlatformEndorsements(platformRef.Bundle, platformRef.Repo, platformRef.Tag, platformRef.Digest)
 	if err != nil {
 		return nil, nil, time.Time{}, fmt.Errorf("verifying platform endorsements: %w", err)
 	}
@@ -185,19 +185,19 @@ func (v *Verifier) authenticateReferenceValues(doc *document.Document, repo stri
 		return code, endorsements, time.Time{}, nil
 	}
 
-	codeFreshnessRef, err := doc.FreshnessCollateral(document.FreshnessCollateralIDCode)
+	codeFreshness, err := doc.Freshness(document.FreshnessCollateralIDCode)
 	if err != nil {
 		return nil, nil, time.Time{}, err
 	}
-	codeWitnessedAt, err := v.provenance.AuthenticateFreshness(codeFreshnessRef.SigstoreBundle, &code.AuthenticatedArtifact, appraisalTime, v.freshnessMaxAge)
+	codeWitnessedAt, err := v.provenance.AuthenticateFreshness(codeFreshness.Bundle, &code.AuthenticatedArtifact, appraisalTime, v.freshnessMaxAge)
 	if err != nil {
 		return nil, nil, time.Time{}, fmt.Errorf("verifying code freshness: %w", err)
 	}
-	freshnessRef, err := doc.FreshnessCollateral(document.FreshnessCollateralIDPlatform)
+	platformFreshness, err := doc.Freshness(document.FreshnessCollateralIDPlatform)
 	if err != nil {
 		return nil, nil, time.Time{}, err
 	}
-	platformWitnessedAt, err := v.provenance.AuthenticateFreshness(freshnessRef.SigstoreBundle, &endorsements.AuthenticatedArtifact, appraisalTime, v.freshnessMaxAge)
+	platformWitnessedAt, err := v.provenance.AuthenticateFreshness(platformFreshness.Bundle, &endorsements.AuthenticatedArtifact, appraisalTime, v.freshnessMaxAge)
 	if err != nil {
 		return nil, nil, time.Time{}, fmt.Errorf("verifying platform freshness: %w", err)
 	}
