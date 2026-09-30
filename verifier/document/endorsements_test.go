@@ -197,7 +197,7 @@ func TestDecodeCollateralSelectsFirstEntryPerPurpose(t *testing.T) {
 		return testCollateralEntry(t, id, CollateralIntelPCSV1Format, intelPCSCollateral{Responses: []rawPCSResponse{{URL: url, BodyBase64: b64("body")}}})
 	}
 	code := func(id, repo string) CollateralEntry {
-		return CollateralEntry{ID: id, Role: RoleReferenceValues, Format: CollateralSigstoreCodeV1Format, Data: []byte(`{"repo":"` + repo + `","tag":"","digest":"","sigstore_bundle":{}}`)}
+		return CollateralEntry{ID: id, Role: RoleReferenceValues, Format: CollateralSigstoreCodeV1Format, Data: []byte(`{"repo":"` + repo + `","tag":"","digest":"ab","sigstore_bundle":{}}`)}
 	}
 	entries := []CollateralEntry{
 		testCollateralEntry(t, "vcek-1", CollateralAMDVCEKV1Format, amdVCEKCollateral{VCEKDERBase64: b64("first vcek"), CertChainPEM: "chain"}),
@@ -226,4 +226,37 @@ func TestEndorsementClonesPreserveNil(t *testing.T) {
 	assert.Equal(t, &IntelPCS{}, (&IntelPCS{}).Clone(), "a nil Responses stays nil")
 	assert.Equal(t, PCSResponse{}, PCSResponse{}.Clone())
 	assert.Equal(t, CPUEndorsements{}, CPUEndorsements{}.Clone())
+}
+
+// A reference must carry what verification needs: a bundle and a digest.
+// Whether a present bundle verifies is provenance's job, and the tag is an
+// optional hint.
+func TestDecodeCollateralRequiresSigstoreBundleAndDigest(t *testing.T) {
+	ref := func(format, data string) CollateralEntry {
+		return CollateralEntry{ID: "ref", Role: RoleReferenceValues, Format: format, Data: []byte(data)}
+	}
+	for _, tt := range []struct {
+		name    string
+		entry   CollateralEntry
+		wantErr string
+	}{
+		{"code without bundle", ref(CollateralSigstoreCodeV1Format, `{"repo":"o/r","tag":"v1","digest":"ab"}`), "is missing sigstore_bundle"},
+		{"code with null bundle", ref(CollateralSigstoreCodeV1Format, `{"repo":"o/r","tag":"v1","digest":"ab","sigstore_bundle":null}`), "is missing sigstore_bundle"},
+		{"platform without digest", ref(CollateralSigstorePlatformV1Format, `{"repo":"o/r","tag":"v1","sigstore_bundle":{}}`), "is missing digest"},
+		{"code with empty digest", ref(CollateralSigstoreCodeV1Format, `{"repo":"o/r","tag":"v1","digest":"","sigstore_bundle":{}}`), "is missing digest"},
+		{"freshness without bundle", ref(CollateralSigstoreFreshnessV1Format, `{}`), "is missing sigstore_bundle"},
+		{"freshness with null bundle", ref(CollateralSigstoreFreshnessV1Format, `{"sigstore_bundle":null}`), "is missing sigstore_bundle"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := decodeCollateral([]CollateralEntry{tt.entry})
+			assert.ErrorContains(t, err, tt.wantErr)
+		})
+	}
+	for name, entry := range map[string]CollateralEntry{
+		"empty tag and repo":     ref(CollateralSigstoreCodeV1Format, `{"repo":"","tag":"","digest":"ab","sigstore_bundle":{"mediaType":"x"}}`),
+		"present invalid bundle": ref(CollateralSigstoreFreshnessV1Format, `{"sigstore_bundle":{}}`),
+	} {
+		_, err := decodeCollateral([]CollateralEntry{entry})
+		assert.NoError(t, err, name)
+	}
 }

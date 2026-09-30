@@ -184,6 +184,9 @@ func decodeCollateral(entries []CollateralEntry) (collateralSet, error) {
 			if err := unmarshalCollateral(entry, entry.Format, &data); err != nil {
 				return set, err
 			}
+			if err := requireBundle(entry, data.SigstoreBundle); err != nil {
+				return set, err
+			}
 			// validateCollateral already rejected duplicate IDs.
 			set.freshness[entry.ID] = Freshness{Bundle: data.SigstoreBundle}
 		}
@@ -243,7 +246,24 @@ func decodeSigstoreRef(entry *CollateralEntry) (*SigstoreRef, error) {
 	if err := unmarshalCollateral(entry, entry.Format, &data); err != nil {
 		return nil, err
 	}
+	// Tag is an optional hint and Repo is checked by provenance where it
+	// matters; the digest and bundle are what verification needs.
+	if data.Digest == "" {
+		return nil, fmt.Errorf("%s collateral entry %q is missing digest", entry.Format, entry.ID)
+	}
+	if err := requireBundle(entry, data.SigstoreBundle); err != nil {
+		return nil, err
+	}
 	return &SigstoreRef{Repo: data.Repo, Tag: data.Tag, Digest: data.Digest, Bundle: data.SigstoreBundle}, nil
+}
+
+// requireBundle rejects an entry whose sigstore_bundle member is missing or
+// null. Whether a present bundle verifies is for provenance to judge.
+func requireBundle(entry *CollateralEntry, bundle jsontext.Value) error {
+	if len(bundle) == 0 || bundle.Kind() == 'n' {
+		return fmt.Errorf("%s collateral entry %q is missing sigstore_bundle", entry.Format, entry.ID)
+	}
+	return nil
 }
 
 // SigstoreRef is a decoded reference-values entry: a Sigstore bundle and the
