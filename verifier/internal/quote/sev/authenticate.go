@@ -7,9 +7,7 @@ import (
 	"bytes"
 	"crypto/x509"
 	_ "embed"
-	"encoding/base64"
 	"encoding/hex"
-	"encoding/json/v2"
 	"encoding/pem"
 	"fmt"
 	"net/url"
@@ -22,7 +20,6 @@ import (
 	"github.com/tinfoilsh/go-sev-guest/verify"
 	"github.com/tinfoilsh/go-sev-guest/verify/trust"
 
-	"github.com/tinfoilsh/tinfoil-go/verifier/document"
 	"github.com/tinfoilsh/tinfoil-go/verifier/internal/errs"
 	"github.com/tinfoilsh/tinfoil-go/verifier/measurement"
 )
@@ -164,56 +161,41 @@ type Quote struct {
 // Identity is the authenticated machines-map lookup key (CHIP_ID, lowercase hex).
 func (q *Quote) Identity() string { return q.identity }
 
+// Evidence is an SEV-SNP attestation report with the endorsement collateral
+// that authenticates it, all decoded.
+type Evidence struct {
+	// Report is the raw attestation report.
+	Report []byte
+	// VCEKDER is the chip's VCEK certificate, and CertChainPEM the ASK then
+	// ARK certificates it chains through.
+	VCEKDER      []byte
+	CertChainPEM string
+	// CRLDER is the AMD KDS revocation list for the product line.
+	CRLDER []byte
+}
+
 // Authenticate verifies the report's signature chain up to the pinned AMD
-// root and its VCEK against the document-carried CRL — no network fetches.
-// Callers must assemble a policy and validate before trusting the
-// platform.
-func Authenticate(doc *document.Document, opts *Options) (result *Quote, err error) {
+// root and its VCEK against the supplied CRL — no network fetches. Callers
+// must assemble a policy and validate before trusting the platform.
+func Authenticate(ev Evidence, opts *Options) (result *Quote, err error) {
 	defer func() { err = errs.WrapAttestation(err) }()
-	if doc == nil {
-		return nil, &errs.ConfigurationError{Err: fmt.Errorf("document is required")}
-	}
 	// Sampled once so the CRL window and the library's own validity checks
 	// appraise the same instant.
 	now := opts.now()
-	entry, ok := doc.EndorsementCollateral(document.CollateralAMDVCEKV1Format, document.SubjectCPU)
-	if !ok {
-		return nil, fmt.Errorf("document carries no amd-vcek endorsement collateral for the cpu")
-	}
-	var data document.AMDVCEKCollateral
-	if err := json.Unmarshal(entry.Data, &data, json.RejectUnknownMembers(true)); err != nil {
-		return nil, fmt.Errorf("parsing amd-vcek collateral entry %q: %w", entry.ID, err)
-	}
-	vcekDER, err := data.VCEKDER()
-	if err != nil {
-		return nil, fmt.Errorf("amd-vcek collateral entry %q: %w", entry.ID, err)
-	}
 	// An empty VCEK would make the library try to fetch one.
-	if len(vcekDER) == 0 {
-		return nil, fmt.Errorf("amd-vcek collateral entry %q carries an empty VCEK", entry.ID)
+	if len(ev.VCEKDER) == 0 {
+		return nil, fmt.Errorf("amd-vcek collateral carries an empty VCEK")
 	}
-	askDER, arkDER, err := decodeCertChain(data.CertChainPEM)
+	askDER, arkDER, err := decodeCertChain(ev.CertChainPEM)
 	if err != nil {
-		return nil, fmt.Errorf("amd-vcek collateral entry %q: %w", entry.ID, err)
+		return nil, fmt.Errorf("amd-vcek collateral: %w", err)
 	}
-	crlEntry, ok := doc.EndorsementCollateral(document.CollateralAMDCRLV1Format, document.SubjectCPU)
-	if !ok {
-		return nil, fmt.Errorf("document carries no amd-crl endorsement collateral for the cpu")
-	}
-	var crl document.AMDCRLCollateral
-	if err := json.Unmarshal(crlEntry.Data, &crl, json.RejectUnknownMembers(true)); err != nil {
-		return nil, fmt.Errorf("parsing amd-crl collateral entry %q: %w", crlEntry.ID, err)
-	}
-	crlDER, err := crl.CRLDER()
-	if err != nil {
-		return nil, fmt.Errorf("amd-crl collateral entry %q: %w", crlEntry.ID, err)
-	}
-	if len(crlDER) == 0 {
-		return nil, fmt.Errorf("amd-crl collateral entry %q carries an empty CRL", crlEntry.ID)
+	if len(ev.CRLDER) == 0 {
+		return nil, fmt.Errorf("amd-crl collateral carries an empty CRL")
 	}
 	// The library verifies the CRL's signature but not its validity window,
 	// so a stale pre-revocation CRL would otherwise pass.
-	parsedCRL, err := x509.ParseRevocationList(crlDER)
+	parsedCRL, err := x509.ParseRevocationList(ev.CRLDER)
 	if err != nil {
 		return nil, fmt.Errorf("parsing amd-crl collateral: %w", err)
 	}
@@ -222,7 +204,7 @@ func Authenticate(doc *document.Document, opts *Options) (result *Quote, err err
 			parsedCRL.ThisUpdate.Format(time.RFC3339), parsedCRL.NextUpdate.Format(time.RFC3339))
 	}
 
-	att, err := verifySignature(doc.CPUEvidence.ReportBase64, vcekDER, askDER, arkDER, crlDER, now, opts.rootPEM())
+	att, err := verifySignature(ev.Report, ev.VCEKDER, askDER, arkDER, ev.CRLDER, now, opts.rootPEM())
 	if err != nil {
 		return nil, err
 	}
@@ -260,11 +242,7 @@ func rejectMaskedChipID(report *sevsnp.Report) error {
 // verifySignature verifies the report signature under the AMD roots with
 // the provided VCEK and ASK/ARK chain, checking VCEK revocation against
 // the provided CRL. No policy validation.
-func verifySignature(reportBase64 string, vcekDER, askDER, arkDER, crlDER []byte, now time.Time, rootPEM []byte) (*sevsnp.Attestation, error) {
-	reportBytes, err := base64.StdEncoding.DecodeString(reportBase64)
-	if err != nil {
-		return nil, err
-	}
+func verifySignature(reportBytes, vcekDER, askDER, arkDER, crlDER []byte, now time.Time, rootPEM []byte) (*sevsnp.Attestation, error) {
 	if len(reportBytes) != abi.ReportSize {
 		return nil, fmt.Errorf("SEV-SNP report must be exactly %d bytes, got %d", abi.ReportSize, len(reportBytes))
 	}

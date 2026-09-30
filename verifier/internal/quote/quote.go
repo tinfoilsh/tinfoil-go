@@ -83,18 +83,28 @@ func (o *Options) tdxOptions() *tdx.Options {
 	return o.overrides.tdx()
 }
 
-// Authenticate verifies the quote's signature chain up to the pinned
-// vendor root, from the document's own endorsement collateral — no network
+// Authenticate verifies the evidence's signature chain up to the pinned
+// vendor root, from the supplied endorsement collateral alone — no network
 // fetches. Callers must assemble a policy and validate before trusting the
 // platform.
-func Authenticate(doc *document.Document, opts *Options) (result *Authenticated, err error) {
+func Authenticate(ev CPUEvidence, en CPUEndorsements, opts *Options) (result *Authenticated, err error) {
 	defer func() { err = errs.WrapAttestation(err) }()
-	if doc == nil {
-		return nil, &errs.ConfigurationError{Err: fmt.Errorf("document is required")}
-	}
-	switch doc.CPUEvidence.Format {
+	switch ev.Format {
 	case document.SEVSNPReportV1Format:
-		q, err := sev.Authenticate(doc, opts.sevOptions())
+		// v3 is single-request: missing collateral is rejected, never
+		// patched up with a network fetch.
+		if en.AMDVCEK == nil {
+			return nil, fmt.Errorf("no amd-vcek endorsement collateral for the cpu")
+		}
+		if en.AMDCRL == nil {
+			return nil, fmt.Errorf("no amd-crl endorsement collateral for the cpu")
+		}
+		q, err := sev.Authenticate(sev.Evidence{
+			Report:       ev.Report,
+			VCEKDER:      en.AMDVCEK.VCEKDER,
+			CertChainPEM: en.AMDVCEK.CertChainPEM,
+			CRLDER:       en.AMDCRL.CRLDER,
+		}, opts.sevOptions())
 		if err != nil {
 			return nil, err
 		}
@@ -105,7 +115,10 @@ func Authenticate(doc *document.Document, opts *Options) (result *Authenticated,
 			sev:         q,
 		}, nil
 	case document.TDXQuoteV1Format:
-		q, err := tdx.Authenticate(doc, opts.tdxOptions())
+		if en.IntelPCS == nil {
+			return nil, fmt.Errorf("no intel-pcs endorsement collateral for the cpu")
+		}
+		q, err := tdx.Authenticate(tdx.Evidence{Quote: ev.Report, PCS: en.IntelPCS.Responses}, opts.tdxOptions())
 		if err != nil {
 			return nil, err
 		}
@@ -116,7 +129,7 @@ func Authenticate(doc *document.Document, opts *Options) (result *Authenticated,
 			tdx:         q,
 		}, nil
 	default:
-		return nil, fmt.Errorf("unsupported cpu_evidence format %q", doc.CPUEvidence.Format)
+		return nil, fmt.Errorf("unsupported cpu_evidence format %q", ev.Format)
 	}
 }
 
@@ -184,8 +197,8 @@ func (p *AssembledPolicy) Validate() (err error) {
 
 // Verify composes Authenticate, Assemble, and Validate. A nil opts selects
 // the production clock and embedded vendor roots.
-func Verify(doc *document.Document, endorsements *policy.Artifact, code, pins *measurement.Measurement, shape *policy.Shape, reportData [64]byte, opts *Options) (*AssembledPolicy, *Authenticated, error) {
-	q, err := Authenticate(doc, opts)
+func Verify(ev CPUEvidence, en CPUEndorsements, endorsements *policy.Artifact, code, pins *measurement.Measurement, shape *policy.Shape, reportData [64]byte, opts *Options) (*AssembledPolicy, *Authenticated, error) {
+	q, err := Authenticate(ev, en, opts)
 	if err != nil {
 		return nil, nil, err
 	}
