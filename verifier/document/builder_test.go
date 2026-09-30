@@ -10,6 +10,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/tinfoilsh/tinfoil-go/verifier/document/collateral"
+
 	"github.com/tinfoilsh/tinfoil-go/verifier/internal/errs"
 )
 
@@ -37,7 +39,7 @@ func TestBuildRoundTrip(t *testing.T) {
 		Nonce:          nonce,
 		CryptoMaterial: testCryptoMaterial(),
 		DeviceEvidence: []DeviceEvidenceItem{{ID: "gpu0", Kind: "gpu", Vendor: "nvidia", Format: NvidiaGPUEvidenceV1Format, Evidence: jsontext.Value(`{"report":"x"}`)}},
-		Collateral:     []CollateralEntry{{ID: "vcek", Role: RoleEndorsement, Format: CollateralAMDVCEKV1Format, Subjects: []string{SubjectCPU}, Data: jsontext.Value(`{"vcek_der_base64":"","cert_chain_pem":""}`)}},
+		Collateral:     []collateral.Entry{{ID: "vcek", Role: collateral.RoleEndorsement, Format: collateral.AMDVCEKV1Format, Subjects: []string{collateral.SubjectCPU}, Data: jsontext.Value(`{"vcek_der_base64":"","cert_chain_pem":""}`)}},
 	}
 	var signed [64]byte
 	report := bytes.Repeat([]byte{0x01}, 1184)
@@ -52,7 +54,7 @@ func TestBuildRoundTrip(t *testing.T) {
 	assert.Equal(t, in.CryptoMaterial, doc.CryptoMaterialItems())
 	assert.Equal(t, in.DeviceEvidence, doc.DeviceEvidenceItems())
 	assert.Equal(t, CPUEvidence{Format: SEVSNPReportV1Format, Report: report}, doc.CPUEvidence())
-	assert.Equal(t, &AMDVCEK{VCEKDER: []byte{}, CertChainPEM: ""}, doc.CPUEndorsements().AMDVCEK, "the vcek entry is decoded and serves the CPU")
+	assert.Equal(t, &collateral.AMDVCEK{VCEKDER: []byte{}, CertChainPEM: ""}, doc.CPUEndorsements().AMDVCEK, "the vcek entry is decoded and serves the CPU")
 }
 
 func TestBuildAcceptsEmptySections(t *testing.T) {
@@ -95,21 +97,21 @@ func TestBuildRejectsInvalidEndorsedInput(t *testing.T) {
 }
 
 func TestBuildRejectsInvalidCollateralBeforeQuoting(t *testing.T) {
-	entry := CollateralEntry{ID: "crl", Role: RoleEndorsement, Format: CollateralAMDCRLV1Format, Subjects: []string{SubjectCPU}, Data: jsontext.Value(`{}`)}
+	entry := collateral.Entry{ID: "crl", Role: collateral.RoleEndorsement, Format: collateral.AMDCRLV1Format, Subjects: []string{collateral.SubjectCPU}, Data: jsontext.Value(`{}`)}
 	unknownRole := entry
 	unknownRole.Role = "unknown"
 	// A format without a decoder is caught only by serialization.
-	malformed := CollateralEntry{ID: "future", Role: RoleEndorsement, Format: "https://tinfoil.sh/collateral/unknown/v9", Data: jsontext.Value(`{bad`)}
+	malformed := collateral.Entry{ID: "future", Role: collateral.RoleEndorsement, Format: "https://tinfoil.sh/collateral/unknown/v9", Data: jsontext.Value(`{bad`)}
 	for _, tt := range []struct {
 		name       string
-		collateral []CollateralEntry
+		collateral []collateral.Entry
 		wantErr    string
 	}{
-		{name: "unknown role", collateral: []CollateralEntry{unknownRole}, wantErr: `unknown role "unknown"`},
-		{name: "duplicate id", collateral: []CollateralEntry{entry, entry}, wantErr: `duplicate collateral entry id "crl"`},
-		{name: "malformed data", collateral: []CollateralEntry{malformed}, wantErr: "serializing collateral"},
-		{name: "non-canonical vcek", collateral: []CollateralEntry{{ID: "vcek", Role: RoleEndorsement, Format: CollateralAMDVCEKV1Format, Subjects: []string{SubjectCPU}, Data: jsontext.Value(`{"vcek_der_base64":"AAAA\n","cert_chain_pem":""}`)}}, wantErr: "vcek_der_base64 is not canonical base64"},
-		{name: "unknown member in known format", collateral: []CollateralEntry{{ID: "crl", Role: RoleEndorsement, Format: CollateralAMDCRLV1Format, Subjects: []string{SubjectCPU}, Data: jsontext.Value(`{"crl_der_base64":"","unknown":1}`)}}, wantErr: `parsing amd-crl collateral entry "crl"`},
+		{name: "unknown role", collateral: []collateral.Entry{unknownRole}, wantErr: `unknown role "unknown"`},
+		{name: "duplicate id", collateral: []collateral.Entry{entry, entry}, wantErr: `duplicate collateral entry id "crl"`},
+		{name: "malformed data", collateral: []collateral.Entry{malformed}, wantErr: "serializing collateral"},
+		{name: "non-canonical vcek", collateral: []collateral.Entry{{ID: "vcek", Role: collateral.RoleEndorsement, Format: collateral.AMDVCEKV1Format, Subjects: []string{collateral.SubjectCPU}, Data: jsontext.Value(`{"vcek_der_base64":"AAAA\n","cert_chain_pem":""}`)}}, wantErr: "vcek_der_base64 is not canonical base64"},
+		{name: "unknown member in known format", collateral: []collateral.Entry{{ID: "crl", Role: collateral.RoleEndorsement, Format: collateral.AMDCRLV1Format, Subjects: []string{collateral.SubjectCPU}, Data: jsontext.Value(`{"crl_der_base64":"","unknown":1}`)}}, wantErr: `parsing amd-crl collateral entry "crl"`},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			called := false

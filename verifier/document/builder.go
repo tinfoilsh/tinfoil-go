@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"slices"
 
+	"github.com/tinfoilsh/tinfoil-go/verifier/document/collateral"
 	"github.com/tinfoilsh/tinfoil-go/verifier/internal/errs"
 )
 
@@ -21,7 +22,7 @@ type BuildInput struct {
 	DeviceEvidence []DeviceEvidenceItem
 	// Collateral lets verifiers authenticate the evidence offline. It is not
 	// endorsed: every entry is checked against its own signature chain.
-	Collateral []CollateralEntry
+	Collateral []collateral.Entry
 }
 
 // QuoteGenerator obtains a hardware quote whose REPORT_DATA is reportData,
@@ -50,12 +51,9 @@ func Build(in BuildInput, generateQuote QuoteGenerator) ([]byte, error) {
 	if err != nil {
 		return nil, &errs.ConfigurationError{Err: err}
 	}
-	if err := validateCollateral(in.Collateral); err != nil {
-		return nil, &errs.ConfigurationError{Err: err}
-	}
 	// Parse decodes every entry of a known role and format; decoding them
 	// here rejects one Parse would refuse before it costs a hardware quote.
-	if _, err := decodeCollateral(in.Collateral); err != nil {
+	if _, err := collateral.Decode(in.Collateral); err != nil {
 		return nil, &errs.ConfigurationError{Err: err}
 	}
 	// Entries of other formats are not decoded; serializing rejects one whose
@@ -125,7 +123,7 @@ func endorse(nonce []byte, cryptoMaterial []CryptoMaterialItem, deviceEvidence [
 }
 
 // assemble serializes the complete document.
-func (e *endorsed) assemble(nonce []byte, format string, report []byte, collateral []CollateralEntry) ([]byte, error) {
+func (e *endorsed) assemble(nonce []byte, format string, report []byte, entries []collateral.Entry) ([]byte, error) {
 	docBytes, err := json.Marshal(rawDocument{
 		Format: AttestationV3Format,
 		Challenge: challenge{
@@ -143,7 +141,7 @@ func (e *endorsed) assemble(nonce []byte, format string, report []byte, collater
 		},
 		CryptoMaterial: e.cryptoMaterial,
 		DeviceEvidence: e.deviceEvidence,
-		Collateral:     collateral,
+		Collateral:     entries,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("serializing attestation document: %w", err)

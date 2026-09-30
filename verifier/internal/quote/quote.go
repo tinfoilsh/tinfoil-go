@@ -19,6 +19,7 @@ import (
 	"strings"
 
 	"github.com/tinfoilsh/tinfoil-go/verifier/document"
+	"github.com/tinfoilsh/tinfoil-go/verifier/document/collateral"
 	"github.com/tinfoilsh/tinfoil-go/verifier/internal/errs"
 	"github.com/tinfoilsh/tinfoil-go/verifier/internal/policy"
 	"github.com/tinfoilsh/tinfoil-go/verifier/internal/quote/sev"
@@ -91,7 +92,7 @@ func (o *Options) tdxOptions() *tdx.Options {
 // vendor root, from the supplied endorsement collateral alone — no network
 // fetches. Callers must assemble a policy and validate before trusting the
 // platform.
-func Authenticate(ev document.CPUEvidence, en document.CPUEndorsements, opts *Options) (result *Authenticated, err error) {
+func Authenticate(ev document.CPUEvidence, en collateral.CPUEndorsements, opts *Options) (result *Authenticated, err error) {
 	defer func() { err = errs.WrapAttestation(err) }()
 	switch ev.Format {
 	case document.SEVSNPReportV1Format:
