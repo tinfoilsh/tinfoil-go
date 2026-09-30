@@ -1,6 +1,7 @@
 package verifier
 
 import (
+	"bytes"
 	"encoding/base64"
 	"encoding/json"
 	"os"
@@ -52,21 +53,25 @@ func TestLiveIgnoreFreshness(t *testing.T) {
 	ignored, err := New(WithFreshnessMaxAge(expiredMaxAge), WithIgnoreFreshness())
 	require.NoError(t, err)
 
-	changeCollateral := func(format string, remove bool) func(*document.Document) {
-		return func(doc *document.Document) {
-			doc.Collateral = slices.DeleteFunc(doc.Collateral, func(entry document.CollateralEntry) bool {
-				return remove && entry.Format == format
-			})
-			for i := range doc.Collateral {
-				if doc.Collateral[i].Format == format {
-					doc.Collateral[i].Data = []byte(`{"sigstore_bundle":{}}`)
+	changeCollateral := func(format string, remove bool) func(map[string]any) {
+		return func(doc map[string]any) {
+			var kept []any
+			for _, e := range doc["collateral"].([]any) {
+				entry := e.(map[string]any)
+				if entry["format"] == format {
+					if remove {
+						continue
+					}
+					entry["data"] = map[string]any{"sigstore_bundle": map[string]any{}}
 				}
+				kept = append(kept, entry)
 			}
+			doc["collateral"] = kept
 		}
 	}
 	for _, tt := range []struct {
 		name      string
-		mutate    func(*document.Document)
+		mutate    func(map[string]any)
 		maxAge    time.Duration
 		wantError string
 		accept    bool
@@ -78,13 +83,10 @@ func TestLiveIgnoreFreshness(t *testing.T) {
 		{"invalid platform provenance", changeCollateral(document.CollateralSigstorePlatformV1Format, false), 0, "verifying platform endorsements", false},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
-			doc, err := document.Parse(raw, nonce)
-			require.NoError(t, err)
+			modified := raw
 			if tt.mutate != nil {
-				tt.mutate(doc)
+				modified = editDocument(t, raw, tt.mutate)
 			}
-			modified, err := json.Marshal(doc)
-			require.NoError(t, err)
 			bounded, err := New(WithFreshnessMaxAge(tt.maxAge))
 			require.NoError(t, err)
 			_, err = bounded.VerifyV3(modified, nonce, repo)
@@ -104,12 +106,25 @@ func TestLiveIgnoreFreshness(t *testing.T) {
 	wrongNonce[0] ^= 1
 	_, err = ignored.VerifyV3(raw, wrongNonce, repo)
 	require.ErrorContains(t, err, "challenge nonce does not match")
-	doc, err := document.Parse(raw, nonce)
-	require.NoError(t, err)
-	doc.CPUEvidence.ReportBase64 = base64.StdEncoding.EncodeToString([]byte("invalid quote"))
-	modified, err := json.Marshal(doc)
-	require.NoError(t, err)
+	modified := editDocument(t, raw, func(doc map[string]any) {
+		doc["cpu_evidence"].(map[string]any)["report_base64"] = base64.StdEncoding.EncodeToString([]byte("invalid quote"))
+	})
 	got, err := ignored.VerifyV3(modified, nonce, repo)
 	require.Error(t, err)
 	require.Nil(t, got)
+}
+
+// editDocument decodes a serialized document as plain JSON, applies edit, and
+// re-encodes it. Numbers stay exact and the endorsed sections, which travel as
+// base64 strings, keep their bytes.
+func editDocument(t *testing.T, raw []byte, edit func(map[string]any)) []byte {
+	t.Helper()
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.UseNumber()
+	var doc map[string]any
+	require.NoError(t, dec.Decode(&doc))
+	edit(doc)
+	out, err := json.Marshal(doc)
+	require.NoError(t, err)
+	return out
 }
