@@ -1,10 +1,6 @@
 package quote
 
 import (
-	"crypto/sha256"
-	"encoding/base64"
-	"encoding/hex"
-	"encoding/json/v2"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -21,32 +17,8 @@ import (
 func boundDocument(t *testing.T, report []byte) *document.Document {
 	t.Helper()
 	nonce := make([]byte, document.NonceSize)
-	cryptoBytes, err := json.Marshal(document.CryptoMaterialSection{Format: document.CryptoMaterialV1Format, Items: []document.CryptoMaterialItem{}})
-	require.NoError(t, err)
-	deviceBytes, err := json.Marshal(document.DeviceEvidenceSection{Format: document.DeviceEvidenceV1Format, Items: []document.DeviceEvidenceItem{}})
-	require.NoError(t, err)
-	cryptoHash := sha256.Sum256(cryptoBytes)
-	deviceHash := sha256.Sum256(deviceBytes)
-	reportData, err := document.ComputeReportData(nonce, cryptoHash[:], deviceHash[:])
-	require.NoError(t, err)
-	docBytes, err := json.Marshal(document.Document{
-		Format: document.AttestationV3Format,
-		Challenge: document.Challenge{
-			Nonce:               hex.EncodeToString(nonce),
-			ReportData:          hex.EncodeToString(reportData[:]),
-			ReportDataAlgorithm: document.ReportDataV1Algorithm,
-		},
-		CPUEvidence: document.CPUEvidence{
-			Format:       document.SEVSNPReportV1Format,
-			ReportBase64: base64.StdEncoding.EncodeToString(report),
-			Endorsed: document.EndorsedHashes{
-				CryptoMaterialHash: hex.EncodeToString(cryptoHash[:]),
-				DeviceEvidenceHash: hex.EncodeToString(deviceHash[:]),
-			},
-		},
-		CryptoMaterial: base64.StdEncoding.EncodeToString(cryptoBytes),
-		DeviceEvidence: base64.StdEncoding.EncodeToString(deviceBytes),
-		Collateral:     []document.CollateralEntry{},
+	docBytes, err := document.Build(document.BuildInput{Nonce: nonce}, func([64]byte) (string, []byte, error) {
+		return document.SEVSNPReportV1Format, report, nil
 	})
 	require.NoError(t, err)
 	doc, err := document.Parse(docBytes, nonce)
