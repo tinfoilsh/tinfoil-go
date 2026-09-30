@@ -15,9 +15,7 @@ package quote
 import (
 	"bytes"
 	"cmp"
-	"encoding/base64"
 	"fmt"
-	"slices"
 	"strings"
 
 	"github.com/tinfoilsh/tinfoil-go/verifier/document"
@@ -36,11 +34,11 @@ type Authenticated struct {
 	// Measurement is a detached summary of the launch measurement (SEV) or MRTD+RTMRs (TDX).
 	Measurement *measurement.Measurement
 
-	// report is the raw evidence that was authenticated, so Assemble can
+	// evidence is the CPU evidence that was authenticated, so Assemble can
 	// check it appraises the quote against the document it came from.
-	report []byte
-	sev    *sev.Quote
-	tdx    *tdx.Quote
+	evidence document.CPUEvidence
+	sev      *sev.Quote
+	tdx      *tdx.Quote
 }
 
 // Platform is policy.PlatformSEVSNP or policy.PlatformTDX.
@@ -93,7 +91,7 @@ func (o *Options) tdxOptions() *tdx.Options {
 // vendor root, from the supplied endorsement collateral alone — no network
 // fetches. Callers must assemble a policy and validate before trusting the
 // platform.
-func Authenticate(ev CPUEvidence, en document.CPUEndorsements, opts *Options) (result *Authenticated, err error) {
+func Authenticate(ev document.CPUEvidence, en document.CPUEndorsements, opts *Options) (result *Authenticated, err error) {
 	defer func() { err = errs.WrapAttestation(err) }()
 	switch ev.Format {
 	case document.SEVSNPReportV1Format:
@@ -118,7 +116,7 @@ func Authenticate(ev CPUEvidence, en document.CPUEndorsements, opts *Options) (r
 			platform:    policy.PlatformSEVSNP,
 			identity:    q.Identity(),
 			Measurement: q.Measurement,
-			report:      slices.Clone(ev.Report),
+			evidence:    ev.Clone(),
 			sev:         q,
 		}, nil
 	case document.TDXQuoteV1Format:
@@ -133,7 +131,7 @@ func Authenticate(ev CPUEvidence, en document.CPUEndorsements, opts *Options) (r
 			platform:    policy.PlatformTDX,
 			identity:    q.Identity(),
 			Measurement: q.Measurement,
-			report:      slices.Clone(ev.Report),
+			evidence:    ev.Clone(),
 			tdx:         q,
 		}, nil
 	default:
@@ -159,8 +157,8 @@ func Assemble(doc *document.Document, endorsements *policy.Artifact, code, pins 
 	if q == nil {
 		return nil, &errs.ConfigurationError{Err: fmt.Errorf("authenticated quote is required")}
 	}
-	docReport, err := base64.StdEncoding.DecodeString(doc.CPUEvidence.ReportBase64)
-	if err != nil || !bytes.Equal(docReport, q.report) {
+	evidence := doc.CPUEvidence()
+	if evidence.Format != q.evidence.Format || !bytes.Equal(evidence.Report, q.evidence.Report) {
 		return nil, &errs.ConfigurationError{Err: fmt.Errorf("authenticated quote is not this document's CPU evidence")}
 	}
 	return assemble(endorsements, code, pins, shape, reportData, q)

@@ -29,60 +29,60 @@ type CollateralEntry struct {
 	Data     jsontext.Value `json:"data"`
 }
 
-// AMDVCEKCollateral is the data of a CollateralAMDVCEKV1Format entry.
-type AMDVCEKCollateral struct {
+// amdVCEKCollateral is the data of a CollateralAMDVCEKV1Format entry.
+type amdVCEKCollateral struct {
 	VCEKDERBase64 string `json:"vcek_der_base64"`
 	CertChainPEM  string `json:"cert_chain_pem"`
 }
 
-// VCEKDER decodes VCEKDERBase64, rejecting non-canonical base64.
-func (c *AMDVCEKCollateral) VCEKDER() ([]byte, error) {
+// vcekDER decodes VCEKDERBase64, rejecting non-canonical base64.
+func (c *amdVCEKCollateral) vcekDER() ([]byte, error) {
 	return decodeCanonicalBase64("vcek_der_base64", c.VCEKDERBase64)
 }
 
-// AMDCRLCollateral is the data of a CollateralAMDCRLV1Format entry.
-type AMDCRLCollateral struct {
+// amdCRLCollateral is the data of a CollateralAMDCRLV1Format entry.
+type amdCRLCollateral struct {
 	CRLDERBase64 string `json:"crl_der_base64"`
 }
 
-// CRLDER decodes CRLDERBase64, rejecting non-canonical base64.
-func (c *AMDCRLCollateral) CRLDER() ([]byte, error) {
+// crlDER decodes CRLDERBase64, rejecting non-canonical base64.
+func (c *amdCRLCollateral) crlDER() ([]byte, error) {
 	return decodeCanonicalBase64("crl_der_base64", c.CRLDERBase64)
 }
 
-// IntelPCSCollateral is the data of a CollateralIntelPCSV1Format entry:
+// intelPCSCollateral is the data of a CollateralIntelPCSV1Format entry:
 // Intel PCS responses captured verbatim so a verifier can replay them
 // instead of fetching. Headers are included because Intel delivers issuer
 // chains in response headers.
-type IntelPCSCollateral struct {
-	Responses []PCSResponse `json:"responses"`
+type intelPCSCollateral struct {
+	Responses []rawPCSResponse `json:"responses"`
 }
 
-// PCSResponse is one captured Intel PCS response.
-type PCSResponse struct {
+// rawPCSResponse is one captured Intel PCS response as serialized.
+type rawPCSResponse struct {
 	URL        string              `json:"url"`
 	Headers    map[string][]string `json:"headers"`
 	BodyBase64 string              `json:"body_base64"`
 }
 
-// Body decodes BodyBase64, rejecting non-canonical base64.
-func (r *PCSResponse) Body() ([]byte, error) {
+// body decodes BodyBase64, rejecting non-canonical base64.
+func (r *rawPCSResponse) body() ([]byte, error) {
 	return decodeCanonicalBase64("body_base64", r.BodyBase64)
 }
 
-// SigstoreCollateral is the data of a sigstore-code or sigstore-platform
+// sigstoreCollateral is the data of a sigstore-code or sigstore-platform
 // reference-values entry. Repo and Tag are informational; trust comes from
 // verifying SigstoreBundle against the expected signing identity and Digest.
-type SigstoreCollateral struct {
+type sigstoreCollateral struct {
 	Repo           string         `json:"repo"`
 	Tag            string         `json:"tag"`
 	Digest         string         `json:"digest"`
 	SigstoreBundle jsontext.Value `json:"sigstore_bundle"`
 }
 
-// FreshnessCollateral carries the independently signed witness bundle for
+// freshnessCollateral carries the independently signed witness bundle for
 // the Sigstore artifact selected by its collateral entry ID.
-type FreshnessCollateral struct {
+type freshnessCollateral struct {
 	SigstoreBundle jsontext.Value `json:"sigstore_bundle"`
 }
 
@@ -116,37 +116,37 @@ func validateCollateral(entries []CollateralEntry) error {
 	return nil
 }
 
-// EndorsementCollateral returns the first endorsement-role collateral entry
+// endorsementCollateral returns the first endorsement-role collateral entry
 // with the given format whose subjects include subject.
-func (d *Document) EndorsementCollateral(format, subject string) (*CollateralEntry, bool) {
+func (d *Document) endorsementCollateral(format, subject string) (*CollateralEntry, bool) {
 	entry := d.findCollateral(RoleEndorsement, format, func(entry *CollateralEntry) bool {
 		return slices.Contains(entry.Subjects, subject)
 	})
 	return entry, entry != nil
 }
 
-// ReferenceValuesCollateral returns the first reference-values collateral
+// referenceValues returns the first reference-values collateral
 // entry with the given format, parsed as a Sigstore collateral payload. A
 // document without such an entry returns an error wrapping
 // ErrCollateralNotFound.
-func (d *Document) ReferenceValuesCollateral(format string) (*SigstoreCollateral, error) {
+func (d *Document) referenceValues(format string) (*sigstoreCollateral, error) {
 	entry := d.findCollateral(RoleReferenceValues, format, nil)
 	if entry == nil {
 		return nil, fmt.Errorf("%w: document carries no %s reference-values entry", ErrCollateralNotFound, format)
 	}
-	return decodeCollateral[SigstoreCollateral](entry)
+	return decodeCollateral[sigstoreCollateral](entry)
 }
 
-// FreshnessCollateral returns the reference-values freshness payload with the
+// freshnessEntry returns the reference-values freshness payload with the
 // requested artifact ID. Parse validates collateral ID uniqueness.
-func (d *Document) FreshnessCollateral(id string) (*FreshnessCollateral, error) {
+func (d *Document) freshnessEntry(id string) (*freshnessCollateral, error) {
 	entry := d.findCollateral(RoleReferenceValues, CollateralSigstoreFreshnessV1Format, func(entry *CollateralEntry) bool {
 		return entry.ID == id
 	})
 	if entry == nil {
 		return nil, fmt.Errorf("%w: document carries no %s reference-values entry %q", ErrCollateralNotFound, CollateralSigstoreFreshnessV1Format, id)
 	}
-	return decodeCollateral[FreshnessCollateral](entry)
+	return decodeCollateral[freshnessCollateral](entry)
 }
 
 // SigstoreRef is a decoded reference-values entry: a Sigstore bundle and the
@@ -178,7 +178,7 @@ func (d *Document) SigstorePlatform() (SigstoreRef, error) {
 }
 
 func (d *Document) sigstoreRef(format string) (SigstoreRef, error) {
-	c, err := d.ReferenceValuesCollateral(format)
+	c, err := d.referenceValues(format)
 	if err != nil {
 		return SigstoreRef{}, err
 	}
@@ -189,7 +189,7 @@ func (d *Document) sigstoreRef(format string) (SigstoreRef, error) {
 // as FreshnessCollateralIDCode. A document without it returns an error
 // wrapping ErrCollateralNotFound.
 func (d *Document) Freshness(id string) (Freshness, error) {
-	c, err := d.FreshnessCollateral(id)
+	c, err := d.freshnessEntry(id)
 	if err != nil {
 		return Freshness{}, err
 	}
@@ -198,8 +198,8 @@ func (d *Document) Freshness(id string) (Freshness, error) {
 
 // findCollateral selects the first matching entry; Parse validates uniqueness.
 func (d *Document) findCollateral(role, format string, match func(*CollateralEntry) bool) *CollateralEntry {
-	for i := range d.Collateral {
-		entry := &d.Collateral[i]
+	for i := range d.collateral {
+		entry := &d.collateral[i]
 		if entry.Role == role && entry.Format == format && (match == nil || match(entry)) {
 			return entry
 		}

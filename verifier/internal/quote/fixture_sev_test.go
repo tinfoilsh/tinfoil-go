@@ -75,8 +75,7 @@ func TestLiveSEVFixture(t *testing.T) {
 	require.NoError(t, err)
 	assert.NotEmpty(t, platformRef.Digest)
 
-	evidence, err := EvidenceFromDocument(doc)
-	require.NoError(t, err)
+	evidence := doc.CPUEvidence()
 	endorsements, err := doc.CPUEndorsements()
 	require.NoError(t, err)
 	endorsements.AMDCRL = liveCRL(t)

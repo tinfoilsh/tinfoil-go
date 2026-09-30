@@ -13,9 +13,9 @@ func TestCollateralBase64Decoders(t *testing.T) {
 	canonical := base64.StdEncoding.EncodeToString(want)
 
 	decoders := map[string]func(string) ([]byte, error){
-		"vcek_der_base64": func(v string) ([]byte, error) { return (&AMDVCEKCollateral{VCEKDERBase64: v}).VCEKDER() },
-		"crl_der_base64":  func(v string) ([]byte, error) { return (&AMDCRLCollateral{CRLDERBase64: v}).CRLDER() },
-		"body_base64":     func(v string) ([]byte, error) { return (&PCSResponse{BodyBase64: v}).Body() },
+		"vcek_der_base64": func(v string) ([]byte, error) { return (&amdVCEKCollateral{VCEKDERBase64: v}).vcekDER() },
+		"crl_der_base64":  func(v string) ([]byte, error) { return (&amdCRLCollateral{CRLDERBase64: v}).crlDER() },
+		"body_base64":     func(v string) ([]byte, error) { return (&rawPCSResponse{BodyBase64: v}).body() },
 	}
 	for field, decode := range decoders {
 		t.Run(field, func(t *testing.T) {

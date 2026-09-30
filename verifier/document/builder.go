@@ -92,11 +92,11 @@ func endorse(nonce []byte, cryptoMaterial []CryptoMaterialItem, deviceEvidence [
 		return nil, fmt.Errorf("nonce must be %d bytes, got %d", NonceSize, len(nonce))
 	}
 
-	cryptoBytes, err := json.Marshal(CryptoMaterialSection{Format: CryptoMaterialV1Format, Items: cryptoMaterial})
+	cryptoBytes, err := json.Marshal(cryptoMaterialSection{Format: CryptoMaterialV1Format, Items: cryptoMaterial})
 	if err != nil {
 		return nil, fmt.Errorf("serializing crypto_material: %w", err)
 	}
-	deviceBytes, err := json.Marshal(DeviceEvidenceSection{Format: DeviceEvidenceV1Format, Items: deviceEvidence})
+	deviceBytes, err := json.Marshal(deviceEvidenceSection{Format: DeviceEvidenceV1Format, Items: deviceEvidence})
 	if err != nil {
 		return nil, fmt.Errorf("serializing device_evidence: %w", err)
 	}
@@ -121,17 +121,17 @@ func endorse(nonce []byte, cryptoMaterial []CryptoMaterialItem, deviceEvidence [
 
 // assemble serializes the complete document.
 func (e *endorsed) assemble(nonce []byte, format string, report []byte, collateral []CollateralEntry) ([]byte, error) {
-	docBytes, err := json.Marshal(Document{
+	docBytes, err := json.Marshal(rawDocument{
 		Format: AttestationV3Format,
-		Challenge: Challenge{
+		Challenge: challenge{
 			Nonce:               hex.EncodeToString(nonce),
 			ReportData:          hex.EncodeToString(e.reportData[:]),
 			ReportDataAlgorithm: ReportDataV1Algorithm,
 		},
-		CPUEvidence: CPUEvidence{
+		CPUEvidence: rawCPUEvidence{
 			Format:       format,
 			ReportBase64: base64.StdEncoding.EncodeToString(report),
-			Endorsed: EndorsedHashes{
+			Endorsed: endorsedHashes{
 				CryptoMaterialHash: hex.EncodeToString(e.cryptoHash[:]),
 				DeviceEvidenceHash: hex.EncodeToString(e.deviceHash[:]),
 			},

@@ -103,24 +103,35 @@ const (
 // NonceSize is the required challenge nonce size in bytes.
 const NonceSize = 32
 
-// Document is the wire shape of a v3 attestation document. The endorsed
-// sections travel base64-encoded: the builder serializes each section once
-// and the encoded string carries those exact bytes, so every verifier
-// recovers them with a plain base64 decode — no re-serialization, no
+// rawDocument is the serialized shape of a v3 attestation document. The
+// endorsed sections travel base64-encoded: the builder serializes each
+// section once and the encoded string carries those exact bytes, so every
+// verifier recovers them with a plain base64 decode — no re-serialization, no
 // canonicalization, no raw-span extraction (the same envelope discipline as
 // DSSE and JWS).
-type Document struct {
+type rawDocument struct {
 	Format         string            `json:"format"`
-	Challenge      Challenge         `json:"challenge"`
-	CPUEvidence    CPUEvidence       `json:"cpu_evidence"`
+	Challenge      challenge         `json:"challenge"`
+	CPUEvidence    rawCPUEvidence    `json:"cpu_evidence"`
 	CryptoMaterial string            `json:"crypto_material"`
 	DeviceEvidence string            `json:"device_evidence"`
 	Collateral     []CollateralEntry `json:"collateral"`
+}
+
+// Document is a parsed v3 attestation document. Obtain one from Parse, which
+// decodes every field and checks the challenge against the caller's nonce;
+// its accessors return decoded copies. Methods require a document returned by
+// Parse: only ExpectedReportData accepts a nil or zero-value Document.
+type Document struct {
+	challenge  challenge
+	endorsed   endorsedHashes
+	evidence   CPUEvidence
+	collateral []CollateralEntry
 
 	cryptoMaterialBytes []byte
 	deviceEvidenceBytes []byte
-	cryptoMaterial      *CryptoMaterialSection
-	deviceEvidence      *DeviceEvidenceSection
+	cryptoMaterial      *cryptoMaterialSection
+	deviceEvidence      *deviceEvidenceSection
 
 	// bound records that bind checked the challenge against the caller's
 	// nonce; reportData is the REPORT_DATA it recomputed. A zero-value
@@ -130,14 +141,27 @@ type Document struct {
 	reportData [64]byte
 }
 
-// Challenge binds the document to a verifier-chosen nonce.
-type Challenge struct {
+// CPUEvidence is a document's decoded hardware evidence.
+type CPUEvidence struct {
+	// Format selects the platform, e.g. SEVSNPReportV1Format.
+	Format string
+	// Report is the raw report (SEV-SNP) or quote (TDX).
+	Report []byte
+}
+
+// Clone returns a deep copy of e.
+func (e CPUEvidence) Clone() CPUEvidence {
+	return CPUEvidence{Format: e.Format, Report: slices.Clone(e.Report)}
+}
+
+// challenge binds the document to a verifier-chosen nonce.
+type challenge struct {
 	Nonce               string `json:"nonce"`
 	ReportData          string `json:"report_data"`
 	ReportDataAlgorithm string `json:"report_data_algorithm"`
 }
 
-func (c *Challenge) parse() error {
+func (c *challenge) parse() error {
 	if c.ReportDataAlgorithm != ReportDataV1Algorithm {
 		return fmt.Errorf("unsupported challenge.report_data_algorithm %q", c.ReportDataAlgorithm)
 	}
@@ -150,38 +174,36 @@ func (c *Challenge) parse() error {
 	return nil
 }
 
-// CPUEvidence is the hardware quote and the endorsed-section hashes it binds.
-type CPUEvidence struct {
+// rawCPUEvidence is the hardware quote and the endorsed-section hashes it binds.
+type rawCPUEvidence struct {
 	Format       string         `json:"format"`
 	ReportBase64 string         `json:"report_base64"`
-	Endorsed     EndorsedHashes `json:"endorsed"`
+	Endorsed     endorsedHashes `json:"endorsed"`
 }
 
-func (c *CPUEvidence) parse() error {
+// parse checks the CPU evidence and returns its decoded report.
+func (c *rawCPUEvidence) parse() ([]byte, error) {
 	if _, err := decodeLowerHex("cpu_evidence.endorsed.crypto_material_hash", c.Endorsed.CryptoMaterialHash, 32); err != nil {
-		return err
+		return nil, err
 	}
 	if _, err := decodeLowerHex("cpu_evidence.endorsed.device_evidence_hash", c.Endorsed.DeviceEvidenceHash, 32); err != nil {
-		return err
+		return nil, err
 	}
 	if c.Format == "" || c.ReportBase64 == "" {
-		return fmt.Errorf("cpu_evidence is incomplete")
+		return nil, fmt.Errorf("cpu_evidence is incomplete")
 	}
-	if _, err := decodeCanonicalBase64("cpu_evidence.report_base64", c.ReportBase64); err != nil {
-		return err
-	}
-	return nil
+	return decodeCanonicalBase64("cpu_evidence.report_base64", c.ReportBase64)
 }
 
-// EndorsedHashes are the SHA-256 hashes of the two endorsed sections,
+// endorsedHashes are the SHA-256 hashes of the two endorsed sections,
 // bound into the quote's REPORT_DATA.
-type EndorsedHashes struct {
+type endorsedHashes struct {
 	CryptoMaterialHash string `json:"crypto_material_hash"`
 	DeviceEvidenceHash string `json:"device_evidence_hash"`
 }
 
-// CryptoMaterialSection is the endorsed crypto_material section envelope.
-type CryptoMaterialSection struct {
+// cryptoMaterialSection is the endorsed crypto_material section envelope.
+type cryptoMaterialSection struct {
 	Format string               `json:"format"`
 	Items  []CryptoMaterialItem `json:"items"`
 }
@@ -194,7 +216,7 @@ type CryptoMaterialItem struct {
 	Data   string `json:"data"`
 }
 
-func parseCryptoMaterial(encoded string) (*CryptoMaterialSection, []byte, error) {
+func parseCryptoMaterial(encoded string) (*cryptoMaterialSection, []byte, error) {
 	if encoded == "" {
 		return nil, nil, fmt.Errorf("crypto_material section is missing")
 	}
@@ -203,7 +225,7 @@ func parseCryptoMaterial(encoded string) (*CryptoMaterialSection, []byte, error)
 		return nil, nil, err
 	}
 
-	var cm CryptoMaterialSection
+	var cm cryptoMaterialSection
 	if err := json.Unmarshal(cryptoBytes, &cm, json.RejectUnknownMembers(true)); err != nil {
 		return nil, nil, fmt.Errorf("parsing crypto_material: %w", err)
 	}
@@ -245,9 +267,9 @@ func parseCryptoMaterial(encoded string) (*CryptoMaterialSection, []byte, error)
 	return &cm, cryptoBytes, nil
 }
 
-// DeviceEvidenceSection is the endorsed device_evidence section envelope.
+// deviceEvidenceSection is the endorsed device_evidence section envelope.
 // Empty device evidence is Items: [] — the section is always present.
-type DeviceEvidenceSection struct {
+type deviceEvidenceSection struct {
 	Format string               `json:"format"`
 	Items  []DeviceEvidenceItem `json:"items"`
 }
@@ -262,7 +284,7 @@ type DeviceEvidenceItem struct {
 	Evidence jsontext.Value `json:"evidence"`
 }
 
-func parseDeviceEvidence(encoded string) (*DeviceEvidenceSection, []byte, error) {
+func parseDeviceEvidence(encoded string) (*deviceEvidenceSection, []byte, error) {
 	if encoded == "" {
 		return nil, nil, fmt.Errorf("device_evidence section is missing")
 	}
@@ -271,7 +293,7 @@ func parseDeviceEvidence(encoded string) (*DeviceEvidenceSection, []byte, error)
 		return nil, nil, err
 	}
 
-	var de DeviceEvidenceSection
+	var de deviceEvidenceSection
 	if err := json.Unmarshal(deviceBytes, &de, json.RejectUnknownMembers(true)); err != nil {
 		return nil, nil, fmt.Errorf("parsing device_evidence: %w", err)
 	}
@@ -351,42 +373,53 @@ func Parse(docBytes, expectedNonce []byte) (result *Document, err error) {
 // decode applies the structural rules alone; the endorsed sections are
 // retained as raw bytes for hashing.
 func decode(docBytes []byte) (*Document, error) {
-	var doc Document
-	if err := json.Unmarshal(docBytes, &doc, json.RejectUnknownMembers(true)); err != nil {
+	var wire rawDocument
+	if err := json.Unmarshal(docBytes, &wire, json.RejectUnknownMembers(true)); err != nil {
 		return nil, fmt.Errorf("parsing attestation document: %w", err)
 	}
 
-	if doc.Format != AttestationV3Format {
-		return nil, fmt.Errorf("unsupported document format %q", doc.Format)
+	if wire.Format != AttestationV3Format {
+		return nil, fmt.Errorf("unsupported document format %q", wire.Format)
 	}
 
-	if err := doc.Challenge.parse(); err != nil {
+	if err := wire.Challenge.parse(); err != nil {
 		return nil, err
 	}
 
-	if err := doc.CPUEvidence.parse(); err != nil {
-		return nil, err
-	}
-
-	cm, cryptoBytes, err := parseCryptoMaterial(doc.CryptoMaterial)
+	report, err := wire.CPUEvidence.parse()
 	if err != nil {
 		return nil, err
 	}
 
-	de, deviceBytes, err := parseDeviceEvidence(doc.DeviceEvidence)
+	cm, cryptoBytes, err := parseCryptoMaterial(wire.CryptoMaterial)
 	if err != nil {
 		return nil, err
 	}
 
-	if err := validateCollateral(doc.Collateral); err != nil {
+	de, deviceBytes, err := parseDeviceEvidence(wire.DeviceEvidence)
+	if err != nil {
 		return nil, err
 	}
 
-	doc.cryptoMaterialBytes = cryptoBytes
-	doc.deviceEvidenceBytes = deviceBytes
-	doc.cryptoMaterial = cm
-	doc.deviceEvidence = de
-	return &doc, nil
+	if err := validateCollateral(wire.Collateral); err != nil {
+		return nil, err
+	}
+
+	return &Document{
+		challenge:           wire.Challenge,
+		endorsed:            wire.CPUEvidence.Endorsed,
+		evidence:            CPUEvidence{Format: wire.CPUEvidence.Format, Report: report},
+		collateral:          wire.Collateral,
+		cryptoMaterialBytes: cryptoBytes,
+		deviceEvidenceBytes: deviceBytes,
+		cryptoMaterial:      cm,
+		deviceEvidence:      de,
+	}, nil
+}
+
+// CPUEvidence returns a copy of the document's decoded CPU evidence.
+func (d *Document) CPUEvidence() CPUEvidence {
+	return d.evidence.Clone()
 }
 
 // CryptoMaterialItems returns a copy of the parsed crypto_material items.
@@ -436,16 +469,16 @@ func (d *Document) ExpectedReportData() (reportData [64]byte, ok bool) {
 // bind checks the challenge bindings of a decoded document against the
 // caller's nonce and records the recomputed REPORT_DATA.
 func (d *Document) bind(expectedNonce []byte) error {
-	if d.Challenge.Nonce != hex.EncodeToString(expectedNonce) {
+	if d.challenge.Nonce != hex.EncodeToString(expectedNonce) {
 		return fmt.Errorf("challenge nonce does not match the expected nonce")
 	}
 
 	cryptoHash := sha256.Sum256(d.cryptoMaterialBytes)
 	deviceHash := sha256.Sum256(d.deviceEvidenceBytes)
-	if hex.EncodeToString(cryptoHash[:]) != d.CPUEvidence.Endorsed.CryptoMaterialHash {
+	if hex.EncodeToString(cryptoHash[:]) != d.endorsed.CryptoMaterialHash {
 		return fmt.Errorf("crypto_material hash does not match cpu_evidence.endorsed.crypto_material_hash")
 	}
-	if hex.EncodeToString(deviceHash[:]) != d.CPUEvidence.Endorsed.DeviceEvidenceHash {
+	if hex.EncodeToString(deviceHash[:]) != d.endorsed.DeviceEvidenceHash {
 		return fmt.Errorf("device_evidence hash does not match cpu_evidence.endorsed.device_evidence_hash")
 	}
 
@@ -453,7 +486,7 @@ func (d *Document) bind(expectedNonce []byte) error {
 	if err != nil {
 		return err
 	}
-	if hex.EncodeToString(reportData[:]) != d.Challenge.ReportData {
+	if hex.EncodeToString(reportData[:]) != d.challenge.ReportData {
 		return fmt.Errorf("challenge report_data does not match the recomputed value")
 	}
 	d.reportData = reportData

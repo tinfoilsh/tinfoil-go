@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"net/textproto"
 	"net/url"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -176,10 +177,9 @@ func (g *pcsReplayGetter) Get(requestURL string) (map[string][]string, []byte, e
 	if !ok {
 		return nil, nil, fmt.Errorf("intel-pcs collateral has no captured response for %s", requestURL)
 	}
-	body, err := resp.Body()
-	if err != nil {
-		return nil, nil, fmt.Errorf("decoding captured PCS response body for %s: %w", requestURL, err)
-	}
+	// Copied so each request gets a private buffer: the library and the CRL
+	// parser keep references into it, and the caller owns the original.
+	body := slices.Clone(resp.Body)
 	// The library checks CRL NextUpdate but not ThisUpdate, so a
 	// future-dated capture would otherwise pass. Intel also serves a root-CA
 	// CRL from a .der URL that does not identify the body as a CRL.

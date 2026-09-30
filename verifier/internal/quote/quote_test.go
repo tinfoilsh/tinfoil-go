@@ -31,7 +31,7 @@ var testShape = &policy.Shape{CPUs: 1, MemoryMB: 1, Disks: 1}
 // REPORT_DATA ladder, so the expected REPORT_DATA is taken from the report
 // itself; the document ladder is covered by the document package tests.
 // Skips when the workspace fixture directory is not present.
-func loadSEVFixture(t *testing.T) (CPUEvidence, document.CPUEndorsements, [64]byte) {
+func loadSEVFixture(t *testing.T) (document.CPUEvidence, document.CPUEndorsements, [64]byte) {
 	t.Helper()
 	root := filepath.Join("..", "..", "..", "..", "attestation-samples", "inference.tinfoil.sh")
 	freshBytes, err := os.ReadFile(filepath.Join(root, "fresh.json"))
@@ -70,7 +70,7 @@ func loadSEVFixture(t *testing.T) (CPUEvidence, document.CPUEndorsements, [64]by
 
 	vcekDER, err := base64.StdEncoding.DecodeString(material.Collateral.CPUVendor.SEVSNP.VCEKDERBase64)
 	require.NoError(t, err)
-	evidence := CPUEvidence{Format: document.SEVSNPReportV1Format, Report: reportBytes}
+	evidence := document.CPUEvidence{Format: document.SEVSNPReportV1Format, Report: reportBytes}
 	endorsements := document.CPUEndorsements{
 		AMDVCEK: &document.AMDVCEK{VCEKDER: vcekDER, CertChainPEM: material.Collateral.CPUVendor.SEVSNP.CertChainPEM},
 		AMDCRL:  liveCRL(t),
@@ -169,7 +169,7 @@ func TestVerifySEVRejectsBadCRL(t *testing.T) {
 	require.NoError(t, err)
 	vcekDER, err := base64.StdEncoding.DecodeString(fixture.VCEK)
 	require.NoError(t, err)
-	evidence := CPUEvidence{Format: document.SEVSNPReportV1Format, Report: report}
+	evidence := document.CPUEvidence{Format: document.SEVSNPReportV1Format, Report: report}
 	endorsements := document.CPUEndorsements{
 		AMDVCEK: &document.AMDVCEK{VCEKDER: vcekDER, CertChainPEM: string(chain)},
 		AMDCRL:  &document.AMDCRL{CRLDER: []byte("not a crl")},
@@ -179,7 +179,7 @@ func TestVerifySEVRejectsBadCRL(t *testing.T) {
 }
 
 func TestVerifyUnknownFormat(t *testing.T) {
-	evidence := CPUEvidence{Format: "https://tinfoil.sh/format/unknown/v1"}
+	evidence := document.CPUEvidence{Format: "https://tinfoil.sh/format/unknown/v1"}
 	_, _, err := verify(evidence, document.CPUEndorsements{}, &policy.Artifact{}, &measurement.Measurement{}, nil, testShape, [64]byte{}, nil)
 	assert.Error(t, err)
 	assert.Contains(t, fmt.Sprint(err), "unsupported cpu_evidence format")
@@ -235,7 +235,7 @@ func asCode(m *measurement.Measurement) *measurement.Measurement {
 // verify composes Authenticate, assemble against an explicit REPORT_DATA, and
 // Validate, for tests whose evidence predates the v3 REPORT_DATA ladder. A nil
 // opts selects the production clock and embedded vendor roots.
-func verify(ev CPUEvidence, en document.CPUEndorsements, endorsements *policy.Artifact, code, pins *measurement.Measurement, shape *policy.Shape, reportData [64]byte, opts *Options) (*AssembledPolicy, *Authenticated, error) {
+func verify(ev document.CPUEvidence, en document.CPUEndorsements, endorsements *policy.Artifact, code, pins *measurement.Measurement, shape *policy.Shape, reportData [64]byte, opts *Options) (*AssembledPolicy, *Authenticated, error) {
 	q, err := Authenticate(ev, en, opts)
 	if err != nil {
 		return nil, nil, err

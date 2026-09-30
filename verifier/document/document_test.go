@@ -28,16 +28,16 @@ func testNonce() []byte {
 // reimplementation of what production builders (cvmimage) do: serialize the
 // endorsed sections once, hash those bytes, base64-wrap them, and walk the
 // REPORT_DATA ladder.
-func buildTestDocument(t *testing.T, nonce []byte) (*Document, []byte) {
+func buildTestDocument(t *testing.T, nonce []byte) (*rawDocument, []byte) {
 	t.Helper()
-	cryptoMaterial := CryptoMaterialSection{
+	cryptoMaterial := cryptoMaterialSection{
 		Format: CryptoMaterialV1Format,
 		Items: []CryptoMaterialItem{
 			{ID: CryptoMaterialIDTLS, Format: KeySPKIFPSHA256V1Format, Data: hex.EncodeToString(bytes.Repeat([]byte{0xaa}, 32))},
 			{ID: CryptoMaterialIDHPKE, Format: KeyX25519HPKEV1Format, Data: hex.EncodeToString(bytes.Repeat([]byte{0xbb}, 32))},
 		},
 	}
-	deviceEvidence := DeviceEvidenceSection{
+	deviceEvidence := deviceEvidenceSection{
 		Format: DeviceEvidenceV1Format,
 		Items:  []DeviceEvidenceItem{},
 	}
@@ -51,17 +51,17 @@ func buildTestDocument(t *testing.T, nonce []byte) (*Document, []byte) {
 	reportData, err := ComputeReportData(nonce, cryptoHash[:], deviceHash[:])
 	require.NoError(t, err)
 
-	doc := &Document{
+	doc := &rawDocument{
 		Format: AttestationV3Format,
-		Challenge: Challenge{
+		Challenge: challenge{
 			Nonce:               hex.EncodeToString(nonce),
 			ReportData:          hex.EncodeToString(reportData[:]),
 			ReportDataAlgorithm: ReportDataV1Algorithm,
 		},
-		CPUEvidence: CPUEvidence{
+		CPUEvidence: rawCPUEvidence{
 			Format:       SEVSNPReportV1Format,
 			ReportBase64: base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{0x01}, 1184)),
-			Endorsed: EndorsedHashes{
+			Endorsed: endorsedHashes{
 				CryptoMaterialHash: hex.EncodeToString(cryptoHash[:]),
 				DeviceEvidenceHash: hex.EncodeToString(deviceHash[:]),
 			},
@@ -92,7 +92,6 @@ func TestBuildAndVerify(t *testing.T) {
 	reportData, ok := doc.ExpectedReportData()
 	require.True(t, ok)
 	assert.Equal(t, built.Challenge.ReportData, hex.EncodeToString(reportData[:]))
-	assert.Equal(t, AttestationV3Format, doc.Format)
 
 	items := doc.CryptoMaterialItems()
 	require.Len(t, items, 2)
@@ -119,8 +118,24 @@ func TestExpectedReportDataRequiresParse(t *testing.T) {
 	}
 }
 
+func TestCPUEvidenceClone(t *testing.T) {
+	original := CPUEvidence{Format: TDXQuoteV1Format, Report: []byte("quote")}
+	clone := original.Clone()
+	assert.Equal(t, original, clone)
+	clone.Report[0] = '!'
+	assert.Equal(t, []byte("quote"), original.Report, "a clone shares no memory with its source")
+	assert.Nil(t, CPUEvidence{}.Clone().Report)
+}
+
+func TestCPUEvidenceReturnsCopies(t *testing.T) {
+	doc := &Document{evidence: CPUEvidence{Format: SEVSNPReportV1Format, Report: []byte("report")}}
+	evidence := doc.CPUEvidence()
+	evidence.Report[0] = '!'
+	assert.Equal(t, []byte("report"), doc.CPUEvidence().Report, "callers must not reach the parsed report")
+}
+
 func TestDeviceEvidenceItemsReturnsCopies(t *testing.T) {
-	doc := &Document{deviceEvidence: &DeviceEvidenceSection{Items: []DeviceEvidenceItem{
+	doc := &Document{deviceEvidence: &deviceEvidenceSection{Items: []DeviceEvidenceItem{
 		{ID: "gpu", Evidence: []byte(`{"nonce":"original"}`)},
 	}}}
 	items := doc.DeviceEvidenceItems()
@@ -303,12 +318,10 @@ func TestParseRejectsMalformedKeyMaterial(t *testing.T) {
 
 func TestParseRejectsUppercaseHex(t *testing.T) {
 	nonce := testNonce()
-	_, docBytes := buildTestDocument(t, nonce)
+	built, docBytes := buildTestDocument(t, nonce)
 
-	doc, err := Parse(docBytes, nonce)
-	require.NoError(t, err)
-	upper := bytes.Replace(docBytes, []byte(doc.Challenge.Nonce), bytes.ToUpper([]byte(doc.Challenge.Nonce)), 1)
-	_, err = Parse(upper, nonce)
+	upper := bytes.Replace(docBytes, []byte(built.Challenge.Nonce), bytes.ToUpper([]byte(built.Challenge.Nonce)), 1)
+	_, err := Parse(upper, nonce)
 	assert.ErrorContains(t, err, "lowercase hex")
 }
 
@@ -397,7 +410,7 @@ func TestParseRejectsDuplicateCollateralIDs(t *testing.T) {
 }
 
 func TestFreshnessSelectsArtifactID(t *testing.T) {
-	doc := &Document{Collateral: []CollateralEntry{
+	doc := &Document{collateral: []CollateralEntry{
 		{
 			ID:     FreshnessCollateralIDCode,
 			Role:   RoleReferenceValues,
@@ -435,7 +448,7 @@ func TestSigstoreReferences(t *testing.T) {
 			Data:   json.RawMessage(`{"repo":"` + repo + `","tag":"v1","digest":"` + strings.Repeat("ab", 32) + `","sigstore_bundle":{"mediaType":"` + repo + `"}}`),
 		}
 	}
-	doc := &Document{Collateral: []CollateralEntry{
+	doc := &Document{collateral: []CollateralEntry{
 		entry(CollateralSigstoreCodeV1Format, "org/code"),
 		entry(CollateralSigstorePlatformV1Format, "org/platform"),
 	}}
@@ -458,7 +471,7 @@ func TestSigstoreReferences(t *testing.T) {
 
 	malformed := entry(CollateralSigstoreCodeV1Format, "org/code")
 	malformed.Data = json.RawMessage(`{"repo":"org/code","unknown":1}`)
-	_, err = (&Document{Collateral: []CollateralEntry{malformed}}).SigstoreCode()
+	_, err = (&Document{collateral: []CollateralEntry{malformed}}).SigstoreCode()
 	assert.ErrorContains(t, err, "parsing "+CollateralSigstoreCodeV1Format+" collateral entry")
 	assert.NotErrorIs(t, err, ErrCollateralNotFound, "malformed is not missing")
 }
