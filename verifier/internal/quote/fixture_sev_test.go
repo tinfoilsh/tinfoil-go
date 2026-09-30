@@ -38,11 +38,13 @@ func loadLiveFixture(t *testing.T, dir string) (*document.Document, [64]byte, []
 	nonce, err := hex.DecodeString(meta.Nonce)
 	require.NoError(t, err)
 
-	doc, reportData, err := document.Check(docBytes, nonce)
+	doc, err := document.Parse(docBytes, nonce)
 	if err != nil && strings.Contains(err.Error(), "report_data") {
 		t.Skipf("fixture %s predates the current report-data construction; regenerate on hardware", dir)
 	}
 	require.NoError(t, err)
+	reportData, ok := doc.ExpectedReportData()
+	require.True(t, ok)
 	return doc, reportData, nonce
 }
 
@@ -78,7 +80,7 @@ func TestLiveSEVFixture(t *testing.T) {
 	endorsements.AMDCRL = liveCRL(t)
 	q, err := Authenticate(evidence, endorsements, nil)
 	require.NoError(t, err)
-	assembled, verified, err := Verify(evidence, endorsements, loadEndorsementArtifact(t), asCode(q.Measurement), nil, testShape, reportData, nil)
+	assembled, verified, err := verify(evidence, endorsements, loadEndorsementArtifact(t), asCode(q.Measurement), nil, testShape, reportData, nil)
 	require.NoError(t, err)
 	assert.Equal(t, policy.PlatformSEVSNP, verified.Platform())
 	assert.Equal(t, "amd-genoa-dev", assembled.PolicyName)

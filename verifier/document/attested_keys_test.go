@@ -36,7 +36,7 @@ func TestAttestedKeyEnvelopeVectors(t *testing.T) {
 			doc.Challenge.ReportData = v.ReportData
 			encoded, err := json.Marshal(doc)
 			require.NoError(t, err)
-			parsed, _, err := Check(encoded, nonce)
+			parsed, err := Parse(encoded, nonce)
 			require.NoError(t, err)
 			require.Equal(t, KeySPKIV1Format, v.Item.Format)
 			require.Equal(t, []CryptoMaterialItem{v.Item}, parsed.CryptoMaterialItems())

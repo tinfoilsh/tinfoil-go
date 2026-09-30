@@ -1,8 +1,8 @@
 // Package document defines the v3 attestation document wire format and its
-// strict parsing and challenge verification. Checking the document
-// authenticates nothing by itself: the CPU quote must prove the hardware
-// bound the recomputed REPORT_DATA before any part of the document is
-// trusted.
+// strict parsing, which checks the challenge against the caller's nonce.
+// Parsing authenticates nothing by itself: the CPU quote must prove the
+// hardware bound the recomputed REPORT_DATA before any part of the document
+// is trusted.
 package document
 
 import (
@@ -117,6 +117,13 @@ type Document struct {
 	deviceEvidenceBytes []byte
 	cryptoMaterial      *CryptoMaterialSection
 	deviceEvidence      *DeviceEvidenceSection
+
+	// bound records that bind checked the challenge against the caller's
+	// nonce; reportData is the REPORT_DATA it recomputed. A zero-value
+	// Document can always be declared outside this package, so bound is what
+	// tells a parsed document from one that was never checked.
+	bound      bool
+	reportData [64]byte
 }
 
 // Challenge binds the document to a verifier-chosen nonce.
@@ -312,12 +319,34 @@ func RandomNonce() ([]byte, error) {
 	return nonce, nil
 }
 
-// Parse strictly parses a v3 document: unknown members reject
-// (case-sensitively), duplicate member names reject everywhere, hex must
-// be lowercase, base64 canonical, and item ids unique. The endorsed
-// sections are retained as raw bytes for hashing.
-func Parse(docBytes []byte) (result *Document, err error) {
+// Parse strictly parses a v3 document and checks its challenge bindings
+// against expectedNonce, the nonce the caller sent: nonce equality,
+// endorsed-section hash recomputation, and REPORT_DATA recomputation. The
+// returned document carries the REPORT_DATA its CPU quote must bind, from
+// ExpectedReportData.
+//
+// Parsing is strict: unknown members reject (case-sensitively), duplicate
+// member names reject everywhere, hex must be lowercase, base64 canonical,
+// and item ids unique. A parsed document is not authenticated: nothing in it
+// is trusted until the quote proves the hardware bound that REPORT_DATA.
+func Parse(docBytes, expectedNonce []byte) (result *Document, err error) {
 	defer func() { err = errs.WrapAttestation(err) }()
+	if len(expectedNonce) != NonceSize {
+		return nil, &errs.ConfigurationError{Err: fmt.Errorf("expected nonce must be %d bytes, got %d", NonceSize, len(expectedNonce))}
+	}
+	doc, err := decode(docBytes)
+	if err != nil {
+		return nil, err
+	}
+	if err := doc.bind(expectedNonce); err != nil {
+		return nil, err
+	}
+	return doc, nil
+}
+
+// decode applies the structural rules alone; the endorsed sections are
+// retained as raw bytes for hashing.
+func decode(docBytes []byte) (*Document, error) {
 	var doc Document
 	if err := json.Unmarshal(docBytes, &doc, json.RejectUnknownMembers(true)); err != nil {
 		return nil, fmt.Errorf("parsing attestation document: %w", err)
@@ -389,41 +418,41 @@ func (d *Document) CryptoMaterialItem(id string) (*CryptoMaterialItem, bool) {
 	return nil, false
 }
 
-// Check parses a v3 document and checks the challenge bindings: nonce
-// equality, endorsed-section hash recomputation, and REPORT_DATA
-// recomputation. It returns the document and the expected REPORT_DATA the
-// CPU quote must bind. A check is not authentication: nothing in the
-// document is trusted until the quote proves the hardware bound that
-// REPORT_DATA.
-func Check(docBytes []byte, expectedNonce []byte) (result *Document, data [64]byte, err error) {
-	defer func() { err = errs.WrapAttestation(err) }()
-	var zero [64]byte
-	if len(expectedNonce) != NonceSize {
-		return nil, zero, &errs.ConfigurationError{Err: fmt.Errorf("expected nonce must be %d bytes, got %d", NonceSize, len(expectedNonce))}
+// ExpectedReportData is the REPORT_DATA the document's CPU quote must bind,
+// recomputed by Parse from the caller's nonce and the endorsed sections. ok
+// is false for a nil document or one that did not come from Parse, whose
+// zero REPORT_DATA must never be compared against a quote.
+func (d *Document) ExpectedReportData() (reportData [64]byte, ok bool) {
+	if d == nil || !d.bound {
+		return reportData, false
 	}
-	doc, err := Parse(docBytes)
-	if err != nil {
-		return nil, zero, err
-	}
-	if doc.Challenge.Nonce != hex.EncodeToString(expectedNonce) {
-		return nil, zero, fmt.Errorf("challenge nonce does not match the expected nonce")
+	return d.reportData, true
+}
+
+// bind checks the challenge bindings of a decoded document against the
+// caller's nonce and records the recomputed REPORT_DATA.
+func (d *Document) bind(expectedNonce []byte) error {
+	if d.Challenge.Nonce != hex.EncodeToString(expectedNonce) {
+		return fmt.Errorf("challenge nonce does not match the expected nonce")
 	}
 
-	cryptoHash := sha256.Sum256(doc.cryptoMaterialBytes)
-	deviceHash := sha256.Sum256(doc.deviceEvidenceBytes)
-	if hex.EncodeToString(cryptoHash[:]) != doc.CPUEvidence.Endorsed.CryptoMaterialHash {
-		return nil, zero, fmt.Errorf("crypto_material hash does not match cpu_evidence.endorsed.crypto_material_hash")
+	cryptoHash := sha256.Sum256(d.cryptoMaterialBytes)
+	deviceHash := sha256.Sum256(d.deviceEvidenceBytes)
+	if hex.EncodeToString(cryptoHash[:]) != d.CPUEvidence.Endorsed.CryptoMaterialHash {
+		return fmt.Errorf("crypto_material hash does not match cpu_evidence.endorsed.crypto_material_hash")
 	}
-	if hex.EncodeToString(deviceHash[:]) != doc.CPUEvidence.Endorsed.DeviceEvidenceHash {
-		return nil, zero, fmt.Errorf("device_evidence hash does not match cpu_evidence.endorsed.device_evidence_hash")
+	if hex.EncodeToString(deviceHash[:]) != d.CPUEvidence.Endorsed.DeviceEvidenceHash {
+		return fmt.Errorf("device_evidence hash does not match cpu_evidence.endorsed.device_evidence_hash")
 	}
 
 	reportData, err := ComputeReportData(expectedNonce, cryptoHash[:], deviceHash[:])
 	if err != nil {
-		return nil, zero, err
+		return err
 	}
-	if hex.EncodeToString(reportData[:]) != doc.Challenge.ReportData {
-		return nil, zero, fmt.Errorf("challenge report_data does not match the recomputed value")
+	if hex.EncodeToString(reportData[:]) != d.Challenge.ReportData {
+		return fmt.Errorf("challenge report_data does not match the recomputed value")
 	}
-	return doc, reportData, nil
+	d.reportData = reportData
+	d.bound = true
+	return nil
 }

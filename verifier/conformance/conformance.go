@@ -155,12 +155,12 @@ func Run(stage string, in Input) (Output, int) {
 	case StageVerify:
 		return verifyFull(doc, nonce, in.Repo, core)
 	case StageCheckEnvelope:
-		if _, _, err := document.Check(doc, nonce); err != nil {
+		if _, err := document.Parse(doc, nonce); err != nil {
 			return reject(stage, "ENVELOPE_REJECTED")
 		}
 		return Output{Stage: stage, Accepted: true}, ExitAccepted
 	case StageAuthenticateProvenance:
-		parsed, err := document.Parse(doc)
+		parsed, err := document.DangerousTestOnlyDecode(doc)
 		if err != nil {
 			return malformed(stage)
 		}
@@ -177,7 +177,7 @@ func Run(stage string, in Input) (Output, int) {
 			CodeMeasurement: toMeasurement(code.Measurement),
 		}}, ExitAccepted
 	case StageAssemblePolicy:
-		parsed, err := document.Parse(doc)
+		parsed, err := document.DangerousTestOnlyDecode(doc)
 		if err != nil {
 			return malformed(stage)
 		}
@@ -190,7 +190,7 @@ func Run(stage string, in Input) (Output, int) {
 		}
 		return Output{Stage: stage, Accepted: true}, ExitAccepted
 	case StageAuthenticateQuote:
-		parsed, err := document.Parse(doc)
+		parsed, err := document.DangerousTestOnlyDecode(doc)
 		if err != nil {
 			return malformed(stage)
 		}

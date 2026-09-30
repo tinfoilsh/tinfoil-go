@@ -72,7 +72,7 @@ func TestLiveVerifyFreshnessExpiration(t *testing.T) {
 	require.NoError(t, err)
 	_, err = s.Verify()
 	require.ErrorAs(t, err, &attestation)
-	doc, err := document.Parse(raw)
+	doc, err := document.Parse(raw, nonce)
 	require.NoError(t, err)
 	codeRef, err := doc.ReferenceValuesCollateral(document.CollateralSigstoreCodeV1Format)
 	require.NoError(t, err)

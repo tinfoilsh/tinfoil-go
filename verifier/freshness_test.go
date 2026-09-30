@@ -78,7 +78,7 @@ func TestLiveIgnoreFreshness(t *testing.T) {
 		{"invalid platform provenance", changeCollateral(document.CollateralSigstorePlatformV1Format, false), 0, "verifying platform endorsements", false},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
-			doc, err := document.Parse(raw)
+			doc, err := document.Parse(raw, nonce)
 			require.NoError(t, err)
 			if tt.mutate != nil {
 				tt.mutate(doc)
@@ -104,7 +104,7 @@ func TestLiveIgnoreFreshness(t *testing.T) {
 	wrongNonce[0] ^= 1
 	_, err = ignored.VerifyV3(raw, wrongNonce, repo)
 	require.ErrorContains(t, err, "challenge nonce does not match")
-	doc, err := document.Parse(raw)
+	doc, err := document.Parse(raw, nonce)
 	require.NoError(t, err)
 	doc.CPUEvidence.ReportBase64 = base64.StdEncoding.EncodeToString([]byte("invalid quote"))
 	modified, err := json.Marshal(doc)
