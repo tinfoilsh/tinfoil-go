@@ -67,9 +67,14 @@ func TestDecodeRequiresCPUSubject(t *testing.T) {
 }
 
 func TestDecodeRejectsMalformedEntryList(t *testing.T) {
-	entry := Entry{ID: "crl", Role: RoleEndorsement, Format: "https://tinfoil.sh/collateral/unknown/v9"}
+	entry := Entry{ID: "crl", Role: RoleEndorsement, Format: "https://tinfoil.sh/collateral/unknown/v9", Data: []byte(`{}`)}
 	unknownRole := entry
 	unknownRole.Role = "unknown"
+	withData := func(data string) []Entry {
+		e := entry
+		e.Data = []byte(data)
+		return []Entry{e}
+	}
 	for _, tt := range []struct {
 		name    string
 		entries []Entry
@@ -79,6 +84,14 @@ func TestDecodeRejectsMalformedEntryList(t *testing.T) {
 		{"missing format", []Entry{entry, {ID: "x", Role: RoleEndorsement}}, "collateral entry 1 is incomplete"},
 		{"duplicate id", []Entry{entry, entry}, `duplicate collateral entry id "crl"`},
 		{"unknown role", []Entry{unknownRole}, `collateral entry "crl" has unknown role "unknown"`},
+		// Unknown formats are not decoded, but their data must still be an object.
+		{"missing data", withData(""), `collateral entry "crl" data is not a valid JSON object`},
+		{"null data", withData("null"), `collateral entry "crl" data is not a valid JSON object`},
+		{"array data", withData("[]"), `collateral entry "crl" data is not a valid JSON object`},
+		{"string data", withData(`"x"`), `collateral entry "crl" data is not a valid JSON object`},
+		{"malformed object", withData(`{bad`), `collateral entry "crl" data is not a valid JSON object`},
+		{"duplicate member", withData(`{"a":1,"a":2}`), `collateral entry "crl" data is not a valid JSON object`},
+		{"trailing value", withData(`{} {}`), `collateral entry "crl" data is not a valid JSON object`},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			_, err := Decode(tt.entries)

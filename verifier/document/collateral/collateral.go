@@ -174,6 +174,12 @@ func validate(entries []Entry) error {
 		if entry.Role != RoleEndorsement && entry.Role != RoleReferenceValues {
 			return fmt.Errorf("collateral entry %q has unknown role %q", entry.ID, entry.Role)
 		}
+		// Only known formats are decoded, so every entry's data is checked
+		// here: exactly one valid JSON object, with the strictness Parse
+		// applies to the document (RFC 7493).
+		if !entry.Data.IsValid() || entry.Data.Kind() != '{' {
+			return fmt.Errorf("collateral entry %q data is not a valid JSON object", entry.ID)
+		}
 	}
 	return nil
 }

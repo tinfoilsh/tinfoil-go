@@ -56,8 +56,8 @@ func Build(in BuildInput, generateQuote QuoteGenerator) ([]byte, error) {
 	if _, err := collateral.Decode(in.Collateral); err != nil {
 		return nil, &errs.ConfigurationError{Err: err}
 	}
-	// Entries of other formats are not decoded; serializing rejects one whose
-	// Data is not valid JSON.
+	// Serializing rejects what Decode does not check, such as invalid UTF-8
+	// in an entry's ID.
 	if _, err := json.Marshal(in.Collateral); err != nil {
 		return nil, &errs.ConfigurationError{Err: fmt.Errorf("serializing collateral: %w", err)}
 	}
