@@ -43,7 +43,9 @@ func loadLiveFixture(t *testing.T, dir string) (*document.Document, [64]byte, []
 		t.Skipf("fixture %s predates the current report-data construction; regenerate on hardware", dir)
 	}
 	require.NoError(t, err)
-	return doc, doc.ExpectedReportData(), nonce
+	reportData, ok := doc.ExpectedReportData()
+	require.True(t, ok)
+	return doc, reportData, nonce
 }
 
 // TestLiveSEVFixture runs document and CPU-evidence verification

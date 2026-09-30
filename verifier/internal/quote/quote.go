@@ -17,6 +17,7 @@ import (
 	"cmp"
 	"encoding/base64"
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/tinfoilsh/tinfoil-go/verifier/document"
@@ -117,7 +118,7 @@ func Authenticate(ev CPUEvidence, en CPUEndorsements, opts *Options) (result *Au
 			platform:    policy.PlatformSEVSNP,
 			identity:    q.Identity(),
 			Measurement: q.Measurement,
-			report:      ev.Report,
+			report:      slices.Clone(ev.Report),
 			sev:         q,
 		}, nil
 	case document.TDXQuoteV1Format:
@@ -132,7 +133,7 @@ func Authenticate(ev CPUEvidence, en CPUEndorsements, opts *Options) (result *Au
 			platform:    policy.PlatformTDX,
 			identity:    q.Identity(),
 			Measurement: q.Measurement,
-			report:      ev.Report,
+			report:      slices.Clone(ev.Report),
 			tdx:         q,
 		}, nil
 	default:
@@ -151,7 +152,8 @@ func Authenticate(ev CPUEvidence, en CPUEndorsements, opts *Options) (result *Au
 // document's challenge.
 func Assemble(doc *document.Document, endorsements *policy.Artifact, code, pins *measurement.Measurement, shape *policy.Shape, q *Authenticated) (result *AssembledPolicy, err error) {
 	defer func() { err = errs.WrapAttestation(err) }()
-	if !doc.Bound() {
+	reportData, ok := doc.ExpectedReportData()
+	if !ok {
 		return nil, &errs.ConfigurationError{Err: fmt.Errorf("a document checked by document.Parse is required")}
 	}
 	if q == nil {
@@ -161,7 +163,7 @@ func Assemble(doc *document.Document, endorsements *policy.Artifact, code, pins 
 	if err != nil || !bytes.Equal(docReport, q.report) {
 		return nil, &errs.ConfigurationError{Err: fmt.Errorf("authenticated quote is not this document's CPU evidence")}
 	}
-	return assemble(endorsements, code, pins, shape, doc.ExpectedReportData(), q)
+	return assemble(endorsements, code, pins, shape, reportData, q)
 }
 
 // assemble is Assemble against an explicit REPORT_DATA.

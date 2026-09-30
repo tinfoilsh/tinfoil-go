@@ -89,9 +89,9 @@ func TestBuildAndVerify(t *testing.T) {
 
 	doc, err := Parse(docBytes, nonce)
 	require.NoError(t, err)
-	reportData := doc.ExpectedReportData()
+	reportData, ok := doc.ExpectedReportData()
+	require.True(t, ok)
 	assert.Equal(t, built.Challenge.ReportData, hex.EncodeToString(reportData[:]))
-	assert.True(t, doc.Bound())
 	assert.Equal(t, AttestationV3Format, doc.Format)
 
 	items := doc.CryptoMaterialItems()
@@ -109,6 +109,14 @@ func TestBuildAndVerify(t *testing.T) {
 	assert.Equal(t, original, *tls)
 
 	assert.Empty(t, doc.DeviceEvidenceItems())
+}
+
+func TestExpectedReportDataRequiresParse(t *testing.T) {
+	for _, doc := range []*Document{nil, {}} {
+		reportData, ok := doc.ExpectedReportData()
+		assert.False(t, ok, "a document that did not come from Parse has no expected REPORT_DATA")
+		assert.Equal(t, [64]byte{}, reportData)
+	}
 }
 
 func TestDeviceEvidenceItemsReturnsCopies(t *testing.T) {

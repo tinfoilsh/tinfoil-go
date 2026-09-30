@@ -119,10 +119,9 @@ type Document struct {
 	deviceEvidence      *DeviceEvidenceSection
 
 	// bound records that bind checked the challenge against the caller's
-	// nonce; reportData is the REPORT_DATA it recomputed. bound is a stopgap
-	// while Document is still the exported wire struct, which callers can
-	// build without Parse; it goes away once Document is opaque and Parse is
-	// the only way to obtain one.
+	// nonce; reportData is the REPORT_DATA it recomputed. A zero-value
+	// Document can always be declared outside this package, so bound is what
+	// tells a parsed document from one that was never checked.
 	bound      bool
 	reportData [64]byte
 }
@@ -420,13 +419,15 @@ func (d *Document) CryptoMaterialItem(id string) (*CryptoMaterialItem, bool) {
 }
 
 // ExpectedReportData is the REPORT_DATA the document's CPU quote must bind,
-// recomputed by Parse from the caller's nonce and the endorsed sections.
-func (d *Document) ExpectedReportData() [64]byte { return d.reportData }
-
-// Bound reports whether the document was checked against a nonce, as every
-// document from Parse is. It exists only while Document can still be built as
-// a struct literal, and will be removed once Parse is its only constructor.
-func (d *Document) Bound() bool { return d != nil && d.bound }
+// recomputed by Parse from the caller's nonce and the endorsed sections. ok
+// is false for a nil document or one that did not come from Parse, whose
+// zero REPORT_DATA must never be compared against a quote.
+func (d *Document) ExpectedReportData() (reportData [64]byte, ok bool) {
+	if d == nil || !d.bound {
+		return reportData, false
+	}
+	return d.reportData, true
+}
 
 // bind checks the challenge bindings of a decoded document against the
 // caller's nonce and records the recomputed REPORT_DATA.
