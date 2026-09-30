@@ -31,15 +31,18 @@ type SigningKey struct {
 }
 
 // Policy pins the identity and supplies the client's clock and freshness rules.
-// Zero MaxAge and FutureSkew select the defaults.
+// Zero MaxAge and FutureSkew select the defaults. IgnoreFreshness skips the
+// approval age check for archived material; Now is then optional and every
+// other check still applies. Verified.ApprovalTime reports the authenticated time.
 type Policy struct {
-	Identity   string
-	AuditScope string
-	Revision   string
-	Digest     string
-	Now        time.Time
-	MaxAge     time.Duration
-	FutureSkew time.Duration
+	Identity        string
+	AuditScope      string
+	Revision        string
+	Digest          string
+	Now             time.Time
+	MaxAge          time.Duration
+	FutureSkew      time.Duration
+	IgnoreFreshness bool
 }
 
 type Verified struct {
@@ -127,7 +130,7 @@ func (p Policy) normalized() (Policy, error) {
 	if p.Digest != "" && !digestPattern.MatchString(p.Digest) {
 		return p, fmt.Errorf("digest pin must be lowercase SHA-256")
 	}
-	if p.Now.IsZero() || p.MaxAge < 0 || p.FutureSkew < 0 {
+	if (p.Now.IsZero() && !p.IgnoreFreshness) || p.MaxAge < 0 || p.FutureSkew < 0 {
 		return p, fmt.Errorf("clock and nonnegative age and skew are required")
 	}
 	if p.MaxAge == 0 {
@@ -298,6 +301,9 @@ func verifyTimestamp(response, input []byte, trust root.TrustedMaterial) (time.T
 }
 
 func verifyApprovalTime(at time.Time, policy Policy) error {
+	if policy.IgnoreFreshness {
+		return nil
+	}
 	if at.Before(policy.Now.Add(-policy.MaxAge)) {
 		return fmt.Errorf("config approval is too old")
 	}

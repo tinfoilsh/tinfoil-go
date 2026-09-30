@@ -346,6 +346,27 @@ func TestFreshnessUsesInnerTimeAndInclusiveBounds(t *testing.T) {
 	require.ErrorContains(t, err, "future")
 }
 
+func TestIgnoreFreshnessSkipsOnlyTheAgeCheck(t *testing.T) {
+	f := newFixture(t)
+	inner := f.now.Add(-time.Minute)
+	b := marshalBundle(t, f.bundle(t, f.statement(t, inner)))
+	stale := f.policy()
+	stale.Now = inner.Add(endorsement.DefaultMaxAge + time.Hour)
+	_, err := f.verifier(t).Verify(testConfig, b, stale)
+	require.ErrorContains(t, err, "too old")
+
+	policy := endorsement.Policy{Identity: testIdentity, AuditScope: testScope, IgnoreFreshness: true}
+	verified, err := f.verifier(t).Verify(testConfig, b, policy)
+	require.NoError(t, err)
+	require.True(t, verified.ApprovalTime.Equal(inner))
+
+	_, err = f.verifier(t).Verify(append(bytes.Clone(testConfig), '\n'), b, policy)
+	require.ErrorContains(t, err, "config bytes")
+	policy.AuditScope = testOtherScope
+	_, err = f.verifier(t).Verify(testConfig, b, policy)
+	require.ErrorContains(t, err, "signer is not authorized")
+}
+
 func TestUntrustedInnerTSAAndWrongPolicy(t *testing.T) {
 	f := newFixture(t)
 	s, err := endorsement.NewStatement(testName, testScope, testConfig)
