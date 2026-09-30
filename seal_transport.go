@@ -25,6 +25,7 @@ import (
 
 	"github.com/openai/openai-go/v3"
 	"github.com/openai/openai-go/v3/option"
+	"github.com/tinfoilsh/tinfoil-go/verifier"
 	"github.com/tinfoilsh/tinfoil-go/verifier/client"
 )
 
@@ -74,7 +75,8 @@ func FetchCatalog(host string) (Catalog, error) {
 }
 
 func (e CatalogEntry) trusted() bool {
-	return strings.HasPrefix(e.Repo, trustedRepoOwner) && !strings.Contains(e.Repo, "@") && len(e.Hosts) > 0
+	repo, _, _, err := verifier.ParseReference(e.Repo)
+	return err == nil && repo == e.Repo && strings.HasPrefix(repo, trustedRepoOwner) && len(e.Hosts) > 0
 }
 
 // Gateway is an OpenAI client that seals each request to a verified replica
@@ -118,7 +120,7 @@ func NewGateway(baseURL string, catalog func() Catalog, opts GatewayOptions) (*G
 	if err != nil || base.Scheme != "https" || base.Host == "" {
 		return nil, &ConfigurationError{Err: fmt.Errorf("gateway base URL must be an absolute HTTPS URL: %q", baseURL)}
 	}
-	policy, err := newGatewayPolicy(opts, &cfg.verification)
+	policy, err := newGatewayPolicy(opts, cfg.verification)
 	if err != nil {
 		return nil, &ConfigurationError{Err: err}
 	}
@@ -138,7 +140,7 @@ func NewGateway(baseURL string, catalog func() Catalog, opts GatewayOptions) (*G
 			var err error
 			if pinned {
 				secure = secure.ForEnclave(r.host)
-			} else if secure, err = client.NewSecureClient(r.host, r.ref, &cfg.verification); err != nil {
+			} else if secure, err = client.NewSecureClient(r.host, r.ref, &policy.defaults); err != nil {
 				return nil, err
 			}
 			secure = secure.ViaRelay(base.Host)
@@ -222,18 +224,27 @@ func (g *Gateway) Serves(model string) bool {
 type gatewayPolicy struct {
 	pins       map[string]*client.SecureClient
 	pinnedOnly bool
+	defaults   client.VerificationOptions
 }
 
-func newGatewayPolicy(opts GatewayOptions, defaults *client.VerificationOptions) (gatewayPolicy, error) {
+func newGatewayPolicy(opts GatewayOptions, defaults client.VerificationOptions) (gatewayPolicy, error) {
 	if opts.PinnedModelsOnly && len(opts.ModelPins) == 0 {
 		return gatewayPolicy{}, fmt.Errorf("pinned-only mode requires at least one model pin")
 	}
-	p := gatewayPolicy{pins: make(map[string]*client.SecureClient), pinnedOnly: opts.PinnedModelsOnly}
+	v, err := verifier.New(verifier.WithPinnedRegisters(defaults.PinnedRegisters), verifier.WithFreshnessMaxAge(defaults.FreshnessMaxAge))
+	if err != nil {
+		return gatewayPolicy{}, fmt.Errorf("gateway verification options: %w", err)
+	}
+	p := gatewayPolicy{
+		pins:       make(map[string]*client.SecureClient),
+		pinnedOnly: opts.PinnedModelsOnly,
+		defaults:   client.VerificationOptions{PinnedRegisters: v.PinnedRegisters(), FreshnessMaxAge: v.FreshnessMaxAge()},
+	}
 	for model, pin := range opts.ModelPins {
 		if strings.TrimSpace(model) == "" || !strings.HasPrefix(pin.Repo, trustedRepoOwner) {
 			return gatewayPolicy{}, fmt.Errorf("model pin %q repository %q must belong to %s", model, pin.Repo, trustedRepoOwner)
 		}
-		secure, err := client.NewSecureClient("", pin.Repo, cmp.Or(pin.Verification, defaults))
+		secure, err := client.NewSecureClient("", pin.Repo, cmp.Or(pin.Verification, &p.defaults))
 		if err != nil {
 			return gatewayPolicy{}, fmt.Errorf("model %q: %w", model, err)
 		}
