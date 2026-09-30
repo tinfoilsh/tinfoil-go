@@ -194,11 +194,7 @@ func Run(stage string, in Input) (Output, int) {
 		if err != nil {
 			return malformed(stage)
 		}
-		endorsements, err := parsed.CPUEndorsements()
-		if err != nil {
-			return reject(stage, "QUOTE_REJECTED")
-		}
-		auth, err := quote.Authenticate(parsed.CPUEvidence(), endorsements, quoteOpts)
+		auth, err := quote.Authenticate(parsed.CPUEvidence(), parsed.CPUEndorsements(), quoteOpts)
 		if err != nil {
 			return reject(stage, "QUOTE_REJECTED")
 		}
