@@ -99,6 +99,8 @@ func TestBuildRejectsInvalidCollateralBeforeQuoting(t *testing.T) {
 	entry := CollateralEntry{ID: "crl", Role: RoleEndorsement, Format: CollateralAMDCRLV1Format, Subjects: []string{SubjectCPU}, Data: jsontext.Value(`{}`)}
 	unknownRole := entry
 	unknownRole.Role = "unknown"
+	malformed := entry
+	malformed.Data = jsontext.Value(`{bad`)
 	for _, tt := range []struct {
 		name       string
 		collateral []CollateralEntry
@@ -106,6 +108,7 @@ func TestBuildRejectsInvalidCollateralBeforeQuoting(t *testing.T) {
 	}{
 		{name: "unknown role", collateral: []CollateralEntry{unknownRole}, wantErr: `unknown role "unknown"`},
 		{name: "duplicate id", collateral: []CollateralEntry{entry, entry}, wantErr: `duplicate collateral entry id "crl"`},
+		{name: "malformed data", collateral: []CollateralEntry{malformed}, wantErr: "serializing collateral"},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			called := false

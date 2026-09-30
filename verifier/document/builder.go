@@ -53,6 +53,11 @@ func Build(in BuildInput, generateQuote QuoteGenerator) ([]byte, error) {
 	if err := validateCollateral(in.Collateral); err != nil {
 		return nil, &errs.ConfigurationError{Err: err}
 	}
+	// validateCollateral does not look inside Data; serializing now rejects a
+	// malformed entry before it costs a hardware quote.
+	if _, err := json.Marshal(in.Collateral); err != nil {
+		return nil, &errs.ConfigurationError{Err: fmt.Errorf("serializing collateral: %w", err)}
+	}
 	format, report, err := generateQuote(sections.reportData)
 	if err != nil {
 		return nil, err
