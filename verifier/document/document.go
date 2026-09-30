@@ -80,6 +80,9 @@ const (
 	// CollateralSigstoreFreshnessV1Format carries a freshness witness for a
 	// Sigstore reference-values artifact.
 	CollateralSigstoreFreshnessV1Format = "https://tinfoil.sh/collateral/sigstore-freshness/v1"
+	// CollateralConfigEndorsementV1Format carries an exact config and its
+	// timestamped registry approval bundle.
+	CollateralConfigEndorsementV1Format = "https://tinfoil.sh/collateral/config-endorsement/v1"
 )
 
 // Conventional identifiers.
@@ -94,6 +97,7 @@ const (
 	// Sigstore reference-values entry it refreshes.
 	FreshnessCollateralIDCode     = "code-freshness"
 	FreshnessCollateralIDPlatform = "platform-freshness"
+	ConfigCollateralID            = "config"
 )
 
 // NonceSize is the required challenge nonce size in bytes.
