@@ -47,7 +47,9 @@ func TestVerifyLiveFixtureTDX(t *testing.T) {
 	require.Equal(t, document.TDXQuoteV1Format, doc.CPUEvidence.Format)
 	artifact := loadEndorsementArtifact(t)
 
-	evidence, endorsements, err := EvidenceFromDocument(doc)
+	evidence, err := EvidenceFromDocument(doc)
+	require.NoError(t, err)
+	endorsements, err := doc.CPUEndorsements()
 	require.NoError(t, err)
 	q, err := Authenticate(evidence, endorsements, nil)
 	if err != nil && strings.Contains(err.Error(), "expired") {

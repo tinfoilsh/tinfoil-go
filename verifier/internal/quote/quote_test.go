@@ -31,7 +31,7 @@ var testShape = &policy.Shape{CPUs: 1, MemoryMB: 1, Disks: 1}
 // REPORT_DATA ladder, so the expected REPORT_DATA is taken from the report
 // itself; the document ladder is covered by the document package tests.
 // Skips when the workspace fixture directory is not present.
-func loadSEVFixture(t *testing.T) (CPUEvidence, CPUEndorsements, [64]byte) {
+func loadSEVFixture(t *testing.T) (CPUEvidence, document.CPUEndorsements, [64]byte) {
 	t.Helper()
 	root := filepath.Join("..", "..", "..", "..", "attestation-samples", "inference.tinfoil.sh")
 	freshBytes, err := os.ReadFile(filepath.Join(root, "fresh.json"))
@@ -71,19 +71,19 @@ func loadSEVFixture(t *testing.T) (CPUEvidence, CPUEndorsements, [64]byte) {
 	vcekDER, err := base64.StdEncoding.DecodeString(material.Collateral.CPUVendor.SEVSNP.VCEKDERBase64)
 	require.NoError(t, err)
 	evidence := CPUEvidence{Format: document.SEVSNPReportV1Format, Report: reportBytes}
-	endorsements := CPUEndorsements{
-		AMDVCEK: &AMDVCEK{VCEKDER: vcekDER, CertChainPEM: material.Collateral.CPUVendor.SEVSNP.CertChainPEM},
+	endorsements := document.CPUEndorsements{
+		AMDVCEK: &document.AMDVCEK{VCEKDER: vcekDER, CertChainPEM: material.Collateral.CPUVendor.SEVSNP.CertChainPEM},
 		AMDCRL:  liveCRL(t),
 	}
 	return evidence, endorsements, reportData
 }
 
 // liveCRL fetches the Genoa amd-crl collateral exactly as the builder does.
-func liveCRL(t *testing.T) *AMDCRL {
+func liveCRL(t *testing.T) *document.AMDCRL {
 	t.Helper()
 	crlBytes, err := testutil.Get("https://kdsintf.amd.com/vcek/v1/Genoa/crl")
 	require.NoError(t, err)
-	return &AMDCRL{CRLDER: crlBytes}
+	return &document.AMDCRL{CRLDER: crlBytes}
 }
 
 func loadEndorsementArtifact(t *testing.T) *policy.Artifact {
@@ -170,9 +170,9 @@ func TestVerifySEVRejectsBadCRL(t *testing.T) {
 	vcekDER, err := base64.StdEncoding.DecodeString(fixture.VCEK)
 	require.NoError(t, err)
 	evidence := CPUEvidence{Format: document.SEVSNPReportV1Format, Report: report}
-	endorsements := CPUEndorsements{
-		AMDVCEK: &AMDVCEK{VCEKDER: vcekDER, CertChainPEM: string(chain)},
-		AMDCRL:  &AMDCRL{CRLDER: []byte("not a crl")},
+	endorsements := document.CPUEndorsements{
+		AMDVCEK: &document.AMDVCEK{VCEKDER: vcekDER, CertChainPEM: string(chain)},
+		AMDCRL:  &document.AMDCRL{CRLDER: []byte("not a crl")},
 	}
 	_, err = Authenticate(evidence, endorsements, nil)
 	assert.ErrorContains(t, err, "parsing amd-crl collateral")
@@ -180,7 +180,7 @@ func TestVerifySEVRejectsBadCRL(t *testing.T) {
 
 func TestVerifyUnknownFormat(t *testing.T) {
 	evidence := CPUEvidence{Format: "https://tinfoil.sh/format/unknown/v1"}
-	_, _, err := verify(evidence, CPUEndorsements{}, &policy.Artifact{}, &measurement.Measurement{}, nil, testShape, [64]byte{}, nil)
+	_, _, err := verify(evidence, document.CPUEndorsements{}, &policy.Artifact{}, &measurement.Measurement{}, nil, testShape, [64]byte{}, nil)
 	assert.Error(t, err)
 	assert.Contains(t, fmt.Sprint(err), "unsupported cpu_evidence format")
 }
@@ -235,7 +235,7 @@ func asCode(m *measurement.Measurement) *measurement.Measurement {
 // verify composes Authenticate, assemble against an explicit REPORT_DATA, and
 // Validate, for tests whose evidence predates the v3 REPORT_DATA ladder. A nil
 // opts selects the production clock and embedded vendor roots.
-func verify(ev CPUEvidence, en CPUEndorsements, endorsements *policy.Artifact, code, pins *measurement.Measurement, shape *policy.Shape, reportData [64]byte, opts *Options) (*AssembledPolicy, *Authenticated, error) {
+func verify(ev CPUEvidence, en document.CPUEndorsements, endorsements *policy.Artifact, code, pins *measurement.Measurement, shape *policy.Shape, reportData [64]byte, opts *Options) (*AssembledPolicy, *Authenticated, error) {
 	q, err := Authenticate(ev, en, opts)
 	if err != nil {
 		return nil, nil, err

@@ -194,7 +194,11 @@ func Run(stage string, in Input) (Output, int) {
 		if err != nil {
 			return malformed(stage)
 		}
-		evidence, endorsements, err := quote.EvidenceFromDocument(parsed)
+		evidence, err := quote.EvidenceFromDocument(parsed)
+		if err != nil {
+			return reject(stage, "QUOTE_REJECTED")
+		}
+		endorsements, err := parsed.CPUEndorsements()
 		if err != nil {
 			return reject(stage, "QUOTE_REJECTED")
 		}

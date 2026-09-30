@@ -93,7 +93,7 @@ func (o *Options) tdxOptions() *tdx.Options {
 // vendor root, from the supplied endorsement collateral alone — no network
 // fetches. Callers must assemble a policy and validate before trusting the
 // platform.
-func Authenticate(ev CPUEvidence, en CPUEndorsements, opts *Options) (result *Authenticated, err error) {
+func Authenticate(ev CPUEvidence, en document.CPUEndorsements, opts *Options) (result *Authenticated, err error) {
 	defer func() { err = errs.WrapAttestation(err) }()
 	switch ev.Format {
 	case document.SEVSNPReportV1Format:
