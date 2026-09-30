@@ -86,6 +86,13 @@ type FreshnessCollateral struct {
 	SigstoreBundle jsontext.Value `json:"sigstore_bundle"`
 }
 
+// ConfigReference identifies immutable registry bytes; it does not select the
+// signing keys or audit scope trusted by a verifier.
+type ConfigReference struct {
+	Name   string `json:"name"`
+	Digest string `json:"digest"`
+}
+
 // ErrCollateralNotFound reports that a document carries no collateral entry
 // of the requested role and format. Low-level callers may use errors.Is to
 // distinguish absence from malformed collateral. Verification classifies missing

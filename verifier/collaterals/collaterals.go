@@ -24,10 +24,12 @@ const FormatV2 = "https://tinfoil.sh/predicate/attestation-collaterals/v2"
 // enclave does no report parsing.
 type Request struct {
 	// Repo is the code repository whose Sigstore bundle is returned.
-	// Required: the service never guesses a repo.
-	Repo string `json:"repo"`
+	// Exactly one of Repo or Config selects the config source.
+	Repo string `json:"repo,omitempty"`
 	// Tag optionally pins a code release; latest when empty.
 	Tag string `json:"tag,omitempty"`
+	// Config pins a versioned registry config and its exact-byte digest.
+	Config *document.ConfigReference `json:"config,omitempty"`
 	// Platform is attestation's platform label: "sev-snp" or "tdx".
 	Platform string `json:"platform"`
 	// QuoteBase64 is the raw hardware report (SEV-SNP, 1184 bytes) or quote
