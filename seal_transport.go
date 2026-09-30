@@ -145,11 +145,15 @@ func NewGateway(baseURL string, catalog func() Catalog, opts GatewayOptions) (*G
 			if err != nil {
 				return nil, err
 			}
-			httpClient, err := ehbpHTTPClient(secure.ViaRelay(base.Host), baseURL)
+			secure = secure.ViaRelay(base.Host)
+			httpClient, err := ehbpHTTPClient(secure, baseURL)
 			if err != nil {
 				return nil, err
 			}
-			return &recoveryTransport{transport: httpClient.Transport}, nil
+			return &verifiedReplicaTransport{
+				recoveryTransport: &recoveryTransport{transport: httpClient.Transport},
+				verification:      secure.Verification,
+			}, nil
 		},
 	}
 	httpClient, err := boundHTTPClient(&http.Client{Transport: seal}, "", baseURL, "")
@@ -163,6 +167,54 @@ func NewGateway(baseURL string, catalog func() Catalog, opts GatewayOptions) (*G
 // HTTPClient seals requests to a replica of the model named in their body.
 func (g *Gateway) HTTPClient() *http.Client {
 	return g.httpClient
+}
+
+// GatewayVerification holds a replica's last successful verification.
+type GatewayVerification struct {
+	// Request model names, not attested identities.
+	Models       []string                   `json:"models"`
+	Reference    string                     `json:"reference"`
+	PinnedModel  string                     `json:"pinned_model,omitempty"`
+	Verification *client.VerifiedDocumentV3 `json:"verification"`
+}
+
+// Verifications returns cached results without re-verifying them.
+// Results may be expired or invalidated.
+func (g *Gateway) Verifications() []GatewayVerification {
+	results := []GatewayVerification{}
+	g.seal.enclaves.Range(func(key, value any) bool {
+		r := key.(replica)
+		transport, ok := value.(*verifiedReplicaTransport)
+		if !ok {
+			return true
+		}
+		if verified := transport.verification(); verified != nil {
+			models := []string{}
+			transport.models.Range(func(model, _ any) bool {
+				models = append(models, model.(string))
+				return true
+			})
+			slices.Sort(models)
+			results = append(results, GatewayVerification{models, r.ref, r.model, verified})
+		}
+		return true
+	})
+	slices.SortFunc(results, func(a, b GatewayVerification) int {
+		return cmp.Or(strings.Compare(a.Verification.EnclaveHost, b.Verification.EnclaveHost),
+			strings.Compare(a.Reference, b.Reference), strings.Compare(a.PinnedModel, b.PinnedModel))
+	})
+	return results
+}
+
+type verifiedReplicaTransport struct {
+	*recoveryTransport
+	verification func() *client.VerifiedDocumentV3
+	models       sync.Map
+}
+
+func (t *verifiedReplicaTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	t.models.Store(req.Header.Get(modelHeader), struct{}{})
+	return t.recoveryTransport.RoundTrip(req)
 }
 
 // Serves checks the current catalog against the gateway policy without verifying replicas.
