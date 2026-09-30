@@ -1,7 +1,6 @@
 package quote
 
 import (
-	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -44,11 +43,10 @@ func tdxFixturePolicy(t *testing.T) string {
 // Skips when the fixture is absent or its captured collateral has expired.
 func TestVerifyLiveFixtureTDX(t *testing.T) {
 	doc, reportData, _ := loadLiveFixture(t, "inf14-tdx-v3")
-	require.Equal(t, document.TDXQuoteV1Format, doc.CPUEvidence.Format)
+	require.Equal(t, document.TDXQuoteV1Format, doc.CPUEvidence().Format)
 	artifact := loadEndorsementArtifact(t)
 
-	evidence, err := EvidenceFromDocument(doc)
-	require.NoError(t, err)
+	evidence := doc.CPUEvidence()
 	endorsements, err := doc.CPUEndorsements()
 	require.NoError(t, err)
 	q, err := Authenticate(evidence, endorsements, nil)
@@ -81,11 +79,7 @@ func TestVerifyLiveFixtureTDX(t *testing.T) {
 // allowObservedShape adds the quote's own MRTD/RTMR0, measured for shape,
 // to every TDX policy as an allowed platform configuration (test only).
 func allowObservedShape(doc *document.Document, artifact *policy.Artifact, shape *policy.Shape) error {
-	raw, err := base64.StdEncoding.DecodeString(doc.CPUEvidence.ReportBase64)
-	if err != nil {
-		return err
-	}
-	parsed, err := tdxabi.QuoteToProto(raw)
+	parsed, err := tdxabi.QuoteToProto(doc.CPUEvidence().Report)
 	if err != nil {
 		return err
 	}

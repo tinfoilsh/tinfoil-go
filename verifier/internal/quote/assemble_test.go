@@ -37,15 +37,23 @@ func TestAssembleRequiresParsedDocument(t *testing.T) {
 
 func TestAssembleRejectsQuoteFromAnotherDocument(t *testing.T) {
 	doc := boundDocument(t, []byte("report a"))
+	authenticated := func(format, report string) *Authenticated {
+		return &Authenticated{evidence: document.CPUEvidence{Format: format, Report: []byte(report)}}
+	}
 	var config *errs.ConfigurationError
 
-	_, err := Assemble(doc, &policy.Artifact{}, &measurement.Measurement{}, nil, testShape, &Authenticated{report: []byte("report b")})
-	require.ErrorAs(t, err, &config)
-	assert.ErrorContains(t, err, "not this document's CPU evidence")
+	for name, q := range map[string]*Authenticated{
+		"other report": authenticated(document.SEVSNPReportV1Format, "report b"),
+		"other format": authenticated(document.TDXQuoteV1Format, "report a"),
+	} {
+		_, err := Assemble(doc, &policy.Artifact{}, &measurement.Measurement{}, nil, testShape, q)
+		require.ErrorAs(t, err, &config, name)
+		assert.ErrorContains(t, err, "not this document's CPU evidence", name)
+	}
 
 	// The quote authenticated from this document's own evidence passes the
 	// origin check and reaches the policy inputs.
-	_, err = Assemble(doc, &policy.Artifact{}, &measurement.Measurement{}, nil, testShape, &Authenticated{report: []byte("report a")})
+	_, err := Assemble(doc, &policy.Artifact{}, &measurement.Measurement{}, nil, testShape, authenticated(document.SEVSNPReportV1Format, "report a"))
 	require.Error(t, err)
 	assert.NotContains(t, err.Error(), "not this document's CPU evidence")
 	assert.ErrorContains(t, err, "authenticated quote is required")

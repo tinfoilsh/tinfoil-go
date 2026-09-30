@@ -6,7 +6,6 @@ import (
 	"crypto/rand"
 	"crypto/x509"
 	"crypto/x509/pkix"
-	"encoding/base64"
 	"math/big"
 	"testing"
 	"time"
@@ -20,9 +19,9 @@ import (
 func TestPCSReplayGetter(t *testing.T) {
 	body := []byte(`{"tcbInfo":{"tcbEvaluationDataNumber":19}}`)
 	getter, err := newPCSReplayGetter([]document.PCSResponse{{
-		URL:        "https://api.trustedservices.intel.com/tdx/certification/v4/tcb?fmspc=90c06f000000&tcbEvaluationDataNumber=19",
-		Headers:    map[string][]string{"tcb-info-issuer-chain": {"chain"}},
-		BodyBase64: base64.StdEncoding.EncodeToString(body),
+		URL:     "https://api.trustedservices.intel.com/tdx/certification/v4/tcb?fmspc=90c06f000000&tcbEvaluationDataNumber=19",
+		Headers: map[string][]string{"tcb-info-issuer-chain": {"chain"}},
+		Body:    body,
 	}}, time.Now())
 	require.NoError(t, err)
 
@@ -40,12 +39,12 @@ func TestPCSReplayGetter(t *testing.T) {
 func TestTCBEvaluationRecorder(t *testing.T) {
 	inner, err := newPCSReplayGetter([]document.PCSResponse{
 		{
-			URL:        "https://api.trustedservices.intel.com/tdx/certification/v4/tcb?fmspc=90c06f000000",
-			BodyBase64: base64.StdEncoding.EncodeToString([]byte(`{"tcbInfo":{"tcbEvaluationDataNumber":20}}`)),
+			URL:  "https://api.trustedservices.intel.com/tdx/certification/v4/tcb?fmspc=90c06f000000",
+			Body: []byte(`{"tcbInfo":{"tcbEvaluationDataNumber":20}}`),
 		},
 		{
-			URL:        "https://api.trustedservices.intel.com/tdx/certification/v4/qe/identity",
-			BodyBase64: base64.StdEncoding.EncodeToString([]byte(`{"enclaveIdentity":{"tcbEvaluationDataNumber":19}}`)),
+			URL:  "https://api.trustedservices.intel.com/tdx/certification/v4/qe/identity",
+			Body: []byte(`{"enclaveIdentity":{"tcbEvaluationDataNumber":19}}`),
 		},
 	}, time.Now())
 	require.NoError(t, err)
@@ -93,8 +92,8 @@ func TestPCSReplayGetterValidatesCRL(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			getter, err := newPCSReplayGetter([]document.PCSResponse{{
-				URL:        tc.url,
-				BodyBase64: base64.StdEncoding.EncodeToString(tc.body),
+				URL:  tc.url,
+				Body: tc.body,
 			}}, now)
 			require.NoError(t, err)
 
@@ -135,14 +134,17 @@ func testCRL(t *testing.T, thisUpdate, nextUpdate time.Time) []byte {
 	return crlDER
 }
 
-func TestPCSReplayGetterRejectsNonCanonicalBody(t *testing.T) {
-	encoded := base64.StdEncoding.EncodeToString([]byte(`{"tcbInfo":{"tcbEvaluationDataNumber":19}}`))
-	getter, err := newPCSReplayGetter([]document.PCSResponse{{
-		URL:        "https://api.trustedservices.intel.com/tdx/certification/v4/tcb?fmspc=90c06f000000",
-		BodyBase64: encoded[:8] + "\n" + encoded[8:],
-	}}, time.Now())
+func TestPCSReplayGetterReturnsPrivateBuffers(t *testing.T) {
+	body := []byte(`{"tcbInfo":{"tcbEvaluationDataNumber":19}}`)
+	url := "https://api.trustedservices.intel.com/tdx/certification/v4/tcb?fmspc=90c06f000000"
+	getter, err := newPCSReplayGetter([]document.PCSResponse{{URL: url, Body: body}}, time.Now())
 	require.NoError(t, err)
 
-	_, _, err = getter.Get("https://api.trustedservices.intel.com/tdx/certification/v4/tcb?fmspc=90c06f000000")
-	assert.ErrorContains(t, err, "body_base64 is not canonical base64")
+	_, first, err := getter.Get(url)
+	require.NoError(t, err)
+	first[0] = '!'
+	_, second, err := getter.Get(url)
+	require.NoError(t, err)
+	assert.Equal(t, body, second, "a consumer changing one response must not affect the next replay")
+	assert.Equal(t, byte('{'), body[0], "the caller's endorsements stay unchanged")
 }

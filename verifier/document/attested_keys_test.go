@@ -32,7 +32,7 @@ func TestAttestedKeyEnvelopeVectors(t *testing.T) {
 			require.NoError(t, err)
 			doc, _ := buildTestDocument(t, nonce)
 			doc.CryptoMaterial, doc.DeviceEvidence = v.CryptoMaterial, v.DeviceEvidence
-			doc.CPUEvidence.Endorsed = EndorsedHashes{CryptoMaterialHash: v.CryptoHash, DeviceEvidenceHash: v.DeviceHash}
+			doc.CPUEvidence.Endorsed = endorsedHashes{CryptoMaterialHash: v.CryptoHash, DeviceEvidenceHash: v.DeviceHash}
 			doc.Challenge.ReportData = v.ReportData
 			encoded, err := json.Marshal(doc)
 			require.NoError(t, err)

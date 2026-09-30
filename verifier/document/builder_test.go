@@ -40,7 +40,8 @@ func TestBuildRoundTrip(t *testing.T) {
 		Collateral:     []CollateralEntry{{ID: "vcek", Role: RoleEndorsement, Format: CollateralAMDVCEKV1Format, Subjects: []string{SubjectCPU}, Data: jsontext.Value(`{"vcek_der_base64":"","cert_chain_pem":""}`)}},
 	}
 	var signed [64]byte
-	docBytes, err := Build(in, fakeQuote(SEVSNPReportV1Format, bytes.Repeat([]byte{0x01}, 1184), &signed))
+	report := bytes.Repeat([]byte{0x01}, 1184)
+	docBytes, err := Build(in, fakeQuote(SEVSNPReportV1Format, report, &signed))
 	require.NoError(t, err)
 
 	doc, err := Parse(docBytes, nonce)
@@ -50,8 +51,8 @@ func TestBuildRoundTrip(t *testing.T) {
 	assert.Equal(t, signed, reportData, "the quote signs the REPORT_DATA a verifier recomputes")
 	assert.Equal(t, in.CryptoMaterial, doc.CryptoMaterialItems())
 	assert.Equal(t, in.DeviceEvidence, doc.DeviceEvidenceItems())
-	assert.Equal(t, SEVSNPReportV1Format, doc.CPUEvidence.Format)
-	entry, ok := doc.EndorsementCollateral(CollateralAMDVCEKV1Format, SubjectCPU)
+	assert.Equal(t, CPUEvidence{Format: SEVSNPReportV1Format, Report: report}, doc.CPUEvidence())
+	entry, ok := doc.endorsementCollateral(CollateralAMDVCEKV1Format, SubjectCPU)
 	require.True(t, ok)
 	assert.Equal(t, "vcek", entry.ID)
 }

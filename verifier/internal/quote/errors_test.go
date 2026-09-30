@@ -13,9 +13,7 @@ import (
 
 func TestMissingInputsAreConfigurationErrors(t *testing.T) {
 	var config *errs.ConfigurationError
-	_, err := EvidenceFromDocument(nil)
-	require.ErrorAs(t, err, &config)
-	_, err = Assemble(nil, nil, nil, nil, nil, nil)
+	_, err := Assemble(nil, nil, nil, nil, nil, nil)
 	require.ErrorAs(t, err, &config)
 	_, err = assemble(nil, nil, nil, nil, [64]byte{}, nil)
 	require.ErrorAs(t, err, &config)
