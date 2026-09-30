@@ -138,7 +138,11 @@ func (v *Verifier) verifyV3(docBytes, nonce []byte, repo string) (*Verification,
 		return nil, layerProvenance, errs.WrapAttestation(fmt.Errorf("reference values: %w", err))
 	}
 
-	cpuEvidence, cpuEndorsements, err := quote.EvidenceFromDocument(doc)
+	cpuEvidence, err := quote.EvidenceFromDocument(doc)
+	if err != nil {
+		return nil, layerQuote, err
+	}
+	cpuEndorsements, err := doc.CPUEndorsements()
 	if err != nil {
 		return nil, layerQuote, err
 	}
