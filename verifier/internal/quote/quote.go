@@ -13,7 +13,9 @@
 package quote
 
 import (
+	"bytes"
 	"cmp"
+	"encoding/base64"
 	"fmt"
 	"strings"
 
@@ -33,8 +35,11 @@ type Authenticated struct {
 	// Measurement is a detached summary of the launch measurement (SEV) or MRTD+RTMRs (TDX).
 	Measurement *measurement.Measurement
 
-	sev *sev.Quote
-	tdx *tdx.Quote
+	// report is the raw evidence that was authenticated, so Assemble can
+	// check it appraises the quote against the document it came from.
+	report []byte
+	sev    *sev.Quote
+	tdx    *tdx.Quote
 }
 
 // Platform is policy.PlatformSEVSNP or policy.PlatformTDX.
@@ -112,6 +117,7 @@ func Authenticate(ev CPUEvidence, en CPUEndorsements, opts *Options) (result *Au
 			platform:    policy.PlatformSEVSNP,
 			identity:    q.Identity(),
 			Measurement: q.Measurement,
+			report:      ev.Report,
 			sev:         q,
 		}, nil
 	case document.TDXQuoteV1Format:
@@ -126,6 +132,7 @@ func Authenticate(ev CPUEvidence, en CPUEndorsements, opts *Options) (result *Au
 			platform:    policy.PlatformTDX,
 			identity:    q.Identity(),
 			Measurement: q.Measurement,
+			report:      ev.Report,
 			tdx:         q,
 		}, nil
 	default:
@@ -134,11 +141,31 @@ func Authenticate(ev CPUEvidence, en CPUEndorsements, opts *Options) (result *Au
 }
 
 // Assemble combines endorsed machine policy, release measurements, caller pins,
-// and REPORT_DATA. TDX platform measurements must match the required VM shape.
-// A machine absent from endorsements is rejected. Pins fill unset registers or
-// must match the existing source value.
-func Assemble(endorsements *policy.Artifact, code, pins *measurement.Measurement, shape *policy.Shape, reportData [64]byte, q *Authenticated) (result *AssembledPolicy, err error) {
+// and the REPORT_DATA doc binds. TDX platform measurements must match the
+// required VM shape. A machine absent from endorsements is rejected. Pins fill
+// unset registers or must match the existing source value.
+//
+// doc must come from document.Parse, so its expected REPORT_DATA was
+// recomputed from the caller's nonce, and q must be the quote authenticated
+// from doc's own CPU evidence: a quote cannot be appraised against another
+// document's challenge.
+func Assemble(doc *document.Document, endorsements *policy.Artifact, code, pins *measurement.Measurement, shape *policy.Shape, q *Authenticated) (result *AssembledPolicy, err error) {
 	defer func() { err = errs.WrapAttestation(err) }()
+	if !doc.Bound() {
+		return nil, &errs.ConfigurationError{Err: fmt.Errorf("a document checked by document.Parse is required")}
+	}
+	if q == nil {
+		return nil, &errs.ConfigurationError{Err: fmt.Errorf("authenticated quote is required")}
+	}
+	docReport, err := base64.StdEncoding.DecodeString(doc.CPUEvidence.ReportBase64)
+	if err != nil || !bytes.Equal(docReport, q.report) {
+		return nil, &errs.ConfigurationError{Err: fmt.Errorf("authenticated quote is not this document's CPU evidence")}
+	}
+	return assemble(endorsements, code, pins, shape, doc.ExpectedReportData(), q)
+}
+
+// assemble is Assemble against an explicit REPORT_DATA.
+func assemble(endorsements *policy.Artifact, code, pins *measurement.Measurement, shape *policy.Shape, reportData [64]byte, q *Authenticated) (*AssembledPolicy, error) {
 	if endorsements == nil {
 		return nil, &errs.ConfigurationError{Err: fmt.Errorf("endorsements are required")}
 	}
@@ -193,23 +220,6 @@ func (p *AssembledPolicy) Validate() (err error) {
 	default:
 		return fmt.Errorf("unsupported platform %q", p.quote.platform)
 	}
-}
-
-// Verify composes Authenticate, Assemble, and Validate. A nil opts selects
-// the production clock and embedded vendor roots.
-func Verify(ev CPUEvidence, en CPUEndorsements, endorsements *policy.Artifact, code, pins *measurement.Measurement, shape *policy.Shape, reportData [64]byte, opts *Options) (*AssembledPolicy, *Authenticated, error) {
-	q, err := Authenticate(ev, en, opts)
-	if err != nil {
-		return nil, nil, err
-	}
-	assembled, err := Assemble(endorsements, code, pins, shape, reportData, q)
-	if err != nil {
-		return nil, nil, err
-	}
-	if err := assembled.Validate(); err != nil {
-		return nil, nil, err
-	}
-	return assembled, q, nil
 }
 
 // layout maps code and pins to enclave registers, leaving platform defaults empty.

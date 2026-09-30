@@ -119,7 +119,7 @@ func (v *Verifier) verifyV3(docBytes, nonce []byte, repo string) (*Verification,
 	if _, _, _, err := provenance.ParseReference(repo); err != nil {
 		return nil, layerProvenance, &errs.ConfigurationError{Err: err}
 	}
-	doc, expectedReportData, err := document.Check(docBytes, nonce)
+	doc, err := document.Parse(docBytes, nonce)
 	if err != nil {
 		return nil, layerEnvelope, err
 	}
@@ -141,7 +141,7 @@ func (v *Verifier) verifyV3(docBytes, nonce []byte, repo string) (*Verification,
 	if err != nil {
 		return nil, layerQuote, err
 	}
-	assembled, err := quote.Assemble(endorsements.Artifact, code.Measurement, v.pinnedRegisters, code.Shape, expectedReportData, authenticated)
+	assembled, err := quote.Assemble(doc, endorsements.Artifact, code.Measurement, v.pinnedRegisters, code.Shape, authenticated)
 	if err != nil {
 		return nil, layerPolicy, err
 	}

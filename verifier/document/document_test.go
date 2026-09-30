@@ -11,6 +11,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/tinfoilsh/tinfoil-go/verifier/internal/errs"
 )
 
 func testNonce() []byte {
@@ -85,9 +87,11 @@ func TestBuildAndVerify(t *testing.T) {
 	nonce := testNonce()
 	built, docBytes := buildTestDocument(t, nonce)
 
-	doc, reportData, err := Check(docBytes, nonce)
+	doc, err := Parse(docBytes, nonce)
 	require.NoError(t, err)
+	reportData := doc.ExpectedReportData()
 	assert.Equal(t, built.Challenge.ReportData, hex.EncodeToString(reportData[:]))
+	assert.True(t, doc.Bound())
 	assert.Equal(t, AttestationV3Format, doc.Format)
 
 	items := doc.CryptoMaterialItems()
@@ -125,27 +129,78 @@ func TestVerifyNonceMismatch(t *testing.T) {
 
 	other := testNonce()
 	other[0] ^= 0xff
-	_, _, err := Check(docBytes, other)
-	assert.ErrorContains(t, err, "nonce")
+	_, err := Parse(docBytes, other)
+	assert.ErrorContains(t, err, "challenge nonce does not match the expected nonce")
 }
 
-// mutateCryptoSection decodes the document's crypto_material, applies mutate
+func TestParseRejectsWrongNonceLength(t *testing.T) {
+	nonce := testNonce()
+	_, docBytes := buildTestDocument(t, nonce)
+
+	for _, n := range [][]byte{nil, nonce[:NonceSize-1], append(bytes.Clone(nonce), 0)} {
+		_, err := Parse(docBytes, n)
+		var config *errs.ConfigurationError
+		require.ErrorAs(t, err, &config, "nonce of %d bytes", len(n))
+	}
+}
+
+// mutateSection decodes the document's endorsed section field, applies mutate
 // to the section bytes, re-encodes the result without updating the endorsed
 // hashes, and returns the re-marshaled document bytes.
-func mutateCryptoSection(t *testing.T, docBytes []byte, mutate func([]byte) []byte) []byte {
+func mutateSection(t *testing.T, docBytes []byte, field string, mutate func([]byte) []byte) []byte {
 	t.Helper()
 	var loose map[string]json.RawMessage
 	require.NoError(t, json.Unmarshal(docBytes, &loose))
 	var encoded string
-	require.NoError(t, json.Unmarshal(loose["crypto_material"], &encoded))
+	require.NoError(t, json.Unmarshal(loose[field], &encoded))
 	section, err := base64.StdEncoding.DecodeString(encoded)
 	require.NoError(t, err)
 	reencoded, err := json.Marshal(base64.StdEncoding.EncodeToString(mutate(section)))
 	require.NoError(t, err)
-	loose["crypto_material"] = reencoded
+	loose[field] = reencoded
 	out, err := json.Marshal(loose)
 	require.NoError(t, err)
 	return out
+}
+
+func mutateCryptoSection(t *testing.T, docBytes []byte, mutate func([]byte) []byte) []byte {
+	t.Helper()
+	return mutateSection(t, docBytes, "crypto_material", mutate)
+}
+
+func TestVerifyTamperedDeviceEvidence(t *testing.T) {
+	nonce := testNonce()
+	_, docBytes := buildTestDocument(t, nonce)
+
+	tampered := mutateSection(t, docBytes, "device_evidence", func(section []byte) []byte {
+		return bytes.Replace(section, []byte(`{"format"`), []byte(`{ "format"`), 1)
+	})
+	require.NotEqual(t, docBytes, tampered)
+
+	_, err := Parse(tampered, nonce)
+	assert.ErrorContains(t, err, "device_evidence hash does not match")
+}
+
+// TestVerifyReportDataMismatch changes only challenge.report_data: both
+// section hashes still match, so the REPORT_DATA recomputation is what must
+// reject.
+func TestVerifyReportDataMismatch(t *testing.T) {
+	nonce := testNonce()
+	_, docBytes := buildTestDocument(t, nonce)
+
+	var loose map[string]json.RawMessage
+	require.NoError(t, json.Unmarshal(docBytes, &loose))
+	var challenge map[string]string
+	require.NoError(t, json.Unmarshal(loose["challenge"], &challenge))
+	challenge["report_data"] = hex.EncodeToString(bytes.Repeat([]byte{0x11}, 64))
+	var err error
+	loose["challenge"], err = json.Marshal(challenge)
+	require.NoError(t, err)
+	tampered, err := json.Marshal(loose)
+	require.NoError(t, err)
+
+	_, err = Parse(tampered, nonce)
+	assert.ErrorContains(t, err, "challenge report_data does not match the recomputed value")
 }
 
 // TestVerifyTransportedBytes verifies the endorsed hashes cover the
@@ -160,7 +215,7 @@ func TestVerifyTransportedBytes(t *testing.T) {
 	})
 	require.NotEqual(t, docBytes, tampered)
 
-	_, _, err := Check(tampered, nonce)
+	_, err := Parse(tampered, nonce)
 	assert.ErrorContains(t, err, "crypto_material hash")
 }
 
@@ -175,7 +230,7 @@ func TestVerifyTamperedKey(t *testing.T) {
 	})
 	require.NotEqual(t, docBytes, tampered)
 
-	_, _, err := Check(tampered, nonce)
+	_, err := Parse(tampered, nonce)
 	assert.ErrorContains(t, err, "crypto_material hash")
 }
 
@@ -189,7 +244,7 @@ func TestVerifyRejectsUnknownTopLevelMembers(t *testing.T) {
 	tampered, err := json.Marshal(loose)
 	require.NoError(t, err)
 
-	_, _, err = Check(tampered, nonce)
+	_, err = Parse(tampered, nonce)
 	assert.Error(t, err)
 }
 
@@ -200,7 +255,7 @@ func TestVerifyRejectsUnknownAlgorithm(t *testing.T) {
 	tampered := bytes.Replace(docBytes,
 		[]byte(ReportDataV1Algorithm),
 		[]byte("https://tinfoil.sh/report-data/v2"), 1)
-	_, _, err := Check(tampered, nonce)
+	_, err := Parse(tampered, nonce)
 	assert.ErrorContains(t, err, "report_data_algorithm")
 }
 
@@ -218,7 +273,7 @@ func TestParseRejectsDuplicateItemIDs(t *testing.T) {
 	})
 	require.NotEqual(t, docBytes, dup)
 
-	_, err := Parse(dup)
+	_, err := Parse(dup, nonce)
 	assert.ErrorContains(t, err, `duplicate crypto_material item id "tls"`)
 }
 
@@ -234,7 +289,7 @@ func TestParseRejectsMalformedKeyMaterial(t *testing.T) {
 			[]byte(hex.EncodeToString(bytes.Repeat([]byte{0xaa}, 8))), 1)
 	})
 	require.NotEqual(t, docBytes, short)
-	_, err := Parse(short)
+	_, err := Parse(short, nonce)
 	assert.ErrorContains(t, err, "must be 32 bytes")
 }
 
@@ -242,10 +297,10 @@ func TestParseRejectsUppercaseHex(t *testing.T) {
 	nonce := testNonce()
 	_, docBytes := buildTestDocument(t, nonce)
 
-	doc, err := Parse(docBytes)
+	doc, err := Parse(docBytes, nonce)
 	require.NoError(t, err)
 	upper := bytes.Replace(docBytes, []byte(doc.Challenge.Nonce), bytes.ToUpper([]byte(doc.Challenge.Nonce)), 1)
-	_, err = Parse(upper)
+	_, err = Parse(upper, nonce)
 	assert.ErrorContains(t, err, "lowercase hex")
 }
 
@@ -266,7 +321,7 @@ func TestParseRejectsNonCanonicalBase64(t *testing.T) {
 	tampered, err := json.Marshal(loose)
 	require.NoError(t, err)
 
-	_, err = Parse(tampered)
+	_, err = Parse(tampered, nonce)
 	assert.ErrorContains(t, err, "crypto_material is not canonical base64")
 }
 
@@ -290,7 +345,7 @@ func TestParseRejectsNonCanonicalReportBase64(t *testing.T) {
 			tampered := bytes.Replace(docBytes, original, replacement, 1)
 			require.NotEqual(t, docBytes, tampered)
 
-			_, err = Parse(tampered)
+			_, err = Parse(tampered, nonce)
 			assert.ErrorContains(t, err, "cpu_evidence.report_base64")
 		})
 	}
@@ -309,10 +364,10 @@ func TestParseRejectsOddLengthUnknownFormatData(t *testing.T) {
 	}
 
 	// "abc" matches the lowercase-hex character class but is not decodable.
-	_, err := Parse(insert(`{"id":"x","format":"https://example.com/key/v9","data":"abc"}`))
+	_, err := Parse(insert(`{"id":"x","format":"https://example.com/key/v9","data":"abc"}`), nonce)
 	assert.ErrorContains(t, err, `crypto_material item "x" data is not lowercase hex`)
 
-	_, err = Parse(insert(`{"id":"x","format":"https://example.com/key/v9","data":""}`))
+	_, err = Parse(insert(`{"id":"x","format":"https://example.com/key/v9","data":""}`), nonce)
 	assert.ErrorContains(t, err, `crypto_material item "x" data is empty`)
 }
 
@@ -329,7 +384,7 @@ func TestParseRejectsDuplicateCollateralIDs(t *testing.T) {
 	docBytes, err := json.Marshal(doc)
 	require.NoError(t, err)
 
-	_, err = Parse(docBytes)
+	_, err = Parse(docBytes, nonce)
 	assert.ErrorContains(t, err, `duplicate collateral entry id "cpu-endorsement"`)
 }
 
@@ -364,7 +419,8 @@ func TestFreshnessCollateralSelectsArtifactID(t *testing.T) {
 }
 
 func TestParseRejectsDuplicateFreshnessArtifactID(t *testing.T) {
-	doc, _ := buildTestDocument(t, testNonce())
+	nonce := testNonce()
+	doc, _ := buildTestDocument(t, nonce)
 	entry := CollateralEntry{
 		ID:     FreshnessCollateralIDCode,
 		Role:   RoleReferenceValues,
@@ -375,7 +431,7 @@ func TestParseRejectsDuplicateFreshnessArtifactID(t *testing.T) {
 	docBytes, err := json.Marshal(doc)
 	require.NoError(t, err)
 
-	_, err = Parse(docBytes)
+	_, err = Parse(docBytes, nonce)
 	assert.ErrorContains(t, err, `duplicate collateral entry id "`+FreshnessCollateralIDCode+`"`)
 }
 

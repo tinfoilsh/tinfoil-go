@@ -105,7 +105,7 @@ func TestLiveVerifySEV(t *testing.T) {
 	// exercised, and the mismatch case is covered below.
 	q, err := Authenticate(evidence, endorsements, nil)
 	require.NoError(t, err)
-	assembled, verified, err := Verify(evidence, endorsements, artifact, asCode(q.Measurement), nil, testShape, reportData, nil)
+	assembled, verified, err := verify(evidence, endorsements, artifact, asCode(q.Measurement), nil, testShape, reportData, nil)
 	require.NoError(t, err)
 	assert.Equal(t, policy.PlatformSEVSNP, verified.Platform())
 	assert.Equal(t, "amd-genoa-prod", assembled.PolicyName)
@@ -118,40 +118,40 @@ func TestLiveVerifySEV(t *testing.T) {
 	// Wrong REPORT_DATA must reject even with a valid signature.
 	wrongReportData := reportData
 	wrongReportData[0] ^= 0xff
-	_, _, err = Verify(evidence, endorsements, artifact, asCode(q.Measurement), nil, testShape, wrongReportData, nil)
+	_, _, err = verify(evidence, endorsements, artifact, asCode(q.Measurement), nil, testShape, wrongReportData, nil)
 	assert.ErrorContains(t, err, "REPORT_DATA")
 
 	// A launch measurement differing from the code expectation must reject.
 	wrongMeasurement := asCode(q.Measurement)
 	wrongMeasurement.Registers[0] = strings.Repeat("ab", 48)
-	_, _, err = Verify(evidence, endorsements, artifact, wrongMeasurement, nil, testShape, reportData, nil)
+	_, _, err = verify(evidence, endorsements, artifact, wrongMeasurement, nil, testShape, reportData, nil)
 	assert.Error(t, err)
 
 	// An assembly without the required code expectation must reject.
-	_, err = Assemble(artifact, nil, nil, testShape, reportData, q)
+	_, err = assemble(artifact, nil, nil, testShape, reportData, q)
 	assert.ErrorContains(t, err, "code measurement is required")
 
 	// SEV assembly does not consume the code artifact's VM shape.
-	_, err = Assemble(artifact, asCode(q.Measurement), nil, nil, reportData, q)
+	_, err = assemble(artifact, asCode(q.Measurement), nil, nil, reportData, q)
 	require.NoError(t, err)
 
 	// A machine absent from the artifact must reject.
 	unendorsed := *artifact
 	unendorsed.Machines = map[string]string{}
-	_, _, err = Verify(evidence, endorsements, &unendorsed, asCode(q.Measurement), nil, testShape, reportData, nil)
+	_, _, err = verify(evidence, endorsements, &unendorsed, asCode(q.Measurement), nil, testShape, reportData, nil)
 	assert.ErrorContains(t, err, "not endorsed")
 
 	// v3 is single-request: evidence without its endorsement collateral is
 	// rejected, never patched up with a network fetch.
 	noVCEK := endorsements
 	noVCEK.AMDVCEK = nil
-	_, _, err = Verify(evidence, noVCEK, artifact, asCode(q.Measurement), nil, testShape, reportData, nil)
+	_, _, err = verify(evidence, noVCEK, artifact, asCode(q.Measurement), nil, testShape, reportData, nil)
 	assert.ErrorContains(t, err, "no amd-vcek endorsement collateral")
 
 	// Evidence without the CRL collateral must reject.
 	noCRL := endorsements
 	noCRL.AMDCRL = nil
-	_, _, err = Verify(evidence, noCRL, artifact, asCode(q.Measurement), nil, testShape, reportData, nil)
+	_, _, err = verify(evidence, noCRL, artifact, asCode(q.Measurement), nil, testShape, reportData, nil)
 	assert.ErrorContains(t, err, "no amd-crl endorsement collateral")
 }
 
@@ -180,7 +180,7 @@ func TestVerifySEVRejectsBadCRL(t *testing.T) {
 
 func TestVerifyUnknownFormat(t *testing.T) {
 	evidence := CPUEvidence{Format: "https://tinfoil.sh/format/unknown/v1"}
-	_, _, err := Verify(evidence, CPUEndorsements{}, &policy.Artifact{}, &measurement.Measurement{}, nil, testShape, [64]byte{}, nil)
+	_, _, err := verify(evidence, CPUEndorsements{}, &policy.Artifact{}, &measurement.Measurement{}, nil, testShape, [64]byte{}, nil)
 	assert.Error(t, err)
 	assert.Contains(t, fmt.Sprint(err), "unsupported cpu_evidence format")
 }
@@ -218,7 +218,7 @@ func TestPinnedLayoutUsesAuthenticatedPlatform(t *testing.T) {
 
 func TestMissingTDXShapePrecedesPolicyLookup(t *testing.T) {
 	q := &Authenticated{platform: policy.PlatformTDX, tdx: &tdx.Quote{}}
-	_, err := Assemble(&policy.Artifact{}, &measurement.Measurement{}, nil, nil, [64]byte{}, q)
+	_, err := assemble(&policy.Artifact{}, &measurement.Measurement{}, nil, nil, [64]byte{}, q)
 	var config *errs.ConfigurationError
 	require.ErrorAs(t, err, &config)
 	require.ErrorContains(t, err, "VM shape", "missing input must be reported before the unendorsed machine")
@@ -230,4 +230,22 @@ func asCode(m *measurement.Measurement) *measurement.Measurement {
 		return &measurement.Measurement{Type: measurement.SnpTdxMultiPlatformV1, Registers: []string{"", m.Registers[2], m.Registers[3]}}
 	}
 	return &measurement.Measurement{Type: measurement.SnpTdxMultiPlatformV1, Registers: []string{m.Registers[0], "", ""}}
+}
+
+// verify composes Authenticate, assemble against an explicit REPORT_DATA, and
+// Validate, for tests whose evidence predates the v3 REPORT_DATA ladder. A nil
+// opts selects the production clock and embedded vendor roots.
+func verify(ev CPUEvidence, en CPUEndorsements, endorsements *policy.Artifact, code, pins *measurement.Measurement, shape *policy.Shape, reportData [64]byte, opts *Options) (*AssembledPolicy, *Authenticated, error) {
+	q, err := Authenticate(ev, en, opts)
+	if err != nil {
+		return nil, nil, err
+	}
+	assembled, err := assemble(endorsements, code, pins, shape, reportData, q)
+	if err != nil {
+		return nil, nil, err
+	}
+	if err := assembled.Validate(); err != nil {
+		return nil, nil, err
+	}
+	return assembled, q, nil
 }
