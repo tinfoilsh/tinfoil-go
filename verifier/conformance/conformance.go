@@ -164,11 +164,11 @@ func Run(stage string, in Input) (Output, int) {
 		if err != nil {
 			return malformed(stage)
 		}
-		codeRef, err := parsed.ReferenceValuesCollateral(document.CollateralSigstoreCodeV1Format)
+		codeRef, err := parsed.SigstoreCode()
 		if err != nil {
 			return reject(stage, "PROVENANCE_REJECTED")
 		}
-		code, err := prov.AuthenticateCode(codeRef.SigstoreBundle, in.Repo, codeRef.Tag, codeRef.Digest)
+		code, err := prov.AuthenticateCode(codeRef.Bundle, in.Repo, codeRef.Tag, codeRef.Digest)
 		if err != nil {
 			return reject(stage, "PROVENANCE_REJECTED")
 		}
@@ -181,11 +181,11 @@ func Run(stage string, in Input) (Output, int) {
 		if err != nil {
 			return malformed(stage)
 		}
-		platRef, err := parsed.ReferenceValuesCollateral(document.CollateralSigstorePlatformV1Format)
+		platRef, err := parsed.SigstorePlatform()
 		if err != nil {
 			return reject(stage, "PROVENANCE_REJECTED")
 		}
-		if _, err := prov.AuthenticatePlatformEndorsements(platRef.SigstoreBundle, platRef.Repo, platRef.Tag, platRef.Digest); err != nil {
+		if _, err := prov.AuthenticatePlatformEndorsements(platRef.Bundle, platRef.Repo, platRef.Tag, platRef.Digest); err != nil {
 			return reject(stage, "PROVENANCE_REJECTED")
 		}
 		return Output{Stage: stage, Accepted: true}, ExitAccepted

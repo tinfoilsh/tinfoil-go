@@ -142,6 +142,53 @@ func (d *Document) FreshnessCollateral(id string) (*FreshnessCollateral, error) 
 	return decodeCollateral[FreshnessCollateral](entry)
 }
 
+// SigstoreRef is a decoded reference-values entry: a Sigstore bundle and the
+// release it names. Repo and Tag are informational; trust comes from
+// verifying Bundle against the expected signing identity and Digest.
+type SigstoreRef struct {
+	Repo   string
+	Tag    string
+	Digest string
+	Bundle jsontext.Value
+}
+
+// Freshness is a decoded freshness witness: the independently signed bundle
+// that attests a reference-values artifact was recently published.
+type Freshness struct {
+	Bundle jsontext.Value
+}
+
+// SigstoreCode returns the code-provenance reference-values entry. A document
+// without one returns an error wrapping ErrCollateralNotFound.
+func (d *Document) SigstoreCode() (SigstoreRef, error) {
+	return d.sigstoreRef(CollateralSigstoreCodeV1Format)
+}
+
+// SigstorePlatform returns the platform-endorsements reference-values entry.
+// A document without one returns an error wrapping ErrCollateralNotFound.
+func (d *Document) SigstorePlatform() (SigstoreRef, error) {
+	return d.sigstoreRef(CollateralSigstorePlatformV1Format)
+}
+
+func (d *Document) sigstoreRef(format string) (SigstoreRef, error) {
+	c, err := d.ReferenceValuesCollateral(format)
+	if err != nil {
+		return SigstoreRef{}, err
+	}
+	return SigstoreRef{Repo: c.Repo, Tag: c.Tag, Digest: c.Digest, Bundle: c.SigstoreBundle}, nil
+}
+
+// Freshness returns the freshness witness with the given collateral ID, such
+// as FreshnessCollateralIDCode. A document without it returns an error
+// wrapping ErrCollateralNotFound.
+func (d *Document) Freshness(id string) (Freshness, error) {
+	c, err := d.FreshnessCollateral(id)
+	if err != nil {
+		return Freshness{}, err
+	}
+	return Freshness{Bundle: c.SigstoreBundle}, nil
+}
+
 // findCollateral selects the first matching entry; Parse validates uniqueness.
 func (d *Document) findCollateral(role, format string, match func(*CollateralEntry) bool) *CollateralEntry {
 	for i := range d.Collateral {

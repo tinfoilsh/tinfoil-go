@@ -68,10 +68,10 @@ func TestLiveSEVFixture(t *testing.T) {
 	assert.Equal(t, document.KeyX25519HPKEV1Format, hpke.Format)
 
 	// Both reference-values entries travel in the document.
-	codeRef, err := doc.ReferenceValuesCollateral(document.CollateralSigstoreCodeV1Format)
+	codeRef, err := doc.SigstoreCode()
 	require.NoError(t, err)
 	assert.NotEmpty(t, codeRef.Digest)
-	platformRef, err := doc.ReferenceValuesCollateral(document.CollateralSigstorePlatformV1Format)
+	platformRef, err := doc.SigstorePlatform()
 	require.NoError(t, err)
 	assert.NotEmpty(t, platformRef.Digest)
 
