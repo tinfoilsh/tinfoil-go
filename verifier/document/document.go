@@ -119,7 +119,10 @@ type Document struct {
 	deviceEvidence      *DeviceEvidenceSection
 
 	// bound records that bind checked the challenge against the caller's
-	// nonce; reportData is the REPORT_DATA it recomputed.
+	// nonce; reportData is the REPORT_DATA it recomputed. bound is a stopgap
+	// while Document is still the exported wire struct, which callers can
+	// build without Parse; it goes away once Document is opaque and Parse is
+	// the only way to obtain one.
 	bound      bool
 	reportData [64]byte
 }
@@ -421,7 +424,8 @@ func (d *Document) CryptoMaterialItem(id string) (*CryptoMaterialItem, bool) {
 func (d *Document) ExpectedReportData() [64]byte { return d.reportData }
 
 // Bound reports whether the document was checked against a nonce, as every
-// document from Parse is.
+// document from Parse is. It exists only while Document can still be built as
+// a struct literal, and will be removed once Parse is its only constructor.
 func (d *Document) Bound() bool { return d != nil && d.bound }
 
 // bind checks the challenge bindings of a decoded document against the
