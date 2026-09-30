@@ -10,9 +10,6 @@
 package collaterals
 
 import (
-	"fmt"
-	"regexp"
-	"strings"
 	"time"
 
 	"github.com/tinfoilsh/tinfoil-go/verifier/document"
@@ -20,17 +17,6 @@ import (
 
 // FormatV2 identifies the collaterals response carrying v3 collateral entries.
 const FormatV2 = "https://tinfoil.sh/predicate/attestation-collaterals/v2"
-
-const (
-	platformDummy           = "dummy"
-	maxConfigSlugLength     = 63
-	maxConfigRevisionLength = 128
-)
-
-var (
-	configNamePattern   = regexp.MustCompile(`^/[a-z0-9]+(?:-[a-z0-9]+)*/[a-z0-9]+(?:-[a-z0-9]+)*/[A-Za-z0-9][A-Za-z0-9._-]*$`)
-	configDigestPattern = regexp.MustCompile(`^[0-9a-f]{64}$`)
-)
 
 // Request asks the collaterals service for everything a v3 document must
 // carry. The raw quote is the only platform input: the service derives the
@@ -49,35 +35,6 @@ type Request struct {
 	// QuoteBase64 is the raw hardware report (SEV-SNP, 1184 bytes) or quote
 	// (TDX v4, with certification data) in standard base64.
 	QuoteBase64 string `json:"quote_base64"`
-}
-
-// Validate checks transport selection; it does not authenticate the requested config.
-func (r Request) Validate() error {
-	if r.Platform == "" || r.QuoteBase64 == "" {
-		return fmt.Errorf("collateral request requires platform and quote_base64")
-	}
-	if r.Config == nil {
-		if r.Repo == "" && r.Platform != platformDummy {
-			return fmt.Errorf("collateral request requires a repository or config reference")
-		}
-		return nil
-	}
-	if r.Repo != "" || r.Tag != "" {
-		return fmt.Errorf("config and repository sources are mutually exclusive")
-	}
-	if !configNamePattern.MatchString(r.Config.Name) || !configDigestPattern.MatchString(r.Config.Digest) {
-		return fmt.Errorf("config reference requires a canonical name and lowercase SHA-256 digest")
-	}
-	parts := strings.Split(r.Config.Name, "/")
-	for _, part := range parts[1 : len(parts)-1] {
-		if len(part) > maxConfigSlugLength {
-			return fmt.Errorf("config identity component is too long")
-		}
-	}
-	if len(parts[len(parts)-1]) > maxConfigRevisionLength {
-		return fmt.Errorf("config revision is too long")
-	}
-	return nil
 }
 
 // Response carries the complete collateral array for a v3 attestation
