@@ -25,7 +25,6 @@ import (
 
 	"github.com/openai/openai-go/v3"
 	"github.com/openai/openai-go/v3/option"
-	"github.com/tinfoilsh/tinfoil-go/verifier"
 	"github.com/tinfoilsh/tinfoil-go/verifier/client"
 )
 
@@ -43,9 +42,8 @@ const (
 
 	// Derived client-side: no router sits between a gateway client and the engine.
 	cacheSaltField = "cache_salt"
-	// Separates the salt from the secret's other use, the cache-prefix hash.
-	cacheSaltDomainTag  = "tinfoil/client-cache-salt/v2"
-	cacheRouteDomainTag = "tinfoil/client-cache-route/v2"
+	// Derives both the salt and the cache-prefix key from the secret.
+	cacheSaltDomainTag = "tinfoil/client-cache-salt/v2"
 )
 
 type CatalogEntry struct {
@@ -76,8 +74,7 @@ func FetchCatalog(host string) (Catalog, error) {
 }
 
 func (e CatalogEntry) trusted() bool {
-	repo, tag, digest, err := verifier.ParseReference(e.Repo)
-	return err == nil && tag == "" && digest == "" && strings.HasPrefix(repo, trustedRepoOwner) && len(e.Hosts) > 0
+	return strings.HasPrefix(e.Repo, trustedRepoOwner) && !strings.Contains(e.Repo, "@") && len(e.Hosts) > 0
 }
 
 // Gateway is an OpenAI client that seals each request to a verified replica
@@ -114,14 +111,14 @@ func NewGateway(baseURL string, catalog func() Catalog, opts GatewayOptions) (*G
 			opt(cfg)
 		}
 	}
+	if cfg.enclave != "" || cfg.repo != "" || cmp.Or(cfg.transport, TransportEHBP) != TransportEHBP || cfg.baseURLSet {
+		return nil, &ConfigurationError{Err: fmt.Errorf("a gateway takes its enclaves and repositories from its catalog and uses the EHBP transport")}
+	}
 	base, err := url.Parse(baseURL)
 	if err != nil || base.Scheme != "https" || base.Host == "" {
 		return nil, &ConfigurationError{Err: fmt.Errorf("gateway base URL must be an absolute HTTPS URL: %q", baseURL)}
 	}
-	if cfg.enclave != "" || cfg.repo != "" || cfg.baseURLSet || cmp.Or(cfg.transport, TransportEHBP) != TransportEHBP {
-		return nil, &ConfigurationError{Err: fmt.Errorf("gateway client options cannot set an enclave, repository, base URL, or non-EHBP transport")}
-	}
-	policy, err := newGatewayPolicy(opts, cfg.verification)
+	policy, err := newGatewayPolicy(opts, &cfg.verification)
 	if err != nil {
 		return nil, &ConfigurationError{Err: err}
 	}
@@ -137,12 +134,11 @@ func NewGateway(baseURL string, catalog func() Catalog, opts GatewayOptions) (*G
 		policy:  policy,
 		secret:  resolveUserCacheSecret(cfg.userCacheSecret, cfg.userCacheSecretSet),
 		build: func(r replica) (http.RoundTripper, error) {
-			verification := policy.defaults
-			if pin, pinned := policy.pins[r.model]; pinned {
-				verification = pin.verification
-			}
-			secure, err := client.NewSecureClient(r.host, r.ref, &verification)
-			if err != nil {
+			secure, pinned := policy.pins[r.model]
+			var err error
+			if pinned {
+				secure = secure.ForEnclave(r.host)
+			} else if secure, err = client.NewSecureClient(r.host, r.ref, &cfg.verification); err != nil {
 				return nil, err
 			}
 			secure = secure.ViaRelay(base.Host)
@@ -223,61 +219,27 @@ func (g *Gateway) Serves(model string) bool {
 	return err == nil
 }
 
-type modelPolicy struct {
-	repo, ref    string
-	verification client.VerificationOptions
-}
-
 type gatewayPolicy struct {
-	pins       map[string]modelPolicy
+	pins       map[string]*client.SecureClient
 	pinnedOnly bool
-	defaults   client.VerificationOptions
 }
 
-func newGatewayPolicy(opts GatewayOptions, defaults client.VerificationOptions) (gatewayPolicy, error) {
+func newGatewayPolicy(opts GatewayOptions, defaults *client.VerificationOptions) (gatewayPolicy, error) {
 	if opts.PinnedModelsOnly && len(opts.ModelPins) == 0 {
 		return gatewayPolicy{}, fmt.Errorf("pinned-only mode requires at least one model pin")
 	}
-	defaults, err := snapshotVerificationOptions(defaults)
-	if err != nil {
-		return gatewayPolicy{}, fmt.Errorf("gateway verification options: %w", err)
-	}
-	p := gatewayPolicy{pins: make(map[string]modelPolicy), pinnedOnly: opts.PinnedModelsOnly, defaults: defaults}
+	p := gatewayPolicy{pins: make(map[string]*client.SecureClient), pinnedOnly: opts.PinnedModelsOnly}
 	for model, pin := range opts.ModelPins {
-		if strings.TrimSpace(model) == "" {
-			return gatewayPolicy{}, fmt.Errorf("model pin name must not be empty")
+		if strings.TrimSpace(model) == "" || !strings.HasPrefix(pin.Repo, trustedRepoOwner) {
+			return gatewayPolicy{}, fmt.Errorf("model pin %q repository %q must belong to %s", model, pin.Repo, trustedRepoOwner)
 		}
-		repo, _, _, err := verifier.ParseReference(pin.Repo)
+		secure, err := client.NewSecureClient("", pin.Repo, cmp.Or(pin.Verification, defaults))
 		if err != nil {
 			return gatewayPolicy{}, fmt.Errorf("model %q: %w", model, err)
 		}
-		if !strings.HasPrefix(repo, trustedRepoOwner) {
-			return gatewayPolicy{}, fmt.Errorf("model %q repository %q must belong to %s", model, repo, trustedRepoOwner)
-		}
-		verification := defaults
-		if pin.Verification != nil {
-			verification, err = snapshotVerificationOptions(*pin.Verification)
-			if err != nil {
-				return gatewayPolicy{}, fmt.Errorf("model %q: %w", model, err)
-			}
-		}
-		p.pins[model] = modelPolicy{repo: repo, ref: pin.Repo, verification: verification}
+		p.pins[model] = secure
 	}
 	return p, nil
-}
-
-func snapshotVerificationOptions(opts client.VerificationOptions) (client.VerificationOptions, error) {
-	v, err := verifier.New(
-		verifier.WithPinnedRegisters(opts.PinnedRegisters),
-		verifier.WithFreshnessMaxAge(opts.FreshnessMaxAge),
-	)
-	if err != nil {
-		return client.VerificationOptions{}, err
-	}
-	return client.VerificationOptions{
-		PinnedRegisters: v.PinnedRegisters(),
-		FreshnessMaxAge: v.FreshnessMaxAge(),
-	}, nil
 }
 
 func (p *gatewayPolicy) resolve(model string, catalog Catalog) ([]string, replica, error) {
@@ -290,10 +252,10 @@ func (p *gatewayPolicy) resolve(model string, catalog Catalog) ([]string, replic
 		return nil, replica{}, &ConfigurationError{Err: fmt.Errorf("model %q has no valid bare %s repository with replicas in the gateway catalog", model, trustedRepoOwner)}
 	}
 	if pinned {
-		if entry.Repo != pin.repo {
-			return nil, replica{}, &AttestationError{Err: fmt.Errorf("model %q: expected repository %q, gateway offered %q", model, pin.repo, entry.Repo)}
+		if repo, _, _ := strings.Cut(pin.Repo(), "@"); entry.Repo != repo {
+			return nil, replica{}, &AttestationError{Err: fmt.Errorf("model %q: expected repository %q, gateway offered %q", model, repo, entry.Repo)}
 		}
-		return entry.Hosts, replica{ref: pin.ref, model: model}, nil
+		return entry.Hosts, replica{ref: pin.Repo(), model: model}, nil
 	}
 	return entry.Hosts, replica{ref: entry.Repo}, nil
 }
@@ -472,36 +434,16 @@ func prepareMultipart(req *http.Request, boundary string) error {
 	if err != nil {
 		return fmt.Errorf("reading multipart upload: %w", err)
 	}
-	reader := multipart.NewReader(bytes.NewReader(body), boundary)
-	var model string
-	for {
-		part, err := reader.NextRawPart()
-		if err == io.EOF {
-			break
-		}
-		if err != nil {
-			return &ConfigurationError{Err: fmt.Errorf("invalid multipart upload: %w", err)}
-		}
-		if part.FormName() == "model" {
-			if model != "" || part.FileName() != "" {
-				return &ConfigurationError{Err: fmt.Errorf("multipart upload must contain exactly one model field, not a file")}
-			}
-			value, err := io.ReadAll(part)
-			if err != nil {
-				return &ConfigurationError{Err: fmt.Errorf("reading multipart model: %w", err)}
-			}
-			model = string(value)
-			if strings.TrimSpace(model) == "" {
-				return &ConfigurationError{Err: fmt.Errorf("multipart model must not be empty")}
-			}
-		} else if _, err := io.Copy(io.Discard, part); err != nil {
-			return &ConfigurationError{Err: fmt.Errorf("reading multipart field: %w", err)}
-		}
+	form, err := multipart.NewReader(bytes.NewReader(body), boundary).ReadForm(maxMultipartBodySize)
+	if err != nil {
+		return &ConfigurationError{Err: fmt.Errorf("invalid multipart upload: %w", err)}
 	}
-	if model == "" {
-		return &ConfigurationError{Err: fmt.Errorf("multipart upload is missing its model field")}
+	defer form.RemoveAll()
+	models := form.Value["model"]
+	if len(models) != 1 || strings.TrimSpace(models[0]) == "" || form.File["model"] != nil {
+		return &ConfigurationError{Err: fmt.Errorf("multipart upload must contain exactly one non-empty model field")}
 	}
-	req.Header.Set(modelHeader, model)
+	req.Header.Set(modelHeader, models[0])
 	setGatewayBody(req, body)
 	return nil
 }
@@ -513,36 +455,19 @@ func (t *sealTransport) scopeCache(h http.Header, fields map[string]json.RawMess
 	if secret = cmp.Or(secret, t.secret); secret == "" {
 		return body, nil
 	}
-	scheme, apiKey, _ := strings.Cut(h.Get("Authorization"), " ")
-	if !strings.EqualFold(scheme, "Bearer") {
-		apiKey = ""
-	}
-	apiKey = strings.TrimSpace(apiKey)
-	salt, err := deriveCacheSalt(secret, apiKey)
+	key, err := hkdf.Key(sha256.New, []byte(secret), []byte(h.Get("Authorization")), cacheSaltDomainTag, 2*sha256.Size)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("deriving cache keys: %w", err)
 	}
 	h.Del(cachePrefixHeader)
 	if head := promptHead(fields); head != nil {
-		key, err := hkdf.Key(sha256.New, []byte(secret), []byte(apiKey), cacheRouteDomainTag, sha256.Size)
-		if err != nil {
-			return nil, fmt.Errorf("deriving cache routing key: %w", err)
-		}
-		mac := hmac.New(sha256.New, key)
+		mac := hmac.New(sha256.New, key[sha256.Size:])
 		mac.Write(head)
 		h.Set(cachePrefixHeader, hex.EncodeToString(mac.Sum(nil)))
 	}
 	delete(fields, userCacheSecretField)
-	fields[cacheSaltField], _ = json.Marshal(salt)
+	fields[cacheSaltField], _ = json.Marshal(base64.RawURLEncoding.EncodeToString(key[:sha256.Size]))
 	return json.Marshal(fields)
-}
-
-func deriveCacheSalt(secret, apiKey string) (string, error) {
-	key, err := hkdf.Key(sha256.New, []byte(secret), []byte(apiKey), cacheSaltDomainTag, sha256.Size)
-	if err != nil {
-		return "", fmt.Errorf("deriving cache salt: %w", err)
-	}
-	return base64.RawURLEncoding.EncodeToString(key), nil
 }
 
 // The first element is the prefix later turns of a conversation share.
