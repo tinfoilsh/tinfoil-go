@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/tinfoilsh/tinfoil-go/tinfoil-config/endorsement"
 	"github.com/tinfoilsh/tinfoil-go/verifier"
 	"github.com/tinfoilsh/tinfoil-go/verifier/document"
 	"github.com/tinfoilsh/tinfoil-go/verifier/measurement"
@@ -20,6 +21,7 @@ type VerifiedDocumentV3 struct {
 	CodeDigest      string
 	CodeTag         string
 	CodeMeasurement *measurement.Measurement
+	Config          *endorsement.Verified `json:",omitempty"`
 	// EnclaveMeasurement carries the quote's authenticated registers,
 	// proven to match the expectations.
 	EnclaveMeasurement *measurement.Measurement
@@ -28,6 +30,7 @@ type VerifiedDocumentV3 struct {
 	// FreshnessExpiresAt is the earlier authenticated code/platform witness
 	// deadline. Cached verification must not authorize new requests at or
 	// after this time; re-verifying the same witness does not extend it.
+	// IGVM uses the config approval and platform witness deadlines.
 	FreshnessExpiresAt time.Time
 }
 
@@ -96,6 +99,7 @@ func fromVerification(v *verifier.Verification) *VerifiedDocumentV3 {
 		CodeDigest:         v.CodeDigest,
 		CodeTag:            v.CodeTag,
 		CodeMeasurement:    v.CodeMeasurement,
+		Config:             v.Config,
 		EnclaveMeasurement: v.EnclaveMeasurement,
 		CryptoMaterial:     v.CryptoMaterial,
 		FreshnessExpiresAt: v.FreshnessExpiresAt,
@@ -112,7 +116,12 @@ func (s *SecureClient) fetchVerification() (*VerifiedDocumentV3, error) {
 		return nil, err
 	}
 
-	core, err := s.core.VerifyV3(docBytes, nonce, s.repo)
+	var core *verifier.Verification
+	if s.configPolicy != nil {
+		core, err = s.core.VerifyIGVM(docBytes, nonce, *s.configPolicy)
+	} else {
+		core, err = s.core.VerifyV3(docBytes, nonce, s.repo)
+	}
 	if err != nil {
 		return nil, err
 	}

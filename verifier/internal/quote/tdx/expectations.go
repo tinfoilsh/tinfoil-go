@@ -28,6 +28,9 @@ func Assemble(a *policy.Artifact, p *policy.TDXPolicy, required *policy.Shape, q
 	if a == nil || p == nil {
 		return nil, "", &errs.ConfigurationError{Err: fmt.Errorf("endorsements and TDX policy are required")}
 	}
+	if p.ConfigBinding != "" {
+		return nil, "", fmt.Errorf("config-binding policy requires IGVM verification")
+	}
 	if required == nil {
 		return nil, "", &errs.ConfigurationError{Err: fmt.Errorf("VM shape is required")}
 	}
@@ -111,8 +114,8 @@ func options(p *policy.TDXPolicy) (*tdxvalidate.Options, error) {
 		return nil, err
 	}
 
-	// MR_CONFIG_ID, MR_OWNER, and MR_OWNER_CONFIG are unconditionally
-	// pinned to zero: Tinfoil launches never populate them.
+	// MR_OWNER and MR_OWNER_CONFIG are pinned to zero. MR_CONFIG_ID is
+	// resolved by the verification profile, with zero as the legacy expectation.
 	// The QE and PCE security versions are enforced by quote verification
 	// against Intel's signed QE Identity and TCB Info collateral; the
 	// library's header minimums compare reserved header bytes (pinned to

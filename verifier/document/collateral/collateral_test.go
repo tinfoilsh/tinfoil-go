@@ -167,7 +167,6 @@ func TestDecodeIgnoresUnknownFormats(t *testing.T) {
 	// never decoded: only the structural checks apply to them.
 	for _, entry := range []Entry{
 		{ID: "future", Role: RoleEndorsement, Format: "https://tinfoil.sh/collateral/unknown/v9", Data: []byte(`{"x":1}`)},
-		{ID: "config", Role: RoleReferenceValues, Format: ConfigEndorsementV1Format, Data: []byte(`{"anything":true}`)},
 		{ID: "misrole", Role: RoleReferenceValues, Format: AMDVCEKV1Format, Data: []byte(`{"unknown":1}`)},
 	} {
 		set, err := Decode([]Entry{entry})
