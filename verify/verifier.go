@@ -16,6 +16,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/tinfoilsh/tinfoil-go/tinfoil-config/endorsement"
 	"github.com/tinfoilsh/tinfoil-go/document"
 	"github.com/tinfoilsh/tinfoil-go/document/collateral"
 	"github.com/tinfoilsh/tinfoil-go/internal/errs"
@@ -50,7 +51,9 @@ type Verifier struct {
 	// provenance authenticates reference values against its own copy of the
 	// trusted root. NewVerifier builds one from the embedded root; only the
 	// conformance build can replace it.
-	provenance *provenance.Client
+	provenance     *provenance.Client
+	configKeys     []endorsement.SigningKey
+	configVerifier *endorsement.Verifier
 
 	// overrides is empty in a production build; the conformance build uses it
 	// to carry synthetic vendor roots down to the CPU evidence layer.
@@ -78,6 +81,13 @@ func NewVerifier(opts ...Option) (*Verifier, error) {
 		if err := opt(v); err != nil {
 			return nil, configurationError(err)
 		}
+	}
+	if v.configKeys != nil {
+		v.configVerifier, err = v.provenance.ConfigVerifier(v.configKeys)
+		if err != nil {
+			return nil, configurationError(err)
+		}
+		v.configKeys = nil
 	}
 	return v, nil
 }

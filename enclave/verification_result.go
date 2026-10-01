@@ -12,6 +12,10 @@ func cloneMeasurement(value *measurement.Measurement) *measurement.Measurement {
 	}
 	cloned := *value
 	cloned.Registers = append([]string(nil), value.Registers...)
+	if verified.Config != nil {
+		config := *verified.Config
+		cloned.Config = &config
+	}
 	return &cloned
 }
 
@@ -23,5 +27,9 @@ func cloneVerification(verified *verify.Verification) *verify.Verification {
 	cloned.CryptoMaterial = append([]document.CryptoMaterialItem(nil), verified.CryptoMaterial...)
 	cloned.CodeMeasurement = cloneMeasurement(verified.CodeMeasurement)
 	cloned.EnclaveMeasurement = cloneMeasurement(verified.EnclaveMeasurement)
+	if verified.Config != nil {
+		config := *verified.Config
+		cloned.Config = &config
+	}
 	return &cloned
 }
