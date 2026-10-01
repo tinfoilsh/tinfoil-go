@@ -1,18 +1,20 @@
-package document
+package collateral
 
 import (
-	"bytes"
 	"crypto/sha256"
 	"encoding/json/jsontext"
 	"fmt"
+	"slices"
 
+	"github.com/tinfoilsh/tinfoil-go/verifier/internal/canonical"
 	"golang.org/x/mod/semver"
 )
 
 const (
-	RuntimeRepo                   = "tinfoilsh/cvmimage"
-	RuntimeCollateralID           = "runtime"
-	CollateralIGVMRuntimeV1Format = "https://tinfoil.sh/collateral/igvm-runtime/v1"
+	RuntimeRepo         = "tinfoilsh/cvmimage"
+	RuntimeID           = "runtime"
+	IGVMRuntimeV1Format = "https://tinfoil.sh/collateral/igvm-runtime/v1"
+	PlatformID          = "platform"
 )
 
 type RuntimeReference struct {
@@ -28,7 +30,7 @@ func (r RuntimeReference) Validate() error {
 	if !semver.IsValid(r.Tag) || semver.Canonical(r.Tag) != r.Tag {
 		return fmt.Errorf("runtime tag must be a canonical semantic version")
 	}
-	_, err := decodeLowerHex("runtime digest", r.Digest, sha256.Size)
+	_, err := canonical.DecodeLowerHex("runtime digest", r.Digest, sha256.Size)
 	return err
 }
 
@@ -44,37 +46,37 @@ type IGVMRuntime struct {
 	Bundle   jsontext.Value
 }
 
-func (d *Document) IGVMRuntime() (IGVMRuntime, error) {
-	entry, err := d.uniqueReferenceValues(RuntimeCollateralID, CollateralIGVMRuntimeV1Format)
-	if err != nil {
-		return IGVMRuntime{}, err
-	}
-	c, err := decodeCollateral[runtimeCollateral](entry)
-	if err != nil {
+func decodeRuntime(entry *Entry) (IGVMRuntime, error) {
+	var c runtimeCollateral
+	if err := unmarshalData(entry, entry.Format, &c); err != nil {
 		return IGVMRuntime{}, err
 	}
 	if err := c.RuntimeReference.Validate(); err != nil {
 		return IGVMRuntime{}, err
 	}
-	manifest, err := decodeCanonicalBase64("manifest_base64", c.Manifest)
+	manifest, err := canonical.DecodeBase64("manifest_base64", c.Manifest)
 	if err != nil {
 		return IGVMRuntime{}, err
 	}
-	if !bytes.HasPrefix(bytes.TrimSpace(c.Bundle), []byte("{")) {
+	if c.Bundle.Kind() != '{' {
 		return IGVMRuntime{}, fmt.Errorf("sigstore_bundle must be an object")
 	}
 	return IGVMRuntime{RuntimeReference: c.RuntimeReference, Manifest: manifest, Bundle: c.Bundle}, nil
 }
 
+func (r IGVMRuntime) Clone() IGVMRuntime {
+	r.Manifest = slices.Clone(r.Manifest)
+	r.Bundle = slices.Clone(r.Bundle)
+	return r
+}
+
 // IGVMPlatform requires an unambiguous platform reference for the IGVM profile.
-func (d *Document) IGVMPlatform() (SigstoreRef, error) {
-	entry, err := d.uniqueReferenceValues("platform", CollateralSigstorePlatformV1Format)
-	if err != nil {
-		return SigstoreRef{}, err
+func (s Set) IGVMPlatform() (SigstoreRef, error) {
+	if s.platformCount == 0 {
+		return SigstoreRef{}, fmt.Errorf("%w: no platform reference-values entry", ErrNotFound)
 	}
-	c, err := decodeCollateral[sigstoreCollateral](entry)
-	if err != nil {
-		return SigstoreRef{}, err
+	if s.platformCount != 1 || s.igvmPlatform == nil {
+		return SigstoreRef{}, fmt.Errorf("conflicting platform collateral for IGVM")
 	}
-	return SigstoreRef{Repo: c.Repo, Tag: c.Tag, Digest: c.Digest, Bundle: c.SigstoreBundle}, nil
+	return s.igvmPlatform.Clone(), nil
 }

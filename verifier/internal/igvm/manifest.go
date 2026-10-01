@@ -8,7 +8,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/tinfoilsh/tinfoil-go/verifier/document"
+	"github.com/tinfoilsh/tinfoil-go/verifier/document/collateral"
 )
 
 const (
@@ -64,7 +64,7 @@ func (s TDXLaunch) Registers() [5]string {
 	return [5]string{s.MRTD, s.RTMR0, s.RTMR1, s.RTMR2, s.RTMR3}
 }
 
-func ParseManifest(data []byte, expected document.RuntimeReference) (*Manifest, error) {
+func ParseManifest(data []byte, expected collateral.RuntimeReference) (*Manifest, error) {
 	if err := expected.Validate(); err != nil {
 		return nil, err
 	}

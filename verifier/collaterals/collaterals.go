@@ -20,7 +20,7 @@ const FormatV2 = "https://tinfoil.sh/predicate/attestation-collaterals/v2"
 
 const (
 	ProfileIGVMV1 = "https://tinfoil.sh/predicate/attestation-collaterals/igvm/v1"
-	RuntimeRepo   = document.RuntimeRepo
+	RuntimeRepo   = collateral.RuntimeRepo
 )
 
 // Request asks the collaterals service for everything a v3 document must
@@ -28,8 +28,8 @@ const (
 // AMD KDS parameters (SEV-SNP) or the Intel PCS URLs (TDX) from it, so the
 // enclave does no report parsing.
 type Request struct {
-	Profile string                     `json:"profile,omitempty"`
-	Runtime *document.RuntimeReference `json:"runtime,omitempty"`
+	Profile string                       `json:"profile,omitempty"`
+	Runtime *collateral.RuntimeReference `json:"runtime,omitempty"`
 	// Repo is the code repository whose Sigstore bundle is returned.
 	// The IGVM profile requires Runtime and Config instead of Repo and Tag.
 	Repo string `json:"repo,omitempty"`

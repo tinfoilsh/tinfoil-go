@@ -1,63 +1,40 @@
 package document
 
 import (
-	"encoding/base64"
-	"encoding/json/v2"
-	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	"github.com/tinfoilsh/tinfoil-go/verifier/document/collateral"
 )
 
-func TestConfigEndorsement(t *testing.T) {
-	config := []byte("cvm-version: 1.0.0\n")
-	reference := "sha256:" + strings.Repeat("ab", 32)
-	data, err := json.Marshal(configCollateral{
-		Reference: reference,
-		Config:    base64.StdEncoding.EncodeToString(config),
-		Bundle:    []byte(`{"mediaType":"test"}`),
-	})
+func TestConfigCollateralAccessorsReturnCopies(t *testing.T) {
+	doc := &Document{collateral: collateral.Set{
+		Config:  &collateral.ConfigEndorsement{Reference: "ref", Config: []byte("config"), Bundle: []byte(`{}`)},
+		Runtime: &collateral.IGVMRuntime{Manifest: []byte("manifest"), Bundle: []byte(`{}`)},
+	}}
+	config, err := doc.ConfigEndorsement()
 	require.NoError(t, err)
-	entry := CollateralEntry{ID: ConfigCollateralID, Role: RoleReferenceValues, Format: CollateralConfigEndorsementV1Format, Data: data}
-	doc := &Document{collateral: []CollateralEntry{entry}}
-	got, err := doc.ConfigEndorsement()
+	config.Reference = "changed"
+	config.Config[0] = '!'
+	config.Bundle[0] = '!'
+	againConfig, err := doc.ConfigEndorsement()
 	require.NoError(t, err)
-	require.Equal(t, reference, got.Reference)
-	require.Equal(t, config, got.Config)
-	require.JSONEq(t, `{"mediaType":"test"}`, string(got.Bundle))
+	require.Equal(t, "ref", againConfig.Reference)
+	require.Equal(t, "config", string(againConfig.Config))
+	require.Equal(t, "{}", string(againConfig.Bundle))
 
-	for name, mutate := range map[string]func(*Document){
-		"missing":      func(d *Document) { d.collateral = nil },
-		"wrong role":   func(d *Document) { d.collateral[0].Role = RoleEndorsement },
-		"wrong format": func(d *Document) { d.collateral[0].Format = CollateralSigstoreCodeV1Format },
-		"wrong id":     func(d *Document) { d.collateral[0].ID = "other" },
-		"duplicate":    func(d *Document) { d.collateral = append(d.collateral, entry) },
-		"ambiguous format": func(d *Document) {
-			other := entry
-			other.ID = "other"
-			d.collateral = append(d.collateral, other)
-		},
-		"noncanonical base64": func(d *Document) {
-			d.collateral[0].Data = []byte(strings.Replace(string(data), `"config_base64":"`, `"config_base64":"\n`, 1))
-		},
-		"bad reference": func(d *Document) {
-			d.collateral[0].Data = []byte(strings.Replace(string(data), reference, "sha256:bad", 1))
-		},
-		"unknown member": func(d *Document) {
-			d.collateral[0].Data = append([]byte(`{"unknown":true,`), data[1:]...)
-		},
-		"duplicate member": func(d *Document) {
-			d.collateral[0].Data = append([]byte(`{"endorsement_ref":"ignored",`), data[1:]...)
-		},
-		"missing bundle": func(d *Document) {
-			d.collateral[0].Data = []byte(strings.Replace(string(data), `{"mediaType":"test"}`, "null", 1))
-		},
-	} {
-		t.Run(name, func(t *testing.T) {
-			doc := &Document{collateral: []CollateralEntry{entry}}
-			mutate(doc)
-			_, err := doc.ConfigEndorsement()
-			require.Error(t, err)
-		})
-	}
+	runtime, err := doc.IGVMRuntime()
+	require.NoError(t, err)
+	runtime.Manifest[0] = '!'
+	runtime.Bundle[0] = '!'
+	againRuntime, err := doc.IGVMRuntime()
+	require.NoError(t, err)
+	require.Equal(t, "manifest", string(againRuntime.Manifest))
+	require.Equal(t, "{}", string(againRuntime.Bundle))
+
+	empty := &Document{}
+	_, err = empty.ConfigEndorsement()
+	require.ErrorIs(t, err, collateral.ErrNotFound)
+	_, err = empty.IGVMRuntime()
+	require.ErrorIs(t, err, collateral.ErrNotFound)
 }

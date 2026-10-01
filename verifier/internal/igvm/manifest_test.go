@@ -8,7 +8,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
-	"github.com/tinfoilsh/tinfoil-go/verifier/document"
+	"github.com/tinfoilsh/tinfoil-go/verifier/document/collateral"
 )
 
 func validManifest() Manifest {
@@ -23,12 +23,12 @@ func validManifest() Manifest {
 	}}
 }
 
-func manifestBytes(t *testing.T, m Manifest) ([]byte, document.RuntimeReference) {
+func manifestBytes(t *testing.T, m Manifest) ([]byte, collateral.RuntimeReference) {
 	t.Helper()
 	data, err := json.Marshal(m)
 	require.NoError(t, err)
 	digest := sha256.Sum256(data)
-	return data, document.RuntimeReference{Repo: document.RuntimeRepo, Tag: "v0.15.0", Digest: hex.EncodeToString(digest[:])}
+	return data, collateral.RuntimeReference{Repo: collateral.RuntimeRepo, Tag: "v0.15.0", Digest: hex.EncodeToString(digest[:])}
 }
 
 func TestManifestRequiresCompleteSupportedMeasurements(t *testing.T) {
@@ -81,7 +81,7 @@ func TestConfigRuntimePin(t *testing.T) {
 		config := []byte("cvm-version: " + version + "@sha256:" + digest + "\ncontainers: []\n")
 		ref, err := ConfigRuntime(config)
 		require.NoError(t, err)
-		require.Equal(t, document.RuntimeReference{Repo: document.RuntimeRepo, Tag: "v" + strings.TrimPrefix(version, "v"), Digest: digest}, ref)
+		require.Equal(t, collateral.RuntimeReference{Repo: collateral.RuntimeRepo, Tag: "v" + strings.TrimPrefix(version, "v"), Digest: digest}, ref)
 	}
 	good := "cvm-version: 0.15.0@sha256:" + digest + "\n"
 	for name, config := range map[string]string{
