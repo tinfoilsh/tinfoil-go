@@ -3,7 +3,7 @@
 // ready-to-embed v3 collateral entries.
 //
 // This is service plumbing, not part of the verification API: verifiers never
-// see these types. The response embeds document.CollateralEntry directly
+// see these types. The response embeds collateral.Entry directly
 // so the enclave serves the entries verbatim, with no translation layer.
 // Collateral is untrusted transport: the verifier re-checks every signature,
 // so a malformed or substituted entry can only cause verification to fail.
@@ -12,7 +12,7 @@ package collaterals
 import (
 	"time"
 
-	"github.com/tinfoilsh/tinfoil-go/verifier/document"
+	"github.com/tinfoilsh/tinfoil-go/verifier/document/collateral"
 )
 
 // FormatV2 identifies the collaterals response carrying v3 collateral entries.
@@ -29,7 +29,7 @@ type Request struct {
 	// Tag optionally pins a code release; latest when empty.
 	Tag string `json:"tag,omitempty"`
 	// Config pins a versioned registry config and its exact-byte digest.
-	Config *document.ConfigReference `json:"config,omitempty"`
+	Config *collateral.ConfigReference `json:"config,omitempty"`
 	// Platform is attestation's platform label: "sev-snp" or "tdx".
 	Platform string `json:"platform"`
 	// QuoteBase64 is the raw hardware report (SEV-SNP, 1184 bytes) or quote
@@ -44,5 +44,5 @@ type Response struct {
 	Format    string    `json:"format"`
 	ExpiresAt time.Time `json:"expires_at"`
 
-	Collateral []document.CollateralEntry `json:"collateral"`
+	Collateral []collateral.Entry `json:"collateral"`
 }

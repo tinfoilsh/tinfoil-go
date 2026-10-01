@@ -14,6 +14,8 @@ import (
 	"fmt"
 	"slices"
 
+	"github.com/tinfoilsh/tinfoil-go/verifier/document/collateral"
+	"github.com/tinfoilsh/tinfoil-go/verifier/internal/canonical"
 	"github.com/tinfoilsh/tinfoil-go/verifier/internal/errs"
 )
 
@@ -60,29 +62,6 @@ const (
 	// KeyX25519HPKEV1Format is a raw 32-byte X25519 public key (RFC 7748)
 	// used for HPKE (RFC 9180).
 	KeyX25519HPKEV1Format = "https://tinfoil.sh/key/x25519-hpke/v1"
-
-	// CollateralAMDVCEKV1Format carries {vcek_der_base64, cert_chain_pem}.
-	CollateralAMDVCEKV1Format = "https://tinfoil.sh/collateral/amd-vcek/v1"
-	// CollateralAMDCRLV1Format carries {crl_der_base64}: the AMD KDS CRL for
-	// the product line, enabling offline VCEK revocation checking.
-	CollateralAMDCRLV1Format = "https://tinfoil.sh/collateral/amd-crl/v1"
-	// CollateralIntelPCSV1Format carries captured Intel PCS responses
-	// (TCB info, QE identity, CRLs) for offline TDX quote verification.
-	CollateralIntelPCSV1Format = "https://tinfoil.sh/collateral/intel-pcs/v1"
-	// CollateralNvidiaGPUV1Format carries NVIDIA cert chains / RIM material.
-	CollateralNvidiaGPUV1Format = "https://tinfoil.sh/collateral/nvidia-gpu/v1"
-	// CollateralSigstoreCodeV1Format carries the code-provenance Sigstore
-	// bundle {repo, tag, digest, sigstore_bundle}.
-	CollateralSigstoreCodeV1Format = "https://tinfoil.sh/collateral/sigstore-code/v1"
-	// CollateralSigstorePlatformV1Format carries the platform-endorsements
-	// Sigstore bundle {repo, tag, digest, sigstore_bundle}.
-	CollateralSigstorePlatformV1Format = "https://tinfoil.sh/collateral/sigstore-platform/v1"
-	// CollateralSigstoreFreshnessV1Format carries a freshness witness for a
-	// Sigstore reference-values artifact.
-	CollateralSigstoreFreshnessV1Format = "https://tinfoil.sh/collateral/sigstore-freshness/v1"
-	// CollateralConfigEndorsementV1Format carries an exact config and its
-	// timestamped registry approval bundle.
-	CollateralConfigEndorsementV1Format = "https://tinfoil.sh/collateral/config-endorsement/v1"
 )
 
 // Conventional identifiers.
@@ -91,13 +70,6 @@ const (
 	CryptoMaterialIDTLS = "tls"
 	// CryptoMaterialIDHPKE is the conventional id of the HPKE public key.
 	CryptoMaterialIDHPKE = "hpke"
-	// SubjectCPU is the reserved collateral subject id for the CPU quote.
-	SubjectCPU = "cpu"
-	// Freshness collateral IDs associate each freshness proof with the
-	// Sigstore reference-values entry it refreshes.
-	FreshnessCollateralIDCode     = "code-freshness"
-	FreshnessCollateralIDPlatform = "platform-freshness"
-	ConfigCollateralID            = "tinfoil-config"
 )
 
 // NonceSize is the required challenge nonce size in bytes.
@@ -110,12 +82,12 @@ const NonceSize = 32
 // canonicalization, no raw-span extraction (the same envelope discipline as
 // DSSE and JWS).
 type rawDocument struct {
-	Format         string            `json:"format"`
-	Challenge      challenge         `json:"challenge"`
-	CPUEvidence    rawCPUEvidence    `json:"cpu_evidence"`
-	CryptoMaterial string            `json:"crypto_material"`
-	DeviceEvidence string            `json:"device_evidence"`
-	Collateral     []CollateralEntry `json:"collateral"`
+	Format         string             `json:"format"`
+	Challenge      challenge          `json:"challenge"`
+	CPUEvidence    rawCPUEvidence     `json:"cpu_evidence"`
+	CryptoMaterial string             `json:"crypto_material"`
+	DeviceEvidence string             `json:"device_evidence"`
+	Collateral     []collateral.Entry `json:"collateral"`
 }
 
 // Document is a parsed v3 attestation document. Obtain one from Parse, which
@@ -126,7 +98,7 @@ type Document struct {
 	challenge  challenge
 	endorsed   endorsedHashes
 	evidence   CPUEvidence
-	collateral collateralSet
+	collateral collateral.Set
 
 	cryptoMaterialBytes []byte
 	deviceEvidenceBytes []byte
@@ -165,10 +137,10 @@ func (c *challenge) parse() error {
 	if c.ReportDataAlgorithm != ReportDataV1Algorithm {
 		return fmt.Errorf("unsupported challenge.report_data_algorithm %q", c.ReportDataAlgorithm)
 	}
-	if _, err := decodeLowerHex("challenge.nonce", c.Nonce, NonceSize); err != nil {
+	if _, err := canonical.DecodeLowerHex("challenge.nonce", c.Nonce, NonceSize); err != nil {
 		return err
 	}
-	if _, err := decodeLowerHex("challenge.report_data", c.ReportData, 64); err != nil {
+	if _, err := canonical.DecodeLowerHex("challenge.report_data", c.ReportData, 64); err != nil {
 		return err
 	}
 	return nil
@@ -183,16 +155,16 @@ type rawCPUEvidence struct {
 
 // parse checks the CPU evidence and returns its decoded report.
 func (c *rawCPUEvidence) parse() ([]byte, error) {
-	if _, err := decodeLowerHex("cpu_evidence.endorsed.crypto_material_hash", c.Endorsed.CryptoMaterialHash, 32); err != nil {
+	if _, err := canonical.DecodeLowerHex("cpu_evidence.endorsed.crypto_material_hash", c.Endorsed.CryptoMaterialHash, 32); err != nil {
 		return nil, err
 	}
-	if _, err := decodeLowerHex("cpu_evidence.endorsed.device_evidence_hash", c.Endorsed.DeviceEvidenceHash, 32); err != nil {
+	if _, err := canonical.DecodeLowerHex("cpu_evidence.endorsed.device_evidence_hash", c.Endorsed.DeviceEvidenceHash, 32); err != nil {
 		return nil, err
 	}
 	if c.Format == "" || c.ReportBase64 == "" {
 		return nil, fmt.Errorf("cpu_evidence is incomplete")
 	}
-	return decodeCanonicalBase64("cpu_evidence.report_base64", c.ReportBase64)
+	return canonical.DecodeBase64("cpu_evidence.report_base64", c.ReportBase64)
 }
 
 // endorsedHashes are the SHA-256 hashes of the two endorsed sections,
@@ -220,7 +192,7 @@ func parseCryptoMaterial(encoded string) (*cryptoMaterialSection, []byte, error)
 	if encoded == "" {
 		return nil, nil, fmt.Errorf("crypto_material section is missing")
 	}
-	cryptoBytes, err := decodeCanonicalBase64("crypto_material", encoded)
+	cryptoBytes, err := canonical.DecodeBase64("crypto_material", encoded)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -248,7 +220,7 @@ func parseCryptoMaterial(encoded string) (*cryptoMaterialSection, []byte, error)
 		case KeySPKIFPSHA256V1Format, KeyX25519HPKEV1Format:
 			// Known key formats are exactly 32 bytes; reject short, empty,
 			// or odd-length material before callers trust it.
-			if _, err := decodeLowerHex(fmt.Sprintf("crypto_material item %q data", item.ID), item.Data, 32); err != nil {
+			if _, err := canonical.DecodeLowerHex(fmt.Sprintf("crypto_material item %q data", item.ID), item.Data, 32); err != nil {
 				return nil, nil, err
 			}
 		default:
@@ -258,7 +230,7 @@ func parseCryptoMaterial(encoded string) (*cryptoMaterialSection, []byte, error)
 			if item.Data == "" {
 				return nil, nil, fmt.Errorf("crypto_material item %q data is empty", item.ID)
 			}
-			if !lowerHexRE.MatchString(item.Data) || len(item.Data)%2 != 0 {
+			if !canonical.IsLowerHex(item.Data) || len(item.Data)%2 != 0 {
 				return nil, nil, fmt.Errorf("crypto_material item %q data is not lowercase hex", item.ID)
 			}
 		}
@@ -288,7 +260,7 @@ func parseDeviceEvidence(encoded string) (*deviceEvidenceSection, []byte, error)
 	if encoded == "" {
 		return nil, nil, fmt.Errorf("device_evidence section is missing")
 	}
-	deviceBytes, err := decodeCanonicalBase64("device_evidence", encoded)
+	deviceBytes, err := canonical.DecodeBase64("device_evidence", encoded)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -371,8 +343,8 @@ func Parse(docBytes, expectedNonce []byte) (result *Document, err error) {
 }
 
 // decode applies the structural rules alone and decodes every field once:
-// the endorsed sections are retained as raw bytes for hashing, and each
-// collateral entry of a known role and format is decoded strictly.
+// the endorsed sections are retained as raw bytes for hashing, and the
+// collateral is decoded by collateral.Decode.
 func decode(docBytes []byte) (*Document, error) {
 	var raw rawDocument
 	if err := json.Unmarshal(docBytes, &raw, json.RejectUnknownMembers(true)); err != nil {
@@ -402,10 +374,7 @@ func decode(docBytes []byte) (*Document, error) {
 		return nil, err
 	}
 
-	if err := validateCollateral(raw.Collateral); err != nil {
-		return nil, err
-	}
-	collateral, err := decodeCollateral(raw.Collateral)
+	set, err := collateral.Decode(raw.Collateral)
 	if err != nil {
 		return nil, err
 	}
@@ -414,7 +383,7 @@ func decode(docBytes []byte) (*Document, error) {
 		challenge:           raw.Challenge,
 		endorsed:            raw.CPUEvidence.Endorsed,
 		evidence:            CPUEvidence{Format: raw.CPUEvidence.Format, Report: report},
-		collateral:          collateral,
+		collateral:          set,
 		cryptoMaterialBytes: cryptoBytes,
 		deviceEvidenceBytes: deviceBytes,
 		cryptoMaterial:      cm,
@@ -458,6 +427,50 @@ func (d *Document) CryptoMaterialItem(id string) (*CryptoMaterialItem, bool) {
 		}
 	}
 	return nil, false
+}
+
+// CPUEndorsements returns a copy of the endorsement collateral the document's
+// CPU evidence format uses, for the reserved collateral.SubjectCPU subject, as
+// Parse decoded it. Collateral the document does not carry is left nil.
+func (d *Document) CPUEndorsements() collateral.CPUEndorsements {
+	var en collateral.CPUEndorsements
+	switch d.evidence.Format {
+	case SEVSNPReportV1Format:
+		en = collateral.CPUEndorsements{AMDVCEK: d.collateral.CPU.AMDVCEK, AMDCRL: d.collateral.CPU.AMDCRL}
+	case TDXQuoteV1Format:
+		en = collateral.CPUEndorsements{IntelPCS: d.collateral.CPU.IntelPCS}
+	}
+	return en.Clone()
+}
+
+// SigstoreCode returns the code-provenance reference-values entry. A document
+// without one returns an error wrapping collateral.ErrNotFound.
+func (d *Document) SigstoreCode() (collateral.SigstoreRef, error) {
+	return sigstoreRef(d.collateral.SigstoreCode, collateral.SigstoreCodeV1Format)
+}
+
+// SigstorePlatform returns the platform-endorsements reference-values entry.
+// A document without one returns an error wrapping collateral.ErrNotFound.
+func (d *Document) SigstorePlatform() (collateral.SigstoreRef, error) {
+	return sigstoreRef(d.collateral.SigstorePlatform, collateral.SigstorePlatformV1Format)
+}
+
+func sigstoreRef(ref *collateral.SigstoreRef, format string) (collateral.SigstoreRef, error) {
+	if ref == nil {
+		return collateral.SigstoreRef{}, fmt.Errorf("%w: document carries no %s reference-values entry", collateral.ErrNotFound, format)
+	}
+	return ref.Clone(), nil
+}
+
+// Freshness returns the freshness witness with the given collateral ID, such
+// as collateral.FreshnessIDCode. A document without it returns an error
+// wrapping collateral.ErrNotFound.
+func (d *Document) Freshness(id string) (collateral.Freshness, error) {
+	f, ok := d.collateral.Freshness[id]
+	if !ok {
+		return collateral.Freshness{}, fmt.Errorf("%w: document carries no %s reference-values entry %q", collateral.ErrNotFound, collateral.SigstoreFreshnessV1Format, id)
+	}
+	return f.Clone(), nil
 }
 
 // ExpectedReportData is the REPORT_DATA the document's CPU quote must bind,

@@ -12,6 +12,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/tinfoilsh/tinfoil-go/internal/testutil"
 	"github.com/tinfoilsh/tinfoil-go/verifier/document"
+	"github.com/tinfoilsh/tinfoil-go/verifier/document/collateral"
 	"github.com/tinfoilsh/tinfoil-go/verifier/internal/provenance"
 	"github.com/tinfoilsh/tinfoil-go/verifier/measurement"
 )
@@ -86,8 +87,8 @@ func TestLiveVerifyFreshnessExpiration(t *testing.T) {
 	require.NoError(t, err)
 	matched := false
 	for id, artifact := range map[string]*provenance.AuthenticatedArtifact{
-		document.FreshnessCollateralIDCode:     &code.AuthenticatedArtifact,
-		document.FreshnessCollateralIDPlatform: &platform.AuthenticatedArtifact,
+		collateral.FreshnessIDCode:     &code.AuthenticatedArtifact,
+		collateral.FreshnessIDPlatform: &platform.AuthenticatedArtifact,
 	} {
 		witness, err := doc.Freshness(id)
 		require.NoError(t, err)

@@ -23,7 +23,7 @@ import (
 	tdxverify "github.com/google/go-tdx-guest/verify"
 	tdxtrust "github.com/google/go-tdx-guest/verify/trust"
 
-	"github.com/tinfoilsh/tinfoil-go/verifier/document"
+	"github.com/tinfoilsh/tinfoil-go/verifier/document/collateral"
 	"github.com/tinfoilsh/tinfoil-go/verifier/internal/errs"
 	"github.com/tinfoilsh/tinfoil-go/verifier/measurement"
 )
@@ -50,7 +50,7 @@ type Evidence struct {
 	// Quote is the raw TDX quote.
 	Quote []byte
 	// PCS holds the captured Intel PCS responses, replayed instead of fetched.
-	PCS []document.PCSResponse
+	PCS []collateral.PCSResponse
 }
 
 // Authenticate verifies the quote's signature chain up to the pinned Intel
@@ -151,12 +151,12 @@ func pcsCollateralKey(rawURL string) (string, error) {
 }
 
 type pcsReplayGetter struct {
-	responses map[string]*document.PCSResponse
+	responses map[string]*collateral.PCSResponse
 	now       time.Time
 }
 
-func newPCSReplayGetter(responses []document.PCSResponse, now time.Time) (*pcsReplayGetter, error) {
-	m := make(map[string]*document.PCSResponse, len(responses))
+func newPCSReplayGetter(responses []collateral.PCSResponse, now time.Time) (*pcsReplayGetter, error) {
+	m := make(map[string]*collateral.PCSResponse, len(responses))
 	for i := range responses {
 		key, err := pcsCollateralKey(responses[i].URL)
 		if err != nil {

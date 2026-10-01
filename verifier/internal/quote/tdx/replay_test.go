@@ -13,12 +13,12 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/tinfoilsh/tinfoil-go/verifier/document"
+	"github.com/tinfoilsh/tinfoil-go/verifier/document/collateral"
 )
 
 func TestPCSReplayGetter(t *testing.T) {
 	body := []byte(`{"tcbInfo":{"tcbEvaluationDataNumber":19}}`)
-	getter, err := newPCSReplayGetter([]document.PCSResponse{{
+	getter, err := newPCSReplayGetter([]collateral.PCSResponse{{
 		URL:     "https://api.trustedservices.intel.com/tdx/certification/v4/tcb?fmspc=90c06f000000&tcbEvaluationDataNumber=19",
 		Headers: map[string][]string{"tcb-info-issuer-chain": {"chain"}},
 		Body:    body,
@@ -37,7 +37,7 @@ func TestPCSReplayGetter(t *testing.T) {
 }
 
 func TestTCBEvaluationRecorder(t *testing.T) {
-	inner, err := newPCSReplayGetter([]document.PCSResponse{
+	inner, err := newPCSReplayGetter([]collateral.PCSResponse{
 		{
 			URL:  "https://api.trustedservices.intel.com/tdx/certification/v4/tcb?fmspc=90c06f000000",
 			Body: []byte(`{"tcbInfo":{"tcbEvaluationDataNumber":20}}`),
@@ -91,7 +91,7 @@ func TestPCSReplayGetterValidatesCRL(t *testing.T) {
 		},
 	} {
 		t.Run(name, func(t *testing.T) {
-			getter, err := newPCSReplayGetter([]document.PCSResponse{{
+			getter, err := newPCSReplayGetter([]collateral.PCSResponse{{
 				URL:  tc.url,
 				Body: tc.body,
 			}}, now)
@@ -137,7 +137,7 @@ func testCRL(t *testing.T, thisUpdate, nextUpdate time.Time) []byte {
 func TestPCSReplayGetterReturnsPrivateBuffers(t *testing.T) {
 	body := []byte(`{"tcbInfo":{"tcbEvaluationDataNumber":19}}`)
 	url := "https://api.trustedservices.intel.com/tdx/certification/v4/tcb?fmspc=90c06f000000"
-	getter, err := newPCSReplayGetter([]document.PCSResponse{{URL: url, Body: body}}, time.Now())
+	getter, err := newPCSReplayGetter([]collateral.PCSResponse{{URL: url, Body: body}}, time.Now())
 	require.NoError(t, err)
 
 	_, first, err := getter.Get(url)

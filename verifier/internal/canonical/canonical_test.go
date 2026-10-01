@@ -1,4 +1,4 @@
-package document
+package canonical
 
 import (
 	"bytes"
@@ -40,7 +40,7 @@ func TestDecodeLowerHex(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := decodeLowerHex("field", tt.value, tt.wantLen)
+			got, err := DecodeLowerHex("field", tt.value, tt.wantLen)
 			if tt.wantErr != "" {
 				assert.ErrorContains(t, err, tt.wantErr)
 				assert.Nil(t, got)
@@ -57,13 +57,13 @@ func TestDecodeLowerHexRoundTrip(t *testing.T) {
 		b := make([]byte, n)
 		_, err := rand.Read(b)
 		require.NoError(t, err)
-		got, err := decodeLowerHex("field", hex.EncodeToString(b), n)
+		got, err := DecodeLowerHex("field", hex.EncodeToString(b), n)
 		require.NoError(t, err, "length %d", n)
 		assert.Equal(t, b, got, "length %d", n)
 	}
 }
 
-func TestDecodeCanonicalBase64(t *testing.T) {
+func TestDecodeBase64(t *testing.T) {
 	tests := []struct {
 		name    string
 		value   string
@@ -93,7 +93,7 @@ func TestDecodeCanonicalBase64(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := decodeCanonicalBase64("field", tt.value)
+			got, err := DecodeBase64("field", tt.value)
 			if tt.wantErr != "" {
 				assert.ErrorContains(t, err, tt.wantErr)
 				assert.Nil(t, got)
@@ -105,12 +105,12 @@ func TestDecodeCanonicalBase64(t *testing.T) {
 	}
 }
 
-func TestDecodeCanonicalBase64RoundTrip(t *testing.T) {
+func TestDecodeBase64RoundTrip(t *testing.T) {
 	for n := 0; n <= 64; n++ {
 		b := make([]byte, n)
 		_, err := rand.Read(b)
 		require.NoError(t, err)
-		got, err := decodeCanonicalBase64("field", base64.StdEncoding.EncodeToString(b))
+		got, err := DecodeBase64("field", base64.StdEncoding.EncodeToString(b))
 		require.NoError(t, err, "length %d", n)
 		assert.Equal(t, b, got, "length %d", n)
 	}

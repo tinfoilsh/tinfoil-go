@@ -12,6 +12,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/tinfoilsh/tinfoil-go/internal/testutil"
 	"github.com/tinfoilsh/tinfoil-go/verifier/document"
+	"github.com/tinfoilsh/tinfoil-go/verifier/document/collateral"
 	"github.com/tinfoilsh/tinfoil-go/verifier/internal/provenance"
 )
 
@@ -79,10 +80,10 @@ func TestLiveIgnoreFreshness(t *testing.T) {
 		accept    bool
 	}{
 		{"expired witnesses", nil, expiredMaxAge, "stale", true},
-		{"missing witnesses", changeCollateral(document.CollateralSigstoreFreshnessV1Format, true), 0, "code-freshness", true},
-		{"invalid witnesses", changeCollateral(document.CollateralSigstoreFreshnessV1Format, false), 0, "verifying code freshness", true},
-		{"invalid code provenance", changeCollateral(document.CollateralSigstoreCodeV1Format, false), 0, "verifying code measurement", false},
-		{"invalid platform provenance", changeCollateral(document.CollateralSigstorePlatformV1Format, false), 0, "verifying platform endorsements", false},
+		{"missing witnesses", changeCollateral(collateral.SigstoreFreshnessV1Format, true), 0, "code-freshness", true},
+		{"invalid witnesses", changeCollateral(collateral.SigstoreFreshnessV1Format, false), 0, "verifying code freshness", true},
+		{"invalid code provenance", changeCollateral(collateral.SigstoreCodeV1Format, false), 0, "verifying code measurement", false},
+		{"invalid platform provenance", changeCollateral(collateral.SigstorePlatformV1Format, false), 0, "verifying platform endorsements", false},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			modified := raw

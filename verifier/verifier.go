@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/tinfoilsh/tinfoil-go/verifier/document"
+	"github.com/tinfoilsh/tinfoil-go/verifier/document/collateral"
 	"github.com/tinfoilsh/tinfoil-go/verifier/internal/errs"
 	"github.com/tinfoilsh/tinfoil-go/verifier/internal/provenance"
 	"github.com/tinfoilsh/tinfoil-go/verifier/internal/quote"
@@ -181,7 +182,7 @@ func (v *Verifier) authenticateReferenceValues(doc *document.Document, repo stri
 		return code, endorsements, time.Time{}, nil
 	}
 
-	codeFreshness, err := doc.Freshness(document.FreshnessCollateralIDCode)
+	codeFreshness, err := doc.Freshness(collateral.FreshnessIDCode)
 	if err != nil {
 		return nil, nil, time.Time{}, err
 	}
@@ -189,7 +190,7 @@ func (v *Verifier) authenticateReferenceValues(doc *document.Document, repo stri
 	if err != nil {
 		return nil, nil, time.Time{}, fmt.Errorf("verifying code freshness: %w", err)
 	}
-	platformFreshness, err := doc.Freshness(document.FreshnessCollateralIDPlatform)
+	platformFreshness, err := doc.Freshness(collateral.FreshnessIDPlatform)
 	if err != nil {
 		return nil, nil, time.Time{}, err
 	}
