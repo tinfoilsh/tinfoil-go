@@ -3,6 +3,7 @@ package provenance
 import (
 	"fmt"
 	"regexp"
+	"strings"
 
 	"github.com/sigstore/sigstore-go/pkg/verify"
 	"github.com/tinfoilsh/tinfoil-go/tinfoil-config/endorsement"
@@ -61,7 +62,7 @@ func enforceArtifactSubject(result *verify.VerificationResult, name, digest stri
 		if subject.Name != name {
 			continue
 		}
-		if subject.Digest["sha256"] != digest {
+		if !strings.EqualFold(subject.Digest["sha256"], digest) {
 			return fmt.Errorf("runtime provenance subject digest does not match")
 		}
 		matches++
