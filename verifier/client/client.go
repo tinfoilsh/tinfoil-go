@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/tinfoilsh/tinfoil-go/tinfoil-config/endorsement"
 	"github.com/tinfoilsh/tinfoil-go/verifier"
 	"github.com/tinfoilsh/tinfoil-go/verifier/internal/provenance"
 	"github.com/tinfoilsh/tinfoil-go/verifier/measurement"
@@ -19,7 +20,8 @@ type SecureClient struct {
 	enclave, repo, relay string
 	// core is the immutable verification policy, shared by every client
 	// derived from this one.
-	core *verifier.Verifier
+	core         *verifier.Verifier
+	configPolicy *verifier.ConfigPolicy
 
 	stateMu      sync.RWMutex
 	state        *enclaveState
@@ -82,14 +84,15 @@ type VerificationOptions struct {
 
 // verifier builds the immutable policy these options describe, validating
 // them once. A nil receiver selects the defaults.
-func (input *VerificationOptions) verifier() (*verifier.Verifier, error) {
+func (input *VerificationOptions) verifier(extra ...verifier.Option) (*verifier.Verifier, error) {
 	if input == nil {
-		return verifier.New()
+		return verifier.New(extra...)
 	}
-	return verifier.New(
+	opts := []verifier.Option{
 		verifier.WithPinnedRegisters(input.PinnedRegisters),
 		verifier.WithFreshnessMaxAge(input.FreshnessMaxAge),
-	)
+	}
+	return verifier.New(append(opts, extra...)...)
 }
 
 // NewSecureClient creates a secure client for an enclave and repository
@@ -103,6 +106,19 @@ func NewSecureClient(enclave, repo string, opts *VerificationOptions) (*SecureCl
 		return nil, err
 	}
 	return &SecureClient{enclave: enclave, repo: repo, core: core}, nil
+}
+
+// NewConfigClient requires the IGVM config-binding profile. Keys and policy are
+// caller trust, independent of the enclave and collateral service.
+func NewConfigClient(enclave string, policy verifier.ConfigPolicy, keys []endorsement.SigningKey, opts *VerificationOptions) (*SecureClient, error) {
+	if err := policy.Validate(); err != nil {
+		return nil, &ConfigurationError{Err: err}
+	}
+	core, err := opts.verifier(verifier.WithConfigSigningKeys(keys))
+	if err != nil {
+		return nil, err
+	}
+	return &SecureClient{enclave: enclave, core: core, configPolicy: &policy}, nil
 }
 
 // NewDefaultClient applies opts to every discovered router and fallback.
@@ -125,12 +141,12 @@ func NewDefaultClient(opts *VerificationOptions) (*SecureClient, error) {
 
 // ForEnclave keeps the repository reference and verification options.
 func (s *SecureClient) ForEnclave(enclave string) *SecureClient {
-	return &SecureClient{enclave: enclave, repo: s.repo, core: s.core}
+	return &SecureClient{enclave: enclave, repo: s.repo, core: s.core, configPolicy: s.configPolicy}
 }
 
 // ViaRelay fetches attestation through relay, which forwards it to the enclave.
 func (s *SecureClient) ViaRelay(relay string) *SecureClient {
-	return &SecureClient{enclave: s.enclave, repo: s.repo, relay: relay, core: s.core}
+	return &SecureClient{enclave: s.enclave, repo: s.repo, relay: relay, core: s.core, configPolicy: s.configPolicy}
 }
 
 // Enclave returns the enclave URL

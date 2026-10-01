@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/tinfoilsh/tinfoil-go/tinfoil-config/endorsement"
 	"github.com/tinfoilsh/tinfoil-go/verifier/document"
 	"github.com/tinfoilsh/tinfoil-go/verifier/internal/errs"
 	"github.com/tinfoilsh/tinfoil-go/verifier/measurement"
@@ -16,6 +17,7 @@ type Verification struct {
 	CodeDigest      string
 	CodeTag         string
 	CodeMeasurement *measurement.Measurement
+	Config          *endorsement.Verified `json:",omitempty"`
 	// EnclaveMeasurement carries the quote's authenticated registers,
 	// proven to match the expectations.
 	EnclaveMeasurement *measurement.Measurement
@@ -25,6 +27,7 @@ type Verification struct {
 	// deadline. Cached verification must not authorize new requests at or
 	// after this time; re-verifying the same witness does not extend it.
 	// It is zero when WithIgnoreFreshness skips witness verification.
+	// IGVM uses the config approval and platform witness deadlines.
 	FreshnessExpiresAt time.Time
 }
 

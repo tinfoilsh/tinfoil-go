@@ -65,3 +65,16 @@ func (d *Document) IGVMRuntime() (IGVMRuntime, error) {
 	}
 	return IGVMRuntime{RuntimeReference: c.RuntimeReference, Manifest: manifest, Bundle: c.Bundle}, nil
 }
+
+// IGVMPlatform requires an unambiguous platform reference for the IGVM profile.
+func (d *Document) IGVMPlatform() (SigstoreRef, error) {
+	entry, err := d.uniqueReferenceValues("platform", CollateralSigstorePlatformV1Format)
+	if err != nil {
+		return SigstoreRef{}, err
+	}
+	c, err := decodeCollateral[sigstoreCollateral](entry)
+	if err != nil {
+		return SigstoreRef{}, err
+	}
+	return SigstoreRef{Repo: c.Repo, Tag: c.Tag, Digest: c.Digest, Bundle: c.SigstoreBundle}, nil
+}
