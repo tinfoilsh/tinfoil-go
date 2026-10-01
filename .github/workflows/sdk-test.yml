@@ -35,6 +35,9 @@ jobs:
           set -euo pipefail
           go test -race -p 1 -json -v -covermode atomic -coverprofile=coverage.out ./... 2>&1 | tee /tmp/gotest.log | gotestfmt
 
+      - name: Run config attestation integration tests
+        run: go test -race -p 1 -tags=tinfoil_conformance ./verifier
+
       - name: Upload test log
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         if: always()
