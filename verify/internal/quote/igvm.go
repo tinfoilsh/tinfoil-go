@@ -43,7 +43,7 @@ func AssembleIGVM(doc *document.Document, endorsements *policy.Artifact, runtime
 	case policy.PlatformSEVSNP:
 		result.sev, err = sev.AssembleIGVM(machine.SEVSNP, q.sev, runtime.SNPLaunch, configHash, reportData)
 	case policy.PlatformTDX:
-		result.tdx, err = tdx.AssembleIGVM(machine.TDX, q.tdx, runtime.TDXLaunch, configHash, reportData)
+		result.tdx, err = tdx.AssembleIGVM(machine.TDX, runtime.TDXLaunch, configHash, reportData)
 	default:
 		return nil, fmt.Errorf("unsupported platform %q", q.platform)
 	}

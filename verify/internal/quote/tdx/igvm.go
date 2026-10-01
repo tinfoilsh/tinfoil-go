@@ -7,9 +7,9 @@ import (
 	"github.com/tinfoilsh/tinfoil-go/verifier/internal/policy"
 )
 
-func AssembleIGVM(p *policy.TDXPolicy, q *Quote, runtime *igvm.TDXLaunch, configHash [32]byte, reportData [64]byte) (*Expectations, error) {
-	if p == nil || p.ConfigBinding != policy.ConfigBindingSHA256 || runtime == nil || q == nil || q.quote == nil {
-		return nil, fmt.Errorf("IGVM requires runtime measurements, a quote, and a config-binding platform policy")
+func AssembleIGVM(p *policy.TDXPolicy, runtime *igvm.TDXLaunch, configHash [32]byte, reportData [64]byte) (*Expectations, error) {
+	if p == nil || p.ConfigBinding != policy.ConfigBindingSHA256 || runtime == nil {
+		return nil, fmt.Errorf("IGVM requires runtime measurements and a config-binding platform policy")
 	}
 	if err := p.Validate(); err != nil {
 		return nil, err

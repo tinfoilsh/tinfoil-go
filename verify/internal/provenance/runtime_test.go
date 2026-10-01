@@ -18,6 +18,8 @@ func TestRuntimeSubjectMustBeUniqueAndMatchNameAndDigest(t *testing.T) {
 		return &verify.VerificationResult{Statement: &in_toto.Statement{Subject: subjects}}
 	}
 	require.NoError(t, enforceArtifactSubject(result(other, matching), name, digest))
+	uppercase := &in_toto.ResourceDescriptor{Name: name, Digest: map[string]string{"sha256": strings.ToUpper(digest)}}
+	require.NoError(t, enforceArtifactSubject(result(uppercase), name, digest))
 	for label, value := range map[string]*verify.VerificationResult{
 		"missing":      result(other),
 		"duplicate":    result(matching, matching),
