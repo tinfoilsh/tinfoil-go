@@ -22,7 +22,8 @@ const (
 	// PlatformSEVSNP labels AMD SEV-SNP policies.
 	PlatformSEVSNP = "sev-snp"
 	// PlatformTDX labels Intel TDX policies.
-	PlatformTDX = "tdx"
+	PlatformTDX         = "tdx"
+	ConfigBindingSHA256 = "sha256"
 
 	sevIdentifierHexLen = 128
 	tdxIdentifierHexLen = 32
