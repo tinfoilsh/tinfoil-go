@@ -28,6 +28,9 @@ func Assemble(a *policy.Artifact, p *policy.TDXPolicy, required *policy.Shape, q
 	if a == nil || p == nil {
 		return nil, "", &errs.ConfigurationError{Err: fmt.Errorf("endorsements and TDX policy are required")}
 	}
+	if p.ConfigBinding != "" {
+		return nil, "", fmt.Errorf("config-binding policy requires IGVM verification")
+	}
 	if required == nil {
 		return nil, "", &errs.ConfigurationError{Err: fmt.Errorf("VM shape is required")}
 	}

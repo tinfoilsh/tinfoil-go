@@ -26,9 +26,10 @@ const (
 // want* fields are compared by strict equality — the library options only
 // bound them.
 type Expectations struct {
-	opts             *sevvalidate.Options
-	wantGuestPolicy  sevabi.SnpPolicy
-	wantPlatformInfo sevabi.SnpPlatformInfo
+	opts               *sevvalidate.Options
+	wantGuestPolicy    sevabi.SnpPolicy
+	wantPlatformInfo   sevabi.SnpPlatformInfo
+	runtimeGuestPolicy *uint64
 }
 
 // Assemble combines policy with the launch digest, REPORT_DATA, and authenticated CHIP_ID.
@@ -36,6 +37,9 @@ func Assemble(p *policy.SEVSNPPolicy, q *Quote, launchDigest string, reportData 
 	defer func() { err = errs.WrapAttestation(err) }()
 	if p == nil {
 		return nil, &errs.ConfigurationError{Err: fmt.Errorf("SEV policy is required")}
+	}
+	if p.ConfigBinding != "" {
+		return nil, fmt.Errorf("config-binding policy requires IGVM verification")
 	}
 	if q == nil || q.attestation == nil {
 		return nil, &errs.ConfigurationError{Err: fmt.Errorf("authenticated SEV quote is required")}
@@ -79,6 +83,9 @@ func (e *Expectations) Validate(q *Quote) (err error) {
 	}
 
 	report := q.attestation.GetReport()
+	if e.runtimeGuestPolicy != nil && (report.GetPolicy() != *e.runtimeGuestPolicy || report.GetGuestSvn() != 0) {
+		return fmt.Errorf("SEV launch policy or guest SVN does not match the runtime manifest")
+	}
 	gotPolicy, err := sevabi.ParseSnpPolicy(report.GetPolicy())
 	if err != nil {
 		return fmt.Errorf("parsing report guest policy: %w", err)
