@@ -410,7 +410,7 @@ func TestParseRejectsDuplicateCollateralIDs(t *testing.T) {
 }
 
 func TestFreshnessSelectsArtifactID(t *testing.T) {
-	doc := &Document{collateral: []CollateralEntry{
+	doc := documentWithCollateral(t, "", []CollateralEntry{
 		{
 			ID:     FreshnessCollateralIDCode,
 			Role:   RoleReferenceValues,
@@ -423,7 +423,7 @@ func TestFreshnessSelectsArtifactID(t *testing.T) {
 			Format: CollateralSigstoreFreshnessV1Format,
 			Data:   json.RawMessage(`{"sigstore_bundle":{"mediaType":"platform"}}`),
 		},
-	}}
+	})
 
 	code, err := doc.Freshness(FreshnessCollateralIDCode)
 	require.NoError(t, err)
@@ -448,10 +448,10 @@ func TestSigstoreReferences(t *testing.T) {
 			Data:   json.RawMessage(`{"repo":"` + repo + `","tag":"v1","digest":"` + strings.Repeat("ab", 32) + `","sigstore_bundle":{"mediaType":"` + repo + `"}}`),
 		}
 	}
-	doc := &Document{collateral: []CollateralEntry{
+	doc := documentWithCollateral(t, "", []CollateralEntry{
 		entry(CollateralSigstoreCodeV1Format, "org/code"),
 		entry(CollateralSigstorePlatformV1Format, "org/platform"),
-	}}
+	})
 
 	code, err := doc.SigstoreCode()
 	require.NoError(t, err)
@@ -471,7 +471,7 @@ func TestSigstoreReferences(t *testing.T) {
 
 	malformed := entry(CollateralSigstoreCodeV1Format, "org/code")
 	malformed.Data = json.RawMessage(`{"repo":"org/code","unknown":1}`)
-	_, err = (&Document{collateral: []CollateralEntry{malformed}}).SigstoreCode()
+	_, err = decodeCollateral([]CollateralEntry{malformed})
 	assert.ErrorContains(t, err, "parsing "+CollateralSigstoreCodeV1Format+" collateral entry")
 	assert.NotErrorIs(t, err, ErrCollateralNotFound, "malformed is not missing")
 }

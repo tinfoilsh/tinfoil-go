@@ -47,8 +47,7 @@ func TestVerifyLiveFixtureTDX(t *testing.T) {
 	artifact := loadEndorsementArtifact(t)
 
 	evidence := doc.CPUEvidence()
-	endorsements, err := doc.CPUEndorsements()
-	require.NoError(t, err)
+	endorsements := doc.CPUEndorsements()
 	q, err := Authenticate(evidence, endorsements, nil)
 	if err != nil && strings.Contains(err.Error(), "expired") {
 		t.Skipf("captured Intel PCS collateral has expired: %v", err)

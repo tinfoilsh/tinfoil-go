@@ -126,7 +126,7 @@ type Document struct {
 	challenge  challenge
 	endorsed   endorsedHashes
 	evidence   CPUEvidence
-	collateral []CollateralEntry
+	collateral collateralSet
 
 	cryptoMaterialBytes []byte
 	deviceEvidenceBytes []byte
@@ -370,46 +370,51 @@ func Parse(docBytes, expectedNonce []byte) (result *Document, err error) {
 	return doc, nil
 }
 
-// decode applies the structural rules alone; the endorsed sections are
-// retained as raw bytes for hashing.
+// decode applies the structural rules alone and decodes every field once:
+// the endorsed sections are retained as raw bytes for hashing, and each
+// collateral entry of a known role and format is decoded strictly.
 func decode(docBytes []byte) (*Document, error) {
-	var wire rawDocument
-	if err := json.Unmarshal(docBytes, &wire, json.RejectUnknownMembers(true)); err != nil {
+	var raw rawDocument
+	if err := json.Unmarshal(docBytes, &raw, json.RejectUnknownMembers(true)); err != nil {
 		return nil, fmt.Errorf("parsing attestation document: %w", err)
 	}
 
-	if wire.Format != AttestationV3Format {
-		return nil, fmt.Errorf("unsupported document format %q", wire.Format)
+	if raw.Format != AttestationV3Format {
+		return nil, fmt.Errorf("unsupported document format %q", raw.Format)
 	}
 
-	if err := wire.Challenge.parse(); err != nil {
+	if err := raw.Challenge.parse(); err != nil {
 		return nil, err
 	}
 
-	report, err := wire.CPUEvidence.parse()
+	report, err := raw.CPUEvidence.parse()
 	if err != nil {
 		return nil, err
 	}
 
-	cm, cryptoBytes, err := parseCryptoMaterial(wire.CryptoMaterial)
+	cm, cryptoBytes, err := parseCryptoMaterial(raw.CryptoMaterial)
 	if err != nil {
 		return nil, err
 	}
 
-	de, deviceBytes, err := parseDeviceEvidence(wire.DeviceEvidence)
+	de, deviceBytes, err := parseDeviceEvidence(raw.DeviceEvidence)
 	if err != nil {
 		return nil, err
 	}
 
-	if err := validateCollateral(wire.Collateral); err != nil {
+	if err := validateCollateral(raw.Collateral); err != nil {
+		return nil, err
+	}
+	collateral, err := decodeCollateral(raw.Collateral)
+	if err != nil {
 		return nil, err
 	}
 
 	return &Document{
-		challenge:           wire.Challenge,
-		endorsed:            wire.CPUEvidence.Endorsed,
-		evidence:            CPUEvidence{Format: wire.CPUEvidence.Format, Report: report},
-		collateral:          wire.Collateral,
+		challenge:           raw.Challenge,
+		endorsed:            raw.CPUEvidence.Endorsed,
+		evidence:            CPUEvidence{Format: raw.CPUEvidence.Format, Report: report},
+		collateral:          collateral,
 		cryptoMaterialBytes: cryptoBytes,
 		deviceEvidenceBytes: deviceBytes,
 		cryptoMaterial:      cm,

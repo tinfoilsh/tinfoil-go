@@ -53,8 +53,13 @@ func Build(in BuildInput, generateQuote QuoteGenerator) ([]byte, error) {
 	if err := validateCollateral(in.Collateral); err != nil {
 		return nil, &errs.ConfigurationError{Err: err}
 	}
-	// validateCollateral does not look inside Data; serializing now rejects a
-	// malformed entry before it costs a hardware quote.
+	// Parse decodes every entry of a known role and format; decoding them
+	// here rejects one Parse would refuse before it costs a hardware quote.
+	if _, err := decodeCollateral(in.Collateral); err != nil {
+		return nil, &errs.ConfigurationError{Err: err}
+	}
+	// Entries of other formats are not decoded; serializing rejects one whose
+	// Data is not valid JSON.
 	if _, err := json.Marshal(in.Collateral); err != nil {
 		return nil, &errs.ConfigurationError{Err: fmt.Errorf("serializing collateral: %w", err)}
 	}

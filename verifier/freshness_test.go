@@ -62,7 +62,9 @@ func TestLiveIgnoreFreshness(t *testing.T) {
 					if remove {
 						continue
 					}
-					entry["data"] = map[string]any{"sigstore_bundle": map[string]any{}}
+					// Only the bundle is invalidated; the entry keeps the
+					// digest and other fields Parse requires.
+					entry["data"].(map[string]any)["sigstore_bundle"] = map[string]any{}
 				}
 				kept = append(kept, entry)
 			}
