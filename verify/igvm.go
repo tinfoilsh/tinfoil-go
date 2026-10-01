@@ -8,6 +8,7 @@ import (
 
 	"github.com/tinfoilsh/tinfoil-go/tinfoil-config/endorsement"
 	"github.com/tinfoilsh/tinfoil-go/verifier/document"
+	"github.com/tinfoilsh/tinfoil-go/verifier/document/collateral"
 	"github.com/tinfoilsh/tinfoil-go/verifier/internal/errs"
 	"github.com/tinfoilsh/tinfoil-go/verifier/internal/igvm"
 	"github.com/tinfoilsh/tinfoil-go/verifier/internal/quote"
@@ -109,7 +110,7 @@ func (v *Verifier) VerifyIGVM(docBytes, nonce []byte, policy ConfigPolicy) (resu
 	if platform.SubjectName != igvm.PlatformSubject {
 		return nil, fmt.Errorf("IGVM requires its dedicated platform endorsement artifact")
 	}
-	freshness, err := doc.Freshness(document.FreshnessCollateralIDPlatform)
+	freshness, err := doc.Freshness(collateral.FreshnessIDPlatform)
 	if err != nil {
 		return nil, err
 	}
@@ -117,10 +118,7 @@ func (v *Verifier) VerifyIGVM(docBytes, nonce []byte, policy ConfigPolicy) (resu
 	if err != nil {
 		return nil, fmt.Errorf("verifying platform freshness: %w", err)
 	}
-	cpu, err := doc.CPUEndorsements()
-	if err != nil {
-		return nil, err
-	}
+	cpu := doc.CPUEndorsements()
 	authenticated, err := quote.Authenticate(doc.CPUEvidence(), cpu, v.quoteOptions(now))
 	if err != nil {
 		return nil, err

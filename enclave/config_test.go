@@ -14,6 +14,7 @@ import (
 	"github.com/tinfoilsh/tinfoil-go/tinfoil-config/endorsement"
 	"github.com/tinfoilsh/tinfoil-go/verifier"
 	"github.com/tinfoilsh/tinfoil-go/verifier/document"
+	"github.com/tinfoilsh/tinfoil-go/verifier/document/collateral"
 )
 
 func TestConfigClientsRetainExplicitProfile(t *testing.T) {
@@ -47,12 +48,12 @@ func TestConfigClientsRetainExplicitProfile(t *testing.T) {
 	for _, derived := range []*SecureClient{client, client.ForEnclave(host), client.ViaRelay(host)} {
 		require.Equal(t, "/org/project", derived.configPolicy.Identity)
 		_, err := derived.fetchVerification()
-		require.ErrorContains(t, err, document.ConfigCollateralID)
+		require.ErrorContains(t, err, collateral.ConfigID)
 	}
 	legacy, err := NewSecureClient(host, "org/repo", nil)
 	require.NoError(t, err)
 	_, err = legacy.fetchVerification()
-	require.ErrorContains(t, err, document.CollateralSigstoreCodeV1Format)
+	require.ErrorContains(t, err, collateral.SigstoreCodeV1Format)
 	verified := &VerifiedDocumentV3{Config: &endorsement.Verified{Name: "/org/project/v1"}}
 	cloned := cloneVerification(verified)
 	cloned.Config.Name = "changed"

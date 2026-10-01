@@ -6,7 +6,7 @@ import (
 
 	"github.com/sigstore/sigstore-go/pkg/verify"
 	"github.com/tinfoilsh/tinfoil-go/tinfoil-config/endorsement"
-	"github.com/tinfoilsh/tinfoil-go/verifier/document"
+	"github.com/tinfoilsh/tinfoil-go/verifier/document/collateral"
 	"github.com/tinfoilsh/tinfoil-go/verifier/internal/igvm"
 )
 
@@ -21,17 +21,17 @@ func (c *Client) ConfigVerifier(keys []endorsement.SigningKey) (*endorsement.Ver
 	return endorsement.NewVerifier(c.trustRoot, keys)
 }
 
-func (c *Client) AuthenticateRuntime(collateral document.IGVMRuntime, expected document.RuntimeReference) (*Runtime, error) {
-	if collateral.RuntimeReference != expected {
+func (c *Client) AuthenticateRuntime(material collateral.IGVMRuntime, expected collateral.RuntimeReference) (*Runtime, error) {
+	if material.RuntimeReference != expected {
 		return nil, fmt.Errorf("runtime collateral does not match the endorsed config's runtime pin")
 	}
-	manifest, err := igvm.ParseManifest(collateral.Manifest, expected)
+	manifest, err := igvm.ParseManifest(material.Manifest, expected)
 	if err != nil {
 		return nil, err
 	}
 	subject := "tinfoil-inference-" + expected.Tag + "-manifest.json"
-	identity := githubWorkflowIdentityPattern(document.RuntimeRepo, `release\.yml`, `refs/tags/`+regexp.QuoteMeta(expected.Tag))
-	result, _, err := c.verifyBundleForSubject(collateral.Bundle, identity, expected.Digest, subject)
+	identity := githubWorkflowIdentityPattern(collateral.RuntimeRepo, `release\.yml`, `refs/tags/`+regexp.QuoteMeta(expected.Tag))
+	result, _, err := c.verifyBundleForSubject(material.Bundle, identity, expected.Digest, subject)
 	if err != nil {
 		return nil, fmt.Errorf("verifying runtime provenance: %w", err)
 	}

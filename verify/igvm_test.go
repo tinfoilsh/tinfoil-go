@@ -10,6 +10,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/tinfoilsh/tinfoil-go/tinfoil-config/endorsement"
 	"github.com/tinfoilsh/tinfoil-go/verifier/document"
+	"github.com/tinfoilsh/tinfoil-go/verifier/document/collateral"
 )
 
 func TestIGVMRequiresIndependentTrustAndFreshness(t *testing.T) {
@@ -34,7 +35,7 @@ func TestIGVMRequiresIndependentTrustAndFreshness(t *testing.T) {
 	raw, err := document.Build(document.BuildInput{Nonce: nonce}, func([64]byte) (string, []byte, error) { return document.SEVSNPReportV1Format, []byte("quote"), nil })
 	require.NoError(t, err)
 	_, err = v.VerifyIGVM(raw, nonce, policy)
-	require.ErrorContains(t, err, document.ConfigCollateralID)
+	require.ErrorContains(t, err, collateral.ConfigID)
 	for name, bad := range map[string]ConfigPolicy{
 		"identity": {Identity: "/org/project/extra", AuditScope: policy.AuditScope},
 		"scope":    {Identity: policy.Identity, AuditScope: "untrusted"},
