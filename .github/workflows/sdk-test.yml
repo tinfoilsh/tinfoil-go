@@ -51,6 +51,53 @@ jobs:
           path: coverage.out
           if-no-files-found: error
 
+  conformance:
+    name: Conformance fixtures
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Check out the shared fixtures
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          repository: tinfoilsh/tinfoil-conformance
+          path: tinfoil-conformance
+          persist-credentials: false
+
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Vet the conformance build
+        run: go vet -tags tinfoil_conformance ./...
+
+      - name: Run the shared v3 fixtures
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          suites=("$GITHUB_WORKSPACE"/tinfoil-conformance/vectors/v3/*/)
+          if [ "${#suites[@]}" -eq 0 ]; then
+            echo "::error::no fixture suites under tinfoil-conformance/vectors/v3"
+            exit 1
+          fi
+          for d in "${suites[@]}"; do
+            echo "== $(basename "$d")"
+            # TestFixtures skips a directory without top-level fixtures.
+            fixtures=("$d"*.json)
+            if [ "${#fixtures[@]}" -eq 0 ]; then
+              echo "::error::no fixtures in vectors/v3/$(basename "$d")"
+              exit 1
+            fi
+            TINFOIL_CONFORMANCE_FIXTURES="$d" \
+              go test -count=1 -tags tinfoil_conformance -run TestFixtures ./verify/conformance/
+          done
+
   live:
     name: Live integration
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
