@@ -1,14 +1,14 @@
-// Package verifier appraises Tinfoil attestation documents.
+// Package verify appraises Tinfoil attestation documents.
 //
 // It is the functional core of the SDK: given a document, the nonce the caller
 // bound it to, and the repository the caller trusts, a Verifier decides what
 // the document proves. It opens no connections and keeps no state between
 // calls, so fetching documents, caching a verification and enforcing its
-// expiry all belong to the caller — see verifier/client for an implementation
+// expiry all belong to the caller — see verify/client for an implementation
 // that does those things.
 //
 // This package also re-exports the SDK's error categories, which are defined
-// in verifier/internal/errs so the lower-level verification packages can
+// in verify/internal/errs so the lower-level verification packages can
 // classify their errors without importing this one, which imports them in
 // turn.
 package verify

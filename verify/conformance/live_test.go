@@ -18,7 +18,7 @@ import (
 // collateral. Opt-in via TINFOIL_LIVE_HOST so ordinary runs stay offline.
 //
 //	TINFOIL_LIVE_HOST=<enclave> TINFOIL_LIVE_REPO=<owner/name> \
-//	  go test -tags tinfoil_conformance -run TestLiveVerification ./verifier/conformance/
+//	  go test -tags tinfoil_conformance -run TestLiveVerification ./verify/conformance/
 func TestLiveVerification(t *testing.T) {
 	host := os.Getenv("TINFOIL_LIVE_HOST")
 	if host == "" {

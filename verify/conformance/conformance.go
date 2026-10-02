@@ -97,7 +97,7 @@ type AcceptOutputs struct {
 	ChannelBinding string `json:"channel_binding,omitempty"`
 }
 
-// Measurement mirrors verifier/measurement.Measurement as plain JSON.
+// Measurement mirrors verify/measurement.Measurement as plain JSON.
 type Measurement struct {
 	Type      string   `json:"type"`
 	Registers []string `json:"registers"`
