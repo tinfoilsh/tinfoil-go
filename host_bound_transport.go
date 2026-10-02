@@ -8,6 +8,10 @@ import (
 	"strings"
 )
 
+// boundHTTPClient wraps httpClient's secure transport in place: first with
+// user_cache_secret injection (skipped when userCacheSecret is empty), then
+// with a hostBoundTransport that refuses origins other than the enclave and
+// baseURL. Either may be empty; the gateway passes only its base URL.
 func boundHTTPClient(httpClient *http.Client, enclave, baseURL, userCacheSecret string) (*http.Client, error) {
 	// The cache-secret layer sits above the sealing transport, so the field it
 	// injects is encrypted with the rest of the body (EHBP) or sent over the
@@ -24,7 +28,7 @@ func boundHTTPClient(httpClient *http.Client, enclave, baseURL, userCacheSecret 
 	if err != nil {
 		return nil, &ConfigurationError{Err: fmt.Errorf("failed to determine allowed request origins: %w", err)}
 	}
-	httpClient.Transport = &hostBoundRoundTripper{
+	httpClient.Transport = &hostBoundTransport{
 		allowedOrigins: origins,
 		enclave:        enclave,
 		transport:      transport,
@@ -51,21 +55,21 @@ func allowedOrigins(enclave, baseURL string) (map[string]struct{}, error) {
 	return origins, nil
 }
 
-// hostBoundRoundTripper rejects requests to any origin other than the verified
+// hostBoundTransport rejects requests to any origin other than the verified
 // enclave or the configured proxy. This guards the escape-hatch HTTP client
 // (and the OpenAI client) from disclosing sensitive request headers, such as the
 // API key, to an arbitrary host.
-type hostBoundRoundTripper struct {
+type hostBoundTransport struct {
 	allowedOrigins map[string]struct{}
 	enclave        string
 	transport      http.RoundTripper
 }
 
-func (t *hostBoundRoundTripper) CloseIdleConnections() {
+func (t *hostBoundTransport) CloseIdleConnections() {
 	closeIdleConnections(t.transport)
 }
 
-func (t *hostBoundRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
+func (t *hostBoundTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	origin := normalizedOrigin(req.URL)
 	if _, ok := t.allowedOrigins[origin]; !ok {
 		return nil, &ConfigurationError{Err: fmt.Errorf("refusing to send request to %q: client is bound to enclave %q", origin, t.enclave)}

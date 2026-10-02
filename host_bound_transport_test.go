@@ -27,7 +27,7 @@ func TestOriginOfNormalizesDefaultPorts(t *testing.T) {
 	}
 }
 
-func TestHostBoundRoundTripperAllowsEnclaveAndProxy(t *testing.T) {
+func TestHostBoundTransportAllowsEnclaveAndProxy(t *testing.T) {
 	origins, err := allowedOrigins("enclave.example.com", "http://proxy.example.com/v1/")
 	require.NoError(t, err)
 
@@ -36,7 +36,7 @@ func TestHostBoundRoundTripperAllowsEnclaveAndProxy(t *testing.T) {
 		calls++
 		return newResponse(http.StatusOK, "ok"), nil
 	})
-	rt := &hostBoundRoundTripper{allowedOrigins: origins, enclave: "enclave.example.com", transport: inner}
+	rt := &hostBoundTransport{allowedOrigins: origins, enclave: "enclave.example.com", transport: inner}
 
 	for _, target := range []string{
 		"https://enclave.example.com/v1/models",
@@ -53,14 +53,14 @@ func TestHostBoundRoundTripperAllowsEnclaveAndProxy(t *testing.T) {
 	require.Equal(t, 4, calls)
 }
 
-func TestHostBoundRoundTripperRejectsForeignHostAndScheme(t *testing.T) {
+func TestHostBoundTransportRejectsForeignHostAndScheme(t *testing.T) {
 	origins, err := allowedOrigins("enclave.example.com", "")
 	require.NoError(t, err)
 	inner := roundTripFunc(func(req *http.Request) (*http.Response, error) {
 		t.Fatalf("inner transport must not be called for a rejected request")
 		return nil, nil
 	})
-	rt := &hostBoundRoundTripper{allowedOrigins: origins, enclave: "enclave.example.com", transport: inner}
+	rt := &hostBoundTransport{allowedOrigins: origins, enclave: "enclave.example.com", transport: inner}
 
 	foreign, err := http.NewRequest(http.MethodGet, "https://evil.example.com/v1/models", nil)
 	require.NoError(t, err)
