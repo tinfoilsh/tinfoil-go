@@ -22,7 +22,7 @@ go get github.com/tinfoilsh/tinfoil-go@latest
 
 ## Quick Start
 ```go
-import "github.com/tinfoilsh/tinfoil-go/verify/client"
+import "github.com/tinfoilsh/tinfoil-go/client"
 
 // 1. Create a client
 tinfoilClient, err := client.NewSecureClient("enclave.example.com", "org/repo", nil)

@@ -6,7 +6,7 @@ import (
 	"log/slog"
 	"os"
 
-	"github.com/tinfoilsh/tinfoil-go/verify/client"
+	"github.com/tinfoilsh/tinfoil-go/client"
 )
 
 var (

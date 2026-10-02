@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"github.com/tinfoilsh/tinfoil-go/verify"
-	"github.com/tinfoilsh/tinfoil-go/verify/internal/provenance"
 	"github.com/tinfoilsh/tinfoil-go/verify/measurement"
 )
 
@@ -95,7 +94,7 @@ func (input *VerificationOptions) verifier() (*verify.Verifier, error) {
 // NewSecureClient creates a secure client for an enclave and repository
 // reference, owner/name[@tag][@sha256:digest]. Verification happens on first use.
 func NewSecureClient(enclave, repo string, opts *VerificationOptions) (*SecureClient, error) {
-	if _, _, _, err := provenance.ParseReference(repo); err != nil {
+	if _, _, _, err := verify.ParseReference(repo); err != nil {
 		return nil, &ConfigurationError{Err: err}
 	}
 	verifier, err := opts.verifier()

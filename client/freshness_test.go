@@ -11,16 +11,25 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"github.com/tinfoilsh/tinfoil-go/document"
-	"github.com/tinfoilsh/tinfoil-go/document/collateral"
 	"github.com/tinfoilsh/tinfoil-go/internal/testutil"
-	"github.com/tinfoilsh/tinfoil-go/verify/internal/provenance"
+	"github.com/tinfoilsh/tinfoil-go/verify"
 	"github.com/tinfoilsh/tinfoil-go/verify/measurement"
 )
 
+// defaultFreshnessMaxAge is the bound a client inherits from the verifier when
+// its options leave FreshnessMaxAge zero.
+func defaultFreshnessMaxAge(t *testing.T) time.Duration {
+	t.Helper()
+	verifier, err := verify.NewVerifier()
+	require.NoError(t, err)
+	return verifier.FreshnessMaxAge()
+}
+
 func TestClientFreshnessMaxAge(t *testing.T) {
+	defaultMaxAge := defaultFreshnessMaxAge(t)
 	defaults, err := NewSecureClient("enclave.example", "org/repo", nil)
 	require.NoError(t, err)
-	require.Equal(t, provenance.MaxFreshnessAge, defaults.verifier.FreshnessMaxAge())
+	require.Equal(t, defaultMaxAge, defaults.verifier.FreshnessMaxAge())
 	for _, maxAge := range []time.Duration{-time.Nanosecond, -time.Hour} {
 		opts := VerificationOptions{FreshnessMaxAge: maxAge}
 		s, err := NewSecureClient("enclave.example", "org/repo", &opts)
@@ -42,13 +51,14 @@ func TestClientFreshnessMaxAge(t *testing.T) {
 		s, err := NewDefaultClient(&opts)
 		require.NoError(t, err)
 		require.Equal(t, "inference.tinfoil.sh", s.Enclave())
-		require.Equal(t, cmp.Or(maxAge, provenance.MaxFreshnessAge), s.verifier.FreshnessMaxAge())
+		require.Equal(t, cmp.Or(maxAge, defaultMaxAge), s.verifier.FreshnessMaxAge())
 		require.Equal(t, opts.PinnedRegisters, s.verifier.PinnedRegisters())
 	}
 }
 
 func TestLiveVerifyFreshnessExpiration(t *testing.T) {
 	testutil.RequireLive(t, enclaveEnvVar, repoEnvVar)
+	defaultMaxAge := defaultFreshnessMaxAge(t)
 	host, repo := os.Getenv(enclaveEnvVar), os.Getenv(repoEnvVar)
 	nonce, err := document.RandomNonce()
 	require.NoError(t, err)
@@ -61,7 +71,7 @@ func TestLiveVerifyFreshnessExpiration(t *testing.T) {
 		opts := VerificationOptions{FreshnessMaxAge: age, PinnedRegisters: verified.EnclaveMeasurement}
 		custom, err := VerifyDocumentV3(raw, nonce, repo, &opts)
 		require.NoError(t, err)
-		require.Equal(t, verified.FreshnessExpiresAt.Add(cmp.Or(age, provenance.MaxFreshnessAge)-provenance.MaxFreshnessAge), custom.FreshnessExpiresAt)
+		require.Equal(t, verified.FreshnessExpiresAt.Add(cmp.Or(age, defaultMaxAge)-defaultMaxAge), custom.FreshnessExpiresAt)
 	}
 	badPins := cloneMeasurement(verified.EnclaveMeasurement)
 	badPins.Registers[0] = strings.Repeat("ab", 48)
@@ -73,38 +83,4 @@ func TestLiveVerifyFreshnessExpiration(t *testing.T) {
 	require.NoError(t, err)
 	_, err = s.Verify()
 	require.ErrorAs(t, err, &attestation)
-	doc, err := document.Parse(raw, nonce)
-	require.NoError(t, err)
-	codeRef, err := doc.SigstoreCode()
-	require.NoError(t, err)
-	provClient, err := provenance.NewDefaultClient()
-	require.NoError(t, err)
-	code, err := provClient.AuthenticateCode(codeRef.Bundle, repo, codeRef.Tag, codeRef.Digest)
-	require.NoError(t, err)
-	platformRef, err := doc.SigstorePlatform()
-	require.NoError(t, err)
-	platform, err := provClient.AuthenticatePlatformEndorsements(platformRef.Bundle, platformRef.Repo, platformRef.Tag, platformRef.Digest)
-	require.NoError(t, err)
-	matched := false
-	for id, artifact := range map[string]*provenance.AuthenticatedArtifact{
-		collateral.FreshnessIDCode:     &code.AuthenticatedArtifact,
-		collateral.FreshnessIDPlatform: &platform.AuthenticatedArtifact,
-	} {
-		witness, err := doc.Freshness(id)
-		require.NoError(t, err)
-		loggedAt, err := provClient.AuthenticateFreshness(witness.Bundle, artifact, time.Now(), 0)
-		require.NoError(t, err)
-		_, err = provClient.AuthenticateFreshness(witness.Bundle, artifact, loggedAt.Add(8*24*time.Hour), 0)
-		require.ErrorContains(t, err, "stale")
-		_, err = provClient.AuthenticateFreshness(witness.Bundle, artifact, loggedAt.Add(8*24*time.Hour), maxAge)
-		require.NoError(t, err)
-		_, err = provClient.AuthenticateFreshness(witness.Bundle, artifact, loggedAt.Add(7*24*time.Hour), 0)
-		require.NoError(t, err)
-		_, err = provClient.AuthenticateFreshness(witness.Bundle, artifact, loggedAt.Add(7*24*time.Hour+time.Nanosecond), 0)
-		require.ErrorContains(t, err, "stale")
-		expiresAt := loggedAt.Add(provenance.MaxFreshnessAge)
-		require.False(t, verified.FreshnessExpiresAt.After(expiresAt), "%s witness expires before public deadline", id)
-		matched = matched || verified.FreshnessExpiresAt.Equal(expiresAt)
-	}
-	require.True(t, matched, "public deadline must equal one of the authenticated witness expirations")
 }

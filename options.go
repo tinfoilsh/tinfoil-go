@@ -2,7 +2,7 @@ package tinfoil
 
 import (
 	"github.com/openai/openai-go/v3/option"
-	"github.com/tinfoilsh/tinfoil-go/verify/client"
+	"github.com/tinfoilsh/tinfoil-go/client"
 )
 
 const (

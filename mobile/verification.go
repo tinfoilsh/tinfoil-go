@@ -3,8 +3,8 @@ package mobile
 import (
 	"time"
 
+	"github.com/tinfoilsh/tinfoil-go/client"
 	"github.com/tinfoilsh/tinfoil-go/document"
-	"github.com/tinfoilsh/tinfoil-go/verify/client"
 	"github.com/tinfoilsh/tinfoil-go/verify/measurement"
 )
 

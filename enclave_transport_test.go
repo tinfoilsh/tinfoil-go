@@ -16,9 +16,9 @@ import (
 	"github.com/openai/openai-go/v3/option"
 	"github.com/stretchr/testify/require"
 	ehbpidentity "github.com/tinfoilsh/encrypted-http-body-protocol/identity"
+	"github.com/tinfoilsh/tinfoil-go/client"
 	"github.com/tinfoilsh/tinfoil-go/document"
 	"github.com/tinfoilsh/tinfoil-go/internal/testutil"
-	"github.com/tinfoilsh/tinfoil-go/verify/client"
 )
 
 type roundTripFunc func(*http.Request) (*http.Response, error)

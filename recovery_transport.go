@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"net/http"
 
-	"github.com/tinfoilsh/tinfoil-go/verify/client"
+	"github.com/tinfoilsh/tinfoil-go/client"
 )
 
 // recoveryTransport owns one application replay. Its underlying transport
