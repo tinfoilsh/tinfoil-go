@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/tinfoilsh/tinfoil-go/document"
+	"github.com/tinfoilsh/tinfoil-go/internal/fetch"
 	"github.com/tinfoilsh/tinfoil-go/verify"
 )
 
@@ -27,7 +28,7 @@ func (s *SecureClient) fetchVerification() (*verify.Verification, error) {
 	if err != nil {
 		return nil, err
 	}
-	docBytes, err := document.FetchVia(s.enclave, s.relay, nonce)
+	docBytes, err := fetch.Document(s.enclave, s.relay, nonce)
 	if err != nil {
 		return nil, err
 	}

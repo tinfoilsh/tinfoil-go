@@ -11,6 +11,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"github.com/tinfoilsh/tinfoil-go/document"
+	"github.com/tinfoilsh/tinfoil-go/internal/fetch"
 	"github.com/tinfoilsh/tinfoil-go/internal/testutil"
 	"github.com/tinfoilsh/tinfoil-go/verify"
 	"github.com/tinfoilsh/tinfoil-go/verify/measurement"
@@ -71,7 +72,7 @@ func TestLiveVerifyFreshnessExpiration(t *testing.T) {
 	host, repo := os.Getenv(enclaveEnvVar), os.Getenv(repoEnvVar)
 	nonce, err := document.RandomNonce()
 	require.NoError(t, err)
-	raw, err := document.Fetch(host, nonce)
+	raw, err := fetch.Document(host, "", nonce)
 	require.NoError(t, err)
 	verified, err := verifyDocument(raw, nonce, repo, nil)
 	require.NoError(t, err)

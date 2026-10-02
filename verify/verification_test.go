@@ -7,6 +7,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"github.com/tinfoilsh/tinfoil-go/document"
+	"github.com/tinfoilsh/tinfoil-go/internal/fetch"
 	"github.com/tinfoilsh/tinfoil-go/internal/sdkinfo"
 	"github.com/tinfoilsh/tinfoil-go/internal/testutil"
 )
@@ -19,7 +20,7 @@ func TestLiveVerificationRecordsRepoAndMetadata(t *testing.T) {
 	require.NoError(t, err)
 	nonce, err := document.RandomNonce()
 	require.NoError(t, err)
-	raw, err := document.Fetch(os.Getenv(enclaveEnvVar), nonce)
+	raw, err := fetch.Document(os.Getenv(enclaveEnvVar), "", nonce)
 	require.NoError(t, err)
 	verifier, err := NewVerifier()
 	require.NoError(t, err)

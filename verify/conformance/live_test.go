@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/tinfoilsh/tinfoil-go/document"
+	"github.com/tinfoilsh/tinfoil-go/internal/fetch"
 )
 
 // TestLiveVerification fetches a v3 attestation from a real enclave and runs
@@ -30,7 +31,7 @@ func TestLiveVerification(t *testing.T) {
 	if err != nil {
 		t.Fatalf("nonce: %v", err)
 	}
-	doc, err := document.Fetch(host, nonce)
+	doc, err := fetch.Document(host, "", nonce)
 	if err != nil {
 		t.Fatalf("fetch from %s: %v", host, err)
 	}

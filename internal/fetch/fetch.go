@@ -1,4 +1,6 @@
-package document
+// Package fetch retrieves raw attestation documents from enclaves. It parses
+// nothing; verification belongs to the verify package.
+package fetch
 
 import (
 	"context"
@@ -10,26 +12,23 @@ import (
 	"net/url"
 	"time"
 
+	"github.com/tinfoilsh/tinfoil-go/document"
 	"github.com/tinfoilsh/tinfoil-go/internal/errs"
 	"github.com/tinfoilsh/tinfoil-go/internal/sdkinfo"
 )
 
-// Fetch retrieves a v3 attestation document from an enclave host using a
+// Document retrieves a v3 attestation document from an enclave host using a
 // fresh challenge nonce, returning the raw response bytes for verification.
-// It uses http.DefaultClient with a 30-second deadline and a 32 MiB body limit,
-// and follows redirects only to HTTPS URLs.
-func Fetch(host string, nonce []byte) ([]byte, error) {
-	return FetchVia(host, "", nonce)
-}
-
-// FetchVia is Fetch through a non-empty relay host; verification ignores the path.
-func FetchVia(host, relay string, nonce []byte) (result []byte, err error) {
+// A non-empty relay host forwards the request to the enclave; verification
+// ignores the path. It uses http.DefaultClient with a 30-second deadline and a
+// 32 MiB body limit, and follows redirects only to HTTPS URLs.
+func Document(host, relay string, nonce []byte) (result []byte, err error) {
 	defer func() { err = errs.WrapFetch(err) }()
 	if host == "" {
 		return nil, &errs.ConfigurationError{Err: fmt.Errorf("enclave host is required")}
 	}
-	if len(nonce) != NonceSize {
-		return nil, &errs.ConfigurationError{Err: fmt.Errorf("nonce must be %d bytes, got %d", NonceSize, len(nonce))}
+	if len(nonce) != document.NonceSize {
+		return nil, &errs.ConfigurationError{Err: fmt.Errorf("nonce must be %d bytes, got %d", document.NonceSize, len(nonce))}
 	}
 	u := url.URL{
 		Scheme:   "https",
