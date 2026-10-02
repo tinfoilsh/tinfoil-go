@@ -1,0 +1,289 @@
+// Package sev authenticates AMD SEV-SNP reports against the pinned AMD
+// roots and assembles complete go-sev-guest validation options from an
+// endorsed policy.
+package sev
+
+import (
+	"bytes"
+	"crypto/x509"
+	_ "embed"
+	"encoding/hex"
+	"encoding/pem"
+	"fmt"
+	"net/url"
+	"strings"
+	"time"
+
+	"github.com/tinfoilsh/go-sev-guest/abi"
+	"github.com/tinfoilsh/go-sev-guest/kds"
+	"github.com/tinfoilsh/go-sev-guest/proto/sevsnp"
+	"github.com/tinfoilsh/go-sev-guest/verify"
+	"github.com/tinfoilsh/go-sev-guest/verify/trust"
+
+	"github.com/tinfoilsh/tinfoil-go/verify/internal/errs"
+	"github.com/tinfoilsh/tinfoil-go/verify/measurement"
+)
+
+//go:generate sh -xc "curl -fo genoa_cert_chain.pem https://kdsintf.amd.com/vcek/v1/Genoa/cert_chain"
+//go:embed genoa_cert_chain.pem
+var askArkGenoaPEM []byte
+
+//go:generate sh -xc "curl -fo turin_cert_chain.pem https://kdsintf.amd.com/vcek/v1/Turin/cert_chain"
+//go:embed turin_cert_chain.pem
+var askArkTurinPEM []byte
+
+// Options carries per-authentication overrides. A nil *Options, and the zero
+// value, select the production defaults: the embedded per-product anchor and
+// the current time. Overrides are held per verification rather than in process
+// state, so concurrent verifications cannot observe each other.
+//
+// The overrides themselves exist only in the conformance build. A production
+// binary has no way to set them, so it cannot be made to trust a supplied
+// anchor or to appraise collateral at anything but the current time.
+type Options struct {
+	overrides overrides
+}
+
+func (o *Options) now() time.Time {
+	if o == nil {
+		return time.Now()
+	}
+	if pinned := o.overrides.clock(); !pinned.IsZero() {
+		return pinned
+	}
+	return time.Now()
+}
+
+func (o *Options) rootPEM() []byte {
+	if o == nil {
+		return nil
+	}
+	return o.overrides.root()
+}
+
+// trustedRoots builds the pinned AMD trust anchors from repo-owned copies
+// rather than the library's embedded defaults, so an anchor only changes
+// when its file is deliberately regenerated. A fresh instance is built per
+// authentication: the library caches the CRL it fetched on this object, and
+// document-supplied collateral must never affect other verifications.
+func trustedRoots(productLine string, rootPEM []byte) (map[string][]*trust.AMDRootCerts, error) {
+	if rootPEM == nil {
+		switch productLine {
+		case ProductGenoa:
+			rootPEM = askArkGenoaPEM
+		case ProductTurin:
+			rootPEM = askArkTurinPEM
+		default:
+			return nil, fmt.Errorf("unsupported SEV product line %q", productLine)
+		}
+	}
+	roots := new(trust.AMDRootCerts)
+	if err := roots.FromKDSCertBytes(rootPEM); err != nil {
+		return nil, fmt.Errorf("parsing embedded AMD %s root certificates: %w", productLine, err)
+	}
+	roots.ProductLine = productLine
+	return map[string][]*trust.AMDRootCerts{productLine: {roots}}, nil
+}
+
+// offlineGetter serves the library's fetches from pre-provided material:
+// the document-carried CRL. Everything else fails — no network.
+type offlineGetter struct {
+	crlDER []byte
+}
+
+func (g *offlineGetter) Get(targetURL string) ([]byte, error) {
+	u, err := url.Parse(targetURL)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse URL: %w", err)
+	}
+	if strings.HasSuffix(u.Path, "/crl") {
+		return g.crlDER, nil
+	}
+	return nil, fmt.Errorf("offline verification cannot fetch %s", targetURL)
+}
+
+// decodeCertChain decodes the document-carried ASK+ARK PEM chain (the AMD
+// KDS cert_chain format). The chain is untrusted transport: the library
+// verifies it against its pinned AMD root certificates.
+func decodeCertChain(chainPEM string) (askDER, arkDER []byte, err error) {
+	rest := []byte(chainPEM)
+	var blocks [][]byte
+	for {
+		var block *pem.Block
+		block, rest = pem.Decode(rest)
+		if block == nil {
+			break
+		}
+		if block.Type != "CERTIFICATE" {
+			return nil, nil, fmt.Errorf("cert_chain_pem carries a %q block, want CERTIFICATE", block.Type)
+		}
+		if len(block.Bytes) == 0 {
+			return nil, nil, fmt.Errorf("cert_chain_pem carries an empty CERTIFICATE block")
+		}
+		blocks = append(blocks, block.Bytes)
+	}
+	if len(blocks) != 2 {
+		return nil, nil, fmt.Errorf("cert_chain_pem must carry exactly the ASK and ARK certificates, got %d blocks", len(blocks))
+	}
+	if len(bytes.TrimSpace(rest)) != 0 {
+		return nil, nil, fmt.Errorf("cert_chain_pem carries trailing data after the certificates")
+	}
+	return blocks[0], blocks[1], nil
+}
+
+// productFromReport derives the SEV product from the report's CPUID
+// family/model/stepping field, present since report version 3 (firmware
+// 1.55, the fleet minimum).
+func productFromReport(report *sevsnp.Report) (*sevsnp.SevProduct, error) {
+	fms := report.GetCpuid1EaxFms()
+	if fms == 0 {
+		return nil, fmt.Errorf("report carries no CPUID product identity (report version %d, want 3+)", report.GetVersion())
+	}
+	product := abi.SevProductFromCpuid1Eax(fms)
+	switch product.GetName() {
+	case sevsnp.SevProduct_SEV_PRODUCT_GENOA, sevsnp.SevProduct_SEV_PRODUCT_TURIN:
+		return product, nil
+	default:
+		return nil, fmt.Errorf("unsupported SEV product in report CPUID 0x%x", fms)
+	}
+}
+
+// Quote is a signature-verified SEV-SNP report, not yet compared against
+// any expected value.
+type Quote struct {
+	identity string
+	// Measurement is a detached summary of the launch measurement register.
+	Measurement *measurement.Measurement
+
+	attestation *sevsnp.Attestation
+}
+
+// Identity is the authenticated machines-map lookup key (CHIP_ID, lowercase hex).
+func (q *Quote) Identity() string { return q.identity }
+
+// Evidence is an SEV-SNP attestation report with the endorsement collateral
+// that authenticates it, all decoded.
+type Evidence struct {
+	// Report is the raw attestation report.
+	Report []byte
+	// VCEKDER is the chip's VCEK certificate, and CertChainPEM the ASK then
+	// ARK certificates it chains through.
+	VCEKDER      []byte
+	CertChainPEM string
+	// CRLDER is the AMD KDS revocation list for the product line.
+	CRLDER []byte
+}
+
+// Authenticate verifies the report's signature chain up to the pinned AMD
+// root and its VCEK against the supplied CRL — no network fetches. Callers
+// must assemble a policy and validate before trusting the platform.
+func Authenticate(ev Evidence, opts *Options) (result *Quote, err error) {
+	defer func() { err = errs.WrapAttestation(err) }()
+	// Sampled once so the CRL window and the library's own validity checks
+	// appraise the same instant.
+	now := opts.now()
+	// An empty VCEK would make the library try to fetch one.
+	if len(ev.VCEKDER) == 0 {
+		return nil, fmt.Errorf("amd-vcek collateral carries an empty VCEK")
+	}
+	askDER, arkDER, err := decodeCertChain(ev.CertChainPEM)
+	if err != nil {
+		return nil, fmt.Errorf("amd-vcek collateral: %w", err)
+	}
+	if len(ev.CRLDER) == 0 {
+		return nil, fmt.Errorf("amd-crl collateral carries an empty CRL")
+	}
+	// The library verifies the CRL's signature but not its validity window,
+	// so a stale pre-revocation CRL would otherwise pass.
+	parsedCRL, err := x509.ParseRevocationList(ev.CRLDER)
+	if err != nil {
+		return nil, fmt.Errorf("parsing amd-crl collateral: %w", err)
+	}
+	if now.Before(parsedCRL.ThisUpdate) || now.After(parsedCRL.NextUpdate) {
+		return nil, fmt.Errorf("amd-crl collateral is outside its validity window (this_update %s, next_update %s)",
+			parsedCRL.ThisUpdate.Format(time.RFC3339), parsedCRL.NextUpdate.Format(time.RFC3339))
+	}
+
+	att, err := verifySignature(ev.Report, ev.VCEKDER, askDER, arkDER, ev.CRLDER, now, opts.rootPEM())
+	if err != nil {
+		return nil, err
+	}
+	report := att.GetReport()
+	if err := rejectMaskedChipID(report); err != nil {
+		return nil, err
+	}
+
+	identity, err := Identity(report.GetChipId())
+	if err != nil {
+		return nil, err
+	}
+
+	return &Quote{
+		identity: identity,
+		Measurement: &measurement.Measurement{
+			Type:      measurement.SevGuestV2,
+			Registers: []string{hex.EncodeToString(report.Measurement)},
+		},
+		attestation: att,
+	}, nil
+}
+
+func rejectMaskedChipID(report *sevsnp.Report) error {
+	signer, err := abi.ParseSignerInfo(report.GetSignerInfo())
+	if err != nil {
+		return fmt.Errorf("parsing report SIGNER_INFO: %w", err)
+	}
+	if signer.MaskChipKey {
+		return fmt.Errorf("report masks CHIP_ID; masked platform identities are unsupported")
+	}
+	return nil
+}
+
+// verifySignature verifies the report signature under the AMD roots with
+// the provided VCEK and ASK/ARK chain, checking VCEK revocation against
+// the provided CRL. No policy validation.
+func verifySignature(reportBytes, vcekDER, askDER, arkDER, crlDER []byte, now time.Time, rootPEM []byte) (*sevsnp.Attestation, error) {
+	if len(reportBytes) != abi.ReportSize {
+		return nil, fmt.Errorf("SEV-SNP report must be exactly %d bytes, got %d", abi.ReportSize, len(reportBytes))
+	}
+
+	parsedReport, err := abi.ReportToProto(reportBytes)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse report: %w", err)
+	}
+
+	product, err := productFromReport(parsedReport)
+	if err != nil {
+		return nil, err
+	}
+	productLine := kds.ProductLine(product)
+	roots, err := trustedRoots(productLine, rootPEM)
+	if err != nil {
+		return nil, err
+	}
+	// All options explicit. Fetching stays enabled because it is how the
+	// library asks for the CRL; the offline getter answers from local
+	// material only.
+	opts := &verify.Options{
+		Getter:           &offlineGetter{crlDER: crlDER},
+		CheckRevocations: true,
+		TrustedRoots:     roots,
+		Product:          product,
+		Now:              now,
+	}
+
+	attestation := &sevsnp.Attestation{
+		Report: parsedReport,
+		CertificateChain: &sevsnp.CertificateChain{
+			VcekCert: vcekDER,
+			AskCert:  askDER,
+			ArkCert:  arkDER,
+		},
+		Product: opts.Product,
+	}
+
+	if err := verify.SnpAttestation(attestation, opts); err != nil {
+		return nil, err
+	}
+	return attestation, nil
+}

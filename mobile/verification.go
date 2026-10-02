@@ -3,9 +3,9 @@ package mobile
 import (
 	"time"
 
-	"github.com/tinfoilsh/tinfoil-go/verifier/client"
-	"github.com/tinfoilsh/tinfoil-go/verifier/document"
-	"github.com/tinfoilsh/tinfoil-go/verifier/measurement"
+	"github.com/tinfoilsh/tinfoil-go/verify/client"
+	"github.com/tinfoilsh/tinfoil-go/verify/document"
+	"github.com/tinfoilsh/tinfoil-go/verify/measurement"
 )
 
 // VerificationSchemaVersion identifies the JSON below. It changes when a field

@@ -6,7 +6,7 @@ import (
 
 	ehbpclient "github.com/tinfoilsh/encrypted-http-body-protocol/client"
 	ehbpidentity "github.com/tinfoilsh/encrypted-http-body-protocol/identity"
-	"github.com/tinfoilsh/tinfoil-go/verifier/client"
+	"github.com/tinfoilsh/tinfoil-go/verify/client"
 )
 
 // enclaveURLHeader tells a proxy which enclave to forward an encrypted request

@@ -16,7 +16,7 @@ import (
 	"io"
 	"os"
 
-	"github.com/tinfoilsh/tinfoil-go/verifier/conformance"
+	"github.com/tinfoilsh/tinfoil-go/verify/conformance"
 )
 
 func main() {

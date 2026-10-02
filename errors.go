@@ -1,11 +1,11 @@
 package tinfoil
 
-import "github.com/tinfoilsh/tinfoil-go/verifier"
+import "github.com/tinfoilsh/tinfoil-go/verify"
 
 // SDK error categories support errors.As; their causes support errors.Is.
 type (
-	Error              = verifier.Error
-	ConfigurationError = verifier.ConfigurationError
-	FetchError         = verifier.FetchError
-	AttestationError   = verifier.AttestationError
+	Error              = verify.Error
+	ConfigurationError = verify.ConfigurationError
+	FetchError         = verify.FetchError
+	AttestationError   = verify.AttestationError
 )
