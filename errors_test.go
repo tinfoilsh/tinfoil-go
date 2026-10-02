@@ -72,7 +72,7 @@ func TestPublicInputErrors(t *testing.T) {
 	require.NoError(t, err)
 	_, err = s.Request("GET", "://", "", nil)
 	require.ErrorAs(t, err, &config)
-	_, err = fetch.Document("", "", make([]byte, document.NonceSize))
+	_, err = fetch.Document(t.Context(), "", "", make([]byte, document.NonceSize))
 	require.ErrorAs(t, err, &config)
 	var verified *verify.Verification
 	_, err = verified.TLSPublicKeyFP()

@@ -20,8 +20,9 @@ import (
 // Document retrieves a v3 attestation document from an enclave host using a
 // fresh challenge nonce, returning the raw response bytes for verification. If
 // relay is an empty string, the document is fetched from the host URL.
-// Otherwise, the request is made to the relay URL.
-func Document(host, relay string, nonce []byte) (result []byte, err error) {
+// Otherwise, the request is made to the relay URL. The fetch stops when ctx is
+// done or after 30 seconds, whichever comes first.
+func Document(ctx context.Context, host, relay string, nonce []byte) (result []byte, err error) {
 	defer func() { err = errs.WrapFetch(err) }()
 	if host == "" {
 		return nil, &errs.ConfigurationError{Err: fmt.Errorf("enclave host is required")}
@@ -39,7 +40,7 @@ func Document(host, relay string, nonce []byte) (result []byte, err error) {
 		u.Host = relay
 		u.RawQuery += "&enclave=" + url.QueryEscape(host)
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), attestationFetchTimeout)
+	ctx, cancel := context.WithTimeout(ctx, attestationFetchTimeout)
 	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
 	if err != nil {

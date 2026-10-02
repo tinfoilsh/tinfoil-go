@@ -3,6 +3,7 @@
 package main
 
 import (
+	"context"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
@@ -41,7 +42,7 @@ func runCapture(args []string) int {
 		return conformance.ExitMalformed
 	}
 
-	doc, err := fetch.Document(*host, "", nonce)
+	doc, err := fetch.Document(context.Background(), *host, "", nonce)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "fetching attestation from %s: %v\n", *host, err)
 		return conformance.ExitInternal

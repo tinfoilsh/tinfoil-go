@@ -28,7 +28,9 @@ func (s *SecureClient) fetchVerification() (*verify.Verification, error) {
 	if err != nil {
 		return nil, err
 	}
-	docBytes, err := fetch.Document(s.enclave, s.relay, nonce)
+	// One refresh serves every waiting request, so no single caller's context
+	// applies; fetch.Document still caps the request's duration.
+	docBytes, err := fetch.Document(context.Background(), s.enclave, s.relay, nonce)
 	if err != nil {
 		return nil, err
 	}
