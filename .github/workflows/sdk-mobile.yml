@@ -5,6 +5,8 @@ on:
     paths:
       - 'mobile/**'
       - 'verify/**'
+      - 'document/**'
+      - 'internal/**'
       - 'go.mod'
       - 'go.sum'
       - 'scripts/*mobile*'
