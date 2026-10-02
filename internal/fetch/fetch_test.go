@@ -1,4 +1,4 @@
-package document
+package fetch
 
 import (
 	"context"
@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
+	"github.com/tinfoilsh/tinfoil-go/document"
 	"github.com/tinfoilsh/tinfoil-go/internal/sdkinfo"
 )
 
@@ -33,9 +34,9 @@ func TestFetchReportsSDKIdentity(t *testing.T) {
 		var body []byte
 		var err error
 		if relay {
-			body, err = FetchVia("enclave.example", host, testNonce())
+			body, err = Document(t.Context(), "enclave.example", host, testNonce())
 		} else {
-			body, err = Fetch(host, testNonce())
+			body, err = Document(t.Context(), host, "", testNonce())
 		}
 		require.NoError(t, err)
 		require.Equal(t, responseBody, string(body))
@@ -71,7 +72,7 @@ func TestFetchSizeLimitAndRedirects(t *testing.T) {
 				return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(strings.Repeat("x", size)))}, nil
 			}),
 		}
-		body, err := Fetch("enclave.example", testNonce())
+		body, err := Document(t.Context(), "enclave.example", "", testNonce())
 		require.Equal(t, 1, redirects)
 		if size > limit {
 			require.ErrorContains(t, err, "exceeds 33554432 bytes")
@@ -97,7 +98,7 @@ func TestFetchTimeout(t *testing.T) {
 				return &http.Response{StatusCode: http.StatusOK, Body: body}, nil
 			})}
 			start := time.Now()
-			_, err := Fetch("enclave.example", testNonce())
+			_, err := Document(t.Context(), "enclave.example", "", testNonce())
 			require.ErrorIs(t, err, context.DeadlineExceeded)
 			if timeout == 0 {
 				timeout = 30 * time.Second
@@ -105,6 +106,27 @@ func TestFetchTimeout(t *testing.T) {
 			require.Equal(t, timeout, time.Since(start))
 		})
 	}
+}
+
+func TestFetchHonorsCallerDeadline(t *testing.T) {
+	original := http.DefaultClient
+	t.Cleanup(func() { http.DefaultClient = original })
+	synctest.Test(t, func(t *testing.T) {
+		http.DefaultClient = &http.Client{Transport: fetchTransport(func(r *http.Request) (*http.Response, error) {
+			body, writer := io.Pipe()
+			go func() {
+				<-r.Context().Done()
+				writer.CloseWithError(r.Context().Err())
+			}()
+			return &http.Response{StatusCode: http.StatusOK, Body: body}, nil
+		})}
+		ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+		defer cancel()
+		start := time.Now()
+		_, err := Document(ctx, "enclave.example", "", testNonce())
+		require.ErrorIs(t, err, context.DeadlineExceeded)
+		require.Equal(t, 5*time.Second, time.Since(start), "a caller deadline shorter than the cap applies")
+	})
 }
 
 func TestFetchRejectsNonHTTPSRedirect(t *testing.T) {
@@ -121,7 +143,7 @@ func TestFetchRejectsNonHTTPSRedirect(t *testing.T) {
 			return &http.Response{StatusCode: http.StatusFound, Header: http.Header{"Location": {"http://enclave.example/redirect"}}, Body: http.NoBody}, nil
 		}),
 	}
-	_, err := Fetch("enclave.example", testNonce())
+	_, err := Document(t.Context(), "enclave.example", "", testNonce())
 	require.ErrorContains(t, err, "refusing redirect to non-HTTPS URL")
 	require.Equal(t, []string{"https"}, schemes)
 }
@@ -134,7 +156,7 @@ func TestFetchKeepsDefaultRedirectLimit(t *testing.T) {
 		requests++
 		return &http.Response{StatusCode: http.StatusFound, Header: http.Header{"Location": {"/loop"}}, Body: http.NoBody}, nil
 	})}
-	_, err := Fetch("enclave.example", testNonce())
+	_, err := Document(t.Context(), "enclave.example", "", testNonce())
 	require.ErrorContains(t, err, "stopped after 10 redirects")
 	require.Equal(t, 10, requests)
 }
@@ -193,11 +215,19 @@ func TestFetchUsesFreshConnectionAfterCutover(t *testing.T) {
 			address.Store(newServer.Listener.Addr().String())
 			host := strings.TrimPrefix(oldServer.URL, "https://")
 			for _, relay := range []string{"", host} {
-				body, err := FetchVia(host, relay, testNonce())
+				body, err := Document(t.Context(), host, relay, testNonce())
 				require.NoError(t, err)
 				require.Equal(t, "new "+protocol, string(body))
 			}
 			require.Equal(t, "old "+protocol, sharedFetch(), "attestation must not close the shared connection pool")
 		})
 	}
+}
+
+func testNonce() []byte {
+	nonce := make([]byte, document.NonceSize)
+	for i := range nonce {
+		nonce[i] = byte(i)
+	}
+	return nonce
 }

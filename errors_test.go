@@ -12,6 +12,7 @@ import (
 	tinfoil "github.com/tinfoilsh/tinfoil-go"
 	"github.com/tinfoilsh/tinfoil-go/client"
 	"github.com/tinfoilsh/tinfoil-go/document"
+	"github.com/tinfoilsh/tinfoil-go/internal/fetch"
 	"github.com/tinfoilsh/tinfoil-go/verify"
 	"github.com/tinfoilsh/tinfoil-go/verify/measurement"
 )
@@ -71,7 +72,7 @@ func TestPublicInputErrors(t *testing.T) {
 	require.NoError(t, err)
 	_, err = s.Request("GET", "://", "", nil)
 	require.ErrorAs(t, err, &config)
-	_, err = document.Fetch("", make([]byte, document.NonceSize))
+	_, err = fetch.Document(t.Context(), "", "", make([]byte, document.NonceSize))
 	require.ErrorAs(t, err, &config)
 	var verified *verify.Verification
 	_, err = verified.TLSPublicKeyFP()
