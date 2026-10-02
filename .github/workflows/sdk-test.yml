@@ -88,6 +88,12 @@ jobs:
           fi
           for d in "${suites[@]}"; do
             echo "== $(basename "$d")"
+            # TestFixtures skips a directory without top-level fixtures.
+            fixtures=("$d"*.json)
+            if [ "${#fixtures[@]}" -eq 0 ]; then
+              echo "::error::no fixtures in vectors/v3/$(basename "$d")"
+              exit 1
+            fi
             TINFOIL_CONFORMANCE_FIXTURES="$d" \
               go test -count=1 -tags tinfoil_conformance -run TestFixtures ./verify/conformance/
           done
