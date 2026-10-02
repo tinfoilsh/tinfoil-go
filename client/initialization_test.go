@@ -11,6 +11,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/tinfoilsh/tinfoil-go/verify"
 )
 
 func TestDefaultClientProbesOncePerDiscovery(t *testing.T) {
@@ -57,7 +58,7 @@ func TestInitializationRecovery(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
 				s := &SecureClient{}
 				var attempts int
-				s.verify = func() (*VerifiedDocumentV3, error) {
+				s.verify = func() (*verify.Verification, error) {
 					attempts++
 					assert.Nil(t, s.Verification(), "failed attempts must not publish state")
 					if attempts == 1 {
@@ -88,7 +89,7 @@ func TestInitializationRetryIsShared(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		var attempts int
 		release := make(chan struct{})
-		s := &SecureClient{verify: func() (*VerifiedDocumentV3, error) {
+		s := &SecureClient{verify: func() (*verify.Verification, error) {
 			attempts++
 			if attempts == 1 {
 				<-release
@@ -112,7 +113,7 @@ func TestInitializationRetryIsShared(t *testing.T) {
 func TestRefreshRejectsExpiredPublication(t *testing.T) {
 	s := &SecureClient{}
 	deadline := make(chan time.Time, 1)
-	s.verify = func() (*VerifiedDocumentV3, error) {
+	s.verify = func() (*verify.Verification, error) {
 		s.stateMu.Lock()
 		expires := time.Now().Add(20 * time.Millisecond)
 		deadline <- expires

@@ -7,6 +7,8 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+
+	"github.com/tinfoilsh/tinfoil-go/verify"
 )
 
 // NewTransport admits requests only with unexpired verification. build must
@@ -17,7 +19,7 @@ import (
 // All transports from this client share its verification and refresh state.
 // build receives a detached result and must only construct its bound transport;
 // it must not call the client's verification, transport setup, or request methods.
-func (s *SecureClient) NewTransport(build func(*VerifiedDocumentV3) (http.RoundTripper, error), isKeyError func(error) bool) (http.RoundTripper, error) {
+func (s *SecureClient) NewTransport(build func(*verify.Verification) (http.RoundTripper, error), isKeyError func(error) bool) (http.RoundTripper, error) {
 	if build == nil {
 		return nil, &ConfigurationError{Err: fmt.Errorf("transport builder is required")}
 	}
@@ -44,7 +46,7 @@ func (s *SecureClient) registerTransport(t *clientTransport) error {
 		if registered {
 			return nil
 		}
-		transport, err := t.buildTransport(state.VerifiedDocumentV3)
+		transport, err := t.buildTransport(state.Verification)
 		if err != nil {
 			return err
 		}
@@ -75,11 +77,11 @@ func (s *SecureClient) registerTransport(t *clientTransport) error {
 
 type clientTransport struct {
 	client     *SecureClient
-	build      func(*VerifiedDocumentV3) (http.RoundTripper, error)
+	build      func(*verify.Verification) (http.RoundTripper, error)
 	isKeyError func(error) bool
 }
 
-func (t *clientTransport) buildTransport(verified *VerifiedDocumentV3) (http.RoundTripper, error) {
+func (t *clientTransport) buildTransport(verified *verify.Verification) (http.RoundTripper, error) {
 	transport, err := t.build(cloneVerification(verified))
 	if transport == nil && err == nil {
 		err = fmt.Errorf("transport builder returned nil")

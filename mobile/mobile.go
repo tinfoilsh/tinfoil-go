@@ -14,6 +14,7 @@ import (
 	"encoding/json"
 
 	"github.com/tinfoilsh/tinfoil-go/client"
+	"github.com/tinfoilsh/tinfoil-go/verify"
 )
 
 // Version is the Tinfoil SDK version.
@@ -66,7 +67,7 @@ func (c *Client) Verify() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return encode(verified)
+	return encode(verified, c.inner.Enclave())
 }
 
 // Verification returns the last successful verification without re-verifying,
@@ -76,11 +77,11 @@ func (c *Client) Verification() (string, error) {
 	if verified == nil {
 		return "", nil
 	}
-	return encode(verified)
+	return encode(verified, c.inner.Enclave())
 }
 
-func encode(verified *client.VerifiedDocumentV3) (string, error) {
-	encoded, err := json.Marshal(toVerificationJSON(verified))
+func encode(verified *verify.Verification, enclave string) (string, error) {
+	encoded, err := json.Marshal(toVerificationJSON(verified, enclave))
 	if err != nil {
 		return "", err
 	}

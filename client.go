@@ -8,6 +8,7 @@ import (
 	"github.com/openai/openai-go/v3"
 	"github.com/openai/openai-go/v3/option"
 	"github.com/tinfoilsh/tinfoil-go/client"
+	"github.com/tinfoilsh/tinfoil-go/verify"
 )
 
 // Client wraps the OpenAI client to provide secure inference through Tinfoil
@@ -117,12 +118,12 @@ func (c *Client) Transport() TransportMode {
 }
 
 // Verify refreshes attestation and returns the verified state.
-func (c *Client) Verify() (*client.VerifiedDocumentV3, error) {
+func (c *Client) Verify() (*verify.Verification, error) {
 	return c.secure.Verify()
 }
 
 // Verification returns a copy of the last successful verification.
-func (c *Client) Verification() *client.VerifiedDocumentV3 {
+func (c *Client) Verification() *verify.Verification {
 	return c.secure.Verification()
 }
 

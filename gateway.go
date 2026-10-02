@@ -12,6 +12,7 @@ import (
 	"github.com/openai/openai-go/v3"
 	"github.com/openai/openai-go/v3/option"
 	"github.com/tinfoilsh/tinfoil-go/client"
+	"github.com/tinfoilsh/tinfoil-go/verify"
 )
 
 // Gateway is an OpenAI client that seals each request to a verified replica
@@ -79,7 +80,7 @@ func NewGateway(baseURL string, catalog func() Catalog, opts GatewayOptions) (*G
 				return nil, err
 			}
 			secure = secure.ViaRelay(base.Host)
-			httpClient, err := ehbpHTTPClient(secure, baseURL)
+			httpClient, err := ehbpHTTPClient(secure, r.host, baseURL)
 			if err != nil {
 				return nil, err
 			}
@@ -104,11 +105,13 @@ func (g *Gateway) HTTPClient() *http.Client {
 
 // GatewayVerification holds a replica's last successful verification.
 type GatewayVerification struct {
+	// Host is the replica the verification is for.
+	Host string `json:"host"`
 	// Request model names, not attested identities.
-	Models       []string                   `json:"models"`
-	Reference    string                     `json:"reference"`
-	PinnedModel  string                     `json:"pinned_model,omitempty"`
-	Verification *client.VerifiedDocumentV3 `json:"verification"`
+	Models       []string             `json:"models"`
+	Reference    string               `json:"reference"`
+	PinnedModel  string               `json:"pinned_model,omitempty"`
+	Verification *verify.Verification `json:"verification"`
 }
 
 // Verifications returns cached results without re-verifying them.
@@ -128,12 +131,12 @@ func (g *Gateway) Verifications() []GatewayVerification {
 				return true
 			})
 			slices.Sort(models)
-			results = append(results, GatewayVerification{models, r.ref, r.model, verified})
+			results = append(results, GatewayVerification{Host: r.host, Models: models, Reference: r.ref, PinnedModel: r.model, Verification: verified})
 		}
 		return true
 	})
 	slices.SortFunc(results, func(a, b GatewayVerification) int {
-		return cmp.Or(strings.Compare(a.Verification.EnclaveHost, b.Verification.EnclaveHost),
+		return cmp.Or(strings.Compare(a.Host, b.Host),
 			strings.Compare(a.Reference, b.Reference), strings.Compare(a.PinnedModel, b.PinnedModel))
 	})
 	return results
@@ -141,7 +144,7 @@ func (g *Gateway) Verifications() []GatewayVerification {
 
 type verifiedReplicaTransport struct {
 	*recoveryTransport
-	verification func() *client.VerifiedDocumentV3
+	verification func() *verify.Verification
 	models       sync.Map
 }
 

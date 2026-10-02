@@ -19,6 +19,7 @@ import (
 	"github.com/tinfoilsh/tinfoil-go/document"
 	"github.com/tinfoilsh/tinfoil-go/document/collateral"
 	"github.com/tinfoilsh/tinfoil-go/internal/errs"
+	"github.com/tinfoilsh/tinfoil-go/internal/sdkinfo"
 	"github.com/tinfoilsh/tinfoil-go/verify/internal/provenance"
 	"github.com/tinfoilsh/tinfoil-go/verify/internal/quote"
 	"github.com/tinfoilsh/tinfoil-go/verify/measurement"
@@ -121,7 +122,8 @@ func (v *Verifier) verifyV3(docBytes, nonce []byte, repo string) (*Verification,
 	if v == nil || v.now == nil || v.provenance == nil {
 		return nil, layerNone, &errs.ConfigurationError{Err: fmt.Errorf("verifier must be built with NewVerifier")}
 	}
-	if _, _, _, err := provenance.ParseReference(repo); err != nil {
+	configRepo, _, _, err := provenance.ParseReference(repo)
+	if err != nil {
 		return nil, layerProvenance, &errs.ConfigurationError{Err: err}
 	}
 	doc, err := document.Parse(docBytes, nonce)
@@ -151,12 +153,17 @@ func (v *Verifier) verifyV3(docBytes, nonce []byte, repo string) (*Verification,
 	}
 
 	return &Verification{
+		ConfigRepo:         configRepo,
 		CodeDigest:         code.Digest,
 		CodeTag:            code.Tag,
 		CodeMeasurement:    code.Measurement,
 		EnclaveMeasurement: authenticated.Measurement,
 		CryptoMaterial:     doc.CryptoMaterialItems(),
 		FreshnessExpiresAt: freshnessExpiresAt,
+		Metadata: VerificationMetadata{
+			Verifier:   SoftwareIdentity{Name: sdkinfo.Name, Version: sdkinfo.Version()},
+			VerifiedAt: now.UTC(),
+		},
 	}, layerNone, nil
 }
 

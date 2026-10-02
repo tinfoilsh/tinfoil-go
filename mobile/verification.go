@@ -3,8 +3,8 @@ package mobile
 import (
 	"time"
 
-	"github.com/tinfoilsh/tinfoil-go/client"
 	"github.com/tinfoilsh/tinfoil-go/document"
+	"github.com/tinfoilsh/tinfoil-go/verify"
 	"github.com/tinfoilsh/tinfoil-go/verify/measurement"
 )
 
@@ -67,22 +67,23 @@ type softwareIdentityJSON struct {
 	Version string `json:"version"`
 }
 
-// toVerificationJSON maps the SDK's record onto the contract. A missing
-// endorsed key is left empty rather than failing: the document is verified
-// either way, and a caller that needs a channel key checks for it.
-func toVerificationJSON(v *client.VerifiedDocumentV3) verificationJSON {
+// toVerificationJSON maps a verification of the enclave at host onto the
+// contract. A missing endorsed key is left empty rather than failing: the
+// document is verified either way, and a caller that needs a channel key checks
+// for it.
+func toVerificationJSON(v *verify.Verification, host string) verificationJSON {
 	out := verificationJSON{
 		SchemaVersion:      VerificationSchemaVersion,
 		ConfigRepo:         v.ConfigRepo,
-		EnclaveHost:        v.EnclaveHost,
+		EnclaveHost:        host,
 		CodeDigest:         v.CodeDigest,
 		CodeTag:            v.CodeTag,
 		CodeMeasurement:    toMeasurementJSON(v.CodeMeasurement),
 		EnclaveMeasurement: toMeasurementJSON(v.EnclaveMeasurement),
 		CryptoMaterial:     make([]cryptoMaterialJSON, 0, len(v.CryptoMaterial)),
 		FreshnessExpiresAt: v.FreshnessExpiresAt.UTC().Format(time.RFC3339Nano),
-		Verifier:           softwareIdentityJSON{Name: v.Verifier.Name, Version: v.Verifier.Version},
-		VerifiedAt:         v.VerifiedAt,
+		Verifier:           softwareIdentityJSON{Name: v.Metadata.Verifier.Name, Version: v.Metadata.Verifier.Version},
+		VerifiedAt:         v.Metadata.VerifiedAt.UTC().Format(time.RFC3339Nano),
 	}
 	out.TLSPublicKeyFP, _ = v.CryptoMaterialData(document.CryptoMaterialIDTLS, document.KeySPKIFPSHA256V1Format)
 	out.HPKEPublicKey, _ = v.CryptoMaterialData(document.CryptoMaterialIDHPKE, document.KeyX25519HPKEV1Format)

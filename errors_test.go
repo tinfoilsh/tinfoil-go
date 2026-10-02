@@ -51,16 +51,18 @@ func TestPublicInputErrors(t *testing.T) {
 	var config *tinfoil.ConfigurationError
 	_, err := tinfoil.NewClientWithOptions(tinfoil.WithTransport("invalid"))
 	require.ErrorAs(t, err, &config)
-	_, err = client.VerifyDocumentV3(nil, nil, "", nil)
+	verifier, err := verify.NewVerifier()
+	require.NoError(t, err)
+	_, err = verifier.VerifyV3(nil, nil, "")
 	require.ErrorAs(t, err, &config)
-	_, err = client.VerifyDocumentV3(nil, nil, "org/repo", nil)
+	_, err = verifier.VerifyV3(nil, nil, "org/repo")
 	require.ErrorAs(t, err, &config)
 	_, err = client.NewSecureClient("enclave.example", "", nil)
 	require.ErrorAs(t, err, &config, "reject missing trust configuration before fetching")
 	for _, repo := range []string{"owner", "owner/repo/extra", "owner/repo@sha256:bad"} {
 		_, err = client.NewSecureClient("enclave.example", repo, nil)
 		require.ErrorAs(t, err, &config)
-		_, err = client.VerifyDocumentV3(nil, nil, repo, nil)
+		_, err = verifier.VerifyV3(nil, nil, repo)
 		require.ErrorAs(t, err, &config)
 	}
 	_, err = client.NewSecureClient("enclave.example", "org/repo@v1@sha256:"+strings.Repeat("a", 64), nil)
@@ -71,12 +73,12 @@ func TestPublicInputErrors(t *testing.T) {
 	require.ErrorAs(t, err, &config)
 	_, err = document.Fetch("", make([]byte, document.NonceSize))
 	require.ErrorAs(t, err, &config)
-	var verified *client.VerifiedDocumentV3
+	var verified *verify.Verification
 	_, err = verified.TLSPublicKeyFP()
 	require.ErrorAs(t, err, &config)
 
 	var attestation *tinfoil.AttestationError
-	_, err = client.VerifyDocumentV3([]byte(`{}`), make([]byte, document.NonceSize), "org/repo", nil)
+	_, err = verifier.VerifyV3([]byte(`{}`), make([]byte, document.NonceSize), "org/repo")
 	require.ErrorAs(t, err, &attestation, "malformed evidence is not a caller configuration error")
 }
 
@@ -94,7 +96,7 @@ func TestMalformedPinsAreConfigurationErrors(t *testing.T) {
 		require.ErrorAs(t, err, &config)
 		_, err = client.NewDefaultClient(opts)
 		require.ErrorAs(t, err, &config, "reject malformed pins before discovery")
-		_, err = client.VerifyDocumentV3(nil, nil, "org/repo", opts)
+		_, err = verify.NewVerifier(verify.WithPinnedRegisters(pins))
 		require.ErrorAs(t, err, &config)
 	}
 	for _, pins := range []*measurement.Measurement{

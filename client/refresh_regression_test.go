@@ -8,11 +8,12 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
+	"github.com/tinfoilsh/tinfoil-go/verify"
 )
 
 func TestTransportDiscardsSnapshotRefreshedDuringBuild(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		s := &SecureClient{state: testEnclaveState(time.Now().Add(time.Hour), "old"), verify: func() (*VerifiedDocumentV3, error) {
+		s := &SecureClient{state: testEnclaveState(time.Now().Add(time.Hour), "old"), verify: func() (*verify.Verification, error) {
 			return testState(time.Now().Add(time.Hour), "new"), nil
 		}}
 		release := make(chan struct{})
@@ -21,7 +22,7 @@ func TestTransportDiscardsSnapshotRefreshedDuringBuild(t *testing.T) {
 		finished := make(chan error, 1)
 		go func() {
 			var err error
-			transport, err = s.NewTransport(func(verified *VerifiedDocumentV3) (http.RoundTripper, error) {
+			transport, err = s.NewTransport(func(verified *verify.Verification) (http.RoundTripper, error) {
 				built = append(built, verified.CodeTag)
 				if verified.CodeTag == "old" {
 					<-release
@@ -47,7 +48,7 @@ func TestTransportDiscardsSnapshotRefreshedDuringBuild(t *testing.T) {
 }
 
 func TestPlaintextRequestDoesNotRefresh(t *testing.T) {
-	s := &SecureClient{state: testEnclaveState(time.Now().Add(time.Hour), "key"), verify: func() (*VerifiedDocumentV3, error) {
+	s := &SecureClient{state: testEnclaveState(time.Now().Add(time.Hour), "key"), verify: func() (*verify.Verification, error) {
 		t.Error("re-verification cannot make a plaintext URL acceptable")
 		return nil, errNoTLS
 	}}
@@ -61,11 +62,11 @@ func TestRefreshPublishesVerificationAndTransportTogether(t *testing.T) {
 	for _, buildErr := range []error{nil, errors.New("transport construction failed")} {
 		t.Run(errorString(buildErr), func(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
-				s := &SecureClient{state: testEnclaveState(time.Now().Add(time.Hour), "old"), verify: func() (*VerifiedDocumentV3, error) {
+				s := &SecureClient{state: testEnclaveState(time.Now().Add(time.Hour), "old"), verify: func() (*verify.Verification, error) {
 					return testState(time.Now().Add(time.Hour), "new"), nil
 				}}
 				release := make(chan struct{})
-				transport, err := s.NewTransport(func(verified *VerifiedDocumentV3) (http.RoundTripper, error) {
+				transport, err := s.NewTransport(func(verified *verify.Verification) (http.RoundTripper, error) {
 					if verified.CodeTag == "new" {
 						<-release
 						if buildErr != nil {
@@ -113,11 +114,11 @@ func TestHTTPClientReusesTransportConfiguration(t *testing.T) {
 }
 
 func TestRefreshRejectsExpiryBeforeTransportConstruction(t *testing.T) {
-	s := &SecureClient{state: testEnclaveState(time.Now().Add(time.Hour), "old"), verify: func() (*VerifiedDocumentV3, error) {
+	s := &SecureClient{state: testEnclaveState(time.Now().Add(time.Hour), "old"), verify: func() (*verify.Verification, error) {
 		return testState(time.Now().Add(-time.Second), "expired"), nil
 	}}
 	var builds int
-	_, err := s.NewTransport(func(*VerifiedDocumentV3) (http.RoundTripper, error) {
+	_, err := s.NewTransport(func(*verify.Verification) (http.RoundTripper, error) {
 		builds++
 		return roundTripFunc(func(*http.Request) (*http.Response, error) { return testResponse(), nil }), nil
 	}, nil)
@@ -131,12 +132,12 @@ func TestRefreshRejectsExpiryBeforeTransportConstruction(t *testing.T) {
 func TestLateRejectionDoesNotInvalidateReplacement(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		var verifications int
-		s := &SecureClient{state: testEnclaveState(time.Now().Add(time.Hour), "old"), verify: func() (*VerifiedDocumentV3, error) {
+		s := &SecureClient{state: testEnclaveState(time.Now().Add(time.Hour), "old"), verify: func() (*verify.Verification, error) {
 			verifications++
 			return testState(time.Now().Add(time.Hour), "new"), nil
 		}}
 		release := make(chan struct{})
-		transport, err := s.NewTransport(func(verified *VerifiedDocumentV3) (http.RoundTripper, error) {
+		transport, err := s.NewTransport(func(verified *verify.Verification) (http.RoundTripper, error) {
 			return roundTripFunc(func(*http.Request) (*http.Response, error) {
 				if verified.CodeTag == "old" {
 					<-release

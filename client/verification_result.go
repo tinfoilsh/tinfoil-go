@@ -2,7 +2,7 @@ package client
 
 import (
 	"github.com/tinfoilsh/tinfoil-go/document"
-	"github.com/tinfoilsh/tinfoil-go/internal/sdkinfo"
+	"github.com/tinfoilsh/tinfoil-go/verify"
 	"github.com/tinfoilsh/tinfoil-go/verify/measurement"
 )
 
@@ -10,16 +10,6 @@ const (
 	// Version is the Tinfoil Go SDK release version.
 	Version = "0.16.1"
 )
-
-// SoftwareIdentity identifies software involved in verification.
-type SoftwareIdentity struct {
-	Name    string `json:"name"`
-	Version string `json:"version"`
-}
-
-func currentVerifierIdentity() SoftwareIdentity {
-	return SoftwareIdentity{Name: sdkinfo.Name, Version: sdkinfo.Version()}
-}
 
 func cloneMeasurement(value *measurement.Measurement) *measurement.Measurement {
 	if value == nil {
@@ -30,7 +20,7 @@ func cloneMeasurement(value *measurement.Measurement) *measurement.Measurement {
 	return &cloned
 }
 
-func cloneVerification(verified *VerifiedDocumentV3) *VerifiedDocumentV3 {
+func cloneVerification(verified *verify.Verification) *verify.Verification {
 	if verified == nil {
 		return nil
 	}
