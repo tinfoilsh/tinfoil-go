@@ -8,8 +8,8 @@ import (
 	"github.com/tinfoilsh/tinfoil-go/verify/measurement"
 )
 
-// Option configures a Verifier. Options are applied in order by New, which
-// reports the first one that fails as a ConfigurationError.
+// Option configures a Verifier. Options are applied in order by NewVerifier,
+// which reports the first one that fails as a ConfigurationError.
 type Option func(*Verifier) error
 
 // WithPinnedRegisters adds register checks; empty entries retain defaults.

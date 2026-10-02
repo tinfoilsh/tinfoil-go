@@ -142,7 +142,7 @@ func Run(stage string, in Input) (Output, int) {
 	quoteOpts := &quote.Options{}
 	quoteOpts.DangerousTestOnlySetClock(appraisal)
 	quoteOpts.DangerousTestOnlySetRoots(rts.amd, rts.intel)
-	verifier, err := verify.New(
+	verifier, err := verify.NewVerifier(
 		verify.DangerousTestOnlyWithClock(func() time.Time { return appraisal }),
 		verify.DangerousTestOnlyWithSigstoreRoot(rts.sigstore),
 		verify.DangerousTestOnlyWithVendorRoots(rts.amd, rts.intel),

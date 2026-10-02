@@ -47,7 +47,7 @@ type Verifier struct {
 	now             func() time.Time
 
 	// provenance authenticates reference values against its own copy of the
-	// trusted root. New builds one from the embedded root; only the
+	// trusted root. NewVerifier builds one from the embedded root; only the
 	// conformance build can replace it.
 	provenance *provenance.Client
 
@@ -56,9 +56,9 @@ type Verifier struct {
 	overrides overrides
 }
 
-// New builds a Verifier from opts. With no options it appraises against the
-// release measurements alone, with the seven-day freshness bound.
-func New(opts ...Option) (*Verifier, error) {
+// NewVerifier builds a Verifier from opts. With no options it appraises against
+// the release measurements alone, with the seven-day freshness bound.
+func NewVerifier(opts ...Option) (*Verifier, error) {
 	// Build default provenance.Client with embedded roots
 	provenanceClient, err := provenance.NewDefaultClient()
 	if err != nil {
@@ -120,7 +120,7 @@ const (
 // verifyV3 is VerifyV3, also reporting which layer rejected the document.
 func (v *Verifier) verifyV3(docBytes, nonce []byte, repo string) (*Verification, layer, error) {
 	if v == nil || v.now == nil || v.provenance == nil {
-		return nil, layerNone, &errs.ConfigurationError{Err: fmt.Errorf("verifier must be built with New")}
+		return nil, layerNone, &errs.ConfigurationError{Err: fmt.Errorf("verifier must be built with NewVerifier")}
 	}
 	if _, _, _, err := provenance.ParseReference(repo); err != nil {
 		return nil, layerProvenance, &errs.ConfigurationError{Err: err}

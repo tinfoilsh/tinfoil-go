@@ -14,7 +14,7 @@ import (
 )
 
 func TestNewDefaults(t *testing.T) {
-	v, err := New()
+	v, err := NewVerifier()
 	require.NoError(t, err)
 	assert.Equal(t, provenance.MaxFreshnessAge, v.FreshnessMaxAge())
 	assert.Nil(t, v.PinnedRegisters())
@@ -23,16 +23,16 @@ func TestNewDefaults(t *testing.T) {
 func TestWithFreshnessMaxAge(t *testing.T) {
 	// Zero keeps the default, so a caller passing an unset policy field does
 	// not silently disable the bound.
-	v, err := New(WithFreshnessMaxAge(0))
+	v, err := NewVerifier(WithFreshnessMaxAge(0))
 	require.NoError(t, err)
 	assert.Equal(t, provenance.MaxFreshnessAge, v.FreshnessMaxAge())
 
-	v, err = New(WithFreshnessMaxAge(24 * time.Hour))
+	v, err = NewVerifier(WithFreshnessMaxAge(24 * time.Hour))
 	require.NoError(t, err)
 	assert.Equal(t, 24*time.Hour, v.FreshnessMaxAge())
 
 	for _, maxAge := range []time.Duration{-time.Nanosecond, -time.Hour} {
-		v, err := New(WithFreshnessMaxAge(maxAge))
+		v, err := NewVerifier(WithFreshnessMaxAge(maxAge))
 		require.Nil(t, v)
 		require.ErrorContains(t, err, "freshness maximum age must not be negative")
 		var configuration *errs.ConfigurationError
@@ -43,7 +43,7 @@ func TestWithFreshnessMaxAge(t *testing.T) {
 func TestWithPinnedRegistersCopies(t *testing.T) {
 	register := strings.Repeat("ab", 48)
 	pins := &measurement.Measurement{Type: measurement.TdxGuestV2, Registers: []string{4: register}}
-	v, err := New(WithPinnedRegisters(pins))
+	v, err := NewVerifier(WithPinnedRegisters(pins))
 	require.NoError(t, err)
 
 	// Mutating the caller's measurement after construction must not reach the
@@ -66,7 +66,7 @@ func TestWithPinnedRegistersRejectsInvalid(t *testing.T) {
 		"nil registers": {Type: measurement.SevGuestV2},
 	} {
 		t.Run(name, func(t *testing.T) {
-			v, err := New(WithPinnedRegisters(pins))
+			v, err := NewVerifier(WithPinnedRegisters(pins))
 			require.Nil(t, v)
 			var configuration *errs.ConfigurationError
 			require.ErrorAs(t, err, &configuration)
@@ -75,7 +75,7 @@ func TestWithPinnedRegistersRejectsInvalid(t *testing.T) {
 }
 
 func TestVerifyV3RejectsBadRepo(t *testing.T) {
-	v, err := New()
+	v, err := NewVerifier()
 	require.NoError(t, err)
 	verified, err := v.VerifyV3([]byte("{}"), make([]byte, 32), "not a repo reference")
 	require.Nil(t, verified)
@@ -84,15 +84,15 @@ func TestVerifyV3RejectsBadRepo(t *testing.T) {
 }
 
 func TestNewIgnoresNilOption(t *testing.T) {
-	v, err := New(nil, WithFreshnessMaxAge(time.Hour), nil)
+	v, err := NewVerifier(nil, WithFreshnessMaxAge(time.Hour), nil)
 	require.NoError(t, err)
 	assert.Equal(t, time.Hour, v.FreshnessMaxAge())
 }
 
-// A caller that ignores New's error holds a nil *Verifier, and a zero value
-// carries neither a trust root nor a clock. Verifying with either must report a
-// configuration error rather than panicking once a well-formed document gets
-// past the parse and the receiver is first dereferenced.
+// A caller that ignores NewVerifier's error holds a nil *Verifier, and a zero
+// value carries neither a trust root nor a clock. Verifying with either must
+// report a configuration error rather than panicking once a well-formed
+// document gets past the parse and the receiver is first dereferenced.
 func TestVerifyV3RejectsUnbuiltVerifier(t *testing.T) {
 	for name, v := range map[string]*Verifier{"nil": nil, "zero value": {}} {
 		t.Run(name, func(t *testing.T) {
@@ -100,7 +100,7 @@ func TestVerifyV3RejectsUnbuiltVerifier(t *testing.T) {
 			require.Nil(t, verified)
 			var configuration *errs.ConfigurationError
 			require.ErrorAs(t, err, &configuration)
-			require.ErrorContains(t, err, "verifier must be built with New")
+			require.ErrorContains(t, err, "verifier must be built with NewVerifier")
 		})
 	}
 }

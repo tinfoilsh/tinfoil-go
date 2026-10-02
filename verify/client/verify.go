@@ -69,12 +69,12 @@ func (v *VerifiedDocumentV3) validateTransportKeys() error {
 // A nil policy uses defaults. repo is a trusted owner/name[@tag][@sha256:digest].
 // Callers must bind traffic to the returned keys and enforce FreshnessExpiresAt.
 //
-// Deprecated: use verify.New and Verifier.VerifyV3, which this wraps. The
-// Verifier takes functional options instead of a policy struct, and returns only
-// what the document proved rather than a record whose ConfigRepo, EnclaveHost,
-// Verifier and VerifiedAt fields this entry point always leaves empty. The
-// struct form existed for the gomobile surface, which no longer binds this
-// package.
+// Deprecated: use verify.NewVerifier and Verifier.VerifyV3, which this wraps.
+// The Verifier takes functional options instead of a policy struct, and returns
+// only what the document proved rather than a record whose ConfigRepo,
+// EnclaveHost, Verifier and VerifiedAt fields this entry point always leaves
+// empty. The struct form existed for the gomobile surface, which no longer
+// binds this package.
 func VerifyDocumentV3(docBytes, nonce []byte, repo string, opts *VerificationOptions) (*VerifiedDocumentV3, error) {
 	verifier, err := opts.verifier()
 	if err != nil {

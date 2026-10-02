@@ -48,7 +48,7 @@ func newGatewayPolicy(opts GatewayOptions, defaults client.VerificationOptions) 
 	if opts.PinnedModelsOnly && len(opts.ModelPins) == 0 {
 		return gatewayPolicy{}, fmt.Errorf("pinned-only mode requires at least one model pin")
 	}
-	v, err := verify.New(verify.WithPinnedRegisters(defaults.PinnedRegisters), verify.WithFreshnessMaxAge(defaults.FreshnessMaxAge))
+	v, err := verify.NewVerifier(verify.WithPinnedRegisters(defaults.PinnedRegisters), verify.WithFreshnessMaxAge(defaults.FreshnessMaxAge))
 	if err != nil {
 		return gatewayPolicy{}, fmt.Errorf("gateway verification options: %w", err)
 	}

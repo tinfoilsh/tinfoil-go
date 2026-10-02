@@ -135,7 +135,7 @@ SDK requests with expired evidence.
 ```go
 import "github.com/tinfoilsh/tinfoil-go/verify"
 
-verifier, err := verify.New()
+verifier, err := verify.NewVerifier()
 if err != nil {
     return err
 }
@@ -184,7 +184,7 @@ cannot change afterwards. Empty pin entries retain defaults; TDX order is
 `[MRTD, RTMR0, RTMR1, RTMR2, RTMR3]`. Pins cannot override release or platform
 measurements, and `FreshnessMaxAge` defaults to seven days.
 
-`verify.New` takes functional options:
+`verify.NewVerifier` takes functional options:
 
 ```go
 import (
@@ -194,7 +194,7 @@ import (
     "github.com/tinfoilsh/tinfoil-go/verify/measurement"
 )
 
-verifier, err := verify.New(
+verifier, err := verify.NewVerifier(
     verify.WithPinnedRegisters(&measurement.Measurement{
         Type:      measurement.TdxGuestV2,
         Registers: []string{4: rtmr3},

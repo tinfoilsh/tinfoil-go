@@ -84,9 +84,9 @@ type VerificationOptions struct {
 // them once. A nil receiver selects the defaults.
 func (input *VerificationOptions) verifier() (*verify.Verifier, error) {
 	if input == nil {
-		return verify.New()
+		return verify.NewVerifier()
 	}
-	return verify.New(
+	return verify.NewVerifier(
 		verify.WithPinnedRegisters(input.PinnedRegisters),
 		verify.WithFreshnessMaxAge(input.FreshnessMaxAge),
 	)

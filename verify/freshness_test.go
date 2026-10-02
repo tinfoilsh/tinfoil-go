@@ -45,13 +45,13 @@ func TestLiveIgnoreFreshness(t *testing.T) {
 	require.NoError(t, err)
 	raw, err := document.Fetch(os.Getenv(enclaveEnvVar), nonce)
 	require.NoError(t, err)
-	defaults, err := New()
+	defaults, err := NewVerifier()
 	require.NoError(t, err)
 	want, err := defaults.VerifyV3(raw, nonce, repo)
 	require.NoError(t, err)
 	require.False(t, want.FreshnessExpiresAt.IsZero())
 	want.FreshnessExpiresAt = time.Time{}
-	ignored, err := New(WithFreshnessMaxAge(expiredMaxAge), WithIgnoreFreshness())
+	ignored, err := NewVerifier(WithFreshnessMaxAge(expiredMaxAge), WithIgnoreFreshness())
 	require.NoError(t, err)
 
 	changeCollateral := func(format string, remove bool) func(map[string]any) {
@@ -90,7 +90,7 @@ func TestLiveIgnoreFreshness(t *testing.T) {
 			if tt.mutate != nil {
 				modified = editDocument(t, raw, tt.mutate)
 			}
-			bounded, err := New(WithFreshnessMaxAge(tt.maxAge))
+			bounded, err := NewVerifier(WithFreshnessMaxAge(tt.maxAge))
 			require.NoError(t, err)
 			_, err = bounded.VerifyV3(modified, nonce, repo)
 			require.ErrorContains(t, err, tt.wantError)
