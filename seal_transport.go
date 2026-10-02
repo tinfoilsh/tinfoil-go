@@ -20,8 +20,8 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/tinfoilsh/tinfoil-go/client"
 	"github.com/tinfoilsh/tinfoil-go/verify"
-	"github.com/tinfoilsh/tinfoil-go/verify/client"
 )
 
 const (

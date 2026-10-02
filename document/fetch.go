@@ -10,8 +10,8 @@ import (
 	"net/url"
 	"time"
 
+	"github.com/tinfoilsh/tinfoil-go/internal/errs"
 	"github.com/tinfoilsh/tinfoil-go/internal/sdkinfo"
-	"github.com/tinfoilsh/tinfoil-go/verify/internal/errs"
 )
 
 // Fetch retrieves a v3 attestation document from an enclave host using a

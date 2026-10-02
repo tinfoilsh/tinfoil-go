@@ -12,7 +12,7 @@ package collaterals
 import (
 	"time"
 
-	"github.com/tinfoilsh/tinfoil-go/verify/document/collateral"
+	"github.com/tinfoilsh/tinfoil-go/document/collateral"
 )
 
 // FormatV2 identifies the collaterals response carrying v3 collateral entries.

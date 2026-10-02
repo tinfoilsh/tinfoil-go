@@ -23,8 +23,8 @@ import (
 	tdxverify "github.com/google/go-tdx-guest/verify"
 	tdxtrust "github.com/google/go-tdx-guest/verify/trust"
 
-	"github.com/tinfoilsh/tinfoil-go/verify/document/collateral"
-	"github.com/tinfoilsh/tinfoil-go/verify/internal/errs"
+	"github.com/tinfoilsh/tinfoil-go/document/collateral"
+	"github.com/tinfoilsh/tinfoil-go/internal/errs"
 	"github.com/tinfoilsh/tinfoil-go/verify/measurement"
 )
 

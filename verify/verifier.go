@@ -4,22 +4,21 @@
 // bound it to, and the repository the caller trusts, a Verifier decides what
 // the document proves. It opens no connections and keeps no state between
 // calls, so fetching documents, caching a verification and enforcing its
-// expiry all belong to the caller — see verify/client for an implementation
+// expiry all belong to the caller — see package client for an implementation
 // that does those things.
 //
 // This package also re-exports the SDK's error categories, which are defined
-// in verify/internal/errs so the lower-level verification packages can
-// classify their errors without importing this one, which imports them in
-// turn.
+// in internal/errs so the lower-level verification packages can classify
+// their errors without importing this one, which imports them in turn.
 package verify
 
 import (
 	"fmt"
 	"time"
 
-	"github.com/tinfoilsh/tinfoil-go/verify/document"
-	"github.com/tinfoilsh/tinfoil-go/verify/document/collateral"
-	"github.com/tinfoilsh/tinfoil-go/verify/internal/errs"
+	"github.com/tinfoilsh/tinfoil-go/document"
+	"github.com/tinfoilsh/tinfoil-go/document/collateral"
+	"github.com/tinfoilsh/tinfoil-go/internal/errs"
 	"github.com/tinfoilsh/tinfoil-go/verify/internal/provenance"
 	"github.com/tinfoilsh/tinfoil-go/verify/internal/quote"
 	"github.com/tinfoilsh/tinfoil-go/verify/measurement"

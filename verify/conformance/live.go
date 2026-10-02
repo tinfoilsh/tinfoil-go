@@ -7,7 +7,7 @@ import (
 	"net"
 	"time"
 
-	"github.com/tinfoilsh/tinfoil-go/verify/client"
+	"github.com/tinfoilsh/tinfoil-go/client"
 )
 
 // RejectionCode maps the layer Verifier.VerifyV3WithLayer reports to the wire

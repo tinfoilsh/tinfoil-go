@@ -13,7 +13,7 @@ package mobile
 import (
 	"encoding/json"
 
-	"github.com/tinfoilsh/tinfoil-go/verify/client"
+	"github.com/tinfoilsh/tinfoil-go/client"
 )
 
 // Version is the Tinfoil SDK version.

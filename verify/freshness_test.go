@@ -10,9 +10,9 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
+	"github.com/tinfoilsh/tinfoil-go/document"
+	"github.com/tinfoilsh/tinfoil-go/document/collateral"
 	"github.com/tinfoilsh/tinfoil-go/internal/testutil"
-	"github.com/tinfoilsh/tinfoil-go/verify/document"
-	"github.com/tinfoilsh/tinfoil-go/verify/document/collateral"
 	"github.com/tinfoilsh/tinfoil-go/verify/internal/provenance"
 )
 
@@ -130,4 +130,53 @@ func editDocument(t *testing.T, raw []byte, edit func(map[string]any)) []byte {
 	out, err := json.Marshal(doc)
 	require.NoError(t, err)
 	return out
+}
+
+func TestLiveFreshnessWitnessExpiration(t *testing.T) {
+	const enclaveEnvVar, repoEnvVar = "TINFOIL_ENCLAVE", "TINFOIL_REPO"
+	const maxAge = 30 * 24 * time.Hour
+	testutil.RequireLive(t, enclaveEnvVar, repoEnvVar)
+	repo := os.Getenv(repoEnvVar)
+	nonce, err := document.RandomNonce()
+	require.NoError(t, err)
+	raw, err := document.Fetch(os.Getenv(enclaveEnvVar), nonce)
+	require.NoError(t, err)
+	verifier, err := NewVerifier()
+	require.NoError(t, err)
+	verified, err := verifier.VerifyV3(raw, nonce, repo)
+	require.NoError(t, err)
+	doc, err := document.Parse(raw, nonce)
+	require.NoError(t, err)
+	codeRef, err := doc.SigstoreCode()
+	require.NoError(t, err)
+	provClient, err := provenance.NewDefaultClient()
+	require.NoError(t, err)
+	code, err := provClient.AuthenticateCode(codeRef.Bundle, repo, codeRef.Tag, codeRef.Digest)
+	require.NoError(t, err)
+	platformRef, err := doc.SigstorePlatform()
+	require.NoError(t, err)
+	platform, err := provClient.AuthenticatePlatformEndorsements(platformRef.Bundle, platformRef.Repo, platformRef.Tag, platformRef.Digest)
+	require.NoError(t, err)
+	matched := false
+	for id, artifact := range map[string]*provenance.AuthenticatedArtifact{
+		collateral.FreshnessIDCode:     &code.AuthenticatedArtifact,
+		collateral.FreshnessIDPlatform: &platform.AuthenticatedArtifact,
+	} {
+		witness, err := doc.Freshness(id)
+		require.NoError(t, err)
+		loggedAt, err := provClient.AuthenticateFreshness(witness.Bundle, artifact, time.Now(), 0)
+		require.NoError(t, err)
+		_, err = provClient.AuthenticateFreshness(witness.Bundle, artifact, loggedAt.Add(8*24*time.Hour), 0)
+		require.ErrorContains(t, err, "stale")
+		_, err = provClient.AuthenticateFreshness(witness.Bundle, artifact, loggedAt.Add(8*24*time.Hour), maxAge)
+		require.NoError(t, err)
+		_, err = provClient.AuthenticateFreshness(witness.Bundle, artifact, loggedAt.Add(7*24*time.Hour), 0)
+		require.NoError(t, err)
+		_, err = provClient.AuthenticateFreshness(witness.Bundle, artifact, loggedAt.Add(7*24*time.Hour+time.Nanosecond), 0)
+		require.ErrorContains(t, err, "stale")
+		expiresAt := loggedAt.Add(provenance.MaxFreshnessAge)
+		require.False(t, verified.FreshnessExpiresAt.After(expiresAt), "%s witness expires before public deadline", id)
+		matched = matched || verified.FreshnessExpiresAt.Equal(expiresAt)
+	}
+	require.True(t, matched, "public deadline must equal one of the authenticated witness expirations")
 }

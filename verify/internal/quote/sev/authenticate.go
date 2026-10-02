@@ -20,7 +20,7 @@ import (
 	"github.com/tinfoilsh/go-sev-guest/verify"
 	"github.com/tinfoilsh/go-sev-guest/verify/trust"
 
-	"github.com/tinfoilsh/tinfoil-go/verify/internal/errs"
+	"github.com/tinfoilsh/tinfoil-go/internal/errs"
 	"github.com/tinfoilsh/tinfoil-go/verify/measurement"
 )
 

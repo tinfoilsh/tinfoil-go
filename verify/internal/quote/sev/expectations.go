@@ -12,7 +12,7 @@ import (
 	"github.com/tinfoilsh/go-sev-guest/proto/sevsnp"
 	sevvalidate "github.com/tinfoilsh/go-sev-guest/validate"
 
-	"github.com/tinfoilsh/tinfoil-go/verify/internal/errs"
+	"github.com/tinfoilsh/tinfoil-go/internal/errs"
 	"github.com/tinfoilsh/tinfoil-go/verify/internal/policy"
 )
 
