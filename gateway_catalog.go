@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/tinfoilsh/tinfoil-go/verifier"
+	"github.com/tinfoilsh/tinfoil-go/verify"
 )
 
 const (
@@ -45,6 +45,6 @@ func FetchCatalog(host string) (Catalog, error) {
 }
 
 func (e CatalogEntry) trusted() bool {
-	repo, _, _, err := verifier.ParseReference(e.Repo)
+	repo, _, _, err := verify.ParseReference(e.Repo)
 	return err == nil && repo == e.Repo && strings.HasPrefix(repo, trustedRepoOwner) && len(e.Hosts) > 0
 }

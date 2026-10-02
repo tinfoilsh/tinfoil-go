@@ -96,7 +96,7 @@ httpClient := client.HTTPClient()
 resp, err := httpClient.Get(fmt.Sprintf("https://%s/health", enclave))
 ```
 
-`WithVerificationOptions` configures [register pins and freshness](verifier/README.md#verification-options).
+`WithVerificationOptions` configures [register pins and freshness](verify/README.md#verification-options).
 
 ## Error handling
 

@@ -9,7 +9,7 @@ and pointers to structs in a bound package. Not maps, not slices other than
 `time.Time` or `context.Context`. **What it cannot carry, it drops silently**:
 the build still succeeds and the symbol is simply absent in Swift.
 
-Binding `verifier/client` directly showed what that costs. `VerificationOptions`
+Binding `verify/client` directly showed what that costs. `VerificationOptions`
 bound with no properties at all, and `VerifiedDocumentV3` lost `CryptoMaterial`,
 `FreshnessExpiresAt` and `Verifier` — the endorsed keys and the expiry deadline.
 

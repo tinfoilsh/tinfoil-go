@@ -8,9 +8,9 @@ import (
 	"io"
 	"os"
 
-	"github.com/tinfoilsh/tinfoil-go/verifier"
-	"github.com/tinfoilsh/tinfoil-go/verifier/conformance"
-	"github.com/tinfoilsh/tinfoil-go/verifier/document"
+	"github.com/tinfoilsh/tinfoil-go/verify"
+	"github.com/tinfoilsh/tinfoil-go/verify/conformance"
+	"github.com/tinfoilsh/tinfoil-go/verify/document"
 )
 
 const stageLive = "live-verify"
@@ -22,8 +22,8 @@ type liveRequest struct {
 }
 
 // runLive verifies a live enclave through the SDK's production verifier —
-// verifier.New with no options, so the embedded roots, the current time and
-// the default freshness bound, never the adapter's injected seams — then
+// verify.NewVerifier with no options, so the embedded roots, the current time
+// and the default freshness bound, never the adapter's injected seams — then
 // asserts the live connection's SPKI fingerprint equals the endorsed one
 // before reporting the facts with channel_binding "tls-spki". It calls
 // VerifyV3WithLayer, which runs exactly VerifyV3 and also names the layer
@@ -36,7 +36,7 @@ func runLive() int {
 		return conformance.ExitMalformed
 	}
 
-	v, err := verifier.New()
+	v, err := verify.NewVerifier()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "building verifier: %v\n", err)
 		return conformance.ExitInternal
