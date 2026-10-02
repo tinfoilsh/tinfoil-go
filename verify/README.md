@@ -1,16 +1,15 @@
 # Tinfoil Verifier
 
-Portable remote-attestation verifier & secure HTTP client for enclave-backed services.
+Portable remote-attestation verifier for enclave-backed services.
 
 [![Build Status](https://github.com/tinfoilsh/tinfoil-go/actions/workflows/sdk-test.yml/badge.svg)](https://github.com/tinfoilsh/tinfoil-go/actions)
 
 ## Overview
-Tinfoil Verifier is a Go library that verifies the integrity of remote enclaves (AMD SEV-SNP & Intel TDX) and binds that verification to TLS connections. It also ships a drop-in secure `http.Client` that performs attestation transparently.
+Tinfoil Verifier is a Go library that verifies the integrity of remote enclaves (AMD SEV-SNP & Intel TDX). The [secure client](../client/README.md) fetches documents, caches verifications and binds TLS connections to them.
 
 ## Features
 - **Hardware-rooted remote attestation** for AMD SEV-SNP & Intel TDX
 - **Self-contained** with no external attestation service
-- **Secure HTTP client** with automatic TLS certificate pinning
 - **Sigstore integration** for code provenance verification
 - **Attested HPKE public keys** for use with [EHBP](https://docs.tinfoil.sh/resources/ehbp) clients
 - **Swift bindings** via gomobile for iOS/macOS integration
@@ -18,55 +17,6 @@ Tinfoil Verifier is a Go library that verifies the integrity of remote enclaves 
 ## Installation
 ```bash
 go get github.com/tinfoilsh/tinfoil-go@latest
-```
-
-## Quick Start
-```go
-import "github.com/tinfoilsh/tinfoil-go/client"
-
-// 1. Create a client
-tinfoilClient, err := client.NewSecureClient("enclave.example.com", "org/repo", nil)
-if err != nil { log.Fatal(err) }
-
-// 2. Perform HTTP requests – attestation happens automatically
-resp, err := tinfoilClient.Request("GET", "/api/data", "", nil)
-if err != nil {
-    log.Fatal(err)
-}
-log.Printf("Status: %s, Body: %s", resp.Status, string(resp.Body))
-```
-
-To verify manually and expose the verification state:
-```go
-verified, err := tinfoilClient.Verify()
-if err != nil {
-    log.Fatal(err)
-}
-// Access verified measurements and keys
-tlsKey, err := verified.TLSPublicKeyFP()
-if err != nil { log.Fatal(err) }
-log.Printf("TLS Cert Fingerprint: %s", tlsKey)
-hpkeKey, err := verified.HPKEPublicKey()
-if err != nil { log.Fatal(err) }
-log.Printf("HPKE Public Key: %s", hpkeKey)
-```
-
-## Secure HTTP Client
-The `client` package wraps `net/http` and adds:
-1. **Attestation gate** – the first request verifies the enclave.
-2. **TLS pinning** – the enclave-generated certificate fingerprint is pinned for the session.
-3. **Round-tripping helpers** – a mobile-compatible `Request` method.
-
-```go
-headers := `{"Content-Type":"application/json"}`
-body    := []byte(`{"key": "value"}`)
-
-resp, err := tinfoilClient.Request("POST", "/api/submit", headers, body)
-```
-
-For advanced usage retrieve the underlying `*http.Client`:
-```go
-httpClient, err := tinfoilClient.HTTPClient()
 ```
 
 ## Remote Attestation
@@ -90,26 +40,14 @@ collateral. Verification then runs offline using the embedded trust roots:
 4. Use the endorsed TLS key for each HTTPS connection, or the endorsed HPKE key
    when selecting EHBP. A TLS-only enclave may omit HPKE material.
 
-The TLS pin runs for direct HTTPS and HTTPS-over-CONNECT connections. Fetching
-the document does not require a separate direct TLS probe. Code and platform
-witnesses have a seven-day maximum age by default; the earliest authenticated
-expiry is exposed by `VerifyV3`, `Verify` and `VerifyDocumentV3` as
-`FreshnessExpiresAt`.
+Code and platform witnesses have a seven-day maximum age by default; the
+earliest authenticated expiry is exposed by `VerifyV3`, `Verify` and
+`VerifyDocumentV3` as `FreshnessExpiresAt`.
 Callers using these APIs must retain the deadline and stop authorizing new
 requests at or after it, then verify again before accepting more requests.
-Re-verifying unchanged witnesses does not extend their deadline.
-
-The cached `SecureClient` HTTP clients and the OpenAI SDK's TLS/EHBP transports
-check this deadline before admitting each request, including redirects and
-key-rotation retries. Expired or missing verification blocks new requests until
-refresh succeeds; refresh errors never authorize requests with expired keys.
-All clients returned by one `SecureClient` share verification state and one
-refresh attempt, including explicit `Verify()` calls. The attestation network
-fetch is bounded to 30 seconds; local cryptographic verification has no SDK
-timeout. A waiting request can cancel without canceling other waiters.
-
-A request admitted before expiration may finish, including a streaming response.
-Expiration does not interrupt that request. There is no background refresh.
+Re-verifying unchanged witnesses does not extend their deadline. The
+[secure client](../client/README.md#pinning-and-refresh) enforces this deadline
+for its own requests.
 
 ### Verifying a document you already hold
 
@@ -151,8 +89,8 @@ returned TLS/HPKE material and stop authorizing new requests at
 `FreshnessExpiresAt`.
 
 `client.VerifyDocumentV3` wraps this with the `VerificationOptions` struct the
-Swift bindings need, and `client.SecureClient` adds fetching, caching and
-transport binding on top.
+Swift bindings need, and [`client.SecureClient`](../client/README.md) adds
+fetching, caching and transport binding on top.
 
 ### Migration from v2
 
@@ -203,18 +141,8 @@ verifier, err := verify.NewVerifier(
 )
 ```
 
-`client` takes the same policy as a struct, because the Swift bindings need a
-type they can construct and pass across the FFI boundary:
-
-```go
-opts := client.VerificationOptions{
-    PinnedRegisters: &measurement.Measurement{
-        Type:      measurement.TdxGuestV2,
-        Registers: []string{4: rtmr3},
-    },
-}
-secureClient, err := client.NewSecureClient("enclave.example.com", "org/repo", &opts)
-```
+The secure client takes the same policy as a
+[struct](../client/README.md#verification-options).
 
 ## JavaScript / TypeScript / WASM
 
@@ -235,13 +163,14 @@ See the [tinfoil-js documentation](https://github.com/tinfoilsh/tinfoil-js) for 
 
 ## Auditing the Verification Code
 
-- Document parsing and nonce/hash binding: `document/document.go`.
-- Code, platform and freshness provenance: `provenance/`.
-- Strict platform-policy parsing: `policy/`.
-- CPU authentication and expectation enforcement: `quote/sev/` and `quote/tdx/`.
+- Document parsing and nonce/hash binding: `../document/document.go`.
+- Code, platform and freshness provenance: `internal/provenance/`.
+- Strict platform-policy parsing: `internal/policy/`.
+- CPU authentication and expectation enforcement: `internal/quote/sev/` and
+  `internal/quote/tdx/`.
 - End-to-end verification: `verifier.go`.
-- Fetching, caching and freshness enforcement: `client/`.
-- Per-connection TLS pinning: `client/roundtrip.go`.
+- Fetching, caching, freshness enforcement and TLS pinning: see the
+  [secure client](../client/README.md#auditing-the-client-code).
 
 ## Arbitrary endorsed material
 
