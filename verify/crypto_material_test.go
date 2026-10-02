@@ -1,4 +1,4 @@
-package client
+package verify
 
 import (
 	"testing"
@@ -9,7 +9,7 @@ import (
 
 func TestCryptoMaterialData(t *testing.T) {
 	const futureFormat = "https://example.com/key/future/v1"
-	v := &VerifiedDocumentV3{
+	v := &Verification{
 		CryptoMaterial: []document.CryptoMaterialItem{
 			{ID: "tls", Format: document.KeySPKIFPSHA256V1Format, Data: "aabb"},
 			{ID: "workload", Format: futureFormat, Data: "010203"},
@@ -22,6 +22,6 @@ func TestCryptoMaterialData(t *testing.T) {
 	require.ErrorContains(t, err, "has format")
 	_, err = v.CryptoMaterialData("missing", futureFormat)
 	require.ErrorContains(t, err, "endorses no")
-	_, err = (*VerifiedDocumentV3)(nil).CryptoMaterialData("workload", futureFormat)
-	require.ErrorContains(t, err, "verified document is required")
+	_, err = (*Verification)(nil).CryptoMaterialData("workload", futureFormat)
+	require.ErrorContains(t, err, "verification is required")
 }

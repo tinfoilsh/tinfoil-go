@@ -24,7 +24,7 @@ type SecureClient struct {
 	state        *enclaveState
 	refreshing   *verificationCall
 	tlsTransport *clientTransport
-	verify       func() (*VerifiedDocumentV3, error)
+	verify       func() (*verify.Verification, error)
 }
 
 var (
@@ -143,13 +143,13 @@ func (s *SecureClient) Repo() string {
 }
 
 // Verification returns a copy of the last verified enclave state.
-func (s *SecureClient) Verification() *VerifiedDocumentV3 {
+func (s *SecureClient) Verification() *verify.Verification {
 	s.stateMu.RLock()
 	defer s.stateMu.RUnlock()
 	if s.state == nil {
 		return nil
 	}
-	return cloneVerification(s.state.VerifiedDocumentV3)
+	return cloneVerification(s.state.Verification)
 }
 
 // VerificationJSON returns the last verification as JSON.
@@ -165,7 +165,7 @@ func (s *SecureClient) VerificationJSON() (string, error) {
 func (s *SecureClient) HTTPClient() (*http.Client, error) {
 	s.stateMu.Lock()
 	if s.tlsTransport == nil {
-		s.tlsTransport = &clientTransport{client: s, build: func(verified *VerifiedDocumentV3) (http.RoundTripper, error) {
+		s.tlsTransport = &clientTransport{client: s, build: func(verified *verify.Verification) (http.RoundTripper, error) {
 			key, err := verified.TLSPublicKeyFP()
 			if err != nil {
 				return nil, err

@@ -25,6 +25,15 @@ func defaultFreshnessMaxAge(t *testing.T) time.Duration {
 	return verifier.FreshnessMaxAge()
 }
 
+// verifyDocument verifies raw with the verifier a SecureClient builds from opts.
+func verifyDocument(raw, nonce []byte, repo string, opts *VerificationOptions) (*verify.Verification, error) {
+	verifier, err := opts.verifier()
+	if err != nil {
+		return nil, err
+	}
+	return verifier.VerifyV3(raw, nonce, repo)
+}
+
 func TestClientFreshnessMaxAge(t *testing.T) {
 	defaultMaxAge := defaultFreshnessMaxAge(t)
 	defaults, err := NewSecureClient("enclave.example", "org/repo", nil)
@@ -38,7 +47,7 @@ func TestClientFreshnessMaxAge(t *testing.T) {
 		s, err = NewDefaultClient(&opts)
 		require.Nil(t, s)
 		require.ErrorContains(t, err, "freshness maximum age must not be negative")
-		_, err = VerifyDocumentV3(nil, nil, "org/repo", &opts)
+		_, err = verifyDocument(nil, nil, "org/repo", &opts)
 		require.ErrorContains(t, err, "freshness maximum age must not be negative")
 	}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte("[]")) }))
@@ -64,19 +73,19 @@ func TestLiveVerifyFreshnessExpiration(t *testing.T) {
 	require.NoError(t, err)
 	raw, err := document.Fetch(host, nonce)
 	require.NoError(t, err)
-	verified, err := VerifyDocumentV3(raw, nonce, repo, nil)
+	verified, err := verifyDocument(raw, nonce, repo, nil)
 	require.NoError(t, err)
 	const maxAge = 30 * 24 * time.Hour
 	for _, age := range []time.Duration{0, maxAge} {
 		opts := VerificationOptions{FreshnessMaxAge: age, PinnedRegisters: verified.EnclaveMeasurement}
-		custom, err := VerifyDocumentV3(raw, nonce, repo, &opts)
+		custom, err := verifyDocument(raw, nonce, repo, &opts)
 		require.NoError(t, err)
 		require.Equal(t, verified.FreshnessExpiresAt.Add(cmp.Or(age, defaultMaxAge)-defaultMaxAge), custom.FreshnessExpiresAt)
 	}
 	badPins := cloneMeasurement(verified.EnclaveMeasurement)
 	badPins.Registers[0] = strings.Repeat("ab", 48)
 	require.NotEqual(t, verified.EnclaveMeasurement.Registers[0], badPins.Registers[0])
-	_, err = VerifyDocumentV3(raw, nonce, repo, &VerificationOptions{PinnedRegisters: badPins})
+	_, err = verifyDocument(raw, nonce, repo, &VerificationOptions{PinnedRegisters: badPins})
 	var attestation *AttestationError
 	require.ErrorAs(t, err, &attestation)
 	s, err := NewDefaultClient(&VerificationOptions{PinnedRegisters: badPins, FreshnessMaxAge: maxAge})

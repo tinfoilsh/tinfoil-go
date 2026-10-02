@@ -19,6 +19,7 @@ import (
 	"github.com/tinfoilsh/tinfoil-go/client"
 	"github.com/tinfoilsh/tinfoil-go/document"
 	"github.com/tinfoilsh/tinfoil-go/internal/testutil"
+	"github.com/tinfoilsh/tinfoil-go/verify"
 )
 
 type roundTripFunc func(*http.Request) (*http.Response, error)
@@ -101,13 +102,13 @@ func TestBuildEHBPTransportRequiresKey(t *testing.T) {
 	require.Contains(t, err.Error(), "HPKE public key")
 }
 
-type transportVerifierFunc func(func(*client.VerifiedDocumentV3) (http.RoundTripper, error), func(error) bool) (http.RoundTripper, error)
+type transportVerifierFunc func(func(*verify.Verification) (http.RoundTripper, error), func(error) bool) (http.RoundTripper, error)
 
-func (f transportVerifierFunc) NewTransport(build func(*client.VerifiedDocumentV3) (http.RoundTripper, error), isKeyError func(error) bool) (http.RoundTripper, error) {
+func (f transportVerifierFunc) NewTransport(build func(*verify.Verification) (http.RoundTripper, error), isKeyError func(error) bool) (http.RoundTripper, error) {
 	return f(build, isKeyError)
 }
 
-func TestEHBPClientPreservesAdmissionAndRebuildsProxyHeader(t *testing.T) {
+func TestEHBPClientPreservesAdmissionAndProxyHeader(t *testing.T) {
 	admissionFailure := &client.AttestationError{Err: errors.New("expired witnesses")}
 	seen := make(chan string, 2)
 	proxy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -115,29 +116,31 @@ func TestEHBPClientPreservesAdmissionAndRebuildsProxyHeader(t *testing.T) {
 		w.WriteHeader(http.StatusNoContent)
 	}))
 	defer proxy.Close()
-	var rebuild func(*client.VerifiedDocumentV3) (http.RoundTripper, error)
-	verifier := transportVerifierFunc(func(build func(*client.VerifiedDocumentV3) (http.RoundTripper, error), isKeyError func(error) bool) (http.RoundTripper, error) {
+	var rebuild func(*verify.Verification) (http.RoundTripper, error)
+	verifier := transportVerifierFunc(func(build func(*verify.Verification) (http.RoundTripper, error), isKeyError func(error) bool) (http.RoundTripper, error) {
 		rebuild = build
 		require.True(t, isKeyError(ehbpidentity.NewKeyConfigError(errors.New("rotated"))))
 		return roundTripFunc(func(*http.Request) (*http.Response, error) {
 			return nil, admissionFailure
 		}), nil
 	})
-	hc, err := ehbpHTTPClient(verifier, proxy.URL)
+	hc, err := ehbpHTTPClient(verifier, "enclave.example", proxy.URL)
 	require.NoError(t, err)
 	_, err = hc.Get(proxy.URL)
 	require.ErrorIs(t, err, admissionFailure, "keep the verifier's admission layer around EHBP")
 	require.Empty(t, seen, "failed admission must not reach the proxy")
 
-	for _, host := range []string{"old.example", "new.example"} {
-		transport, err := rebuild(&client.VerifiedDocumentV3{EnclaveHost: host, CryptoMaterial: []document.CryptoMaterialItem{{ID: document.CryptoMaterialIDHPKE, Format: document.KeyX25519HPKEV1Format, Data: strings.Repeat("01", 32)}}})
+	// Every transport rebuilt after re-verification, here for a rotated key,
+	// keeps routing to the client's enclave.
+	for _, key := range []string{strings.Repeat("01", 32), strings.Repeat("02", 32)} {
+		transport, err := rebuild(&verify.Verification{CryptoMaterial: []document.CryptoMaterialItem{{ID: document.CryptoMaterialIDHPKE, Format: document.KeyX25519HPKEV1Format, Data: key}}})
 		require.NoError(t, err)
 		req, err := http.NewRequest(http.MethodGet, proxy.URL, nil)
 		require.NoError(t, err)
 		resp, err := transport.RoundTrip(req)
 		require.NoError(t, err)
 		resp.Body.Close()
-		require.Equal(t, "https://"+host, <-seen)
+		require.Equal(t, "https://enclave.example", <-seen)
 		require.Empty(t, req.Header.Get(enclaveURLHeader), "do not mutate the caller's request")
 	}
 }

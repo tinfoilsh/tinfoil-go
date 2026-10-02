@@ -10,6 +10,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/tinfoilsh/tinfoil-go/internal/testutil"
+	"github.com/tinfoilsh/tinfoil-go/verify"
 	"github.com/tinfoilsh/tinfoil-go/verify/measurement"
 )
 
@@ -55,20 +56,20 @@ func TestClientVerificationJSON(t *testing.T) {
 		Registers: []string{"a"},
 	}
 
-	verified := &VerifiedDocumentV3{
+	verified := &verify.Verification{
 		CodeDigest:         "feabcd",
 		CryptoMaterial:     testState(time.Time{}, "key").CryptoMaterial,
 		CodeMeasurement:    codeMeasurement,
 		EnclaveMeasurement: enclaveMeasurement,
 	}
 	client := &SecureClient{
-		state: &enclaveState{VerifiedDocumentV3: verified},
+		state: &enclaveState{Verification: verified},
 	}
 
 	encoded, err := client.VerificationJSON()
 	assert.NoError(t, err)
 
-	var decoded VerifiedDocumentV3
+	var decoded verify.Verification
 	assert.NoError(t, json.Unmarshal([]byte(encoded), &decoded))
 	assert.Equal(t, verified, &decoded)
 	view := client.Verification()

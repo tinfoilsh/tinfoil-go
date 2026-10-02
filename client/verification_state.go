@@ -5,6 +5,8 @@ import (
 	"errors"
 	"net/http"
 	"time"
+
+	"github.com/tinfoilsh/tinfoil-go/verify"
 )
 
 // errFreshnessExpired means the authenticated witnesses no longer authorize requests.
@@ -17,7 +19,7 @@ const (
 )
 
 type enclaveState struct {
-	*VerifiedDocumentV3
+	*verify.Verification
 	rejected   bool
 	transports map[*clientTransport]http.RoundTripper
 }
@@ -63,16 +65,16 @@ func (s *SecureClient) refresh(call *verificationCall, retries int) {
 	s.stateMu.RLock()
 	previous := s.state
 	s.stateMu.RUnlock()
-	verify := s.verify
-	if verify == nil {
-		verify = s.fetchVerification
+	fetch := s.verify
+	if fetch == nil {
+		fetch = s.fetchVerification
 	}
 	// The attestation fetch bounds its network I/O. Local verification has no
 	// SDK deadline; each caller can independently cancel its wait above.
-	var verified *VerifiedDocumentV3
+	var verified *verify.Verification
 	var err, firstErr error
 	for attempt := 0; ; attempt++ {
-		verified, err = verify()
+		verified, err = fetch()
 		if err == nil && !time.Now().Before(verified.FreshnessExpiresAt) {
 			err = &AttestationError{Err: errFreshnessExpired}
 		}
@@ -82,7 +84,7 @@ func (s *SecureClient) refresh(call *verificationCall, retries int) {
 		firstErr = err
 		time.Sleep(verificationRetryDelay)
 	}
-	state := &enclaveState{VerifiedDocumentV3: verified, transports: make(map[*clientTransport]http.RoundTripper)}
+	state := &enclaveState{Verification: verified, transports: make(map[*clientTransport]http.RoundTripper)}
 	if err == nil && previous != nil {
 		for adapter := range previous.transports {
 			transport, buildErr := adapter.buildTransport(verified)

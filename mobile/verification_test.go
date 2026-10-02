@@ -8,19 +8,18 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/tinfoilsh/tinfoil-go/client"
 	"github.com/tinfoilsh/tinfoil-go/document"
+	"github.com/tinfoilsh/tinfoil-go/verify"
 	"github.com/tinfoilsh/tinfoil-go/verify/measurement"
 )
 
-func sampleVerification() *client.VerifiedDocumentV3 {
-	return &client.VerifiedDocumentV3{
-		ConfigRepo:  "tinfoilsh/confidential-model-router",
-		EnclaveHost: "inference.tinfoil.sh",
-		Verifier:    client.SoftwareIdentity{Name: "tinfoil-go", Version: "0.15.7"},
-		VerifiedAt:  "2026-09-26T12:00:00Z",
-		CodeDigest:  "abc123",
-		CodeTag:     "v1.2.3",
+const sampleHost = "inference.tinfoil.sh"
+
+func sampleVerification() *verify.Verification {
+	return &verify.Verification{
+		ConfigRepo: "tinfoilsh/confidential-model-router",
+		CodeDigest: "abc123",
+		CodeTag:    "v1.2.3",
 		CodeMeasurement: &measurement.Measurement{
 			Type: measurement.SnpTdxMultiPlatformV1, Registers: []string{"aa", "bb", "cc"},
 		},
@@ -32,6 +31,10 @@ func sampleVerification() *client.VerifiedDocumentV3 {
 			{ID: "hpke", Format: document.KeyX25519HPKEV1Format, Data: "cafebabe"},
 		},
 		FreshnessExpiresAt: time.Date(2026, 10, 3, 12, 0, 0, 0, time.UTC),
+		Metadata: verify.VerificationMetadata{
+			Verifier:   verify.SoftwareIdentity{Name: "tinfoil-go", Version: "0.15.7"},
+			VerifiedAt: time.Date(2026, 9, 26, 12, 0, 0, 0, time.UTC),
+		},
 	}
 }
 
@@ -39,7 +42,7 @@ func sampleVerification() *client.VerifiedDocumentV3 {
 // real work this mapping does: binding a connection is what a caller has a
 // verification for, and it should not have to repeat the lookup.
 func TestVerificationLiftsChannelKeys(t *testing.T) {
-	encoded, err := encode(sampleVerification())
+	encoded, err := encode(sampleVerification(), sampleHost)
 	require.NoError(t, err)
 
 	var got map[string]any
@@ -55,7 +58,7 @@ func TestVerificationOmitsMissingHPKE(t *testing.T) {
 	v := sampleVerification()
 	v.CryptoMaterial = v.CryptoMaterial[:1]
 
-	encoded, err := encode(v)
+	encoded, err := encode(v, sampleHost)
 	require.NoError(t, err)
 
 	var got map[string]any
@@ -67,7 +70,7 @@ func TestVerificationOmitsMissingHPKE(t *testing.T) {
 // time.Time cannot cross the FFI boundary, so the deadline a caller must honour
 // is formatted here and parsed back on the other side.
 func TestVerificationFormatsFreshnessDeadline(t *testing.T) {
-	encoded, err := encode(sampleVerification())
+	encoded, err := encode(sampleVerification(), sampleHost)
 	require.NoError(t, err)
 
 	var got map[string]any
@@ -75,4 +78,18 @@ func TestVerificationFormatsFreshnessDeadline(t *testing.T) {
 	parsed, err := time.Parse(time.RFC3339Nano, got["freshness_expires_at"].(string))
 	require.NoError(t, err)
 	assert.True(t, parsed.Equal(sampleVerification().FreshnessExpiresAt))
+}
+
+// The host comes from the client and the verifier and time from the
+// verification's metadata; the contract keeps them as flat fields.
+func TestVerificationKeepsHostAndMetadata(t *testing.T) {
+	encoded, err := encode(sampleVerification(), sampleHost)
+	require.NoError(t, err)
+
+	var got map[string]any
+	require.NoError(t, json.Unmarshal([]byte(encoded), &got))
+	assert.Equal(t, "tinfoilsh/confidential-model-router", got["config_repo"])
+	assert.Equal(t, sampleHost, got["enclave_host"])
+	assert.Equal(t, map[string]any{"name": "tinfoil-go", "version": "0.15.7"}, got["verifier"])
+	assert.Equal(t, "2026-09-26T12:00:00Z", got["verified_at"])
 }

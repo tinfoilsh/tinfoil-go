@@ -5,6 +5,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"github.com/tinfoilsh/tinfoil-go/document"
+	"github.com/tinfoilsh/tinfoil-go/verify"
 )
 
 func TestVerifiedTransportKeysAllowTLSOnly(t *testing.T) {
@@ -23,8 +24,8 @@ func TestVerifiedTransportKeysAllowTLSOnly(t *testing.T) {
 		{"wrong HPKE format", []document.CryptoMaterialItem{tls, {ID: "hpke", Format: "unexpected"}}, "", true},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
-			v := &VerifiedDocumentV3{CryptoMaterial: tt.items}
-			err := v.validateTransportKeys()
+			v := &verify.Verification{CryptoMaterial: tt.items}
+			err := validateTransportKeys(v)
 			if tt.wantError {
 				var attestation *AttestationError
 				require.ErrorAs(t, err, &attestation)

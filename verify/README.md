@@ -41,8 +41,8 @@ collateral. Verification then runs offline using the embedded trust roots:
    when selecting EHBP. A TLS-only enclave may omit HPKE material.
 
 Code and platform witnesses have a seven-day maximum age by default; the
-earliest authenticated expiry is exposed by `VerifyV3`, `Verify` and
-`VerifyDocumentV3` as `FreshnessExpiresAt`.
+earliest authenticated expiry is exposed by `VerifyV3` and the secure
+client's `Verify` as `FreshnessExpiresAt`.
 Callers using these APIs must retain the deadline and stop authorizing new
 requests at or after it, then verify again before accepting more requests.
 Re-verifying unchanged witnesses does not extend their deadline. The
@@ -88,9 +88,8 @@ document cannot supply either. After success, bind service traffic to the
 returned TLS/HPKE material and stop authorizing new requests at
 `FreshnessExpiresAt`.
 
-`client.VerifyDocumentV3` wraps this with the `VerificationOptions` struct the
-Swift bindings need, and [`client.SecureClient`](../client/README.md) adds
-fetching, caching and transport binding on top.
+[`client.SecureClient`](../client/README.md) adds fetching, caching and
+transport binding on top.
 
 ### Migration from v2
 
@@ -110,9 +109,8 @@ fetches reference values through the old bundle service.
 
 For an already fetched document, use `verify.Verifier` — see [Verifying a
 document you already hold](#verifying-a-document-you-already-hold).
-`client.VerifyDocumentV3` remains for callers already built on it. Neither
-opens a service connection or enforces a cache's expiration on the caller's
-behalf. Swift callers using the removed bundle APIs also need to migrate before
+It opens no service connection and does not enforce a cache's expiration on
+the caller's behalf. Swift callers using the removed bundle APIs also need to migrate before
 adopting the v3 framework.
 
 ## Verification options
@@ -174,7 +172,7 @@ See the [tinfoil-js documentation](https://github.com/tinfoilsh/tinfoil-js) for 
 
 ## Arbitrary endorsed material
 
-A successful `VerifyV3`, `Verify` or `VerifyDocumentV3` result retains every endorsed
+A successful `VerifyV3` or `Verify` result retains every endorsed
 `CryptoMaterial` item. Select by exact ID and format:
 
 ```go

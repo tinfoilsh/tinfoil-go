@@ -62,11 +62,11 @@ The client retains the result used by its active secure transport:
 ```go
 document := client.Verification()
 fmt.Println(document.ConfigRepo, document.CodeTag, document.CodeDigest)
-fmt.Println(document.Verifier.Name, document.Verifier.Version)
-fmt.Println(document.VerifiedAt)
+fmt.Println(document.Metadata.Verifier.Name, document.Metadata.Verifier.Version)
+fmt.Println(document.Metadata.VerifiedAt)
 ```
 
-`VerifiedAt` is recorded from the local clock after successful verification. It is not an attested timestamp or a freshness guarantee.
+`Metadata` describes the verification rather than the document: `VerifiedAt` is the local clock reading the verifier judged freshness against. It is not an attested timestamp or a freshness guarantee.
 
 ## Prompt Cache Scoping
 
