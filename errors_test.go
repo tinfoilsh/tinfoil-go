@@ -10,9 +10,9 @@ import (
 
 	"github.com/stretchr/testify/require"
 	tinfoil "github.com/tinfoilsh/tinfoil-go"
+	"github.com/tinfoilsh/tinfoil-go/document"
 	"github.com/tinfoilsh/tinfoil-go/verify"
 	"github.com/tinfoilsh/tinfoil-go/verify/client"
-	"github.com/tinfoilsh/tinfoil-go/verify/document"
 	"github.com/tinfoilsh/tinfoil-go/verify/measurement"
 )
 

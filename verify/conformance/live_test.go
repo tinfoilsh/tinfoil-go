@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tinfoilsh/tinfoil-go/verify/document"
+	"github.com/tinfoilsh/tinfoil-go/document"
 )
 
 // TestLiveVerification fetches a v3 attestation from a real enclave and runs

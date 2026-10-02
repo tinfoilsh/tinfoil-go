@@ -8,8 +8,8 @@ import (
 	"fmt"
 	"slices"
 
+	"github.com/tinfoilsh/tinfoil-go/document/collateral"
 	"github.com/tinfoilsh/tinfoil-go/internal/errs"
-	"github.com/tinfoilsh/tinfoil-go/verify/document/collateral"
 )
 
 // BuildInput is everything a v3 document carries besides its CPU evidence.
