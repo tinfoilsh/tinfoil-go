@@ -3,6 +3,7 @@ package tinfoil
 import (
 	"fmt"
 	"net/http"
+	"strings"
 
 	"github.com/openai/openai-go/v3"
 	"github.com/openai/openai-go/v3/option"
@@ -24,6 +25,56 @@ func NewClient(openaiOpts ...option.RequestOption) (*Client, error) {
 		return nil, fmt.Errorf("failed to create secure client: %w", err)
 	}
 	return createClientFromSecureClient(secureClient, defaultTransportMode, "", resolveUserCacheSecret("", false), openaiOpts...)
+}
+
+// NewClientWithOptions creates a secure OpenAI client configured through
+// functional options. By default it selects a router automatically, verifies
+// against the default config repository, and uses the EHBP transport.
+func NewClientWithOptions(opts ...ClientOption) (*Client, error) {
+	cfg := &clientConfig{
+		repo:      defaultConfigRepo,
+		transport: defaultTransportMode,
+	}
+	for _, opt := range opts {
+		if opt != nil {
+			opt(cfg)
+		}
+	}
+	if cfg.transport == "" {
+		cfg.transport = defaultTransportMode
+	}
+	if cfg.repo == "" {
+		cfg.repo = defaultConfigRepo
+	}
+	if cfg.transport != TransportTLS && cfg.transport != TransportEHBP {
+		return nil, &ConfigurationError{Err: fmt.Errorf("unknown transport mode: %q", cfg.transport)}
+	}
+	if cfg.baseURLSet {
+		origin, err := originOf(cfg.baseURL)
+		if err != nil {
+			return nil, &ConfigurationError{Err: fmt.Errorf("invalid base URL: %w", err)}
+		}
+		if !strings.HasPrefix(origin, "https://") {
+			return nil, &ConfigurationError{Err: fmt.Errorf("invalid base URL: HTTPS is required to protect request headers")}
+		}
+	}
+	if cfg.enclave == "" && cfg.repo != defaultConfigRepo {
+		return nil, &ConfigurationError{Err: fmt.Errorf("custom repository requires an enclave")}
+	}
+
+	var secureClient *client.SecureClient
+	var err error
+	if cfg.enclave == "" {
+		secureClient, err = client.NewDefaultClient(&cfg.verification)
+	} else {
+		secureClient, err = client.NewSecureClient(cfg.enclave, cfg.repo, &cfg.verification)
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	return createClientFromSecureClient(secureClient, cfg.transport, cfg.baseURL,
+		resolveUserCacheSecret(cfg.userCacheSecret, cfg.userCacheSecretSet), cfg.openaiOpts...)
 }
 
 func createClientFromSecureClient(secureClient *client.SecureClient, mode TransportMode, baseURL, userCacheSecret string, openaiOpts ...option.RequestOption) (*Client, error) {

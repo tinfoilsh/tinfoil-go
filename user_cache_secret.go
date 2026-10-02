@@ -62,24 +62,6 @@ var userCacheSecretPaths = []string{
 	"/responses",
 }
 
-// WithUserCacheSecret sets the user cache secret explicitly, taking precedence
-// over the environment variable and the generated secret. Use one stable value
-// per end user: a server holding many end users' conversations should instead
-// set a non-empty string field on every request, which wins over the
-// client-level secret:
-//
-//	client.Chat.Completions.New(ctx, params,
-//		option.WithJSONSet("user_cache_secret", perUserSecret))
-//
-// An empty string is treated as unset and falls through to the environment or
-// generated secret.
-func WithUserCacheSecret(secret string) ClientOption {
-	return func(c *clientConfig) {
-		c.userCacheSecret = secret
-		c.userCacheSecretSet = secret != ""
-	}
-}
-
 // resolveUserCacheSecret resolves the client-level secret: the explicit option
 // wins when non-empty, then a non-empty environment value, then the persisted
 // (or generated) secret.
