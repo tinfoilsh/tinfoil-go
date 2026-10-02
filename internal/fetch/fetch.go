@@ -18,10 +18,9 @@ import (
 )
 
 // Document retrieves a v3 attestation document from an enclave host using a
-// fresh challenge nonce, returning the raw response bytes for verification.
-// A non-empty relay host forwards the request to the enclave; verification
-// ignores the path. It uses http.DefaultClient with a 30-second deadline and a
-// 32 MiB body limit, and follows redirects only to HTTPS URLs.
+// fresh challenge nonce, returning the raw response bytes for verification. If
+// relay is an empty string, the document is fetched from the host URL.
+// Otherwise, the request is made to the relay URL.
 func Document(host, relay string, nonce []byte) (result []byte, err error) {
 	defer func() { err = errs.WrapFetch(err) }()
 	if host == "" {
@@ -48,16 +47,25 @@ func Document(host, relay string, nonce []byte) (result []byte, err error) {
 	}
 	req.Header.Set(sdkNameHeader, sdkinfo.Name)
 	req.Header.Set(sdkVersionHeader, sdkinfo.Version())
+	// Copy http.DefaultClient so an application's process-wide settings (its
+	// transport, proxy or timeout) still apply, while the CheckRedirect below
+	// leaves the shared client untouched.
 	client := *http.DefaultClient
+	// A nil Transport means http.DefaultTransport; resolve it so it can be
+	// cloned below.
 	if client.Transport == nil {
 		client.Transport = http.DefaultTransport
 	}
-	// A pooled connection may still reach a draining replica after a cutover.
+	// Use a private connection pool. A pooled connection, possibly opened by
+	// other traffic on the shared transport, may still reach a draining replica
+	// after a cutover. A transport that is not an *http.Transport cannot be
+	// cloned and keeps its own pooling.
 	if transport, ok := client.Transport.(*http.Transport); ok {
 		transport = transport.Clone()
 		defer transport.CloseIdleConnections()
 		client.Transport = transport
 	}
+	// Replacing CheckRedirect drops the default 10-redirect limit, so restate it.
 	client.CheckRedirect = func(req *http.Request, via []*http.Request) error {
 		if req.URL.Scheme != "https" {
 			return fmt.Errorf("refusing redirect to non-HTTPS URL %s", req.URL.Redacted())
@@ -75,6 +83,8 @@ func Document(host, relay string, nonce []byte) (result []byte, err error) {
 	if resp.StatusCode > 299 {
 		return nil, fmt.Errorf("HTTP GET %s: %d %s", u.String(), resp.StatusCode, resp.Status)
 	}
+	// LimitReader truncates silently. Reading one byte past the limit tells an
+	// oversized document apart from one of exactly the maximum size.
 	body, err := io.ReadAll(io.LimitReader(resp.Body, maxAttestationBytes+1))
 	if err != nil {
 		return nil, err
