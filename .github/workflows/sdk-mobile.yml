@@ -5,6 +5,7 @@ on:
     paths:
       - 'mobile/**'
       - 'verify/**'
+      - 'client/**'
       - 'document/**'
       - 'internal/**'
       - 'go.mod'
