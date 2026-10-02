@@ -5,7 +5,7 @@ import (
 	"maps"
 	"slices"
 
-	"github.com/tinfoilsh/tinfoil-go/verify/internal/canonical"
+	"github.com/tinfoilsh/tinfoil-go/internal/canonical"
 )
 
 // IntelPCS is decoded intel-pcs collateral: Intel PCS responses captured so a

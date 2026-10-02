@@ -14,7 +14,7 @@ import (
 
 	"github.com/tinfoilsh/tinfoil-go/verify/document/collateral"
 
-	"github.com/tinfoilsh/tinfoil-go/verify/internal/errs"
+	"github.com/tinfoilsh/tinfoil-go/internal/errs"
 )
 
 func testNonce() []byte {

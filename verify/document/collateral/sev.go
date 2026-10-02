@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"slices"
 
-	"github.com/tinfoilsh/tinfoil-go/verify/internal/canonical"
+	"github.com/tinfoilsh/tinfoil-go/internal/canonical"
 )
 
 // AMDVCEK is decoded amd-vcek collateral.

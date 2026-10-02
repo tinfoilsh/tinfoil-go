@@ -14,9 +14,9 @@ import (
 	"fmt"
 	"slices"
 
+	"github.com/tinfoilsh/tinfoil-go/internal/canonical"
+	"github.com/tinfoilsh/tinfoil-go/internal/errs"
 	"github.com/tinfoilsh/tinfoil-go/verify/document/collateral"
-	"github.com/tinfoilsh/tinfoil-go/verify/internal/canonical"
-	"github.com/tinfoilsh/tinfoil-go/verify/internal/errs"
 )
 
 // Attestation document v3 (predicate https://tinfoil.sh/predicate/attestation/v3).

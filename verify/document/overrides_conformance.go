@@ -2,7 +2,7 @@
 
 package document
 
-import "github.com/tinfoilsh/tinfoil-go/verify/internal/errs"
+import "github.com/tinfoilsh/tinfoil-go/internal/errs"
 
 // DangerousTestOnlyDecode applies Parse's structural rules without checking
 // the challenge against a nonce, so the conformance harness can drive the
