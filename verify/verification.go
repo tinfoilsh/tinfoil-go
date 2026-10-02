@@ -9,10 +9,13 @@ import (
 	"github.com/tinfoilsh/tinfoil-go/verify/measurement"
 )
 
-// Verification is what one attestation document proved. It names no enclave
-// host, no verifier identity and no wall-clock time: those describe the act of
-// verifying rather than the document, and belong to whatever performed it.
+// Verification holds the facts proven during the verification of an
+// attestation document. It also contains metadata of the verification process
+// injected by the verifier
 type Verification struct {
+	// ConfigRepo is the repository the code provenance was authenticated
+	// against, without a tag or digest.
+	ConfigRepo      string
 	CodeDigest      string
 	CodeTag         string
 	CodeMeasurement *measurement.Measurement
@@ -26,6 +29,25 @@ type Verification struct {
 	// after this time; re-verifying the same witness does not extend it.
 	// It is zero when WithIgnoreFreshness skips witness verification.
 	FreshnessExpiresAt time.Time
+	// Metadata describes the verification rather than the document.
+	Metadata VerificationMetadata
+}
+
+// VerificationMetadata describes how a verification was performed. The
+// verifier fills it in from its own state; none of it is attested by or
+// checked against the document.
+type VerificationMetadata struct {
+	// Verifier identifies the SDK that performed the verification.
+	Verifier SoftwareIdentity
+	// VerifiedAt is the instant the document was appraised at, read once from
+	// the local clock. It is not a freshness guarantee.
+	VerifiedAt time.Time
+}
+
+// SoftwareIdentity identifies software involved in verification.
+type SoftwareIdentity struct {
+	Name    string `json:"name"`
+	Version string `json:"version"`
 }
 
 // TLSPublicKeyFP returns the endorsed TLS key fingerprint (the id=tls

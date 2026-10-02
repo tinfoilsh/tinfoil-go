@@ -3,6 +3,7 @@ package client
 import (
 	"github.com/tinfoilsh/tinfoil-go/document"
 	"github.com/tinfoilsh/tinfoil-go/internal/sdkinfo"
+	"github.com/tinfoilsh/tinfoil-go/verify"
 	"github.com/tinfoilsh/tinfoil-go/verify/measurement"
 )
 
@@ -12,10 +13,7 @@ const (
 )
 
 // SoftwareIdentity identifies software involved in verification.
-type SoftwareIdentity struct {
-	Name    string `json:"name"`
-	Version string `json:"version"`
-}
+type SoftwareIdentity = verify.SoftwareIdentity
 
 func currentVerifierIdentity() SoftwareIdentity {
 	return SoftwareIdentity{Name: sdkinfo.Name, Version: sdkinfo.Version()}

@@ -51,6 +51,7 @@ func TestLiveIgnoreFreshness(t *testing.T) {
 	require.NoError(t, err)
 	require.False(t, want.FreshnessExpiresAt.IsZero())
 	want.FreshnessExpiresAt = time.Time{}
+	want.Metadata = VerificationMetadata{}
 	ignored, err := NewVerifier(WithFreshnessMaxAge(expiredMaxAge), WithIgnoreFreshness())
 	require.NoError(t, err)
 
@@ -101,6 +102,8 @@ func TestLiveIgnoreFreshness(t *testing.T) {
 				return
 			}
 			require.NoError(t, err)
+			require.False(t, got.Metadata.VerifiedAt.IsZero())
+			got.Metadata = VerificationMetadata{}
 			require.Equal(t, want, got)
 		})
 	}
