@@ -1,8 +1,9 @@
 // Package verify appraises Tinfoil attestation documents.
 //
 // It is the functional core of the SDK: given a document, the nonce the caller
-// bound it to, and the repository the caller trusts, a Verifier decides what
-// the document proves. It opens no connections and keeps no state between
+// bound it to, and what the caller trusts — a code repository, or an approved
+// config and the runtime that config pins — a Verifier decides what the
+// document proves. It opens no connections and keeps no state between
 // calls, so fetching documents, caching a verification and enforcing its
 // expiry all belong to the caller — see package enclave for an implementation
 // that does those things.
@@ -20,6 +21,8 @@ import (
 	"github.com/tinfoilsh/tinfoil-go/document/collateral"
 	"github.com/tinfoilsh/tinfoil-go/internal/errs"
 	"github.com/tinfoilsh/tinfoil-go/internal/sdkinfo"
+	"github.com/tinfoilsh/tinfoil-go/tinfoil-config/endorsement"
+	"github.com/tinfoilsh/tinfoil-go/verify/internal/policy"
 	"github.com/tinfoilsh/tinfoil-go/verify/internal/provenance"
 	"github.com/tinfoilsh/tinfoil-go/verify/internal/quote"
 	"github.com/tinfoilsh/tinfoil-go/verify/measurement"
@@ -52,6 +55,13 @@ type Verifier struct {
 	// conformance build can replace it.
 	provenance *provenance.Client
 
+	// configKeys are the registry keys the application provisioned, and
+	// configVerifier the verifier NewVerifier builds from them. Both are nil
+	// unless WithConfigSigningKeys was given, so a verifier that was never
+	// told whom to trust cannot verify a config.
+	configKeys     []endorsement.SigningKey
+	configVerifier *endorsement.Verifier
+
 	// overrides is empty in a production build; the conformance build uses it
 	// to carry synthetic vendor roots down to the CPU evidence layer.
 	overrides overrides
@@ -79,6 +89,12 @@ func NewVerifier(opts ...Option) (*Verifier, error) {
 			return nil, configurationError(err)
 		}
 	}
+	if v.configKeys != nil {
+		if v.configVerifier, err = v.provenance.ConfigVerifier(v.configKeys); err != nil {
+			return nil, configurationError(err)
+		}
+		v.configKeys = nil
+	}
 	return v, nil
 }
 
@@ -105,7 +121,30 @@ func (v *Verifier) PinnedRegisters() *measurement.Measurement {
 // nonce it generated, and repo. On success it must bind its traffic to the
 // returned keys and stop authorizing new requests at FreshnessExpiresAt.
 func (v *Verifier) VerifyV3(docBytes, nonce []byte, repo string) (*Verification, error) {
-	verified, _, err := v.verifyV3(docBytes, nonce, repo)
+	if _, _, _, err := provenance.ParseReference(repo); err != nil {
+		return nil, configurationError(err)
+	}
+	verified, _, err := v.verifyV3(docBytes, nonce, func(doc *document.Document, at time.Time) (*references, error) {
+		return v.codeReferences(doc, repo, at)
+	})
+	return verified, err
+}
+
+// VerifyConfig appraises a nonce-bound v3 attestation document whose guest
+// booted a shape-independent cvmimage IGVM image. pin is the config the
+// caller trusts; the keys that may approve it come from WithConfigSigningKeys.
+//
+// Unlike VerifyV3, nothing here pins the code repository: the approved config
+// names the runtime it is allowed to run, and the launch register proves the
+// guest is running that config. The caller still owns both expectations that
+// cannot come from the document — the nonce it generated, and pin.
+func (v *Verifier) VerifyConfig(docBytes, nonce []byte, pin ConfigPin) (*Verification, error) {
+	if err := v.checkConfigPin(pin); err != nil {
+		return nil, configurationError(err)
+	}
+	verified, _, err := v.verifyV3(docBytes, nonce, func(doc *document.Document, at time.Time) (*references, error) {
+		return v.configReferences(doc, pin, at)
+	})
 	return verified, err
 }
 
@@ -122,14 +161,35 @@ const (
 	layerPolicy     layer = "policy"
 )
 
-// verifyV3 is VerifyV3, also reporting which layer rejected the document.
-func (v *Verifier) verifyV3(docBytes, nonce []byte, repo string) (*Verification, layer, error) {
+// referenceValues authenticates everything a document is appraised against.
+// Which flow is running is entirely its business: the five steps below do not
+// know whether the measurement describes a workload release or the IGVM
+// runtime an approved config is appraised against.
+type referenceValues func(doc *document.Document, appraisalTime time.Time) (*references, error)
+
+// references is what a flow gathered, all of it authenticated.
+type references struct {
+	// Code is the release the expected measurement came from: a workload
+	// release, or the cvmimage runtime release in the config flow.
+	*provenance.Code
+	// Endorsements is the appraisal policy, with any config binding already
+	// resolved into a concrete expectation.
+	Endorsements *policy.Artifact
+	// ConfigRepo is the repository the code artifact was pinned to: the
+	// caller's in the repo flow, the runtime's in the config flow.
+	ConfigRepo string
+	// Config is the registry approval, which only the config flow has.
+	Config *endorsement.Verified
+	// FreshnessExpiresAt is the earliest authenticated deadline among the
+	// witnesses and approvals the flow required.
+	FreshnessExpiresAt time.Time
+}
+
+// verifyV3 is VerifyV3 or VerifyConfig, also reporting which layer rejected
+// the document.
+func (v *Verifier) verifyV3(docBytes, nonce []byte, gather referenceValues) (*Verification, layer, error) {
 	if v == nil || v.now == nil || v.provenance == nil {
 		return nil, layerNone, &errs.ConfigurationError{Err: fmt.Errorf("verifier must be built with NewVerifier")}
-	}
-	configRepo, _, _, err := provenance.ParseReference(repo)
-	if err != nil {
-		return nil, layerProvenance, &errs.ConfigurationError{Err: err}
 	}
 	doc, err := document.Parse(docBytes, nonce)
 	if err != nil {
@@ -140,7 +200,7 @@ func (v *Verifier) verifyV3(docBytes, nonce []byte, repo string) (*Verification,
 	// this document against the same instant.
 	now := v.now()
 
-	code, endorsements, freshnessExpiresAt, err := v.authenticateReferenceValues(doc, repo, now)
+	refs, err := gather(doc, now)
 	if err != nil {
 		return nil, layerProvenance, errs.WrapAttestation(fmt.Errorf("reference values: %w", err))
 	}
@@ -149,7 +209,7 @@ func (v *Verifier) verifyV3(docBytes, nonce []byte, repo string) (*Verification,
 	if err != nil {
 		return nil, layerQuote, err
 	}
-	assembled, err := quote.Assemble(doc, endorsements.Artifact, code.Measurement, v.pinnedRegisters, code.Shape, authenticated)
+	assembled, err := quote.Assemble(doc, refs.Endorsements, refs.Measurement, v.pinnedRegisters, refs.Shape, authenticated)
 	if err != nil {
 		return nil, layerPolicy, err
 	}
@@ -158,13 +218,14 @@ func (v *Verifier) verifyV3(docBytes, nonce []byte, repo string) (*Verification,
 	}
 
 	return &Verification{
-		ConfigRepo:         configRepo,
-		CodeDigest:         code.Digest,
-		CodeTag:            code.Tag,
-		CodeMeasurement:    code.Measurement,
+		ConfigRepo:         refs.ConfigRepo,
+		CodeDigest:         refs.Digest,
+		CodeTag:            refs.Tag,
+		CodeMeasurement:    refs.Measurement,
+		Config:             refs.Config,
 		EnclaveMeasurement: authenticated.Measurement,
 		CryptoMaterial:     doc.CryptoMaterialItems(),
-		FreshnessExpiresAt: freshnessExpiresAt,
+		FreshnessExpiresAt: refs.FreshnessExpiresAt,
 		Metadata: VerificationMetadata{
 			Verifier:   v.identity,
 			VerifiedAt: now.UTC(),
@@ -172,53 +233,78 @@ func (v *Verifier) verifyV3(docBytes, nonce []byte, repo string) (*Verification,
 	}, layerNone, nil
 }
 
-func (v *Verifier) authenticateReferenceValues(doc *document.Document, repo string, appraisalTime time.Time) (*provenance.Code, *provenance.PlatformEndorsements, time.Time, error) {
+// codeReferences gathers the reference values of the code-provenance flow:
+// the caller pins a repository, and the measurement comes from a code artifact
+// that repository signed.
+func (v *Verifier) codeReferences(doc *document.Document, repo string, appraisalTime time.Time) (*references, error) {
+	configRepo, _, _, err := provenance.ParseReference(repo)
+	if err != nil {
+		return nil, err
+	}
 	codeRef, err := doc.SigstoreCode()
 	if err != nil {
-		return nil, nil, time.Time{}, err
+		return nil, err
 	}
 	code, err := v.provenance.AuthenticateCode(codeRef.Bundle, repo, codeRef.Tag, codeRef.Digest)
 	if err != nil {
-		return nil, nil, time.Time{}, fmt.Errorf("verifying code measurement: %w", err)
+		return nil, fmt.Errorf("verifying code measurement: %w", err)
 	}
+	endorsements, err := v.authenticatePlatform(doc)
+	if err != nil {
+		return nil, err
+	}
+	refs := &references{Code: code, Endorsements: endorsements.Artifact, ConfigRepo: configRepo}
+	if v.ignoreFreshness {
+		return refs, nil
+	}
+	codeWitnessedAt, err := v.witness(doc, collateral.FreshnessIDCode, &code.AuthenticatedArtifact, appraisalTime, "code")
+	if err != nil {
+		return nil, err
+	}
+	platformWitnessedAt, err := v.witness(doc, collateral.FreshnessIDPlatform, &endorsements.AuthenticatedArtifact, appraisalTime, "platform")
+	if err != nil {
+		return nil, err
+	}
+	refs.FreshnessExpiresAt = freshnessExpiration(v.freshnessMaxAge, codeWitnessedAt, platformWitnessedAt)
+	return refs, nil
+}
+
+func (v *Verifier) authenticatePlatform(doc *document.Document) (*provenance.PlatformEndorsements, error) {
 	platformRef, err := doc.SigstorePlatform()
 	if err != nil {
-		return nil, nil, time.Time{}, err
+		return nil, err
 	}
 	endorsements, err := v.provenance.AuthenticatePlatformEndorsements(platformRef.Bundle, platformRef.Repo, platformRef.Tag, platformRef.Digest)
 	if err != nil {
-		return nil, nil, time.Time{}, fmt.Errorf("verifying platform endorsements: %w", err)
+		return nil, fmt.Errorf("verifying platform endorsements: %w", err)
 	}
-	if v.ignoreFreshness {
-		return code, endorsements, time.Time{}, nil
-	}
-
-	codeFreshness, err := doc.Freshness(collateral.FreshnessIDCode)
-	if err != nil {
-		return nil, nil, time.Time{}, err
-	}
-	codeWitnessedAt, err := v.provenance.AuthenticateFreshness(codeFreshness.Bundle, &code.AuthenticatedArtifact, appraisalTime, v.freshnessMaxAge)
-	if err != nil {
-		return nil, nil, time.Time{}, fmt.Errorf("verifying code freshness: %w", err)
-	}
-	platformFreshness, err := doc.Freshness(collateral.FreshnessIDPlatform)
-	if err != nil {
-		return nil, nil, time.Time{}, err
-	}
-	platformWitnessedAt, err := v.provenance.AuthenticateFreshness(platformFreshness.Bundle, &endorsements.AuthenticatedArtifact, appraisalTime, v.freshnessMaxAge)
-	if err != nil {
-		return nil, nil, time.Time{}, fmt.Errorf("verifying platform freshness: %w", err)
-	}
-
-	return code, endorsements, freshnessExpiration(codeWitnessedAt, platformWitnessedAt, v.freshnessMaxAge), nil
+	return endorsements, nil
 }
 
-// freshnessExpiration uses authenticated witness times, never local verification time.
-func freshnessExpiration(codeWitnessedAt, platformWitnessedAt time.Time, maxAge time.Duration) time.Time {
-	expiresAt := codeWitnessedAt.Add(maxAge)
-	platformExpiresAt := platformWitnessedAt.Add(maxAge)
-	if platformExpiresAt.Before(expiresAt) {
-		expiresAt = platformExpiresAt
+// witness authenticates the freshness witness with the given collateral ID
+// against an already-authenticated artifact.
+func (v *Verifier) witness(doc *document.Document, id string, artifact *provenance.AuthenticatedArtifact, appraisalTime time.Time, label string) (time.Time, error) {
+	freshness, err := doc.Freshness(id)
+	if err != nil {
+		return time.Time{}, err
+	}
+	witnessedAt, err := v.provenance.AuthenticateFreshness(freshness.Bundle, artifact, appraisalTime, v.freshnessMaxAge)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("verifying %s freshness: %w", label, err)
+	}
+	return witnessedAt, nil
+}
+
+// freshnessExpiration uses authenticated witness times, never local
+// verification time. At least one is required: a zero expiry already means
+// "do not authorize new requests" to every caller, so a flow that accidentally
+// witnessed nothing must not be able to produce one by passing no times.
+func freshnessExpiration(maxAge time.Duration, witnessedAt time.Time, more ...time.Time) time.Time {
+	expiresAt := witnessedAt.Add(maxAge)
+	for _, at := range more {
+		if deadline := at.Add(maxAge); deadline.Before(expiresAt) {
+			expiresAt = deadline
+		}
 	}
 	return expiresAt
 }

@@ -2,9 +2,11 @@ package verify
 
 import (
 	"fmt"
+	"slices"
 	"time"
 
 	"github.com/tinfoilsh/tinfoil-go/internal/errs"
+	"github.com/tinfoilsh/tinfoil-go/tinfoil-config/endorsement"
 	"github.com/tinfoilsh/tinfoil-go/verify/measurement"
 )
 
@@ -59,6 +61,20 @@ func WithSoftwareIdentity(identity SoftwareIdentity) Option {
 func WithIgnoreFreshness() Option {
 	return func(v *Verifier) error {
 		v.ignoreFreshness = true
+		return nil
+	}
+}
+
+// WithConfigSigningKeys pins the registry keys that may approve a config, and
+// the audit scope each is authorized for. They are application trust: nothing
+// in a document or in collateral can add one, and VerifyConfig refuses to run
+// without them.
+func WithConfigSigningKeys(keys []endorsement.SigningKey) Option {
+	return func(v *Verifier) error {
+		if len(keys) == 0 {
+			return fmt.Errorf("at least one config signing key is required")
+		}
+		v.configKeys = slices.Clone(keys)
 		return nil
 	}
 }

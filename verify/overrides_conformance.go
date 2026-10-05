@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/tinfoilsh/tinfoil-go/document"
+
 	"github.com/tinfoilsh/tinfoil-go/verify/internal/provenance"
 	"github.com/tinfoilsh/tinfoil-go/verify/internal/quote"
 )
@@ -79,6 +81,8 @@ func DangerousTestOnlyWithVendorRoots(amdRootPEM, intelRootPEM []byte) Option {
 // Verifier itself was unusable or the document verified. The conformance
 // adapter reports that layer, so this runs exactly the code VerifyV3 does.
 func (v *Verifier) VerifyV3WithLayer(docBytes, nonce []byte, repo string) (*Verification, string, error) {
-	verified, layer, err := v.verifyV3(docBytes, nonce, repo)
+	verified, layer, err := v.verifyV3(docBytes, nonce, func(doc *document.Document, at time.Time) (*references, error) {
+		return v.codeReferences(doc, repo, at)
+	})
 	return verified, string(layer), err
 }

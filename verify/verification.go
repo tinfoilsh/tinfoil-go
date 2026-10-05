@@ -6,6 +6,7 @@ import (
 
 	"github.com/tinfoilsh/tinfoil-go/document"
 	"github.com/tinfoilsh/tinfoil-go/internal/errs"
+	"github.com/tinfoilsh/tinfoil-go/tinfoil-config/endorsement"
 	"github.com/tinfoilsh/tinfoil-go/verify/measurement"
 )
 
@@ -14,11 +15,18 @@ import (
 // injected by the verifier
 type Verification struct {
 	// ConfigRepo is the repository the code provenance was authenticated
-	// against, without a tag or digest.
-	ConfigRepo      string
+	// against, without a tag or digest. After VerifyConfig it is the runtime
+	// repository, which that flow pins rather than taking from the caller.
+	ConfigRepo string
+	// CodeDigest and CodeTag identify the release the measurement came from:
+	// the workload's code artifact after VerifyV3, the cvmimage runtime
+	// release after VerifyConfig.
 	CodeDigest      string
 	CodeTag         string
 	CodeMeasurement *measurement.Measurement
+	// Config is the authenticated registry approval of the config the guest
+	// bound into its launch register, or nil when no config was verified.
+	Config *endorsement.Verified
 	// EnclaveMeasurement carries the quote's authenticated registers,
 	// proven to match the expectations.
 	EnclaveMeasurement *measurement.Measurement

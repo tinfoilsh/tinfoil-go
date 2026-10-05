@@ -1,0 +1,42 @@
+cvm-version: 0.15.0
+cpus: 4
+memory: 8192
+gpus: 0
+
+networks:
+  dev:
+    egress: open
+
+volumes:
+  - name: workspace
+    exec: true
+
+containers:
+  - name: "workspace"
+    image: "ghcr.io/tinfoilsh/confidential-debian@sha256:eacec91f14a69c3ddd7d51d51f1987f7df3b9ca20dbdfb7e594dced887a43eb9" # v0.1.0
+    restart: on-failure
+    cvm_admin: true
+    stop_signal: SIGRTMIN+3
+    stop_timeout: 120
+    networks: [dev]
+    volumes: [workspace:/mnt/disk]
+
+    ports: ["22:22"]
+
+    env:
+      - SSH_KEYS: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIexampleexampleexampleexampleexampleexampleA"
+
+    tmpfs:
+      /run: "rw,nosuid,nodev,mode=755"
+
+    healthcheck:
+      test: ["CMD", "/healthcheck.sh"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+
+shim:
+  upstream-port: 22
+  authenticated: false
+  tls-mode: self-signed
