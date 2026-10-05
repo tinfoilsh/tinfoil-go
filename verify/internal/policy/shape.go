@@ -1,10 +1,10 @@
 package policy
 
 // Shape is the canonical VM shape descriptor: the launch dimensions that
-// determine a platform measurement. Disks counts every attached disk
-// (root, config, external config, one per model). GPUs is nil when the
-// dimension is unknown for a measured slug; a code artifact always
-// declares it.
+// determine a platform measurement. Disks counts every attached disk (root,
+// config, external config, one per model). GPUs is nil when the dimension is
+// unknown for a measured slug. A per-shape code artifact declares a shape; an
+// IGVM one declares none, because its measurement does not depend on any.
 type Shape struct {
 	CPUs     int  `json:"cpus"`
 	MemoryMB int  `json:"memory_mb"`

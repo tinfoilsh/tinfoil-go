@@ -31,6 +31,10 @@ func WithPinnedRegisters(pins *measurement.Measurement) Option {
 // WithFreshnessMaxAge bounds how old an authenticated witness may be. Zero
 // leaves the bound unchanged, so an unset policy field keeps the seven-day
 // default rather than disabling the check; a negative age is invalid.
+//
+// It is also the window a config approval stays acceptable for, so a large
+// value weakens config withdrawal as well as witness staleness. There is no
+// upper bound: a caller that sets years here has disabled both.
 func WithFreshnessMaxAge(maxAge time.Duration) Option {
 	return func(v *Verifier) error {
 		if maxAge < 0 {

@@ -1,9 +1,9 @@
 // Package verify appraises Tinfoil attestation documents.
 //
 // It is the functional core of the SDK: given a document, the nonce the caller
-// bound it to, and what the caller trusts — a code repository, or an approved
-// config and the runtime that config pins — a Verifier decides what the
-// document proves. It opens no connections and keeps no state between
+// bound it to, and what the caller trusts — a code repository, or the identity
+// of a config a registry approved — a Verifier decides what the document
+// proves. It opens no connections and keeps no state between
 // calls, so fetching documents, caching a verification and enforcing its
 // expiry all belong to the caller — see package enclave for an implementation
 // that does those things.
@@ -131,13 +131,18 @@ func (v *Verifier) VerifyV3(docBytes, nonce []byte, repo string) (*Verification,
 }
 
 // VerifyConfig appraises a nonce-bound v3 attestation document whose guest
-// booted a shape-independent cvmimage IGVM image. pin is the config the
-// caller trusts; the keys that may approve it come from WithConfigSigningKeys.
+// booted a shape-independent cvmimage IGVM image. pin is the config the caller
+// trusts; the keys that may approve it come from WithConfigSigningKeys.
 //
-// Unlike VerifyV3, nothing here pins the code repository: the approved config
-// names the runtime it is allowed to run, and the launch register proves the
-// guest is running that config. The caller still owns both expectations that
-// cannot come from the document — the nonce it generated, and pin.
+// The runtime repository is pinned here rather than by the caller, and the
+// approved config says nothing about which release of it the guest may run:
+// the document names the release and a freshness witness is what refuses a
+// withdrawn one, exactly as VerifyV3 works when its repo reference carries no
+// tag or digest. A caller that wants one specific image should pin its
+// registers with WithPinnedRegisters.
+//
+// The caller still owns both expectations that cannot come from the document —
+// the nonce it generated, and pin.
 func (v *Verifier) VerifyConfig(docBytes, nonce []byte, pin ConfigPin) (*Verification, error) {
 	if err := v.checkConfigPin(pin); err != nil {
 		return nil, configurationError(err)

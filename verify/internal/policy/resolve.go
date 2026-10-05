@@ -27,6 +27,11 @@ func (a *Artifact) Resolve(configDigest string) (*Artifact, error) {
 	if err := validatePolicyHex("config digest", configDigest, 32); err != nil {
 		return nil, err
 	}
+	// Only Policies is cloned, and only its blocks are rewritten; Measurements
+	// and Machines are shared with the authenticated source and must stay
+	// read-only. Parse is the only constructor on the real path, so each
+	// policy already carries exactly its platform's block — the nil checks
+	// below mean an artifact built any other way fails rather than panics.
 	resolved := *a
 	resolved.Policies = maps.Clone(a.Policies)
 	for name, p := range resolved.Policies {

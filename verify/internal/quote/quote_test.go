@@ -291,3 +291,22 @@ func TestLayoutIgvmRuntime(t *testing.T) {
 	_, err = layout(short, nil, &Authenticated{platform: policy.PlatformSEVSNP})
 	require.ErrorContains(t, err, "want")
 }
+
+// An IGVM code artifact declares no VM shape, and needs none: it fixes every
+// register itself. So unlike a multiplatform measurement, a nil shape must not
+// stop assembly before the policy lookup — the complement of
+// TestMissingTDXShapePrecedesPolicyLookup. Whether a legacy policy that does
+// enumerate platform measurements then still demands a shape is tdx.Assemble's
+// business, and tdx's own tests cover it.
+func TestIgvmMeasurementNeedsNoShape(t *testing.T) {
+	q := &Authenticated{platform: policy.PlatformTDX, tdx: &tdx.Quote{}}
+	registers := make([]string, 6)
+	for i := range registers {
+		registers[i] = strings.Repeat("11", 48)
+	}
+	code := &measurement.Measurement{Type: measurement.IgvmRuntimeV1, Registers: registers}
+
+	_, err := assemble(&policy.Artifact{}, code, nil, nil, [64]byte{}, q)
+	require.ErrorContains(t, err, "not endorsed", "assembly reached the policy lookup")
+	assert.NotContains(t, err.Error(), "VM shape", "and never asked for a shape")
+}

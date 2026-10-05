@@ -328,18 +328,23 @@ func igvmMeasurement(measurementType measurement.PredicateType, fields map[strin
 	if tdx == nil {
 		return nil, fmt.Errorf("invalid igvm measurement: tdx_measurement is not an object")
 	}
-	// Each register is read from exactly one place, so no member of the TDX
-	// block can stand in for the SNP digest or for another register.
+	// Each register names the one member it is read from, so no member of the
+	// TDX block can stand in for the SNP digest or for another register, and
+	// a name and its value cannot drift apart.
 	t := tdx.GetFields()
-	registers := []string{
-		fields["snp_measurement"].GetStringValue(),
-		t["mrtd"].GetStringValue(), t["rtmr0"].GetStringValue(), t["rtmr1"].GetStringValue(),
-		t["rtmr2"].GetStringValue(), t["rtmr3"].GetStringValue(),
-	}
-	for i, name := range []string{"snp_measurement", "mrtd", "rtmr0", "rtmr1", "rtmr2", "rtmr3"} {
-		if _, err := canonical.DecodeLowerHex(name, registers[i], 48); err != nil {
+	registers := make([]string, 0, 6)
+	for _, member := range []struct{ name, value string }{
+		{"snp_measurement", fields["snp_measurement"].GetStringValue()},
+		{"mrtd", t["mrtd"].GetStringValue()},
+		{"rtmr0", t["rtmr0"].GetStringValue()},
+		{"rtmr1", t["rtmr1"].GetStringValue()},
+		{"rtmr2", t["rtmr2"].GetStringValue()},
+		{"rtmr3", t["rtmr3"].GetStringValue()},
+	} {
+		if _, err := canonical.DecodeLowerHex(member.name, member.value, 48); err != nil {
 			return nil, fmt.Errorf("invalid igvm measurement: %w", err)
 		}
+		registers = append(registers, member.value)
 	}
 	return &measurement.Measurement{Type: measurementType, Registers: registers}, nil
 }

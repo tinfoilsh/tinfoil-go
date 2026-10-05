@@ -11,6 +11,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/tinfoilsh/tinfoil-go/internal/errs"
 	"github.com/tinfoilsh/tinfoil-go/verify/internal/policy"
 )
 
@@ -69,7 +70,9 @@ func TestAssembleRejectsUnresolvedBinding(t *testing.T) {
 	require.ErrorContains(t, err, "never resolved against a config")
 }
 
-// A policy that enumerates platform measurements still requires a shape.
+// A policy that enumerates platform measurements still requires a shape, and
+// reports a missing one as an attestation failure: a document can pair an IGVM
+// code artifact, which declares no shape, with such a policy.
 func TestAssembleStillRequiresShapeForPlatformMeasurements(t *testing.T) {
 	minTCBEval := 0
 	p := &policy.TDXPolicy{
@@ -79,7 +82,9 @@ func TestAssembleStillRequiresShapeForPlatformMeasurements(t *testing.T) {
 		PlatformMeasurements: []string{"sample"},
 	}
 	_, _, err := Assemble(&policy.Artifact{}, p, nil, &Quote{quote: &tdxpb.QuoteV4{}}, [5]string{}, [64]byte{})
-	require.ErrorContains(t, err, "VM shape is required")
+	require.ErrorContains(t, err, "declare no VM shape")
+	var configErr *errs.ConfigurationError
+	require.NotErrorAs(t, err, &configErr, "collateral can reach this, so it is not the caller's mistake")
 }
 
 // A policy naming no platform measurement expects reference values that fix

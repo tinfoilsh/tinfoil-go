@@ -40,7 +40,11 @@ func Assemble(a *policy.Artifact, p *policy.TDXPolicy, required *policy.Shape, q
 	// a policy that still enumerates platform measurements needs either.
 	if len(p.PlatformMeasurements) > 0 {
 		if required == nil {
-			return nil, "", &errs.ConfigurationError{Err: fmt.Errorf("VM shape is required")}
+			// Reachable from collateral: an IGVM code artifact declares no
+			// shape, and a document can pair one with a legacy policy that
+			// enumerates platform measurements. So this is the document's
+			// fault, not the caller's.
+			return nil, "", fmt.Errorf("policy enumerates platform measurements but the reference values declare no VM shape")
 		}
 		body := q.quote.GetTdQuoteBody()
 		var m *policy.PlatformMeasurement

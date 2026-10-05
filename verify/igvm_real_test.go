@@ -5,7 +5,6 @@ import (
 	"encoding/hex"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -131,7 +130,9 @@ func TestRealLaunchResolution(t *testing.T) {
 	// bytes the launch writes after it.
 	tdx := resolved.Policies[realTDXPolicy].TDX
 	require.NotNil(t, tdx)
-	assert.Equal(t, realHostData+strings.Repeat("0", 32), tdx.MRConfigID)
+	assert.Equal(t, realHostData+"00000000000000000000000000000000", tdx.MRConfigID,
+		"written out, so this cannot agree with a wrong padding length by construction")
+	assert.Len(t, tdx.MRConfigID, 96, "MRCONFIGID is 48 bytes")
 	assert.Empty(t, tdx.ConfigBinding)
 
 	// And the register the resolution produced is the report's own.
