@@ -52,22 +52,32 @@ func publishedLaunch(t *testing.T) (snp string, tdx map[string]string) {
 	return manifest.IGVM.SNPLaunch.Measurement, manifest.IGVM.TDXLaunch
 }
 
-// igvmPredicate is the statement cvmimage's release workflow must sign.
-func igvmPredicate(t *testing.T, snp string, tdx map[string]string) *in_toto.Statement {
+// igvmPredicate is the statement cvmimage's release workflow signs: the
+// runtime manifest, carried verbatim as the predicate.
+func igvmPredicate(t *testing.T, manifest map[string]any) *in_toto.Statement {
 	t.Helper()
-	predicate, err := structpb.NewStruct(map[string]any{
-		"snp_measurement": snp,
-		"tdx_measurement": map[string]any{
-			"mrtd": tdx["mrtd"], "rtmr0": tdx["rtmr0"], "rtmr1": tdx["rtmr1"],
-			"rtmr2": tdx["rtmr2"], "rtmr3": tdx["rtmr3"],
-		},
-	})
+	predicate, err := structpb.NewStruct(manifest)
 	require.NoError(t, err)
 	return &in_toto.Statement{
 		Type:          "https://in-toto.io/Statement/v1",
-		PredicateType: string(measurement.IgvmRuntimeV1),
+		PredicateType: string(measurement.SnpTdxMultiPlatformV2),
 		Predicate:     predicate,
 	}
+}
+
+// publishedManifest is the manifest cvmimage published, as the predicate
+// carries it.
+func publishedManifest(t *testing.T) map[string]any {
+	t.Helper()
+	var manifest map[string]any
+	require.NoError(t, json.Unmarshal(fixture(t, "tinfoil-inference-v0.15.0-rc6-manifest.json"), &manifest))
+	return manifest
+}
+
+// launchOf returns the igvm block's two launch objects for mutation.
+func launchOf(manifest map[string]any) (map[string]any, map[string]any) {
+	igvm := manifest["igvm"].(map[string]any)
+	return igvm["snp_launch"].(map[string]any), igvm["tdx_launch"].(map[string]any)
 }
 
 // Reads the runtime measurement the way the verifier does, and checks it
@@ -77,9 +87,9 @@ func TestIGVMPredicateCarriesTheRealLaunchState(t *testing.T) {
 	assert.Equal(t, realMeasurement, snp, "the manifest and the hardware agree")
 	assert.Equal(t, realMRTD, tdx["mrtd"])
 
-	m, err := measurementFromStatement(igvmPredicate(t, snp, tdx))
+	m, err := measurementFromStatement(igvmPredicate(t, publishedManifest(t)))
 	require.NoError(t, err)
-	assert.Equal(t, measurement.IgvmRuntimeV1, m.Type)
+	assert.Equal(t, measurement.SnpTdxMultiPlatformV2, m.Type)
 	require.Len(t, m.Registers, 6, "SNP measurement plus all five TDX registers")
 	assert.Equal(t, []string{realMeasurement, realMRTD, zeroRegister, zeroRegister, zeroRegister, zeroRegister}, m.Registers)
 
@@ -91,24 +101,22 @@ func TestIGVMPredicateCarriesTheRealLaunchState(t *testing.T) {
 
 // A predicate missing a register would leave it unconstrained.
 func TestIGVMPredicateRejections(t *testing.T) {
-	snp, tdx := publishedLaunch(t)
-	for _, name := range []string{"snp_measurement", "mrtd", "rtmr0", "rtmr1", "rtmr2", "rtmr3"} {
+	for _, name := range []string{"measurement", "mrtd", "rtmr0", "rtmr1", "rtmr2", "rtmr3"} {
 		for _, bad := range []string{"", "ff", strings.ToUpper(realMeasurement)} {
-			registers := map[string]string{"mrtd": tdx["mrtd"], "rtmr0": tdx["rtmr0"], "rtmr1": tdx["rtmr1"], "rtmr2": tdx["rtmr2"], "rtmr3": tdx["rtmr3"]}
-			value := snp
-			if name == "snp_measurement" {
-				value = bad
+			manifest := publishedManifest(t)
+			snp, tdx := launchOf(manifest)
+			if name == "measurement" {
+				snp[name] = bad
 			} else {
-				registers[name] = bad
+				tdx[name] = bad
 			}
-			_, err := measurementFromStatement(igvmPredicate(t, value, registers))
+			_, err := measurementFromStatement(igvmPredicate(t, manifest))
 			require.ErrorContains(t, err, name, "%s = %q must reject", name, bad)
 		}
 	}
-	// A predicate with no TDX block names no TDX registers at all.
-	bare, err := structpb.NewStruct(map[string]any{"snp_measurement": snp})
-	require.NoError(t, err)
-	_, err = measurementFromStatement(&in_toto.Statement{
-		Type: "https://in-toto.io/Statement/v1", PredicateType: string(measurement.IgvmRuntimeV1), Predicate: bare})
-	require.ErrorContains(t, err, "tdx_measurement")
+	// A manifest with no tdx_launch names no TDX registers at all.
+	manifest := publishedManifest(t)
+	delete(manifest["igvm"].(map[string]any), "tdx_launch")
+	_, err := measurementFromStatement(igvmPredicate(t, manifest))
+	require.ErrorContains(t, err, "tdx_launch")
 }

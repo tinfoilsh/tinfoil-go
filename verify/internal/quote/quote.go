@@ -178,7 +178,7 @@ func assemble(endorsements *policy.Artifact, code, pins *measurement.Measurement
 		return nil, &errs.ConfigurationError{Err: fmt.Errorf("assembling policy: expected code measurement is required")}
 	}
 	// Selecting an endorsed platform measurement needs the VM shape.
-	if q.platform == policy.PlatformTDX && shape == nil && code.Type != measurement.IgvmRuntimeV1 {
+	if q.platform == policy.PlatformTDX && shape == nil && code.Type != measurement.SnpTdxMultiPlatformV2 {
 		return nil, &errs.ConfigurationError{Err: fmt.Errorf("assembling policy: the code artifact's VM shape is required")}
 	}
 	name, machinePolicy, err := endorsements.PolicyFor(q.identity, q.platform)
@@ -237,7 +237,7 @@ func layout(code, pins *measurement.Measurement, q *Authenticated) ([]string, er
 		if q.platform == policy.PlatformTDX {
 			registers = []string{"", "", code.Registers[1], code.Registers[2], ""}
 		}
-	case code.Type == measurement.IgvmRuntimeV1 && len(code.Registers) == 6:
+	case code.Type == measurement.SnpTdxMultiPlatformV2 && len(code.Registers) == 6:
 		// Cloned: pins are merged into registers in place.
 		registers = slices.Clone(code.Registers[:1])
 		if q.platform == policy.PlatformTDX {
@@ -245,7 +245,7 @@ func layout(code, pins *measurement.Measurement, q *Authenticated) ([]string, er
 		}
 	default:
 		return nil, fmt.Errorf("code measurement is %s with %d registers, want %s with 3 or %s with 6",
-			code.Type, len(code.Registers), measurement.SnpTdxMultiPlatformV1, measurement.IgvmRuntimeV1)
+			code.Type, len(code.Registers), measurement.SnpTdxMultiPlatformV1, measurement.SnpTdxMultiPlatformV2)
 	}
 	enclaveType := measurement.SevGuestV2
 	if q.platform == policy.PlatformTDX {

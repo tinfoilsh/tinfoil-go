@@ -18,9 +18,10 @@ const (
 
 	SnpTdxMultiPlatformV1 PredicateType = "https://tinfoil.sh/predicate/snp-tdx-multiplatform/v1"
 
-	// IgvmRuntimeV1 is one cvmimage IGVM image's launch state on both
-	// platforms: [SNP measurement, MRTD, RTMR0, RTMR1, RTMR2, RTMR3].
-	IgvmRuntimeV1 PredicateType = "https://tinfoil.sh/predicate/igvm-runtime/v1"
+	// SnpTdxMultiPlatformV2 is a cvmimage runtime manifest. It states one
+	// image's launch state on both platforms and declares no VM shape:
+	// [SNP measurement, MRTD, RTMR0, RTMR1, RTMR2, RTMR3].
+	SnpTdxMultiPlatformV2 PredicateType = "https://tinfoil.sh/predicate/snp-tdx-multiplatform/v2"
 )
 
 type Measurement struct {
@@ -66,7 +67,7 @@ func (m *Measurement) String() string {
 	switch m.Type {
 	case SnpTdxMultiPlatformV1:
 		platform = []string{"SNP", "RTMR1", "RTMR2"}
-	case IgvmRuntimeV1:
+	case SnpTdxMultiPlatformV2:
 		platform = []string{"SNP", "MRTD", "RTMR0", "RTMR1", "RTMR2", "RTMR3"}
 	case SevGuestV2:
 		platform = []string{"SNP"}

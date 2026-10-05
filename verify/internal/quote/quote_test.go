@@ -256,7 +256,7 @@ func verify(ev document.CPUEvidence, en collateral.CPUEndorsements, endorsements
 // what the enclave must report.
 func TestLayoutIgvmRuntime(t *testing.T) {
 	runtime := &measurement.Measurement{
-		Type: measurement.IgvmRuntimeV1,
+		Type: measurement.SnpTdxMultiPlatformV2,
 		Registers: []string{
 			strings.Repeat("11", 48), strings.Repeat("22", 48), strings.Repeat("33", 48),
 			strings.Repeat("44", 48), strings.Repeat("55", 48), strings.Repeat("66", 48),
@@ -287,7 +287,7 @@ func TestLayoutIgvmRuntime(t *testing.T) {
 	assert.Equal(t, before, runtime.Registers)
 
 	// The register count is part of the type.
-	short := &measurement.Measurement{Type: measurement.IgvmRuntimeV1, Registers: runtime.Registers[:3]}
+	short := &measurement.Measurement{Type: measurement.SnpTdxMultiPlatformV2, Registers: runtime.Registers[:3]}
 	_, err = layout(short, nil, &Authenticated{platform: policy.PlatformSEVSNP})
 	require.ErrorContains(t, err, "want")
 }
@@ -300,7 +300,7 @@ func TestIgvmMeasurementNeedsNoShape(t *testing.T) {
 	for i := range registers {
 		registers[i] = strings.Repeat("11", 48)
 	}
-	code := &measurement.Measurement{Type: measurement.IgvmRuntimeV1, Registers: registers}
+	code := &measurement.Measurement{Type: measurement.SnpTdxMultiPlatformV2, Registers: registers}
 
 	_, err := assemble(&policy.Artifact{}, code, nil, nil, [64]byte{}, q)
 	require.ErrorContains(t, err, "not endorsed", "assembly reached the policy lookup")

@@ -317,25 +317,26 @@ func shapeFromPredicate(fields map[string]*structpb.Value) (*policy.Shape, error
 	return shape, nil
 }
 
-// igvmMeasurement reads an IGVM image's launch state: the SEV-SNP launch
-// digest and all five TDX registers. It leaves none to a platform measurement
-// and declares no VM shape.
+// igvmMeasurement reads a cvmimage runtime manifest: the SEV-SNP launch
+// digest and all five TDX registers. The manifest's other members describe
+// the build and are not read here.
 func igvmMeasurement(measurementType measurement.PredicateType, fields map[string]*structpb.Value) (*measurement.Measurement, error) {
-	tdx := fields["tdx_measurement"].GetStructValue()
-	if tdx == nil {
-		return nil, fmt.Errorf("invalid igvm measurement: tdx_measurement is not an object")
+	igvm := fields["igvm"].GetStructValue().GetFields()
+	snp := igvm["snp_launch"].GetStructValue().GetFields()
+	tdx := igvm["tdx_launch"].GetStructValue().GetFields()
+	if snp == nil || tdx == nil {
+		return nil, fmt.Errorf("invalid igvm measurement: igvm.snp_launch and igvm.tdx_launch must be objects")
 	}
 	// Each register names the one member it is read from, so no member can
 	// stand in for another.
-	t := tdx.GetFields()
 	registers := make([]string, 0, 6)
 	for _, member := range []struct{ name, value string }{
-		{"snp_measurement", fields["snp_measurement"].GetStringValue()},
-		{"mrtd", t["mrtd"].GetStringValue()},
-		{"rtmr0", t["rtmr0"].GetStringValue()},
-		{"rtmr1", t["rtmr1"].GetStringValue()},
-		{"rtmr2", t["rtmr2"].GetStringValue()},
-		{"rtmr3", t["rtmr3"].GetStringValue()},
+		{"snp_launch.measurement", snp["measurement"].GetStringValue()},
+		{"tdx_launch.mrtd", tdx["mrtd"].GetStringValue()},
+		{"tdx_launch.rtmr0", tdx["rtmr0"].GetStringValue()},
+		{"tdx_launch.rtmr1", tdx["rtmr1"].GetStringValue()},
+		{"tdx_launch.rtmr2", tdx["rtmr2"].GetStringValue()},
+		{"tdx_launch.rtmr3", tdx["rtmr3"].GetStringValue()},
 	} {
 		if _, err := canonical.DecodeLowerHex(member.name, member.value, 48); err != nil {
 			return nil, fmt.Errorf("invalid igvm measurement: %w", err)
@@ -350,7 +351,7 @@ func measurementFromStatement(statement *in_toto.Statement) (*measurement.Measur
 
 	measurementType := measurement.PredicateType(statement.PredicateType)
 	switch measurementType {
-	case measurement.IgvmRuntimeV1:
+	case measurement.SnpTdxMultiPlatformV2:
 		return igvmMeasurement(measurementType, predicateFields)
 	case measurement.SnpTdxMultiPlatformV1:
 		tdxMeasurementField, ok := predicateFields["tdx_measurement"]
