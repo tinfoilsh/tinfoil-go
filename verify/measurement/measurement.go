@@ -18,10 +18,8 @@ const (
 
 	SnpTdxMultiPlatformV1 PredicateType = "https://tinfoil.sh/predicate/snp-tdx-multiplatform/v1"
 
-	// IgvmRuntimeV1 is the launch state of one cvmimage IGVM image, on both
-	// platforms: [SNP measurement, MRTD, RTMR0, RTMR1, RTMR2, RTMR3]. It
-	// carries every TDX register, because an image whose measurement does
-	// not vary with the machine shape fixes all of them.
+	// IgvmRuntimeV1 is one cvmimage IGVM image's launch state on both
+	// platforms: [SNP measurement, MRTD, RTMR0, RTMR1, RTMR2, RTMR3].
 	IgvmRuntimeV1 PredicateType = "https://tinfoil.sh/predicate/igvm-runtime/v1"
 )
 

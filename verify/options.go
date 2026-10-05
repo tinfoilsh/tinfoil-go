@@ -28,13 +28,10 @@ func WithPinnedRegisters(pins *measurement.Measurement) Option {
 	}
 }
 
-// WithFreshnessMaxAge bounds how old an authenticated witness may be. Zero
-// leaves the bound unchanged, so an unset policy field keeps the seven-day
-// default rather than disabling the check; a negative age is invalid.
-//
-// It is also the window a config approval stays acceptable for, so a large
-// value weakens config withdrawal as well as witness staleness. There is no
-// upper bound: a caller that sets years here has disabled both.
+// WithFreshnessMaxAge bounds how old an authenticated witness may be, and how
+// long a config approval stays acceptable. Zero leaves the bound unchanged, so
+// an unset policy field keeps the seven-day default rather than disabling the
+// check; a negative age is invalid. There is no upper bound.
 func WithFreshnessMaxAge(maxAge time.Duration) Option {
 	return func(v *Verifier) error {
 		if maxAge < 0 {
@@ -70,9 +67,8 @@ func WithIgnoreFreshness() Option {
 }
 
 // WithConfigSigningKeys pins the registry keys that may approve a config, and
-// the audit scope each is authorized for. They are application trust: nothing
-// in a document or in collateral can add one, and VerifyConfig refuses to run
-// without them.
+// the audit scope each is authorized for. Nothing in a document can add one,
+// and VerifyConfig refuses to run without them.
 func WithConfigSigningKeys(keys []endorsement.SigningKey) Option {
 	return func(v *Verifier) error {
 		if len(keys) == 0 {

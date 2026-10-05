@@ -57,8 +57,7 @@ type Verifier struct {
 
 	// configKeys are the registry keys the application provisioned, and
 	// configVerifier the verifier NewVerifier builds from them. Both are nil
-	// unless WithConfigSigningKeys was given, so a verifier that was never
-	// told whom to trust cannot verify a config.
+	// unless WithConfigSigningKeys was given.
 	configKeys     []endorsement.SigningKey
 	configVerifier *endorsement.Verifier
 
@@ -131,18 +130,9 @@ func (v *Verifier) VerifyV3(docBytes, nonce []byte, repo string) (*Verification,
 }
 
 // VerifyConfig appraises a nonce-bound v3 attestation document whose guest
-// booted a shape-independent cvmimage IGVM image. pin is the config the caller
-// trusts; the keys that may approve it come from WithConfigSigningKeys.
-//
-// The runtime repository is pinned here rather than by the caller, and the
-// approved config says nothing about which release of it the guest may run:
-// the document names the release and a freshness witness is what refuses a
-// withdrawn one, exactly as VerifyV3 works when its repo reference carries no
-// tag or digest. A caller that wants one specific image should pin its
-// registers with WithPinnedRegisters.
-//
-// The caller still owns both expectations that cannot come from the document —
-// the nonce it generated, and pin.
+// booted a cvmimage IGVM image. pin is the config the caller trusts; the keys
+// that may approve it come from WithConfigSigningKeys. The document names the
+// runtime release, and a freshness witness is what refuses a withdrawn one.
 func (v *Verifier) VerifyConfig(docBytes, nonce []byte, pin ConfigPin) (*Verification, error) {
 	if err := v.checkConfigPin(pin); err != nil {
 		return nil, configurationError(err)
@@ -167,21 +157,17 @@ const (
 )
 
 // referenceValues authenticates everything a document is appraised against.
-// Which flow is running is entirely its business: the five steps below do not
-// know whether the measurement describes a workload release or the IGVM
-// runtime an approved config is appraised against.
+// Which flow is running is entirely its business.
 type referenceValues func(doc *document.Document, appraisalTime time.Time) (*references, error)
 
 // references is what a flow gathered, all of it authenticated.
 type references struct {
-	// Code is the release the expected measurement came from: a workload
-	// release, or the cvmimage runtime release in the config flow.
+	// Code is the release the expected measurement came from.
 	*provenance.Code
 	// Endorsements is the appraisal policy, with any config binding already
 	// resolved into a concrete expectation.
 	Endorsements *policy.Artifact
-	// ConfigRepo is the repository the code artifact was pinned to: the
-	// caller's in the repo flow, the runtime's in the config flow.
+	// ConfigRepo is the repository the code artifact was pinned to.
 	ConfigRepo string
 	// Config is the registry approval, which only the config flow has.
 	Config *endorsement.Verified
@@ -190,8 +176,7 @@ type references struct {
 	FreshnessExpiresAt time.Time
 }
 
-// verifyV3 is VerifyV3 or VerifyConfig, also reporting which layer rejected
-// the document.
+// verifyV3 is VerifyV3 or VerifyConfig, also reporting which layer rejected the document.
 func (v *Verifier) verifyV3(docBytes, nonce []byte, gather referenceValues) (*Verification, layer, error) {
 	if v == nil || v.now == nil || v.provenance == nil {
 		return nil, layerNone, &errs.ConfigurationError{Err: fmt.Errorf("verifier must be built with NewVerifier")}
@@ -239,8 +224,7 @@ func (v *Verifier) verifyV3(docBytes, nonce []byte, gather referenceValues) (*Ve
 }
 
 // codeReferences gathers the reference values of the code-provenance flow:
-// the caller pins a repository, and the measurement comes from a code artifact
-// that repository signed.
+// the measurement comes from a code artifact the pinned repository signed.
 func (v *Verifier) codeReferences(doc *document.Document, repo string, appraisalTime time.Time) (*references, error) {
 	configRepo, _, _, err := provenance.ParseReference(repo)
 	if err != nil {
@@ -300,10 +284,8 @@ func (v *Verifier) witness(doc *document.Document, id string, artifact *provenan
 	return witnessedAt, nil
 }
 
-// freshnessExpiration uses authenticated witness times, never local
-// verification time. At least one is required: a zero expiry already means
-// "do not authorize new requests" to every caller, so a flow that accidentally
-// witnessed nothing must not be able to produce one by passing no times.
+// freshnessExpiration uses authenticated witness times, never local verification time.
+// At least one is required: a zero expiry already means "do not authorize new requests".
 func freshnessExpiration(maxAge time.Duration, witnessedAt time.Time, more ...time.Time) time.Time {
 	expiresAt := witnessedAt.Add(maxAge)
 	for _, at := range more {

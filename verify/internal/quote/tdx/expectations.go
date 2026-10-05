@@ -35,15 +35,12 @@ func Assemble(a *policy.Artifact, p *policy.TDXPolicy, required *policy.Shape, q
 	if err != nil {
 		return nil, "", err
 	}
-	// A shape-independent image supplies all five registers itself, so there
-	// is no measurements-map entry to select and no VM shape to match. Only
-	// a policy that still enumerates platform measurements needs either.
+	// An image supplying all five registers itself needs no measurements-map
+	// entry and no VM shape.
 	if len(p.PlatformMeasurements) > 0 {
 		if required == nil {
-			// Reachable from collateral: an IGVM code artifact declares no
-			// shape, and a document can pair one with a legacy policy that
-			// enumerates platform measurements. So this is the document's
-			// fault, not the caller's.
+			// Reachable from collateral, so it is the document's fault and
+			// not the caller's.
 			return nil, "", fmt.Errorf("policy enumerates platform measurements but the reference values declare no VM shape")
 		}
 		body := q.quote.GetTdQuoteBody()
@@ -57,10 +54,8 @@ func Assemble(a *policy.Artifact, p *policy.TDXPolicy, required *policy.Shape, q
 		registers[0] = cmp.Or(registers[0], m.MRTD)
 		registers[1] = cmp.Or(registers[1], m.RTMR0)
 	} else if registers[0] == "" || registers[1] == "" {
-		// A policy naming no platform measurement is appraising an image
-		// that fixes MRTD and RTMR0 itself. Reference values that do not
-		// supply them leave both unconstrained, so say so here rather than
-		// let the hex decode below report an empty string.
+		// A policy naming no platform measurement expects reference values
+		// that fix MRTD and RTMR0 themselves.
 		return nil, "", fmt.Errorf("policy names no platform measurement and the reference values supply no MRTD or RTMR0")
 	}
 	registers[4] = cmp.Or(registers[4], measurement.RTMR3_ZERO)
@@ -130,10 +125,8 @@ func options(p *policy.TDXPolicy) (*tdxvalidate.Options, error) {
 		return nil, err
 	}
 
-	// MR_OWNER and MR_OWNER_CONFIG are unconditionally pinned to zero:
-	// Tinfoil launches never populate them. MR_CONFIG_ID is zero too unless
-	// the policy was resolved against a config binding, which sets it to the
-	// config digest.
+	// MR_OWNER and MR_OWNER_CONFIG are pinned to zero: Tinfoil launches never
+	// populate them. MR_CONFIG_ID is too, unless a config binding set it.
 	mrConfigID := make([]byte, 48)
 	if p.MRConfigID != "" {
 		if mrConfigID, err = policy.DecodeHex("mr_config_id", p.MRConfigID, 48); err != nil {

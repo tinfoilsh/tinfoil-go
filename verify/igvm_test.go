@@ -54,9 +54,8 @@ func TestConfigPinValidate(t *testing.T) {
 	}
 }
 
-// A verifier that was never told which registry keys to trust cannot verify a
-// config, and says so as a configuration error rather than a failed
-// attestation.
+// A verifier told no registry keys says so as a configuration error, not a
+// failed attestation.
 func TestVerifyConfigRequiresSigningKeys(t *testing.T) {
 	v, err := NewVerifier()
 	require.NoError(t, err)
@@ -66,8 +65,7 @@ func TestVerifyConfigRequiresSigningKeys(t *testing.T) {
 	require.ErrorContains(t, err, "WithConfigSigningKeys")
 }
 
-// The config approval is the only evidence that a config has not been
-// withdrawn, so skipping freshness would leave nothing to appraise.
+// The approval is the only evidence a config has not been withdrawn.
 func TestVerifyConfigRefusesIgnoredFreshness(t *testing.T) {
 	v, err := NewVerifier(WithConfigSigningKeys([]endorsement.SigningKey{testSigningKey(t)}), WithIgnoreFreshness())
 	require.NoError(t, err)
@@ -88,8 +86,7 @@ func TestWithConfigSigningKeysRequiresKeys(t *testing.T) {
 	require.ErrorContains(t, err, "at least one config signing key")
 }
 
-// A document that carries no config endorsement cannot be appraised by the
-// config flow: there is nothing naming which runtime it may be running.
+// A document carrying no config endorsement cannot be appraised by this flow.
 func TestVerifyConfigRequiresConfigCollateral(t *testing.T) {
 	v, err := NewVerifier(WithConfigSigningKeys([]endorsement.SigningKey{testSigningKey(t)}))
 	require.NoError(t, err)
@@ -100,10 +97,8 @@ func TestVerifyConfigRequiresConfigCollateral(t *testing.T) {
 }
 
 // With a config endorsement present the flow reaches the registry approval,
-// which an unsigned config cannot pass. That is as far as this test can go:
-// an approval needs a real Sigstore timestamp and log entry, and a synthetic
-// trust root would invalidate the real runtime and platform bundles that the
-// rest of this package's tests depend on.
+// which an unsigned config cannot pass. That is as far as this can go without
+// a real approval, which needs a real Sigstore timestamp and log entry.
 func TestVerifyConfigReachesRegistryApproval(t *testing.T) {
 	v, err := NewVerifier(WithConfigSigningKeys([]endorsement.SigningKey{testSigningKey(t)}))
 	require.NoError(t, err)
@@ -112,9 +107,8 @@ func TestVerifyConfigReachesRegistryApproval(t *testing.T) {
 	require.ErrorContains(t, err, "verifying config approval")
 }
 
-// configEntry carries exact config bytes with a placeholder bundle: the
-// collateral layer only requires a bundle to be present, and whether it
-// verifies is for the registry verifier to judge.
+// configEntry carries exact config bytes with a placeholder bundle; the
+// collateral layer only requires one to be present.
 func configEntry(t *testing.T, config []byte) collateral.Entry {
 	t.Helper()
 	data, err := json.Marshal(map[string]any{
@@ -125,8 +119,7 @@ func configEntry(t *testing.T, config []byte) collateral.Entry {
 	return collateral.Entry{ID: collateral.ConfigID, Role: collateral.RoleReferenceValues, Format: collateral.ConfigEndorsementV1Format, Data: data}
 }
 
-// buildIGVMDocument produces a parseable v3 document carrying entries. Its
-// quote is a stub: these tests stop before the quote layer.
+// buildIGVMDocument produces a parseable v3 document with a stub quote.
 func buildIGVMDocument(t *testing.T, entries []collateral.Entry) ([]byte, []byte) {
 	t.Helper()
 	nonce, err := document.RandomNonce()
@@ -140,9 +133,7 @@ func buildIGVMDocument(t *testing.T, entries []collateral.Entry) ([]byte, []byte
 }
 
 // The one entry a collaterals service must add for this flow round-trips into
-// the accessor it reads. Everything else the flow needs — the code artifact,
-// the platform artifact and both witnesses — is what a repo request already
-// carries.
+// the accessor it reads; everything else a repo request already carries.
 func TestIGVMCollateralRoundTrip(t *testing.T) {
 	config := igvmFixture(t, "config-placeholder.yaml")
 	docBytes, nonce := buildIGVMDocument(t, []collateral.Entry{configEntry(t, config)})
@@ -153,9 +144,8 @@ func TestIGVMCollateralRoundTrip(t *testing.T) {
 	assert.Equal(t, config, approval.Config)
 }
 
-// The config flow witnesses the cvmimage release the same way the repo flow
-// witnesses a workload release: through the code entry. Nothing names a
-// runtime separately, so there is no second witness to forget.
+// The config flow witnesses the cvmimage release through the code entry, the
+// same way the repo flow witnesses a workload release.
 func TestRuntimeFreshnessIsTheCodeWitness(t *testing.T) {
 	v, err := NewVerifier(WithConfigSigningKeys([]endorsement.SigningKey{testSigningKey(t)}))
 	require.NoError(t, err)
@@ -168,9 +158,8 @@ func TestRuntimeFreshnessIsTheCodeWitness(t *testing.T) {
 	require.ErrorContains(t, err, collateral.FreshnessIDCode)
 }
 
-// A caller may pin which cvmimage release it accepts. Validation keeps the pin
-// to that one repository, so it can narrow which release is acceptable but
-// never redirect the runtime somewhere else.
+// Validation keeps the pin to one repository, so it can narrow which release
+// is acceptable but never redirect the runtime elsewhere.
 func TestConfigPinRuntimeValidate(t *testing.T) {
 	for _, runtime := range []string{
 		"tinfoilsh/cvmimage",
@@ -196,18 +185,10 @@ func TestConfigPinRuntimeValidate(t *testing.T) {
 	}
 }
 
-// An unset pin leaves the reference the constant, so no existing caller
-// changes behaviour; a set one replaces it and reaches AuthenticateCode, whose
-// own rule is that a pinned tag and digest beat the document's hints. That
-// rule, including rejecting a release the pin does not name, is covered
-// against a real signed bundle by provenance's TestAuthenticateCode.
-//
-// What is checked here is that the reference codeReferences is given is the
-// one AuthenticateCode enforces, digest pin and all. The real
-// platform-endorsements bundle stands in for a code artifact, under its own
-// repository because the signing identity is keyed on it: with no digest pin
-// it gets as far as its predicate being the wrong kind, and with one naming a
-// digest it does not carry it is refused before that.
+// The reference codeReferences is given is the one AuthenticateCode enforces,
+// digest pin and all. The real platform-endorsements bundle stands in for a
+// code artifact: unpinned it reaches its predicate being the wrong kind, and
+// with a digest it does not carry it is refused before that.
 func TestRuntimeReferenceReachesAuthenticateCode(t *testing.T) {
 	v, err := NewVerifier(WithConfigSigningKeys([]endorsement.SigningKey{testSigningKey(t)}))
 	require.NoError(t, err)
@@ -234,8 +215,7 @@ func TestRuntimeReferenceReachesAuthenticateCode(t *testing.T) {
 		"the pinned digest replaced the document's and was refused first")
 }
 
-// An unset pin must leave the reference exactly the constant, so no caller
-// written before the pin existed changes behaviour.
+// An unset pin leaves the reference exactly the constant.
 func TestConfigPinRuntimeDefaultsToTheConstant(t *testing.T) {
 	assert.Empty(t, testPin().Runtime)
 	assert.Equal(t, runtimeRepo, cmp.Or(testPin().Runtime, runtimeRepo))

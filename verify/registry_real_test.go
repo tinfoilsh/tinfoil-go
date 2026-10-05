@@ -21,22 +21,11 @@ import (
 	"github.com/tinfoilsh/tinfoil-go/verify/internal/provenance"
 )
 
-// testdata/registry/canary-endorsement.json is the body the production config
-// registry served for its publication canary, saved verbatim:
-//
-//	GET https://api.tinfoil.sh/api/config-registry/endorsements/<endorsement_ref>
-//
-// The bundle in it is real: signed by the control plane's KMS key, with a
-// Rekor v2 inclusion proof and an RFC 3161 approval token from the public
-// Sigstore timestamp authority. The tests below appraise it against the
-// production Sigstore root this module embeds.
-//
-// What they cannot do is check the signature, because that needs the
-// registry's public verification key and this module has no way to obtain
-// one: the registry's key endpoints require authorization, and the only
-// published handle on the key is the bundle's hint, which is a digest.
-// Supplying that key is a caller's job — WithConfigSigningKeys exists for
-// exactly that — but until one is published, nothing here can stand in for it.
+// testdata/registry/canary-endorsement.json is what the production config
+// registry served for its canary, saved verbatim, and is appraised below
+// against the production Sigstore root. Its signature is not checked: that
+// needs the registry's verification key, which is not published.
+
 type registryEndorsement struct {
 	EndorsementRef string         `json:"endorsement_ref"`
 	AuditScope     string         `json:"audit_scope"`
@@ -59,10 +48,9 @@ func canary(t *testing.T) (registryEndorsement, []byte) {
 	return e, config
 }
 
-// canaryVerifier builds a config verifier whose trusted material is the
-// production Sigstore root. Its signing key is generated here and is NOT the
-// registry's: it is enough to construct a verifier, which is all the checks
-// below need.
+// canaryVerifier builds a config verifier over the production Sigstore root.
+// Its signing key is generated here and is not the registry's; the checks
+// below need a verifier, not that key.
 func canaryVerifier(t *testing.T, scope string) *endorsement.Verifier {
 	t.Helper()
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
@@ -74,19 +62,16 @@ func canaryVerifier(t *testing.T, scope string) *endorsement.Verifier {
 	return v
 }
 
-// The digest the registry publishes is SHA-256 of the exact config bytes, and
-// is the value a guest writes into HOST_DATA or MRCONFIGID. That the registry
-// and the launch binding agree on one number is the whole join between the two
-// halves of this design.
+// The digest the registry publishes is SHA-256 of the exact config bytes,
+// which is the value a guest writes into HOST_DATA or MRCONFIGID.
 func TestRegistryCanaryDigestIsTheLaunchBinding(t *testing.T) {
 	e, config := canary(t)
 	digest := sha256.Sum256(config)
 	assert.Equal(t, e.Digest, hex.EncodeToString(digest[:]))
 }
 
-// The statement the registry signs parses under this module's profile: the
-// canonical name, a UUID audit scope, one subject carrying the config digest,
-// and the inner approval timestamp that makes withdrawal observable.
+// The statement the registry signs parses under this module's profile, down to
+// the inner approval timestamp that makes withdrawal observable.
 func TestRegistryCanaryStatementParses(t *testing.T) {
 	e, _ := canary(t)
 	var bundle struct {
@@ -118,8 +103,7 @@ func TestRegistryCanaryStatementParses(t *testing.T) {
 }
 
 // The approval time is authenticated against the public Sigstore timestamp
-// authority in the embedded root — no registry key needed, because the token
-// is the TSA's signature over the statement core.
+// authority in the embedded root, which needs no registry key.
 func TestRegistryCanaryApprovalTimeIsAuthentic(t *testing.T) {
 	e, _ := canary(t)
 	var bundle struct {
@@ -159,11 +143,9 @@ func TestRegistryCanaryApprovalTimeIsAuthentic(t *testing.T) {
 	require.ErrorContains(t, err, "imprint")
 }
 
-// The registry emits bundles in the shape this module requires: a v0.3 DSSE
-// bundle, one signature, a key hint, a Rekor v2 hashedrekord with an inclusion
-// proof and no inclusion promise, and no bundle-level RFC 3161 timestamp.
-// Reaching the signing-key check proves every one of those passed, because
-// they are all that stands before it.
+// Reaching the signing-key check proves the bundle's shape was accepted: the
+// v0.3 media type, the single signature, the key hint and the Rekor v2
+// inclusion proof are all that stands before it.
 func TestRegistryCanaryBundleShapeIsAccepted(t *testing.T) {
 	e, config := canary(t)
 	v := canaryVerifier(t, e.AuditScope)
@@ -175,10 +157,7 @@ func TestRegistryCanaryBundleShapeIsAccepted(t *testing.T) {
 }
 
 // The verifier reads nothing out of a config but its digest, so the canary is
-// usable as it stands: its cvm-version names a release, and the flow neither
-// reads that member nor needs to. Which release an approved config may run is
-// decided by the cvmimage code artifact and its freshness witness, not by the
-// config.
+// usable as it stands even though its cvm-version names a release.
 func TestRegistryCanaryNeedsNoRuntimePin(t *testing.T) {
 	e, config := canary(t)
 	digest := sha256.Sum256(config)

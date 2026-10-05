@@ -28,11 +28,7 @@ type Request struct {
 	Repo string `json:"repo,omitempty"`
 	// Tag optionally pins a code release; latest when empty.
 	Tag string `json:"tag,omitempty"`
-	// Config pins a versioned registry config and its exact-byte digest. A
-	// guest that bound its config into HOST_DATA or MRCONFIGID already knows
-	// the digest, because it is the value it wrote there; the name comes from
-	// however the config was delivered to it. Sending Config rather than Repo
-	// selects the config flow and is the whole of the guest's side of it.
+	// Config pins a versioned registry config and its exact-byte digest.
 	Config *collateral.ConfigReference `json:"config,omitempty"`
 	// Platform is attestation's platform label: "sev-snp" or "tdx".
 	Platform string `json:"platform"`
@@ -42,22 +38,9 @@ type Request struct {
 }
 
 // Response carries the complete collateral array for a v3 attestation
-// document.
-//
-// A Repo request is answered with the CPU endorsement entries (amd-vcek and
-// amd-crl, or intel-pcs) and the reference-values entries "code", "platform",
-// "code-freshness" and "platform-freshness".
-//
-// A Config request is answered with exactly the same entries plus one:
-//
-//	tinfoil-config  config-endorsement/v1  {config_base64, sigstore_bundle}
-//
-// The two differences are in what the existing entries carry, not in which
-// entries exist. "code" is the cvmimage runtime release rather than a workload
-// release, so its measurement predicate is the IGVM one; and "platform" is
-// platform-endorsements-igvm.json, whose policies declare a config binding
-// instead of a fixed host_data. Both freshness witnesses are unchanged, and
-// the cvmimage release is witnessed through "code-freshness" like any other.
+// document: the platform endorsement entry (amd-vcek or intel-pcs) and the
+// two reference-values entries (sigstore-code, sigstore-platform).
+// A Config request is answered with the same entries plus tinfoil-config.
 type Response struct {
 	Format    string    `json:"format"`
 	ExpiresAt time.Time `json:"expires_at"`

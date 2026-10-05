@@ -12,32 +12,21 @@ import (
 	"github.com/tinfoilsh/tinfoil-go/verify/internal/provenance"
 )
 
-// runtimeRepo publishes the measured IGVM images. It is pinned here rather
-// than supplied by the caller: a config names the workload, not the runtime it
-// happens to be deployed on.
+// runtimeRepo publishes the measured IGVM images.
 const runtimeRepo = "tinfoilsh/cvmimage"
 
-// ConfigPin is the config a caller will accept. None of it may be learned from
-// the document: the whole point of the flow is that the approved config decides
-// what the guest is allowed to be running.
-//
-// Identity and AuditScope are required. Revision and Digest narrow the pin
-// further, to one revision of the config or to exact bytes.
+// ConfigPin is the config a caller will accept; none of it may be learned from
+// the document. Identity and AuditScope are required, and Revision and Digest
+// narrow the pin to one revision or to exact bytes.
 type ConfigPin struct {
 	Identity   string
 	AuditScope string
 	Revision   string
 	Digest     string
 	// Runtime optionally pins which cvmimage release this caller accepts, in
-	// VerifyV3's owner/name[@tag][@sha256:digest] grammar. Empty accepts
-	// whichever release the document names, bounded only by its freshness
-	// witness.
-	//
-	// This is the caller asserting what it expects, so it binds only for
-	// callers that set it. A pin inside the signed config would bind for
-	// everyone; that was deliberately not taken, because it would require
-	// every config to adopt the @sha256: form and be re-approved on every
-	// runtime upgrade.
+	// VerifyV3's owner/name[@tag][@sha256:digest] grammar. It binds only for
+	// callers that set it; empty accepts whichever release the document
+	// names, bounded by that release's freshness witness.
 	Runtime string
 }
 
@@ -72,26 +61,22 @@ func (p ConfigPin) Validate() error {
 }
 
 // checkConfigPin reports whether this verifier can appraise pin at all, so a
-// caller's mistake surfaces before a document is parsed and never looks like a
-// failed attestation.
+// caller's mistake never looks like a failed attestation.
 func (v *Verifier) checkConfigPin(pin ConfigPin) error {
 	if v.configVerifier == nil {
 		return fmt.Errorf("config verification requires WithConfigSigningKeys")
 	}
 	if v.ignoreFreshness {
-		// A config approval is the only statement that the config has not
-		// been withdrawn, and it is timestamped rather than witnessed, so
-		// there is nothing left to appraise if freshness is skipped.
+		// The approval's timestamp is the only statement that the config has
+		// not been withdrawn, so skipping it leaves nothing to appraise.
 		return fmt.Errorf("config verification cannot ignore freshness")
 	}
 	return pin.Validate()
 }
 
 // configReferences is the code-provenance flow against cvmimage, plus the one
-// thing a shape-independent launch cannot measure: which config it booted.
-// The approved config's digest is the value the launch bound into HOST_DATA or
-// MRCONFIGID, and resolving the endorsements against it turns their config
-// binding into that expectation.
+// thing the launch cannot measure: the approved config's digest, which is the
+// value it bound into HOST_DATA or MRCONFIGID.
 func (v *Verifier) configReferences(doc *document.Document, pin ConfigPin, appraisalTime time.Time) (*references, error) {
 	entry, err := doc.ConfigEndorsement()
 	if err != nil {
@@ -104,21 +89,19 @@ func (v *Verifier) configReferences(doc *document.Document, pin ConfigPin, appra
 	if err != nil {
 		return nil, fmt.Errorf("verifying config approval: %w", err)
 	}
-	// A pin in the reference takes precedence over the document's tag and
-	// digest hints, which is AuthenticateCode's existing rule.
+	// AuthenticateCode gives a pin in the reference precedence over the
+	// document's tag and digest hints.
 	refs, err := v.codeReferences(doc, cmp.Or(pin.Runtime, runtimeRepo), appraisalTime)
 	if err != nil {
 		return nil, err
 	}
-	// approved.Digest is SHA-256 of the same bytes the approval covered, so
-	// the expectation and the thing approved cannot be about different
-	// configs.
+	// approved.Digest is SHA-256 of the bytes the approval covered.
 	if refs.Endorsements, err = refs.Endorsements.Resolve(approved.Digest); err != nil {
 		return nil, err
 	}
 	refs.Config = approved
-	// The approval carries its own timestamp rather than a witness, and is
-	// bounded by the same maximum age as one.
+	// The approval is timestamped rather than witnessed, under the same
+	// maximum age.
 	if deadline := approved.ApprovalTime.Add(v.freshnessMaxAge); refs.FreshnessExpiresAt.IsZero() || deadline.Before(refs.FreshnessExpiresAt) {
 		refs.FreshnessExpiresAt = deadline
 	}

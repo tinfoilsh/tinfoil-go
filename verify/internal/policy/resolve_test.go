@@ -10,8 +10,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// The real published IGVM artifact: every policy binds its config, and no
-// policy names a platform measurement.
+// The real published IGVM artifact.
 func loadIGVMFixture(t *testing.T) *Artifact {
 	t.Helper()
 	data, err := os.ReadFile(filepath.Join("..", "..", "testdata", "igvm", "platform-endorsements-igvm.json"))
@@ -40,8 +39,8 @@ func TestResolveFillsBothPlatforms(t *testing.T) {
 	}
 }
 
-// Resolution must not reach back into the artifact it copied: a verifier
-// holding one authenticated artifact may appraise several documents.
+// A verifier holding one authenticated artifact may appraise several
+// documents, so resolution must not reach back into it.
 func TestResolveDoesNotMutateSource(t *testing.T) {
 	a := loadIGVMFixture(t)
 	_, err := a.Resolve(testDigest)
@@ -59,8 +58,7 @@ func TestResolveDoesNotMutateSource(t *testing.T) {
 }
 
 // A legacy artifact has nothing to resolve, and resolving it anyway would
-// leave its launch registers unchecked. Refusing is what keeps the two
-// artifacts from being used interchangeably.
+// leave its launch registers unchecked.
 func TestResolveRejectsUnboundPolicies(t *testing.T) {
 	data, err := os.ReadFile(filepath.Join("testdata", "platform-endorsements.json"))
 	require.NoError(t, err)
@@ -78,8 +76,7 @@ func TestResolveRejectsBadDigest(t *testing.T) {
 	}
 }
 
-// Parsing must reject a policy that declares both a fixed value and a
-// binding: one of the two would silently win.
+// A policy declaring both a fixed value and a binding must not parse.
 func TestValidateRejectsBindingWithFixedValue(t *testing.T) {
 	a := loadIGVMFixture(t)
 	p := a.Policies["amd-turin-prod"]

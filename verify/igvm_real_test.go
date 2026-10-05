@@ -15,30 +15,15 @@ import (
 	"github.com/tinfoilsh/tinfoil-go/verify/internal/provenance"
 )
 
-// The fixtures under testdata/igvm are genuine, not synthetic:
-//
-//	platform-endorsements-igvm.json  release v0.0.16 of platform-endorsements
-//	platform-bundle.json             its real attestation, from the GitHub API
-//	sev-snp-report.bin               a real SEV-SNP report from an AMD Turin
-//	                                 host that booted cvmimage v0.15.0-rc6
-//	config-b.yaml                    the exact config disk that boot used
-//	tinfoil-inference-…-manifest.json  the manifest cvmimage publishes today
-//
-// The platform bundle is authenticated against the production Sigstore root
-// this module embeds, so these tests fail if the real publishing identity,
-// subject or digest changes.
-//
-// The runtime measurement is the one part that cannot be real yet: cvmimage
-// publishes it in the manifest file above, and this verifier reads it from an
-// attestation predicate cvmimage does not emit yet. The predicate is built
-// from the manifest's own values in the provenance package's tests.
-//
-// config-b.yaml must be replaced before this branch is published: it is the
-// literal config a developer booted and carries an operator SSH public key.
-// Its exact bytes are what make the HOST_DATA assertion real, so replacing it
-// means re-capturing a report on hardware under a config written for the
-// purpose. config-placeholder.yaml is derived and its copy is already a
-// placeholder.
+// The fixtures under testdata/igvm are real, and the platform bundle is
+// authenticated against the production Sigstore root this module embeds. The
+// runtime measurement is the exception: cvmimage publishes it in a manifest
+// file and not yet as the predicate this verifier reads.
+
+// TODO: config-b.yaml is a config a developer booted and carries their SSH
+// public key. Its exact bytes are what make the HOST_DATA assertion real, so
+// replacing it needs a report re-captured on hardware.
+
 const (
 	realPlatformSHA = "c4f46b52976c8d2660f7067fc491eb87c58573671d325b79ef0ca5e97493c40a"
 	realPlatformTag = "v0.0.16"

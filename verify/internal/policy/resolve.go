@@ -12,26 +12,15 @@ const ConfigBindingSHA256 = "sha256"
 
 // Resolve returns a copy of a in which every policy's config binding has been
 // turned into the register the launch must report, so that policy assembly
-// needs no knowledge of IGVM at all.
-//
-// A cvmimage launch measurement depends only on the image, so the config
-// cannot be measured and the endorsements cannot enumerate one platform
-// measurement per machine shape. A policy declaring config_binding is an
-// expectation with a hole in it; this fills the hole.
-//
-// Every policy must declare a binding, so a legacy artifact cannot be resolved
-// and a mixed one cannot be partly resolved. That, and assembly's refusal of a
-// binding that was never resolved, are what keep the two artifacts from
-// standing in for each other.
+// needs no knowledge of IGVM. Every policy must declare a binding: a legacy
+// artifact cannot be resolved, and a mixed one cannot be partly resolved.
 func (a *Artifact) Resolve(configDigest string) (*Artifact, error) {
 	if err := validatePolicyHex("config digest", configDigest, 32); err != nil {
 		return nil, err
 	}
-	// Only Policies is cloned, and only its blocks are rewritten; Measurements
-	// and Machines are shared with the authenticated source and must stay
-	// read-only. Parse is the only constructor on the real path, so each
-	// policy already carries exactly its platform's block — the nil checks
-	// below mean an artifact built any other way fails rather than panics.
+	// Only Policies is cloned; Measurements and Machines are shared with the
+	// authenticated source and must stay read-only. The nil checks below mean
+	// an artifact that did not come from Parse fails rather than panics.
 	resolved := *a
 	resolved.Policies = maps.Clone(a.Policies)
 	for name, p := range resolved.Policies {
@@ -42,8 +31,7 @@ func (a *Artifact) Resolve(configDigest string) (*Artifact, error) {
 			p.SEVSNP = &sev
 		case p.TDX != nil && p.TDX.ConfigBinding != "":
 			tdx := *p.TDX
-			// MRCONFIGID is 48 bytes: the digest, then the 16 zero bytes a
-			// launch writes after a 32-byte hash.
+			// MRCONFIGID is 48 bytes: the digest then 16 zero bytes.
 			tdx.ConfigBinding, tdx.MRConfigID = "", configDigest+strings.Repeat("0", 32)
 			p.TDX = &tdx
 		default:

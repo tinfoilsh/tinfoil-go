@@ -177,8 +177,7 @@ func assemble(endorsements *policy.Artifact, code, pins *measurement.Measurement
 	if code == nil {
 		return nil, &errs.ConfigurationError{Err: fmt.Errorf("assembling policy: expected code measurement is required")}
 	}
-	// Reference values that do not fix MRTD and RTMR0 leave them to an
-	// endorsed platform measurement, and selecting one needs the VM shape.
+	// Selecting an endorsed platform measurement needs the VM shape.
 	if q.platform == policy.PlatformTDX && shape == nil && code.Type != measurement.IgvmRuntimeV1 {
 		return nil, &errs.ConfigurationError{Err: fmt.Errorf("assembling policy: the code artifact's VM shape is required")}
 	}
@@ -226,11 +225,7 @@ func (p *AssembledPolicy) Validate() (err error) {
 	}
 }
 
-// layout maps code and pins to enclave registers, leaving platform defaults
-// empty. A multiplatform code measurement names only the registers the image
-// itself fixes, leaving MRTD and RTMR0 to the endorsed platform measurement; an
-// IGVM runtime measurement names all of them, which is what makes the launch
-// independent of the machine shape.
+// layout maps code and pins to enclave registers, leaving platform defaults empty.
 func layout(code, pins *measurement.Measurement, q *Authenticated) ([]string, error) {
 	if err := measurement.ValidatePins(pins); err != nil {
 		return nil, &errs.ConfigurationError{Err: err}
@@ -243,8 +238,7 @@ func layout(code, pins *measurement.Measurement, q *Authenticated) ([]string, er
 			registers = []string{"", "", code.Registers[1], code.Registers[2], ""}
 		}
 	case code.Type == measurement.IgvmRuntimeV1 && len(code.Registers) == 6:
-		// Cloned: pins are merged into registers in place, and the caller's
-		// reference values must not change underneath it.
+		// Cloned: pins are merged into registers in place.
 		registers = slices.Clone(code.Registers[:1])
 		if q.platform == policy.PlatformTDX {
 			registers = slices.Clone(code.Registers[1:])

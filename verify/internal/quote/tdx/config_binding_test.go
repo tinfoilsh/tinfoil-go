@@ -17,9 +17,8 @@ import (
 
 const configDigest = "301396c526d83a0ea03f823dd3a8621d9defc90e74d05e63f03325ae0fbc4ff0"
 
-// A config-binding policy has no measurements map, no platform measurements,
-// and no VM shape. All five registers come from the runtime manifest, so
-// assembly must neither need a shape nor consult the measurements map.
+// A config-binding policy has no measurements map and no VM shape: all five
+// registers come from the runtime measurement.
 func TestAssembleFromRuntimeRegisters(t *testing.T) {
 	parsed, err := tdxabi.QuoteToProto(tdxtestdata.RawQuote)
 	require.NoError(t, err)
@@ -62,8 +61,7 @@ func TestAssembleFromRuntimeRegisters(t *testing.T) {
 	require.NoError(t, e.Validate(quote))
 }
 
-// An unresolved binding must never be assembled: it names no expectation at
-// all, and silently enforcing nothing is the failure mode that matters.
+// An unresolved binding names no expectation at all.
 func TestAssembleRejectsUnresolvedBinding(t *testing.T) {
 	a := loadIGVMFixture(t)
 	_, _, err := Assemble(a, a.Policies["tdx-h200-prod"].TDX, nil, &Quote{quote: &tdxpb.QuoteV4{}}, [5]string{}, [64]byte{})
@@ -71,8 +69,7 @@ func TestAssembleRejectsUnresolvedBinding(t *testing.T) {
 }
 
 // A policy that enumerates platform measurements still requires a shape, and
-// reports a missing one as an attestation failure: a document can pair an IGVM
-// code artifact, which declares no shape, with such a policy.
+// reports a missing one as an attestation failure.
 func TestAssembleStillRequiresShapeForPlatformMeasurements(t *testing.T) {
 	minTCBEval := 0
 	p := &policy.TDXPolicy{
@@ -88,8 +85,7 @@ func TestAssembleStillRequiresShapeForPlatformMeasurements(t *testing.T) {
 }
 
 // A policy naming no platform measurement expects reference values that fix
-// MRTD and RTMR0. Without them nothing constrains either register, and
-// assembly must say so rather than leave the hex decode to report it.
+// MRTD and RTMR0; without them nothing constrains either register.
 func TestAssembleRequiresRuntimeRegistersWithoutPlatformMeasurements(t *testing.T) {
 	minTCBEval := 0
 	p := &policy.TDXPolicy{

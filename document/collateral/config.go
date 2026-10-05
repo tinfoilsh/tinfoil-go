@@ -9,11 +9,9 @@ import (
 )
 
 // ConfigEndorsement is a decoded ConfigEndorsementV1Format entry: the exact
-// config bytes a registry approved, and the approval bundle. The bytes travel
-// with the approval because the verifier needs both — the approval says which
-// digest is trusted, and SHA-256 of the bytes is the value the launch bound
-// into its register. Nothing here is trusted until the bundle is verified
-// against them.
+// config bytes a registry approved, and the approval bundle. Both travel
+// because SHA-256 of the bytes is the value the launch bound into its
+// register. Nothing here is trusted until the bundle is verified against them.
 type ConfigEndorsement struct {
 	Config []byte
 	Bundle jsontext.Value
@@ -25,8 +23,7 @@ func (c ConfigEndorsement) Clone() ConfigEndorsement {
 }
 
 // configData is the data of a ConfigEndorsementV1Format entry. It names no
-// digest and no revision: both are in the signed approval, and an unsigned
-// second copy could only ever agree or cause a rejection.
+// digest and no revision; both are in the signed approval.
 type configData struct {
 	ConfigBase64   string         `json:"config_base64"`
 	SigstoreBundle jsontext.Value `json:"sigstore_bundle"`

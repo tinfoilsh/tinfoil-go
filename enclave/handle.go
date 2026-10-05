@@ -25,7 +25,7 @@ import (
 // refresh.
 type Handle struct {
 	enclave, repo, relay string
-	// configPin verifies an approved config instead of a code repository.
+	// configPin selects the config flow when set.
 	configPin *verify.ConfigPin
 	// verifier is the immutable verification policy, shared by every handle
 	// derived from this one.

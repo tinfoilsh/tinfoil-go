@@ -274,8 +274,7 @@ func (c *Client) AuthenticateCode(bundleJSON []byte, ref, tag, hexDigest string)
 	if err != nil {
 		return nil, fmt.Errorf("code predicate: %w", err)
 	}
-	// Only a per-shape measurement declares a VM shape; an IGVM image was
-	// measured for no particular machine, so it names none.
+	// Only a per-shape measurement declares a VM shape.
 	var shape *policy.Shape
 	if m.Type == measurement.SnpTdxMultiPlatformV1 {
 		if shape, err = shapeFromPredicate(result.Statement.Predicate.GetFields()); err != nil {
@@ -318,19 +317,16 @@ func shapeFromPredicate(fields map[string]*structpb.Value) (*policy.Shape, error
 	return shape, nil
 }
 
-// igvmMeasurement reads the launch state of a shape-independent IGVM image:
-// the SEV-SNP launch digest and all five TDX registers. A measurement that
-// does not vary with the machine fixes every register, so unlike the
-// multiplatform predicate this one leaves none to a platform measurement and
-// declares no VM shape.
+// igvmMeasurement reads an IGVM image's launch state: the SEV-SNP launch
+// digest and all five TDX registers. It leaves none to a platform measurement
+// and declares no VM shape.
 func igvmMeasurement(measurementType measurement.PredicateType, fields map[string]*structpb.Value) (*measurement.Measurement, error) {
 	tdx := fields["tdx_measurement"].GetStructValue()
 	if tdx == nil {
 		return nil, fmt.Errorf("invalid igvm measurement: tdx_measurement is not an object")
 	}
-	// Each register names the one member it is read from, so no member of the
-	// TDX block can stand in for the SNP digest or for another register, and
-	// a name and its value cannot drift apart.
+	// Each register names the one member it is read from, so no member can
+	// stand in for another.
 	t := tdx.GetFields()
 	registers := make([]string, 0, 6)
 	for _, member := range []struct{ name, value string }{

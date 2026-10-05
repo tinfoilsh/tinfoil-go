@@ -89,8 +89,8 @@ type Set struct {
 	CPU              CPUEndorsements
 	SigstoreCode     *SigstoreRef
 	SigstorePlatform *SigstoreRef
-	// Config is the registry approval of the exact config bound into the
-	// launch register.
+	// Config is the registry approval of the config bound into the launch
+	// register.
 	Config *ConfigEndorsement
 	// Freshness holds the freshness witnesses by entry ID.
 	Freshness map[string]Freshness

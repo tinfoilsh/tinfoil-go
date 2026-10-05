@@ -253,7 +253,7 @@ func verify(ev document.CPUEvidence, en collateral.CPUEndorsements, endorsements
 }
 
 // An IGVM runtime measurement names all six registers, so it alone decides
-// what the enclave must report on either platform.
+// what the enclave must report.
 func TestLayoutIgvmRuntime(t *testing.T) {
 	runtime := &measurement.Measurement{
 		Type: measurement.IgvmRuntimeV1,
@@ -292,12 +292,8 @@ func TestLayoutIgvmRuntime(t *testing.T) {
 	require.ErrorContains(t, err, "want")
 }
 
-// An IGVM code artifact declares no VM shape, and needs none: it fixes every
-// register itself. So unlike a multiplatform measurement, a nil shape must not
-// stop assembly before the policy lookup — the complement of
-// TestMissingTDXShapePrecedesPolicyLookup. Whether a legacy policy that does
-// enumerate platform measurements then still demands a shape is tdx.Assemble's
-// business, and tdx's own tests cover it.
+// An IGVM code artifact fixes every register itself, so a nil shape must not
+// stop assembly before the policy lookup.
 func TestIgvmMeasurementNeedsNoShape(t *testing.T) {
 	q := &Authenticated{platform: policy.PlatformTDX, tdx: &tdx.Quote{}}
 	registers := make([]string, 6)

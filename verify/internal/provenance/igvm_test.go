@@ -17,11 +17,9 @@ import (
 	"github.com/tinfoilsh/tinfoil-go/verify/measurement"
 )
 
-// The values below are real: cvmimage publishes them today in the
-// v0.15.0-rc6 manifest, and an AMD Turin host that booted that image reported
-// the SNP one. What is not real is the predicate carrying them — cvmimage
-// does not emit it yet — so these tests build the statement and check that
-// decoding it yields exactly what the published manifest and the hardware say.
+// The values below are real: cvmimage publishes them in its v0.15.0-rc6
+// manifest and an AMD Turin host reported the SNP one. The predicate carrying
+// them is built here, because cvmimage does not emit it yet.
 const (
 	realTag         = "v0.15.0-rc6"
 	realMeasurement = "5b06eeba4725864b09c32b6523a55302cbdb2c3f7f6293bfe492bd92390d1a2abd4db16c454e136c47aed9f61db10df6"
@@ -36,8 +34,8 @@ func fixture(t *testing.T, name string) []byte {
 	return data
 }
 
-// publishedLaunch is what cvmimage's manifest says today about v0.15.0-rc6.
-// The predicate it must publish instead has to carry exactly these values.
+// publishedLaunch is what cvmimage's manifest says about v0.15.0-rc6; the
+// predicate must carry exactly these values.
 func publishedLaunch(t *testing.T) (snp string, tdx map[string]string) {
 	t.Helper()
 	var manifest struct {
@@ -54,9 +52,7 @@ func publishedLaunch(t *testing.T) (snp string, tdx map[string]string) {
 	return manifest.IGVM.SNPLaunch.Measurement, manifest.IGVM.TDXLaunch
 }
 
-// igvmPredicate is the statement cvmimage's release workflow must sign. It is
-// built here only because cvmimage does not emit it yet; every value in it
-// comes from the published manifest.
+// igvmPredicate is the statement cvmimage's release workflow must sign.
 func igvmPredicate(t *testing.T, snp string, tdx map[string]string) *in_toto.Statement {
 	t.Helper()
 	predicate, err := structpb.NewStruct(map[string]any{
@@ -74,8 +70,7 @@ func igvmPredicate(t *testing.T, snp string, tdx map[string]string) *in_toto.Sta
 	}
 }
 
-// TestIGVMPredicateCarriesTheRealLaunchState reads the runtime measurement the
-// way the verifier does — out of an attestation predicate — and checks it
+// Reads the runtime measurement the way the verifier does, and checks it
 // against what cvmimage publishes and what the hardware reported.
 func TestIGVMPredicateCarriesTheRealLaunchState(t *testing.T) {
 	snp, tdx := publishedLaunch(t)
@@ -94,8 +89,7 @@ func TestIGVMPredicateCarriesTheRealLaunchState(t *testing.T) {
 	assert.Equal(t, realMeasurement, hex.EncodeToString(report.GetMeasurement()))
 }
 
-// Every register is required and must be a 48-byte lowercase hex string: a
-// predicate missing one would leave that register unconstrained.
+// A predicate missing a register would leave it unconstrained.
 func TestIGVMPredicateRejections(t *testing.T) {
 	snp, tdx := publishedLaunch(t)
 	for _, name := range []string{"snp_measurement", "mrtd", "rtmr0", "rtmr1", "rtmr2", "rtmr3"} {
