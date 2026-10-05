@@ -1,14 +1,18 @@
 package verify
 
 import (
+	"crypto"
 	"crypto/sha256"
 	"fmt"
+	"time"
 
 	"github.com/tinfoilsh/tinfoil-go/document"
 	"github.com/tinfoilsh/tinfoil-go/document/collateral"
+	"github.com/tinfoilsh/tinfoil-go/freshness"
 	"github.com/tinfoilsh/tinfoil-go/internal/errs"
 	"github.com/tinfoilsh/tinfoil-go/tinfoil-config/endorsement"
 	"github.com/tinfoilsh/tinfoil-go/verify/internal/igvm"
+	"github.com/tinfoilsh/tinfoil-go/verify/internal/provenance"
 	"github.com/tinfoilsh/tinfoil-go/verify/internal/quote"
 )
 
@@ -37,20 +41,31 @@ func WithConfigSigningKeys(keys []endorsement.SigningKey) Option {
 	}
 }
 
+// WithFreshnessSigningKeys pins Tinfoil's platform and runtime approval keys.
+// These keys do not authorize configs for any org.
+func WithFreshnessSigningKeys(keys []crypto.PublicKey) Option {
+	return func(v *Verifier) error {
+		if len(keys) == 0 {
+			return fmt.Errorf("freshness signing keys must not be empty")
+		}
+		v.freshnessKeys = append([]crypto.PublicKey(nil), keys...)
+		return nil
+	}
+}
+
 // VerifyIGVM verifies the config-binding profile without falling back to legacy
-// repository verification. Config freshness authorizes its pinned runtime;
-// platform freshness is required independently.
+// repository verification. Config, platform, and runtime approvals must be fresh.
 func (v *Verifier) VerifyIGVM(docBytes, nonce []byte, policy ConfigPolicy) (*Verification, error) {
 	verified, _, err := v.verifyIGVM(docBytes, nonce, policy)
 	return verified, err
 }
 
 func (v *Verifier) verifyIGVM(docBytes, nonce []byte, policy ConfigPolicy) (result *Verification, failed layer, err error) {
-	if v == nil || v.configVerifier == nil || v.provenance == nil || v.now == nil {
-		return nil, layerNone, configurationError(fmt.Errorf("config verification requires independently pinned signing keys"))
+	if v == nil || v.configVerifier == nil || v.freshnessVerifier == nil || v.provenance == nil || v.now == nil {
+		return nil, layerNone, configurationError(fmt.Errorf("config verification requires independently pinned signing keys for configs and freshness"))
 	}
 	if v.ignoreFreshness {
-		return nil, layerNone, configurationError(fmt.Errorf("IGVM verification requires config and platform freshness"))
+		return nil, layerNone, configurationError(fmt.Errorf("IGVM verification requires config, platform, and runtime freshness"))
 	}
 	if err := policy.Validate(); err != nil {
 		return nil, layerProvenance, configurationError(err)
@@ -98,9 +113,13 @@ func (v *Verifier) verifyIGVM(docBytes, nonce []byte, policy ConfigPolicy) (resu
 	if platform.SubjectName != igvm.PlatformSubject {
 		return nil, layerProvenance, fmt.Errorf("IGVM requires its dedicated platform endorsement artifact")
 	}
-	platformApprovedAt, err := v.authenticateFreshness(doc, collateral.FreshnessIDPlatform, &platform.AuthenticatedArtifact, now)
+	platformApprovedAt, err := v.authenticateArtifactFreshness(doc, collateral.FreshnessIDPlatform, freshness.KindPlatform, &platform.AuthenticatedArtifact, now)
 	if err != nil {
 		return nil, layerProvenance, fmt.Errorf("verifying platform freshness: %w", err)
+	}
+	runtimeApprovedAt, err := v.authenticateArtifactFreshness(doc, collateral.FreshnessIDRuntime, freshness.KindRuntime, &runtime.AuthenticatedArtifact, now)
+	if err != nil {
+		return nil, layerProvenance, fmt.Errorf("verifying runtime freshness: %w", err)
 	}
 	authenticated, err := quote.Authenticate(doc.CPUEvidence(), doc.CPUEndorsements(), v.quoteOptions(now))
 	if err != nil {
@@ -121,7 +140,36 @@ func (v *Verifier) verifyIGVM(docBytes, nonce []byte, policy ConfigPolicy) (resu
 	return &Verification{
 		ConfigRepo: runtime.Repo, CodeDigest: runtime.Digest, CodeTag: runtime.Tag, CodeMeasurement: measurement,
 		EnclaveMeasurement: authenticated.Measurement, Config: approved, CryptoMaterial: doc.CryptoMaterialItems(),
-		FreshnessExpiresAt: freshnessExpiration(approved.ApprovalTime, platformApprovedAt, v.freshnessMaxAge),
+		FreshnessExpiresAt: igvmFreshnessExpiration(approved.ApprovalTime, platformApprovedAt, runtimeApprovedAt, v.freshnessMaxAge),
 		Metadata:           VerificationMetadata{Verifier: v.identity, VerifiedAt: now},
 	}, layerNone, nil
+}
+
+func (v *Verifier) authenticateArtifactFreshness(doc *document.Document, id, kind string, artifact *provenance.AuthenticatedArtifact, now time.Time) (time.Time, error) {
+	material, err := doc.Freshness(id)
+	if err != nil {
+		return time.Time{}, err
+	}
+	if material.Format != collateral.ArtifactFreshnessV1Format {
+		return time.Time{}, fmt.Errorf("IGVM requires Tinfoil artifact freshness approvals")
+	}
+	approved, err := v.freshnessVerifier.Verify(material.Bundle, freshness.Policy{
+		Artifact: freshness.Artifact{Kind: kind, Repo: artifact.Repo, Tag: artifact.Tag, Name: artifact.SubjectName, Digest: artifact.Digest},
+		Now:      now, MaxAge: v.freshnessMaxAge,
+	})
+	if err != nil {
+		return time.Time{}, err
+	}
+	return approved.ApprovalTime, nil
+}
+
+func igvmFreshnessExpiration(config, platform, runtime time.Time, maxAge time.Duration) time.Time {
+	earliest := config
+	if platform.Before(earliest) {
+		earliest = platform
+	}
+	if runtime.Before(earliest) {
+		earliest = runtime
+	}
+	return earliest.Add(maxAge)
 }

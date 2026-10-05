@@ -95,7 +95,7 @@ func NewStatement(artifact Artifact) (*Statement, error) {
 	}, nil
 }
 
-func (s *Statement) Artifact() Artifact {
+func (s *Statement) artifact() Artifact {
 	return Artifact{Kind: s.Predicate.Kind, Repo: s.Predicate.Repo, Tag: s.Predicate.Tag, Name: s.Subject[0].Name, Digest: s.Subject[0].Digest["sha256"]}
 }
 
@@ -103,7 +103,7 @@ func (s *Statement) validate(requireTimestamp bool) error {
 	if s == nil || s.Type != StatementType || s.PredicateType != PredicateType || len(s.Subject) != 1 || len(s.Subject[0].Digest) != 1 {
 		return fmt.Errorf("unsupported artifact freshness statement")
 	}
-	if err := s.Artifact().Validate(); err != nil {
+	if err := s.artifact().Validate(); err != nil {
 		return err
 	}
 	if requireTimestamp && (s.Predicate.Freshness == nil || len(s.Predicate.Freshness.RFC3161Timestamp) == 0) {

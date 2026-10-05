@@ -209,8 +209,8 @@ func TestDecodeKeysFreshnessByID(t *testing.T) {
 	}
 	set := decode(t, []Entry{witness(FreshnessIDCode, `{"a":1}`), witness(FreshnessIDPlatform, `{"b":2}`)})
 	assert.Equal(t, map[string]Freshness{
-		FreshnessIDCode:     {Bundle: []byte(`{"a":1}`)},
-		FreshnessIDPlatform: {Bundle: []byte(`{"b":2}`)},
+		FreshnessIDCode:     {Format: SigstoreFreshnessV1Format, Bundle: []byte(`{"a":1}`)},
+		FreshnessIDPlatform: {Format: SigstoreFreshnessV1Format, Bundle: []byte(`{"b":2}`)},
 	}, set.Freshness)
 }
 

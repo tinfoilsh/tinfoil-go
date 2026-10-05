@@ -1,11 +1,13 @@
 package verify
 
 import (
+	"crypto"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 	"github.com/tinfoilsh/tinfoil-go/document"
@@ -22,14 +24,20 @@ func TestIGVMRequiresIndependentTrustAndFreshness(t *testing.T) {
 	require.NoError(t, err)
 	_, err = v.VerifyIGVM(nil, nil, policy)
 	require.ErrorContains(t, err, "pinned signing keys")
-	_, err = NewVerifier(WithConfigSigningKeys(nil))
-	require.ErrorContains(t, err, "must not be empty")
-	v, err = NewVerifier(WithConfigSigningKeys(keys), WithIgnoreFreshness())
+	v, err = NewVerifier(WithConfigSigningKeys(keys))
 	require.NoError(t, err)
 	_, err = v.VerifyIGVM(nil, nil, policy)
-	require.ErrorContains(t, err, "requires config and platform freshness")
+	require.ErrorContains(t, err, "signing keys for configs and freshness")
+	_, err = NewVerifier(WithFreshnessSigningKeys(nil))
+	require.ErrorContains(t, err, "must not be empty")
+	_, err = NewVerifier(WithConfigSigningKeys(nil))
+	require.ErrorContains(t, err, "must not be empty")
+	v, err = NewVerifier(WithConfigSigningKeys(keys), WithFreshnessSigningKeys([]crypto.PublicKey{key.Public()}), WithIgnoreFreshness())
+	require.NoError(t, err)
+	_, err = v.VerifyIGVM(nil, nil, policy)
+	require.ErrorContains(t, err, "requires config, platform, and runtime freshness")
 
-	v, err = NewVerifier(WithConfigSigningKeys(keys))
+	v, err = NewVerifier(WithConfigSigningKeys(keys), WithFreshnessSigningKeys([]crypto.PublicKey{key.Public()}))
 	require.NoError(t, err)
 	nonce := make([]byte, document.NonceSize)
 	raw, err := document.Build(document.BuildInput{Nonce: nonce}, func([64]byte) (string, []byte, error) { return document.SEVSNPReportV1Format, []byte("quote"), nil })
@@ -47,5 +55,13 @@ func TestIGVMRequiresIndependentTrustAndFreshness(t *testing.T) {
 			var e *ConfigurationError
 			require.ErrorAs(t, err, &e)
 		})
+	}
+}
+
+func TestIGVMFreshnessExpirationIncludesEveryApproval(t *testing.T) {
+	now := time.Now()
+	older := now.Add(-time.Hour)
+	for _, times := range [][3]time.Time{{older, now, now}, {now, older, now}, {now, now, older}} {
+		require.Equal(t, older.Add(time.Hour), igvmFreshnessExpiration(times[0], times[1], times[2], time.Hour))
 	}
 }

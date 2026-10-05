@@ -83,7 +83,7 @@ func (v *Verifier) Verify(bundleJSON []byte, policy Policy) (*Verified, error) {
 	if err != nil {
 		return nil, err
 	}
-	if s.Artifact() != policy.Artifact {
+	if s.artifact() != policy.Artifact {
 		return nil, fmt.Errorf("freshness approval does not match the expected artifact")
 	}
 	digest, err := hex.DecodeString(policy.Artifact.Digest)

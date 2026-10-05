@@ -33,6 +33,8 @@ const (
 	// SigstoreFreshnessV1Format carries a freshness witness for a Sigstore
 	// reference-values artifact.
 	SigstoreFreshnessV1Format = "https://tinfoil.sh/collateral/sigstore-freshness/v1"
+	// ArtifactFreshnessV1Format carries a Tinfoil-signed release approval.
+	ArtifactFreshnessV1Format = "https://tinfoil.sh/collateral/artifact-freshness/v1"
 	// ConfigEndorsementV1Format carries an exact config and its timestamped
 	// registry approval bundle.
 	ConfigEndorsementV1Format = "https://tinfoil.sh/collateral/config-endorsement/v1"
@@ -56,6 +58,7 @@ const (
 	// reference-values entry it refreshes.
 	FreshnessIDCode     = "code-freshness"
 	FreshnessIDPlatform = "platform-freshness"
+	FreshnessIDRuntime  = "runtime-freshness"
 	// ConfigID is the ID of the config-endorsement entry.
 	ConfigID = "tinfoil-config"
 )
@@ -134,6 +137,15 @@ func Decode(entries []Entry) (Set, error) {
 				return set, err
 			}
 			set.Runtime = &v
+		case entry.Format == ArtifactFreshnessV1Format || entry.ID == FreshnessIDRuntime:
+			if (entry.ID != FreshnessIDPlatform && entry.ID != FreshnessIDRuntime) || entry.Format != ArtifactFreshnessV1Format || entry.Role != RoleReferenceValues {
+				return set, fmt.Errorf("conflicting artifact freshness collateral %q", entry.ID)
+			}
+			f, err := decodeFreshness(entry)
+			if err != nil {
+				return set, err
+			}
+			set.Freshness[entry.ID] = f
 		case entry.Role == RoleEndorsement && entry.Format == AMDVCEKV1Format:
 			v, err := decodeAMDVCEK(entry)
 			if err != nil {

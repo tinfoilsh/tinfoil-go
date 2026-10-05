@@ -1,6 +1,7 @@
 package enclave
 
 import (
+	"crypto"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
@@ -43,7 +44,7 @@ func TestConfigHandlesRetainExplicitProfile(t *testing.T) {
 	keys := []endorsement.SigningKey{{PublicKey: key.Public(), AuditScope: policy.AuditScope}}
 	host := strings.TrimPrefix(server.URL, "https://")
 	sdk := verify.SoftwareIdentity{Name: "test-sdk", Version: "1.0.0"}
-	client, err := NewConfigHandle(host, policy, keys, &Options{SDK: &sdk})
+	client, err := NewConfigHandle(host, policy, keys, []crypto.PublicKey{key.Public()}, &Options{SDK: &sdk})
 	require.NoError(t, err)
 	policy.Identity = "/other/project"
 	for _, derived := range []*Handle{client, client.ForEnclave(host), client.ViaRelay(host)} {

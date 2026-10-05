@@ -1,12 +1,14 @@
 package provenance
 
 import (
+	"crypto"
 	"fmt"
 	"regexp"
 	"strings"
 
 	"github.com/sigstore/sigstore-go/pkg/verify"
 	"github.com/tinfoilsh/tinfoil-go/document/collateral"
+	"github.com/tinfoilsh/tinfoil-go/freshness"
 	"github.com/tinfoilsh/tinfoil-go/tinfoil-config/endorsement"
 	"github.com/tinfoilsh/tinfoil-go/verify/internal/igvm"
 )
@@ -20,6 +22,10 @@ type Runtime struct {
 
 func (c *Client) ConfigVerifier(keys []endorsement.SigningKey) (*endorsement.Verifier, error) {
 	return endorsement.NewVerifier(c.trustRoot, keys)
+}
+
+func (c *Client) FreshnessVerifier(keys []crypto.PublicKey) (*freshness.Verifier, error) {
+	return freshness.NewVerifier(c.trustRoot, keys)
 }
 
 func (c *Client) AuthenticateRuntime(material collateral.IGVMRuntime, expected collateral.RuntimeReference) (*Runtime, error) {

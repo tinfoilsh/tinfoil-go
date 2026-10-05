@@ -118,7 +118,7 @@ func (v *Verifier) Verify(b *bundle.Bundle, digest []byte, published bool) (stri
 }
 
 func (v *Verifier) VerifyTimestamp(response, input []byte) (time.Time, error) {
-	return VerifyTimestamp(response, input, v.trust)
+	return verifyTimestamp(response, input, v.trust)
 }
 
 func KeyHint(publicKey crypto.PublicKey) (string, error) {
@@ -167,7 +167,7 @@ func validateBundle(b *bundle.Bundle, requirePublication bool) error {
 	return nil
 }
 
-func VerifyTimestamp(response, input []byte, trust root.TrustedMaterial) (time.Time, error) {
+func verifyTimestamp(response, input []byte, trust root.TrustedMaterial) (time.Time, error) {
 	if len(response) == 0 || len(response) > MaxTimestampSize || len(input) == 0 || len(input) > MaxStatementSize {
 		return time.Time{}, fmt.Errorf("timestamp response or input size is outside allowed bounds")
 	}

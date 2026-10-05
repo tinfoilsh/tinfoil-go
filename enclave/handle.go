@@ -6,6 +6,7 @@ package enclave
 import (
 	"bytes"
 	"context"
+	"crypto"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -123,11 +124,11 @@ func NewHandle(enclave, repo string, opts *Options) (*Handle, error) {
 
 // NewConfigHandle requires the IGVM config-binding profile. Keys and policy are
 // caller trust, independent of the enclave and collateral service.
-func NewConfigHandle(enclave string, policy verify.ConfigPolicy, keys []endorsement.SigningKey, opts *Options) (*Handle, error) {
+func NewConfigHandle(enclave string, policy verify.ConfigPolicy, keys []endorsement.SigningKey, freshnessKeys []crypto.PublicKey, opts *Options) (*Handle, error) {
 	if err := policy.Validate(); err != nil {
 		return nil, &ConfigurationError{Err: err}
 	}
-	verifier, err := opts.verifier(verify.WithConfigSigningKeys(keys))
+	verifier, err := opts.verifier(verify.WithConfigSigningKeys(keys), verify.WithFreshnessSigningKeys(freshnessKeys))
 	if err != nil {
 		return nil, err
 	}

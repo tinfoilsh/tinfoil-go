@@ -13,11 +13,13 @@
 package verify
 
 import (
+	"crypto"
 	"fmt"
 	"time"
 
 	"github.com/tinfoilsh/tinfoil-go/document"
 	"github.com/tinfoilsh/tinfoil-go/document/collateral"
+	"github.com/tinfoilsh/tinfoil-go/freshness"
 	"github.com/tinfoilsh/tinfoil-go/internal/errs"
 	"github.com/tinfoilsh/tinfoil-go/internal/sdkinfo"
 	"github.com/tinfoilsh/tinfoil-go/tinfoil-config/endorsement"
@@ -51,9 +53,11 @@ type Verifier struct {
 	// provenance authenticates reference values against its own copy of the
 	// trusted root. NewVerifier builds one from the embedded root; only the
 	// conformance build can replace it.
-	provenance     *provenance.Client
-	configKeys     []endorsement.SigningKey
-	configVerifier *endorsement.Verifier
+	provenance        *provenance.Client
+	configKeys        []endorsement.SigningKey
+	configVerifier    *endorsement.Verifier
+	freshnessKeys     []crypto.PublicKey
+	freshnessVerifier *freshness.Verifier
 
 	// overrides is empty in a production build; the conformance build uses it
 	// to carry synthetic vendor roots down to the CPU evidence layer.
@@ -88,6 +92,13 @@ func NewVerifier(opts ...Option) (*Verifier, error) {
 			return nil, configurationError(err)
 		}
 		v.configKeys = nil
+	}
+	if v.freshnessKeys != nil {
+		v.freshnessVerifier, err = v.provenance.FreshnessVerifier(v.freshnessKeys)
+		if err != nil {
+			return nil, configurationError(err)
+		}
+		v.freshnessKeys = nil
 	}
 	return v, nil
 }
@@ -218,6 +229,9 @@ func (v *Verifier) authenticateFreshness(doc *document.Document, id string, arti
 	freshness, err := doc.Freshness(id)
 	if err != nil {
 		return time.Time{}, err
+	}
+	if freshness.Format != collateral.SigstoreFreshnessV1Format {
+		return time.Time{}, fmt.Errorf("legacy verification requires GitHub freshness witnesses")
 	}
 	return v.provenance.AuthenticateFreshness(freshness.Bundle, artifact, now, v.freshnessMaxAge)
 }

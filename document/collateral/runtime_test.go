@@ -80,3 +80,26 @@ func TestIGVMPlatform(t *testing.T) {
 		})
 	}
 }
+
+func TestArtifactFreshnessRequiresReservedProfile(t *testing.T) {
+	for _, id := range []string{FreshnessIDPlatform, FreshnessIDRuntime} {
+		entry := Entry{ID: id, Role: RoleReferenceValues, Format: ArtifactFreshnessV1Format, Data: []byte(`{"sigstore_bundle":{}}`)}
+		set, err := Decode([]Entry{entry})
+		require.NoError(t, err)
+		require.Equal(t, ArtifactFreshnessV1Format, set.Freshness[id].Format)
+		for name, mutate := range map[string]func(*Entry){
+			"unknown id":     func(e *Entry) { e.ID = "other" },
+			"wrong role":     func(e *Entry) { e.Role = RoleEndorsement },
+			"missing bundle": func(e *Entry) { e.Data = []byte(`{}`) },
+		} {
+			t.Run(id+"/"+name, func(t *testing.T) {
+				changed := entry
+				mutate(&changed)
+				_, err := Decode([]Entry{changed})
+				require.Error(t, err)
+			})
+		}
+	}
+	_, err := Decode([]Entry{{ID: FreshnessIDRuntime, Role: RoleReferenceValues, Format: SigstoreFreshnessV1Format, Data: []byte(`{"sigstore_bundle":{}}`)}})
+	require.ErrorContains(t, err, "conflicting artifact freshness collateral")
+}
