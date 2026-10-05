@@ -13,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/tinfoilsh/tinfoil-go/tinfoil-config/endorsement"
 	"github.com/tinfoilsh/tinfoil-go/verify"
 	"github.com/tinfoilsh/tinfoil-go/verify/measurement"
 )
@@ -24,6 +25,8 @@ import (
 // refresh.
 type Handle struct {
 	enclave, repo, relay string
+	// configPin verifies an approved config instead of a code repository.
+	configPin *verify.ConfigPin
 	// verifier is the immutable verification policy, shared by every handle
 	// derived from this one.
 	verifier *verify.Verifier
@@ -92,9 +95,9 @@ type Options struct {
 
 // verifier builds the immutable policy these options describe, validating
 // them once. A nil receiver selects the defaults.
-func (input *Options) verifier() (*verify.Verifier, error) {
+func (input *Options) verifier(extra ...verify.Option) (*verify.Verifier, error) {
 	if input == nil {
-		return verify.NewVerifier()
+		return verify.NewVerifier(extra...)
 	}
 	opts := []verify.Option{
 		verify.WithPinnedRegisters(input.PinnedRegisters),
@@ -103,7 +106,7 @@ func (input *Options) verifier() (*verify.Verifier, error) {
 	if input.SDK != nil {
 		opts = append(opts, verify.WithSoftwareIdentity(*input.SDK))
 	}
-	return verify.NewVerifier(opts...)
+	return verify.NewVerifier(append(opts, extra...)...)
 }
 
 // NewHandle creates a handle for an enclave and repository
@@ -117,6 +120,20 @@ func NewHandle(enclave, repo string, opts *Options) (*Handle, error) {
 		return nil, err
 	}
 	return &Handle{enclave: enclave, repo: repo, verifier: verifier}, nil
+}
+
+// NewConfigHandle verifies an enclave against an approved registry config
+// instead of a code repository. keys are the registry signing keys the
+// application trusts; they must not come from the enclave.
+func NewConfigHandle(enclave string, pin verify.ConfigPin, keys []endorsement.SigningKey, opts *Options) (*Handle, error) {
+	if err := pin.Validate(); err != nil {
+		return nil, &ConfigurationError{Err: err}
+	}
+	verifier, err := opts.verifier(verify.WithConfigSigningKeys(keys))
+	if err != nil {
+		return nil, err
+	}
+	return &Handle{enclave: enclave, configPin: &pin, verifier: verifier}, nil
 }
 
 // NewDefaultHandle applies opts to every discovered router and fallback.
@@ -139,12 +156,12 @@ func NewDefaultHandle(opts *Options) (*Handle, error) {
 
 // ForEnclave keeps the repository reference and verification options.
 func (s *Handle) ForEnclave(enclave string) *Handle {
-	return &Handle{enclave: enclave, repo: s.repo, verifier: s.verifier}
+	return &Handle{enclave: enclave, repo: s.repo, configPin: s.configPin, verifier: s.verifier}
 }
 
 // ViaRelay fetches attestation through relay, which forwards it to the enclave.
 func (s *Handle) ViaRelay(relay string) *Handle {
-	return &Handle{enclave: s.enclave, repo: s.repo, relay: relay, verifier: s.verifier}
+	return &Handle{enclave: s.enclave, repo: s.repo, relay: relay, configPin: s.configPin, verifier: s.verifier}
 }
 
 // Enclave returns the enclave URL
