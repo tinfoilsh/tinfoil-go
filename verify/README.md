@@ -41,7 +41,7 @@ collateral. Verification then runs offline using the embedded trust roots:
    when selecting EHBP. A TLS-only enclave may omit HPKE material.
 
 Code and platform witnesses have a seven-day maximum age by default; the
-earliest authenticated expiry is exposed by `VerifyV3` and the secure
+earliest authenticated expiry is exposed by `VerifyV3` and the enclave
 handle's `Verify` as `FreshnessExpiresAt`.
 Callers using these APIs must retain the deadline and stop authorizing new
 requests at or after it, then verify again before accepting more requests.
