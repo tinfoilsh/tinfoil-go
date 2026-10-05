@@ -65,6 +65,7 @@ func TestRequestPreservesTLSCategoryAndMobilePrefix(t *testing.T) {
 			var httpError *url.Error
 			require.ErrorAs(t, err, &httpError)
 			require.True(t, strings.HasPrefix(err.Error(), "attestation error: "))
+			require.Equal(t, 1, strings.Count(err.Error(), "attestation error: "), err.Error())
 			require.Zero(t, refreshes, "standalone clients report rejection without replay")
 			require.True(t, IsKeyRejection(err))
 			if trustCertificate {
@@ -85,9 +86,12 @@ func TestMobileErrorPreservesCategoriesAndNativeFailures(t *testing.T) {
 		var actual Error
 		require.ErrorAs(t, err, &actual)
 		require.Same(t, category, actual)
-		prefix, _, _ := strings.Cut(category.Error(), ": ")
-		require.True(t, strings.HasPrefix(err.Error(), prefix+": "))
+		prefix, cause, _ := strings.Cut(category.Error(), ": ")
+		require.Equal(t, prefix+`: Get "https://enclave.example": `+cause, err.Error(), "the prefix leads, once")
 	}
+	// Retried verification joins failures that already lead with their category.
+	joined := errors.Join(&FetchError{Err: errors.New("last")}, &FetchError{Err: errors.New("first")})
+	require.Same(t, joined, mobileError(joined))
 	native := errors.New("connection refused")
 	require.Same(t, native, mobileError(native))
 }

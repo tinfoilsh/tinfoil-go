@@ -15,17 +15,22 @@ struct bound with no properties at all, and its verification result lost
 the expiry deadline.
 
 So everything structured crosses as a JSON string, and the typed surface is just
-`Client` plus two accessors. The JSON shape is declared in `verification.go`,
-not derived from the SDK's types: callers are never compiled against this
-module, so a field rename inside the verifier would otherwise break them
-silently. That struct is the contract, and `schema_version` says which version a
-payload is.
+`Client` and the flat `Response` of its pinned `Request`. The JSON shape is
+declared in `verification.go`, not derived from the SDK's types: callers are
+never compiled against this module, so a field rename inside the verifier would
+otherwise break them silently. That struct is the contract, and
+`schema_version` says which version a payload is.
 
 Errors flatten to an `NSError` carrying only a message, so the category has to
-survive in the text. It already does: every error reaching this package is one
-of the SDK's categories, and their messages lead with `configuration error:`,
-`fetch error:` or `attestation error:`. Nothing here rewrites them — a wrapper
-that prepended the prefix would print it twice.
+survive in the text. It does: the SDK's categories lead their messages with
+`configuration error:`, `fetch error:` or `attestation error:`. When `Request`'s
+HTTP client wraps one, the prefix moves to the front of the whole message, once.
+This package adds no prefix of its own. The prefixes are exported as constants
+in `errors.go`, so a caller matches on them instead of on literals.
+
+Not every error has a category. One from outside the three, such as `Request`
+failing to connect to an enclave that has already verified, arrives with its
+native message and no prefix.
 
 ## Checking a change
 
