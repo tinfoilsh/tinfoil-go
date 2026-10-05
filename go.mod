@@ -13,7 +13,7 @@ require (
 	github.com/sigstore/sigstore v1.10.8
 	github.com/sigstore/sigstore-go v1.2.2
 	github.com/stretchr/testify v1.11.1
-	github.com/tinfoilsh/encrypted-http-body-protocol v0.3.4-0.20261005203310-ed775505bb83
+	github.com/tinfoilsh/encrypted-http-body-protocol v0.4.0
 	github.com/tinfoilsh/go-sev-guest v0.0.0-20260818055935-bec7bdb637fd
 	github.com/transparency-dev/formats v0.1.1
 	github.com/transparency-dev/merkle v0.0.2
