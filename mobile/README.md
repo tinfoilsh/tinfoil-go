@@ -22,11 +22,15 @@ otherwise break them silently. That struct is the contract, and
 `schema_version` says which version a payload is.
 
 Errors flatten to an `NSError` carrying only a message, so the category has to
-survive in the text. It already does: every error reaching this package is one
-of the SDK's categories, and their messages lead with `configuration error:`,
-`fetch error:` or `attestation error:`. Nothing here rewrites them — a wrapper
-that prepended the prefix would print it twice. The prefixes are exported as
-constants in `errors.go`, so a caller matches on them instead of on literals.
+survive in the text. It does: the SDK's categories lead their messages with
+`configuration error:`, `fetch error:` or `attestation error:`. Nothing here
+rewrites them — a wrapper that prepended the prefix would print it twice. The
+prefixes are exported as constants in `errors.go`, so a caller matches on them
+instead of on literals.
+
+Not every error has a category. One from outside the three, such as `Request`
+failing to connect to an enclave that has already verified, arrives with its
+native message and no prefix.
 
 ## Checking a change
 

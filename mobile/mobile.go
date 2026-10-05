@@ -122,7 +122,9 @@ type Response struct {
 // Request sends an HTTPS request whose connection is pinned to the verified
 // TLS key, verifying first if the client holds no current verification.
 // url is absolute or a path on the enclave, headersJSON is a JSON object of
-// header names to values or empty, and the whole response body is read.
+// header names to values or empty, and the whole response body is read. A
+// failure of the HTTP client itself, such as a refused connection, has no
+// category prefix.
 func (c *Client) Request(method, url, headersJSON string, body []byte) (*Response, error) {
 	resp, err := c.inner.Request(method, url, headersJSON, body)
 	if err != nil {

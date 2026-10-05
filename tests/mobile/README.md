@@ -29,7 +29,8 @@ way the Go client does: it discovers Tinfoil's routers and falls back to
 fallback unverified, so read `verification` before calling `verify`.
 `viaRelay` derives a client that fetches attestation through a relay, given as a
 host with an optional port and reached over HTTPS. Errors arrive as an `NSError`
-whose message leads with one of the `Mobile*ErrorPrefix` constants.
+whose message leads with one of the `Mobile*ErrorPrefix` constants, or with none
+for a failure outside the categories, such as a refused connection.
 
 V3 removes the old attestation-bundle discovery/verification APIs, and this
 framework renames the binding surface from `Client*` to `Mobile*`. Swift callers
