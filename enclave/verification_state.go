@@ -1,4 +1,4 @@
-package client
+package enclave
 
 import (
 	"context"
@@ -31,7 +31,7 @@ type verificationCall struct {
 }
 
 // verifiedState shares one refresh (including its failure) across all waiters.
-func (s *SecureClient) verifiedState(ctx context.Context, force bool, retries int) (*enclaveState, error) {
+func (s *Handle) verifiedState(ctx context.Context, force bool, retries int) (*enclaveState, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -61,7 +61,7 @@ func (s *SecureClient) verifiedState(ctx context.Context, force bool, retries in
 	return call.state, call.err
 }
 
-func (s *SecureClient) refresh(call *verificationCall, retries int) {
+func (s *Handle) refresh(call *verificationCall, retries int) {
 	s.stateMu.RLock()
 	previous := s.state
 	s.stateMu.RUnlock()
@@ -127,7 +127,7 @@ func (state *enclaveState) valid() bool {
 	return !state.rejected && time.Now().Before(state.FreshnessExpiresAt)
 }
 
-func (s *SecureClient) invalidate(state *enclaveState) {
+func (s *Handle) invalidate(state *enclaveState) {
 	s.stateMu.Lock()
 	defer s.stateMu.Unlock()
 	state.rejected = true

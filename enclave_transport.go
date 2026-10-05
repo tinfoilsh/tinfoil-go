@@ -6,7 +6,7 @@ import (
 
 	ehbpclient "github.com/tinfoilsh/encrypted-http-body-protocol/client"
 	ehbpidentity "github.com/tinfoilsh/encrypted-http-body-protocol/identity"
-	"github.com/tinfoilsh/tinfoil-go/client"
+	"github.com/tinfoilsh/tinfoil-go/enclave"
 	"github.com/tinfoilsh/tinfoil-go/verify"
 )
 
@@ -29,33 +29,33 @@ const (
 	TransportTLS TransportMode = "tls"
 )
 
-func secureHTTPClient(secureClient *client.SecureClient, mode TransportMode, baseURL, userCacheSecret string) (*http.Client, error) {
+func secureHTTPClient(handle *enclave.Handle, mode TransportMode, baseURL, userCacheSecret string) (*http.Client, error) {
 	var httpClient *http.Client
 	if mode == TransportTLS {
 		var err error
-		if httpClient, err = secureClient.HTTPClient(); err != nil {
+		if httpClient, err = handle.HTTPClient(); err != nil {
 			return nil, err
 		}
-		if err := validateTLSBaseURL(baseURL, secureClient.Enclave()); err != nil {
+		if err := validateTLSBaseURL(baseURL, handle.Enclave()); err != nil {
 			return nil, &ConfigurationError{Err: err}
 		}
 	} else {
 		var err error
-		if httpClient, err = ehbpHTTPClient(secureClient, secureClient.Enclave(), baseURL); err != nil {
+		if httpClient, err = ehbpHTTPClient(handle, handle.Enclave(), baseURL); err != nil {
 			return nil, err
 		}
 	}
 	httpClient.Transport = &recoveryTransport{transport: httpClient.Transport}
-	return boundHTTPClient(httpClient, secureClient.Enclave(), baseURL, userCacheSecret)
+	return boundHTTPClient(httpClient, handle.Enclave(), baseURL, userCacheSecret)
 }
 
 type transportVerifier interface {
 	NewTransport(func(*verify.Verification) (http.RoundTripper, error), func(error) bool) (http.RoundTripper, error)
 }
 
-func ehbpHTTPClient(secureClient transportVerifier, enclave, baseURL string) (*http.Client, error) {
+func ehbpHTTPClient(handle transportVerifier, enclave, baseURL string) (*http.Client, error) {
 	headerValue, proxied := enclaveURLHeaderValue(baseURL, enclave)
-	transport, err := secureClient.NewTransport(func(verified *verify.Verification) (http.RoundTripper, error) {
+	transport, err := handle.NewTransport(func(verified *verify.Verification) (http.RoundTripper, error) {
 		key, err := verified.HPKEPublicKey()
 		if err != nil {
 			return nil, fmt.Errorf("%w; cannot use the EHBP transport (use WithTransport(TransportTLS))", err)
@@ -116,7 +116,7 @@ func validateTLSBaseURL(baseURL, enclave string) error {
 // enclaveURLHeaderTransport injects the X-Tinfoil-Enclave-Url header before
 // delegating to the wrapped transport. EHBP leaves request headers in
 // plaintext, so the header reaches the proxy while the body stays sealed to the
-// enclave's HPKE key. The value is the SecureClient's enclave, which never
+// enclave's HPKE key. The value is the handle's enclave, which never
 // changes, so every transport rebuilt after re-verification and every retry
 // points at the enclave that was verified.
 type enclaveURLHeaderTransport struct {

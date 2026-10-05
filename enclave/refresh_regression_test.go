@@ -1,4 +1,4 @@
-package client
+package enclave
 
 import (
 	"errors"
@@ -13,7 +13,7 @@ import (
 
 func TestTransportDiscardsSnapshotRefreshedDuringBuild(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		s := &SecureClient{state: testEnclaveState(time.Now().Add(time.Hour), "old"), verify: func() (*verify.Verification, error) {
+		s := &Handle{state: testEnclaveState(time.Now().Add(time.Hour), "old"), verify: func() (*verify.Verification, error) {
 			return testState(time.Now().Add(time.Hour), "new"), nil
 		}}
 		release := make(chan struct{})
@@ -48,7 +48,7 @@ func TestTransportDiscardsSnapshotRefreshedDuringBuild(t *testing.T) {
 }
 
 func TestPlaintextRequestDoesNotRefresh(t *testing.T) {
-	s := &SecureClient{state: testEnclaveState(time.Now().Add(time.Hour), "key"), verify: func() (*verify.Verification, error) {
+	s := &Handle{state: testEnclaveState(time.Now().Add(time.Hour), "key"), verify: func() (*verify.Verification, error) {
 		t.Error("re-verification cannot make a plaintext URL acceptable")
 		return nil, errNoTLS
 	}}
@@ -62,7 +62,7 @@ func TestRefreshPublishesVerificationAndTransportTogether(t *testing.T) {
 	for _, buildErr := range []error{nil, errors.New("transport construction failed")} {
 		t.Run(errorString(buildErr), func(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
-				s := &SecureClient{state: testEnclaveState(time.Now().Add(time.Hour), "old"), verify: func() (*verify.Verification, error) {
+				s := &Handle{state: testEnclaveState(time.Now().Add(time.Hour), "old"), verify: func() (*verify.Verification, error) {
 					return testState(time.Now().Add(time.Hour), "new"), nil
 				}}
 				release := make(chan struct{})
@@ -104,7 +104,7 @@ func TestRefreshPublishesVerificationAndTransportTogether(t *testing.T) {
 }
 
 func TestHTTPClientReusesTransportConfiguration(t *testing.T) {
-	s := &SecureClient{state: testEnclaveState(time.Now().Add(time.Hour), "key")}
+	s := &Handle{state: testEnclaveState(time.Now().Add(time.Hour), "key")}
 	first, err := s.HTTPClient()
 	require.NoError(t, err)
 	second, err := s.HTTPClient()
@@ -114,7 +114,7 @@ func TestHTTPClientReusesTransportConfiguration(t *testing.T) {
 }
 
 func TestRefreshRejectsExpiryBeforeTransportConstruction(t *testing.T) {
-	s := &SecureClient{state: testEnclaveState(time.Now().Add(time.Hour), "old"), verify: func() (*verify.Verification, error) {
+	s := &Handle{state: testEnclaveState(time.Now().Add(time.Hour), "old"), verify: func() (*verify.Verification, error) {
 		return testState(time.Now().Add(-time.Second), "expired"), nil
 	}}
 	var builds int
@@ -132,7 +132,7 @@ func TestRefreshRejectsExpiryBeforeTransportConstruction(t *testing.T) {
 func TestLateRejectionDoesNotInvalidateReplacement(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		var verifications int
-		s := &SecureClient{state: testEnclaveState(time.Now().Add(time.Hour), "old"), verify: func() (*verify.Verification, error) {
+		s := &Handle{state: testEnclaveState(time.Now().Add(time.Hour), "old"), verify: func() (*verify.Verification, error) {
 			verifications++
 			return testState(time.Now().Add(time.Hour), "new"), nil
 		}}

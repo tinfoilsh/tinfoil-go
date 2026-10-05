@@ -1,4 +1,4 @@
-package client
+package enclave
 
 import (
 	"crypto/sha256"

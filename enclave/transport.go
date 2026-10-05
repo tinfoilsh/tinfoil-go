@@ -1,4 +1,4 @@
-package client
+package enclave
 
 import (
 	"context"
@@ -19,7 +19,7 @@ import (
 // All transports from this client share its verification and refresh state.
 // build receives a detached result and must only construct its bound transport;
 // it must not call the client's verification, transport setup, or request methods.
-func (s *SecureClient) NewTransport(build func(*verify.Verification) (http.RoundTripper, error), isKeyError func(error) bool) (http.RoundTripper, error) {
+func (s *Handle) NewTransport(build func(*verify.Verification) (http.RoundTripper, error), isKeyError func(error) bool) (http.RoundTripper, error) {
 	if build == nil {
 		return nil, &ConfigurationError{Err: fmt.Errorf("transport builder is required")}
 	}
@@ -30,7 +30,7 @@ func (s *SecureClient) NewTransport(build func(*verify.Verification) (http.Round
 	return t, nil
 }
 
-func (s *SecureClient) registerTransport(t *clientTransport) error {
+func (s *Handle) registerTransport(t *clientTransport) error {
 	for {
 		state, err := s.verifiedState(context.Background(), false, verificationRetries)
 		if err != nil {
@@ -76,7 +76,7 @@ func (s *SecureClient) registerTransport(t *clientTransport) error {
 }
 
 type clientTransport struct {
-	client     *SecureClient
+	client     *Handle
 	build      func(*verify.Verification) (http.RoundTripper, error)
 	isKeyError func(error) bool
 }

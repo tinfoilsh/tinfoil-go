@@ -1,4 +1,4 @@
-package client
+package enclave
 
 import (
 	"github.com/tinfoilsh/tinfoil-go/document"

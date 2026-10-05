@@ -7,7 +7,7 @@ import (
 	"net"
 	"time"
 
-	"github.com/tinfoilsh/tinfoil-go/client"
+	"github.com/tinfoilsh/tinfoil-go/enclave"
 )
 
 // RejectionCode maps the layer Verifier.VerifyV3WithLayer reports to the wire
@@ -27,7 +27,7 @@ func RejectionCode(layer string) string {
 }
 
 // TLSSPKIFingerprint dials host:443 and returns the SDK's canonical SPKI
-// fingerprint of the presented leaf (client.ConnectionCertFP — the same
+// fingerprint of the presented leaf (enclave.ConnectionCertFP — the same
 // computation TLSBoundRoundTripper enforces). Certificate-chain verification
 // is skipped on purpose: trust comes from matching the attested fingerprint,
 // not the public PKI.
@@ -45,5 +45,5 @@ func TLSSPKIFingerprint(host string) (string, error) {
 		return "", err
 	}
 	defer conn.Close()
-	return client.ConnectionCertFP(conn.ConnectionState())
+	return enclave.ConnectionCertFP(conn.ConnectionState())
 }

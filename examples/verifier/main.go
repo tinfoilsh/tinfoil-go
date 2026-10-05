@@ -6,19 +6,19 @@ import (
 	"log/slog"
 	"os"
 
-	"github.com/tinfoilsh/tinfoil-go/client"
+	"github.com/tinfoilsh/tinfoil-go/enclave"
 )
 
 var (
-	repo    = flag.String("r", "tinfoilsh/confidential-model-router", "config repo, owner/name[@tag][@sha256:digest]")
-	enclave = flag.String("e", "inference.tinfoil.sh", "enclave host")
+	repo = flag.String("r", "tinfoilsh/confidential-model-router", "config repo, owner/name[@tag][@sha256:digest]")
+	host = flag.String("e", "inference.tinfoil.sh", "enclave host")
 )
 
 func main() {
 	flag.Parse()
 
-	slog.Info("verifying enclave", "enclave", *enclave, "repo", *repo)
-	c, err := client.NewSecureClient(*enclave, *repo, nil)
+	slog.Info("verifying enclave", "enclave", *host, "repo", *repo)
+	c, err := enclave.NewHandle(*host, *repo, nil)
 	if err != nil {
 		slog.Error("creating client", "error", err)
 		os.Exit(1)

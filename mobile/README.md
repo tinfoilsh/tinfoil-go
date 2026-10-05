@@ -9,9 +9,10 @@ and pointers to structs in a bound package. Not maps, not slices other than
 `time.Time` or `context.Context`. **What it cannot carry, it drops silently**:
 the build still succeeds and the symbol is simply absent in Swift.
 
-Binding `client` directly showed what that costs. `VerificationOptions`
-bound with no properties at all, and `VerifiedDocumentV3` lost `CryptoMaterial`,
-`FreshnessExpiresAt` and `Verifier` — the endorsed keys and the expiry deadline.
+Binding the Go client package directly showed what that costs. Its options
+struct bound with no properties at all, and its verification result lost
+`CryptoMaterial`, `FreshnessExpiresAt` and `Verifier` — the endorsed keys and
+the expiry deadline.
 
 So everything structured crosses as a JSON string, and the typed surface is just
 `Client` plus two accessors. The JSON shape is declared in `verification.go`,

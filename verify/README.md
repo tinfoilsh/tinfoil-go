@@ -5,7 +5,7 @@ Portable remote-attestation verifier for enclave-backed services.
 [![Build Status](https://github.com/tinfoilsh/tinfoil-go/actions/workflows/sdk-test.yml/badge.svg)](https://github.com/tinfoilsh/tinfoil-go/actions)
 
 ## Overview
-Tinfoil Verifier is a Go library that verifies the integrity of remote enclaves (AMD SEV-SNP & Intel TDX). The [secure client](../client/README.md) fetches documents, caches verifications and binds TLS connections to them.
+Tinfoil Verifier is a Go library that verifies the integrity of remote enclaves (AMD SEV-SNP & Intel TDX). The [enclave handle](../enclave/README.md) fetches documents, caches verifications and binds TLS connections to them.
 
 ## Features
 - **Hardware-rooted remote attestation** for AMD SEV-SNP & Intel TDX
@@ -42,11 +42,11 @@ collateral. Verification then runs offline using the embedded trust roots:
 
 Code and platform witnesses have a seven-day maximum age by default; the
 earliest authenticated expiry is exposed by `VerifyV3` and the secure
-client's `Verify` as `FreshnessExpiresAt`.
+handle's `Verify` as `FreshnessExpiresAt`.
 Callers using these APIs must retain the deadline and stop authorizing new
 requests at or after it, then verify again before accepting more requests.
 Re-verifying unchanged witnesses does not extend their deadline. The
-[secure client](../client/README.md#pinning-and-refresh) enforces this deadline
+[enclave handle](../enclave/README.md#pinning-and-refresh) enforces this deadline
 for its own requests.
 
 ### Verifying a document you already hold
@@ -88,7 +88,7 @@ document cannot supply either. After success, bind service traffic to the
 returned TLS/HPKE material and stop authorizing new requests at
 `FreshnessExpiresAt`.
 
-[`client.SecureClient`](../client/README.md) adds fetching, caching and
+[`enclave.Handle`](../enclave/README.md) adds fetching, caching and
 transport binding on top.
 
 ### Migration from v2
@@ -139,8 +139,8 @@ verifier, err := verify.NewVerifier(
 )
 ```
 
-The secure client takes the same policy as a
-[struct](../client/README.md#verification-options).
+The enclave handle takes the same policy as a
+[struct](../enclave/README.md#verification-options).
 
 ## JavaScript / TypeScript / WASM
 
@@ -168,7 +168,7 @@ See the [tinfoil-js documentation](https://github.com/tinfoilsh/tinfoil-js) for 
   `internal/quote/tdx/`.
 - End-to-end verification: `verifier.go`.
 - Fetching, caching, freshness enforcement and TLS pinning: see the
-  [secure client](../client/README.md#auditing-the-client-code).
+  [enclave handle](../enclave/README.md#auditing-the-handle-code).
 
 ## Arbitrary endorsed material
 

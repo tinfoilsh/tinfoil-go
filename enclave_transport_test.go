@@ -16,8 +16,8 @@ import (
 	"github.com/openai/openai-go/v3/option"
 	"github.com/stretchr/testify/require"
 	ehbpidentity "github.com/tinfoilsh/encrypted-http-body-protocol/identity"
-	"github.com/tinfoilsh/tinfoil-go/client"
 	"github.com/tinfoilsh/tinfoil-go/document"
+	"github.com/tinfoilsh/tinfoil-go/enclave"
 	"github.com/tinfoilsh/tinfoil-go/internal/testutil"
 	"github.com/tinfoilsh/tinfoil-go/verify"
 )
@@ -109,7 +109,7 @@ func (f transportVerifierFunc) NewTransport(build func(*verify.Verification) (ht
 }
 
 func TestEHBPClientPreservesAdmissionAndProxyHeader(t *testing.T) {
-	admissionFailure := &client.AttestationError{Err: errors.New("expired witnesses")}
+	admissionFailure := &enclave.AttestationError{Err: errors.New("expired witnesses")}
 	seen := make(chan string, 2)
 	proxy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		seen <- r.Header.Get(enclaveURLHeader)

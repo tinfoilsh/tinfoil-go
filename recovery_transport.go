@@ -5,18 +5,18 @@ import (
 	"fmt"
 	"net/http"
 
-	"github.com/tinfoilsh/tinfoil-go/client"
+	"github.com/tinfoilsh/tinfoil-go/enclave"
 )
 
 // recoveryTransport owns one application replay. Its underlying transport
-// admits each attempt through the selected SecureClient's current state.
+// admits each attempt through the selected enclave handle's current state.
 type recoveryTransport struct {
 	transport http.RoundTripper
 }
 
 func (t *recoveryTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	resp, err := t.transport.RoundTrip(req)
-	if !client.IsKeyRejection(err) {
+	if !enclave.IsKeyRejection(err) {
 		return resp, err
 	}
 	if resp != nil && resp.Body != nil {
