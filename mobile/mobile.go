@@ -39,10 +39,7 @@ func NewClient(host, repo string) (*Client, error) {
 // {"name":"tinfoil-swift","version":"0.8.2"}. An empty string selects the
 // defaults.
 func NewClientWithOptions(host, repo, optionsJSON string) (*Client, error) {
-	if optionsJSON == "" {
-		return NewClient(host, repo)
-	}
-	opts, err := enclave.ParseOptionsJSON(optionsJSON)
+	opts, err := parseOptions(optionsJSON)
 	if err != nil {
 		return nil, err
 	}
@@ -51,6 +48,43 @@ func NewClientWithOptions(host, repo, optionsJSON string) (*Client, error) {
 		return nil, err
 	}
 	return &Client{inner: inner}, nil
+}
+
+// NewDefaultClient discovers Tinfoil's routers and returns a client for the
+// first that verifies against tinfoilsh/confidential-model-router, falling back
+// to inference.tinfoil.sh. optionsJSON is as for NewClientWithOptions and
+// applies to every router tried.
+//
+// Discovery verifies the router it selects, so Verification already holds the
+// result. The fallback is returned unverified: Verification is empty and the
+// first Verify contacts it.
+func NewDefaultClient(optionsJSON string) (*Client, error) {
+	opts, err := parseOptions(optionsJSON)
+	if err != nil {
+		return nil, err
+	}
+	inner, err := enclave.NewDefaultHandle(opts)
+	if err != nil {
+		return nil, err
+	}
+	return &Client{inner: inner}, nil
+}
+
+// parseOptions decodes the options JSON, where an empty string selects the
+// defaults.
+func parseOptions(optionsJSON string) (*enclave.Options, error) {
+	if optionsJSON == "" {
+		return nil, nil
+	}
+	return enclave.ParseOptionsJSON(optionsJSON)
+}
+
+// ViaRelay returns a client for the same enclave, repository and options that
+// fetches attestation through relay, a host with an optional port, which
+// forwards it to the enclave. The relay is reached over HTTPS. The new client
+// shares no verification with this one and verifies on first use.
+func (c *Client) ViaRelay(relay string) *Client {
+	return &Client{inner: c.inner.ViaRelay(relay)}
 }
 
 // Enclave returns the host this client verifies.
@@ -77,6 +111,24 @@ func (c *Client) Verification() (string, error) {
 		return "", nil
 	}
 	return encode(verified, c.inner.Enclave())
+}
+
+// Response is the result of Request.
+type Response struct {
+	StatusCode int
+	Body       []byte
+}
+
+// Request sends an HTTPS request whose connection is pinned to the verified
+// TLS key, verifying first if the client holds no current verification.
+// url is absolute or a path on the enclave, headersJSON is a JSON object of
+// header names to values or empty, and the whole response body is read.
+func (c *Client) Request(method, url, headersJSON string, body []byte) (*Response, error) {
+	resp, err := c.inner.Request(method, url, headersJSON, body)
+	if err != nil {
+		return nil, err
+	}
+	return &Response{StatusCode: resp.StatusCode, Body: resp.Body}, nil
 }
 
 func encode(verified *verify.Verification, enclave string) (string, error) {

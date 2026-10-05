@@ -11,16 +11,25 @@ Apple targets and type-checks `Smoke.swift` against the macOS framework. It
 creates no release and contacts no enclave.
 
 The typed surface is deliberately small: construct a client, verify, read the
-result. Everything structured crosses as a JSON string, so `Smoke.swift` also
-decodes a verification payload into `Verification` — gomobile drops what it
-cannot represent without failing the build, so a type-check that only touched
-method names would not notice a field going missing.
+result, and send a pinned request. Everything structured crosses as a JSON
+string, so `Smoke.swift` also decodes a verification payload into
+`Verification` — gomobile drops what it cannot represent without failing the
+build, so a type-check that only touched method names would not notice a field
+going missing.
 
 `MobileNewClientWithOptions` takes the policy as a JSON object with
 `pinned_registers` and integer `freshness_max_age_ns`; an empty string selects
 the default policy. Its `sdk` object, `{"name": "tinfoil-swift", "version": …}`,
 names the Swift SDK in attestation requests and verification metadata in place
 of `tinfoil-go`.
+
+`MobileNewDefaultClient` takes the same options JSON and picks the enclave the
+way the Go client does: it discovers Tinfoil's routers and falls back to
+`inference.tinfoil.sh`. It returns a selected router already verified and the
+fallback unverified, so read `verification` before calling `verify`.
+`viaRelay` derives a client that fetches attestation through a relay, given as a
+host with an optional port and reached over HTTPS. Errors arrive as an `NSError`
+whose message leads with one of the `Mobile*ErrorPrefix` constants.
 
 V3 removes the old attestation-bundle discovery/verification APIs, and this
 framework renames the binding surface from `Client*` to `Mobile*`. Swift callers

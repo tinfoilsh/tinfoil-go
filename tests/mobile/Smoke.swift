@@ -34,6 +34,29 @@ func checkMobileSurface() throws {
     let cached = client.verification(&error)
     if let error { throw error }
     _ = try decodeVerification(cached)
+
+    // Discovery verifies the router it selects; a fallback is left unverified,
+    // so read the cached verification before verifying again.
+    guard let discovered = MobileNewDefaultClient("", &error) else {
+        if let error { throw error }
+        return
+    }
+    let _: String = discovered.enclave()
+
+    // A relay is a host with an optional port, not a URL.
+    let _: MobileClient? = client.viaRelay("relay.example:8443")
+
+    // Pinned to the verified TLS key. headersJSON is a JSON object or empty.
+    let response = try client.request("GET", url: "/", headersJSON: "", body: nil)
+    let _: Int = response.statusCode
+    let _: Data? = response.body
+
+    // Errors cross as NSError with only a message; the prefix is the category.
+    let _: [String] = [
+        MobileConfigurationErrorPrefix,
+        MobileFetchErrorPrefix,
+        MobileAttestationErrorPrefix,
+    ]
 }
 
 /// The fields a caller is expected to find in a verification payload.
