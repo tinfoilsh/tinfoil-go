@@ -6,11 +6,7 @@ package endorsement
 import (
 	"bytes"
 	"crypto"
-	"crypto/ecdsa"
-	"crypto/elliptic"
 	"crypto/sha256"
-	"crypto/x509"
-	"encoding/base64"
 	"encoding/hex"
 	"encoding/json/jsontext"
 	"encoding/json/v2"
@@ -21,6 +17,7 @@ import (
 
 	"github.com/digitorus/timestamp"
 	"github.com/secure-systems-lab/go-securesystemslib/dsse"
+	"github.com/tinfoilsh/tinfoil-go/internal/approval"
 )
 
 const (
@@ -226,14 +223,5 @@ func EndorsementReference(payload []byte) (string, error) {
 }
 
 func KeyHint(publicKey crypto.PublicKey) (string, error) {
-	key, ok := publicKey.(*ecdsa.PublicKey)
-	if !ok || key == nil || key.Curve != elliptic.P256() || key.X == nil || key.Y == nil || !key.Curve.IsOnCurve(key.X, key.Y) {
-		return "", fmt.Errorf("config endorsement requires an ECDSA P-256 key")
-	}
-	der, err := x509.MarshalPKIXPublicKey(key)
-	if err != nil {
-		return "", fmt.Errorf("encoding signing key: %w", err)
-	}
-	digest := sha256.Sum256(der)
-	return base64.StdEncoding.EncodeToString(digest[:]), nil
+	return approval.KeyHint(publicKey)
 }

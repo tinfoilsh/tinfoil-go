@@ -85,7 +85,7 @@ func TestNamesAndAuditScopesAreCanonical(t *testing.T) {
 
 func TestStrictStatementDecoding(t *testing.T) {
 	f := newFixture(t)
-	payload := f.statement(t, f.now)
+	payload := f.statement(t, f.Now)
 	for _, tc := range []struct {
 		name   string
 		mutate func([]byte) []byte
@@ -122,8 +122,8 @@ func TestStrictStatementDecoding(t *testing.T) {
 
 func TestRenewalChangesApprovalWithoutChangingArtifact(t *testing.T) {
 	f := newFixture(t)
-	firstPayload := f.statement(t, f.now.Add(-time.Minute))
-	secondPayload := f.statement(t, f.now)
+	firstPayload := f.statement(t, f.Now.Add(-time.Minute))
+	secondPayload := f.statement(t, f.Now)
 	first, err := endorsement.ParseStatement(firstPayload)
 	require.NoError(t, err)
 	second, err := endorsement.ParseStatement(secondPayload)
@@ -142,6 +142,6 @@ func TestRenewalChangesApprovalWithoutChangingArtifact(t *testing.T) {
 	require.NotEqual(t, firstRef, secondRef)
 	digest := sha256.Sum256(testConfig)
 	require.Equal(t, hex.EncodeToString(digest[:]), first.Subject[0].Digest["sha256"])
-	_, err = first.Complete(f.timestamp(t, []byte("unrelated request"), f.now))
+	_, err = first.Complete(f.Timestamp(t, []byte("unrelated request"), f.Now))
 	require.ErrorContains(t, err, "does not match")
 }
