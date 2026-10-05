@@ -14,11 +14,15 @@ func TestIGVMRuntimePinsCannotOverrideMeasurements(t *testing.T) {
 	register := strings.Repeat("ab", igvm.MeasurementSize)
 	runtime := &measurement.Measurement{Type: measurement.TdxGuestV2, Registers: []string{register, register, register, register, register}}
 	pins := &measurement.Measurement{Type: measurement.TdxGuestV2, Registers: []string{"", "", strings.ToUpper(register), "", ""}}
-	require.NoError(t, checkRuntimePins(runtime, pins))
+	got, err := applyPins(runtime.Registers, runtime.Type, pins)
+	require.NoError(t, err)
+	require.Equal(t, runtime.Registers, got)
 	pins.Registers[2] = strings.Repeat("cd", igvm.MeasurementSize)
-	require.ErrorContains(t, checkRuntimePins(runtime, pins), "does not match")
+	_, err = applyPins(runtime.Registers, runtime.Type, pins)
+	require.ErrorContains(t, err, "does not match")
 	pins = &measurement.Measurement{Type: measurement.SevGuestV2, Registers: []string{register}}
-	require.Error(t, checkRuntimePins(runtime, pins))
+	_, err = applyPins(runtime.Registers, runtime.Type, pins)
+	require.Error(t, err)
 }
 
 func TestIGVMAssemblyRequiresMatchingAuthenticatedEvidence(t *testing.T) {

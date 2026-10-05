@@ -1,9 +1,7 @@
 package quote
 
 import (
-	"bytes"
 	"fmt"
-	"strings"
 
 	"github.com/tinfoilsh/tinfoil-go/document"
 	"github.com/tinfoilsh/tinfoil-go/internal/errs"
@@ -16,13 +14,9 @@ import (
 
 func AssembleIGVM(doc *document.Document, endorsements *policy.Artifact, runtime *igvm.Measurements, pins *measurement.Measurement, configHash [32]byte, q *Authenticated) (result *AssembledPolicy, err error) {
 	defer func() { err = errs.WrapAttestation(err) }()
-	reportData, ok := doc.ExpectedReportData()
-	if !ok || q == nil {
-		return nil, &errs.ConfigurationError{Err: fmt.Errorf("a parsed document and authenticated quote are required")}
-	}
-	evidence := doc.CPUEvidence()
-	if evidence.Format != q.evidence.Format || !bytes.Equal(evidence.Report, q.evidence.Report) {
-		return nil, &errs.ConfigurationError{Err: fmt.Errorf("authenticated quote is not this document's CPU evidence")}
+	reportData, err := q.reportData(doc)
+	if err != nil {
+		return nil, err
 	}
 	if endorsements == nil || runtime == nil || runtime.SNPLaunch == nil || runtime.TDXLaunch == nil {
 		return nil, fmt.Errorf("platform and complete runtime endorsements are required")
@@ -31,7 +25,7 @@ func AssembleIGVM(doc *document.Document, endorsements *policy.Artifact, runtime
 	if err != nil {
 		return nil, err
 	}
-	if err := checkRuntimePins(want, pins); err != nil {
+	if _, err := applyPins(want.Registers, want.Type, pins); err != nil {
 		return nil, err
 	}
 	name, machine, err := endorsements.PolicyFor(q.identity, q.platform)
@@ -63,22 +57,4 @@ func RuntimeMeasurement(runtime *igvm.Measurements, platform string) (*measureme
 	default:
 		return nil, fmt.Errorf("unsupported platform %q", platform)
 	}
-}
-
-func checkRuntimePins(runtime, pins *measurement.Measurement) error {
-	if err := measurement.ValidatePins(pins); err != nil {
-		return &errs.ConfigurationError{Err: err}
-	}
-	if pins == nil {
-		return nil
-	}
-	if pins.Type != runtime.Type || len(pins.Registers) != len(runtime.Registers) {
-		return &errs.ConfigurationError{Err: fmt.Errorf("register pins do not match the runtime platform")}
-	}
-	for i, pin := range pins.Registers {
-		if pin != "" && !strings.EqualFold(pin, runtime.Registers[i]) {
-			return fmt.Errorf("pinned register %d does not match the runtime manifest", i)
-		}
-	}
-	return nil
 }

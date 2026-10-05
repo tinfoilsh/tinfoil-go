@@ -151,18 +151,26 @@ func Authenticate(ev document.CPUEvidence, en collateral.CPUEndorsements, opts *
 // document's challenge.
 func Assemble(doc *document.Document, endorsements *policy.Artifact, code, pins *measurement.Measurement, shape *policy.Shape, q *Authenticated) (result *AssembledPolicy, err error) {
 	defer func() { err = errs.WrapAttestation(err) }()
+	reportData, err := q.reportData(doc)
+	if err != nil {
+		return nil, err
+	}
+	return assemble(endorsements, code, pins, shape, reportData, q)
+}
+
+func (q *Authenticated) reportData(doc *document.Document) ([64]byte, error) {
 	reportData, ok := doc.ExpectedReportData()
 	if !ok {
-		return nil, &errs.ConfigurationError{Err: fmt.Errorf("a document checked by document.Parse is required")}
+		return reportData, &errs.ConfigurationError{Err: fmt.Errorf("a document checked by document.Parse is required")}
 	}
 	if q == nil {
-		return nil, &errs.ConfigurationError{Err: fmt.Errorf("authenticated quote is required")}
+		return reportData, &errs.ConfigurationError{Err: fmt.Errorf("authenticated quote is required")}
 	}
 	evidence := doc.CPUEvidence()
 	if evidence.Format != q.evidence.Format || !bytes.Equal(evidence.Report, q.evidence.Report) {
-		return nil, &errs.ConfigurationError{Err: fmt.Errorf("authenticated quote is not this document's CPU evidence")}
+		return reportData, &errs.ConfigurationError{Err: fmt.Errorf("authenticated quote is not this document's CPU evidence")}
 	}
-	return assemble(endorsements, code, pins, shape, reportData, q)
+	return reportData, nil
 }
 
 // assemble is Assemble against an explicit REPORT_DATA.
@@ -225,9 +233,6 @@ func (p *AssembledPolicy) Validate() (err error) {
 
 // layout maps code and pins to enclave registers, leaving platform defaults empty.
 func layout(code, pins *measurement.Measurement, q *Authenticated) ([]string, error) {
-	if err := measurement.ValidatePins(pins); err != nil {
-		return nil, &errs.ConfigurationError{Err: err}
-	}
 	if code.Type != measurement.SnpTdxMultiPlatformV1 || len(code.Registers) != 3 {
 		return nil, fmt.Errorf("code measurement is %s with %d registers, want %s with 3", code.Type, len(code.Registers), measurement.SnpTdxMultiPlatformV1)
 	}
@@ -236,6 +241,13 @@ func layout(code, pins *measurement.Measurement, q *Authenticated) ([]string, er
 	if q.platform == policy.PlatformTDX {
 		registers = []string{"", "", code.Registers[1], code.Registers[2], ""}
 		enclaveType = measurement.TdxGuestV2
+	}
+	return applyPins(registers, enclaveType, pins)
+}
+
+func applyPins(registers []string, enclaveType measurement.PredicateType, pins *measurement.Measurement) ([]string, error) {
+	if err := measurement.ValidatePins(pins); err != nil {
+		return nil, &errs.ConfigurationError{Err: err}
 	}
 	if pins == nil {
 		return registers, nil
