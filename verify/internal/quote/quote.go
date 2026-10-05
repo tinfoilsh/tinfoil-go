@@ -16,6 +16,7 @@ import (
 	"bytes"
 	"cmp"
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/tinfoilsh/tinfoil-go/document"
@@ -176,7 +177,9 @@ func assemble(endorsements *policy.Artifact, code, pins *measurement.Measurement
 	if code == nil {
 		return nil, &errs.ConfigurationError{Err: fmt.Errorf("assembling policy: expected code measurement is required")}
 	}
-	if q.platform == policy.PlatformTDX && shape == nil {
+	// Reference values that do not fix MRTD and RTMR0 leave them to an
+	// endorsed platform measurement, and selecting one needs the VM shape.
+	if q.platform == policy.PlatformTDX && shape == nil && code.Type != measurement.IgvmRuntimeV1 {
 		return nil, &errs.ConfigurationError{Err: fmt.Errorf("assembling policy: the code artifact's VM shape is required")}
 	}
 	name, machinePolicy, err := endorsements.PolicyFor(q.identity, q.platform)
@@ -223,18 +226,35 @@ func (p *AssembledPolicy) Validate() (err error) {
 	}
 }
 
-// layout maps code and pins to enclave registers, leaving platform defaults empty.
+// layout maps code and pins to enclave registers, leaving platform defaults
+// empty. A multiplatform code measurement names only the registers the image
+// itself fixes, leaving MRTD and RTMR0 to the endorsed platform measurement; an
+// IGVM runtime measurement names all of them, which is what makes the launch
+// independent of the machine shape.
 func layout(code, pins *measurement.Measurement, q *Authenticated) ([]string, error) {
 	if err := measurement.ValidatePins(pins); err != nil {
 		return nil, &errs.ConfigurationError{Err: err}
 	}
-	if code.Type != measurement.SnpTdxMultiPlatformV1 || len(code.Registers) != 3 {
-		return nil, fmt.Errorf("code measurement is %s with %d registers, want %s with 3", code.Type, len(code.Registers), measurement.SnpTdxMultiPlatformV1)
+	var registers []string
+	switch {
+	case code.Type == measurement.SnpTdxMultiPlatformV1 && len(code.Registers) == 3:
+		registers = []string{code.Registers[0]}
+		if q.platform == policy.PlatformTDX {
+			registers = []string{"", "", code.Registers[1], code.Registers[2], ""}
+		}
+	case code.Type == measurement.IgvmRuntimeV1 && len(code.Registers) == 6:
+		// Cloned: pins are merged into registers in place, and the caller's
+		// reference values must not change underneath it.
+		registers = slices.Clone(code.Registers[:1])
+		if q.platform == policy.PlatformTDX {
+			registers = slices.Clone(code.Registers[1:])
+		}
+	default:
+		return nil, fmt.Errorf("code measurement is %s with %d registers, want %s with 3 or %s with 6",
+			code.Type, len(code.Registers), measurement.SnpTdxMultiPlatformV1, measurement.IgvmRuntimeV1)
 	}
-	registers := []string{code.Registers[0]}
 	enclaveType := measurement.SevGuestV2
 	if q.platform == policy.PlatformTDX {
-		registers = []string{"", "", code.Registers[1], code.Registers[2], ""}
 		enclaveType = measurement.TdxGuestV2
 	}
 	if pins == nil {

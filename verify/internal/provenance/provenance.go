@@ -22,8 +22,10 @@ import (
 	"google.golang.org/protobuf/encoding/protojson"
 
 	in_toto "github.com/in-toto/attestation/go/v1"
+	"github.com/tinfoilsh/tinfoil-go/tinfoil-config/endorsement"
 	"google.golang.org/protobuf/types/known/structpb"
 
+	"github.com/tinfoilsh/tinfoil-go/internal/canonical"
 	"github.com/tinfoilsh/tinfoil-go/verify/internal/policy"
 	"github.com/tinfoilsh/tinfoil-go/verify/measurement"
 )
@@ -272,9 +274,13 @@ func (c *Client) AuthenticateCode(bundleJSON []byte, ref, tag, hexDigest string)
 	if err != nil {
 		return nil, fmt.Errorf("code predicate: %w", err)
 	}
-	shape, err := shapeFromPredicate(result.Statement.Predicate.GetFields())
-	if err != nil {
-		return nil, fmt.Errorf("code predicate: %w", err)
+	// Only a per-shape measurement declares a VM shape; an IGVM image was
+	// measured for no particular machine, so it names none.
+	var shape *policy.Shape
+	if m.Type == measurement.SnpTdxMultiPlatformV1 {
+		if shape, err = shapeFromPredicate(result.Statement.Predicate.GetFields()); err != nil {
+			return nil, fmt.Errorf("code predicate: %w", err)
+		}
 	}
 	authenticated, err := authenticatedArtifact(result, repo, tag, hexDigest, "code")
 	if err != nil {
@@ -312,11 +318,39 @@ func shapeFromPredicate(fields map[string]*structpb.Value) (*policy.Shape, error
 	return shape, nil
 }
 
+// igvmMeasurement reads the launch state of a shape-independent IGVM image:
+// the SEV-SNP launch digest and all five TDX registers. A measurement that
+// does not vary with the machine fixes every register, so unlike the
+// multiplatform predicate this one leaves none to a platform measurement and
+// declares no VM shape.
+func igvmMeasurement(measurementType measurement.PredicateType, fields map[string]*structpb.Value) (*measurement.Measurement, error) {
+	tdx := fields["tdx_measurement"].GetStructValue()
+	if tdx == nil {
+		return nil, fmt.Errorf("invalid igvm measurement: tdx_measurement is not an object")
+	}
+	// Each register is read from exactly one place, so no member of the TDX
+	// block can stand in for the SNP digest or for another register.
+	t := tdx.GetFields()
+	registers := []string{
+		fields["snp_measurement"].GetStringValue(),
+		t["mrtd"].GetStringValue(), t["rtmr0"].GetStringValue(), t["rtmr1"].GetStringValue(),
+		t["rtmr2"].GetStringValue(), t["rtmr3"].GetStringValue(),
+	}
+	for i, name := range []string{"snp_measurement", "mrtd", "rtmr0", "rtmr1", "rtmr2", "rtmr3"} {
+		if _, err := canonical.DecodeLowerHex(name, registers[i], 48); err != nil {
+			return nil, fmt.Errorf("invalid igvm measurement: %w", err)
+		}
+	}
+	return &measurement.Measurement{Type: measurementType, Registers: registers}, nil
+}
+
 func measurementFromStatement(statement *in_toto.Statement) (*measurement.Measurement, error) {
 	predicateFields := statement.Predicate.GetFields()
 
 	measurementType := measurement.PredicateType(statement.PredicateType)
 	switch measurementType {
+	case measurement.IgvmRuntimeV1:
+		return igvmMeasurement(measurementType, predicateFields)
 	case measurement.SnpTdxMultiPlatformV1:
 		tdxMeasurementField, ok := predicateFields["tdx_measurement"]
 		if !ok {
@@ -391,6 +425,13 @@ func (c *Client) AuthenticatePlatformEndorsements(bundleJSON []byte, repo, tag, 
 		AuthenticatedArtifact: authenticated,
 		Artifact:              artifact,
 	}, nil
+}
+
+// ConfigVerifier builds a config-registry verifier over this client's trusted
+// root. Only keys the application provisioned may approve a config; nothing in
+// a document can add one.
+func (c *Client) ConfigVerifier(keys []endorsement.SigningKey) (*endorsement.Verifier, error) {
+	return endorsement.NewVerifier(c.trustRoot, keys)
 }
 
 func authenticatedArtifact(result *verify.VerificationResult, repo, tag, hexDigest, label string) (AuthenticatedArtifact, error) {

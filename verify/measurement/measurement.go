@@ -17,6 +17,12 @@ const (
 	TdxGuestV2 PredicateType = "https://tinfoil.sh/predicate/tdx-guest/v2"
 
 	SnpTdxMultiPlatformV1 PredicateType = "https://tinfoil.sh/predicate/snp-tdx-multiplatform/v1"
+
+	// IgvmRuntimeV1 is the launch state of one cvmimage IGVM image, on both
+	// platforms: [SNP measurement, MRTD, RTMR0, RTMR1, RTMR2, RTMR3]. It
+	// carries every TDX register, because an image whose measurement does
+	// not vary with the machine shape fixes all of them.
+	IgvmRuntimeV1 PredicateType = "https://tinfoil.sh/predicate/igvm-runtime/v1"
 )
 
 type Measurement struct {
@@ -62,6 +68,8 @@ func (m *Measurement) String() string {
 	switch m.Type {
 	case SnpTdxMultiPlatformV1:
 		platform = []string{"SNP", "RTMR1", "RTMR2"}
+	case IgvmRuntimeV1:
+		platform = []string{"SNP", "MRTD", "RTMR0", "RTMR1", "RTMR2", "RTMR3"}
 	case SevGuestV2:
 		platform = []string{"SNP"}
 	case TdxGuestV2:

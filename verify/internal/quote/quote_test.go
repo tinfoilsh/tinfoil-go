@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -249,4 +250,44 @@ func verify(ev document.CPUEvidence, en collateral.CPUEndorsements, endorsements
 		return nil, nil, err
 	}
 	return assembled, q, nil
+}
+
+// An IGVM runtime measurement names all six registers, so it alone decides
+// what the enclave must report on either platform.
+func TestLayoutIgvmRuntime(t *testing.T) {
+	runtime := &measurement.Measurement{
+		Type: measurement.IgvmRuntimeV1,
+		Registers: []string{
+			strings.Repeat("11", 48), strings.Repeat("22", 48), strings.Repeat("33", 48),
+			strings.Repeat("44", 48), strings.Repeat("55", 48), strings.Repeat("66", 48),
+		},
+	}
+	snp, err := layout(runtime, nil, &Authenticated{platform: policy.PlatformSEVSNP})
+	require.NoError(t, err)
+	assert.Equal(t, []string{runtime.Registers[0]}, snp)
+
+	tdx, err := layout(runtime, nil, &Authenticated{platform: policy.PlatformTDX})
+	require.NoError(t, err)
+	assert.Equal(t, runtime.Registers[1:], tdx)
+
+	// A matching pin is accepted and a differing one rejected, with no
+	// IGVM-specific pin checking.
+	pins := &measurement.Measurement{Type: measurement.SevGuestV2, Registers: []string{runtime.Registers[0]}}
+	_, err = layout(runtime, pins, &Authenticated{platform: policy.PlatformSEVSNP})
+	require.NoError(t, err)
+	pins.Registers[0] = strings.Repeat("ff", 48)
+	_, err = layout(runtime, pins, &Authenticated{platform: policy.PlatformSEVSNP})
+	require.ErrorContains(t, err, "pinned register 0")
+
+	// Layout must not write through to the caller's reference values.
+	before := slices.Clone(runtime.Registers)
+	pins = &measurement.Measurement{Type: measurement.TdxGuestV2, Registers: make([]string, 5)}
+	_, err = layout(runtime, pins, &Authenticated{platform: policy.PlatformTDX})
+	require.NoError(t, err)
+	assert.Equal(t, before, runtime.Registers)
+
+	// The register count is part of the type.
+	short := &measurement.Measurement{Type: measurement.IgvmRuntimeV1, Registers: runtime.Registers[:3]}
+	_, err = layout(short, nil, &Authenticated{platform: policy.PlatformSEVSNP})
+	require.ErrorContains(t, err, "want")
 }
