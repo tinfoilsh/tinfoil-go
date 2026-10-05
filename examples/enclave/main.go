@@ -4,11 +4,11 @@ import (
 	"encoding/json"
 	"log"
 
-	"github.com/tinfoilsh/tinfoil-go/client"
+	"github.com/tinfoilsh/tinfoil-go/enclave"
 )
 
 func main() {
-	tinfoilClient, err := client.NewDefaultClient(nil)
+	tinfoilClient, err := enclave.NewDefaultHandle(nil)
 	if err != nil {
 		log.Fatalf("failed to create client: %v", err)
 	}

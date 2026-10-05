@@ -20,7 +20,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/tinfoilsh/tinfoil-go/client"
+	"github.com/tinfoilsh/tinfoil-go/enclave"
 	"github.com/tinfoilsh/tinfoil-go/verify"
 )
 
@@ -39,12 +39,12 @@ const (
 )
 
 type gatewayPolicy struct {
-	pins       map[string]*client.SecureClient
+	pins       map[string]*enclave.Handle
 	pinnedOnly bool
-	defaults   client.VerificationOptions
+	defaults   enclave.Options
 }
 
-func newGatewayPolicy(opts GatewayOptions, defaults client.VerificationOptions) (gatewayPolicy, error) {
+func newGatewayPolicy(opts GatewayOptions, defaults enclave.Options) (gatewayPolicy, error) {
 	if opts.PinnedModelsOnly && len(opts.ModelPins) == 0 {
 		return gatewayPolicy{}, fmt.Errorf("pinned-only mode requires at least one model pin")
 	}
@@ -53,19 +53,19 @@ func newGatewayPolicy(opts GatewayOptions, defaults client.VerificationOptions) 
 		return gatewayPolicy{}, fmt.Errorf("gateway verification options: %w", err)
 	}
 	p := gatewayPolicy{
-		pins:       make(map[string]*client.SecureClient),
+		pins:       make(map[string]*enclave.Handle),
 		pinnedOnly: opts.PinnedModelsOnly,
-		defaults:   client.VerificationOptions{PinnedRegisters: v.PinnedRegisters(), FreshnessMaxAge: v.FreshnessMaxAge()},
+		defaults:   enclave.Options{PinnedRegisters: v.PinnedRegisters(), FreshnessMaxAge: v.FreshnessMaxAge()},
 	}
 	for model, pin := range opts.ModelPins {
 		if strings.TrimSpace(model) == "" || !strings.HasPrefix(pin.Repo, trustedRepoOwner) {
 			return gatewayPolicy{}, fmt.Errorf("model pin %q repository %q must belong to %s", model, pin.Repo, trustedRepoOwner)
 		}
-		secure, err := client.NewSecureClient("", pin.Repo, cmp.Or(pin.Verification, &p.defaults))
+		enclaveHandle, err := enclave.NewHandle("", pin.Repo, cmp.Or(pin.Verification, &p.defaults))
 		if err != nil {
 			return gatewayPolicy{}, fmt.Errorf("model %q: %w", model, err)
 		}
-		p.pins[model] = secure
+		p.pins[model] = enclaveHandle
 	}
 	return p, nil
 }

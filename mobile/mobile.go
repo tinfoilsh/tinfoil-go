@@ -13,23 +13,23 @@ package mobile
 import (
 	"encoding/json"
 
-	"github.com/tinfoilsh/tinfoil-go/client"
+	"github.com/tinfoilsh/tinfoil-go/enclave"
 	"github.com/tinfoilsh/tinfoil-go/verify"
 )
 
 // Version is the Tinfoil SDK version.
-const Version = client.Version
+const Version = enclave.Version
 
 // Client verifies an enclave and reports what it proved. It wraps the SDK's
 // own client, which is not itself bound.
 type Client struct {
-	inner *client.SecureClient
+	inner *enclave.Handle
 }
 
-// NewClient verifies enclave against repo, a trusted
+// NewClient verifies the enclave at host against repo, a trusted
 // owner/name[@tag][@sha256:digest] reference, using the default policy.
-func NewClient(enclave, repo string) (*Client, error) {
-	inner, err := client.NewSecureClient(enclave, repo, nil)
+func NewClient(host, repo string) (*Client, error) {
+	inner, err := enclave.NewHandle(host, repo, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -37,17 +37,17 @@ func NewClient(enclave, repo string) (*Client, error) {
 }
 
 // NewClientWithOptions is NewClient with a policy, as the JSON object
-// VerificationOptions describes: pinned registers and a freshness bound, the
+// enclave.Options describes: pinned registers and a freshness bound, the
 // latter in integer nanoseconds. An empty string selects the default policy.
-func NewClientWithOptions(enclave, repo, optionsJSON string) (*Client, error) {
+func NewClientWithOptions(host, repo, optionsJSON string) (*Client, error) {
 	if optionsJSON == "" {
-		return NewClient(enclave, repo)
+		return NewClient(host, repo)
 	}
-	opts, err := client.ParseVerificationOptionsJSON(optionsJSON)
+	opts, err := enclave.ParseOptionsJSON(optionsJSON)
 	if err != nil {
 		return nil, err
 	}
-	inner, err := client.NewSecureClient(enclave, repo, opts)
+	inner, err := enclave.NewHandle(host, repo, opts)
 	if err != nil {
 		return nil, err
 	}

@@ -1,4 +1,4 @@
-package client
+package enclave
 
 import (
 	"context"
@@ -8,7 +8,7 @@ import (
 	"github.com/tinfoilsh/tinfoil-go/verify"
 )
 
-// validateTransportKeys requires the keys a SecureClient binds traffic to: the
+// validateTransportKeys requires the keys a Handle binds traffic to: the
 // TLS key, and the HPKE key when the document endorses one.
 func validateTransportKeys(v *verify.Verification) error {
 	if _, err := v.TLSPublicKeyFP(); err != nil {
@@ -23,7 +23,7 @@ func validateTransportKeys(v *verify.Verification) error {
 	return nil
 }
 
-func (s *SecureClient) fetchVerification() (*verify.Verification, error) {
+func (s *Handle) fetchVerification() (*verify.Verification, error) {
 	nonce, err := document.RandomNonce()
 	if err != nil {
 		return nil, err
@@ -46,7 +46,7 @@ func (s *SecureClient) fetchVerification() (*verify.Verification, error) {
 }
 
 // Verify refreshes the client's verified measurements and keys.
-func (s *SecureClient) Verify() (*verify.Verification, error) {
+func (s *Handle) Verify() (*verify.Verification, error) {
 	state, err := s.verifiedState(context.Background(), true, verificationRetries)
 	if err != nil {
 		return nil, err

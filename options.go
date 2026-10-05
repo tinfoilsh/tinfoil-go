@@ -2,7 +2,7 @@ package tinfoil
 
 import (
 	"github.com/openai/openai-go/v3/option"
-	"github.com/tinfoilsh/tinfoil-go/client"
+	"github.com/tinfoilsh/tinfoil-go/enclave"
 )
 
 const (
@@ -13,7 +13,7 @@ const (
 type clientConfig struct {
 	enclave            string
 	repo               string
-	verification       client.VerificationOptions
+	verification       enclave.Options
 	transport          TransportMode
 	baseURL            string
 	baseURLSet         bool
@@ -39,7 +39,7 @@ func WithRepo(repo string) ClientOption {
 
 // WithVerificationOptions sets the policy applied to enclave verification.
 // The client copies opts and its pins at construction, including for router discovery.
-func WithVerificationOptions(opts client.VerificationOptions) ClientOption {
+func WithVerificationOptions(opts enclave.Options) ClientOption {
 	return func(c *clientConfig) { c.verification = opts }
 }
 
@@ -73,7 +73,7 @@ func WithOpenAIOptions(opts ...option.RequestOption) ClientOption {
 // set a non-empty string field on every request, which wins over the
 // client-level secret:
 //
-//	client.Chat.Completions.New(ctx, params,
+//	enclave.Chat.Completions.New(ctx, params,
 //		option.WithJSONSet("user_cache_secret", perUserSecret))
 //
 // An empty string is treated as unset and falls through to the environment or

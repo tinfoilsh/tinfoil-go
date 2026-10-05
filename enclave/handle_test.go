@@ -1,4 +1,4 @@
-package client
+package enclave
 
 import (
 	"encoding/json"
@@ -17,10 +17,10 @@ import (
 func TestClientOptionsCopyPinnedRegisters(t *testing.T) {
 	register := strings.Repeat("ab", 48)
 	pins := &measurement.Measurement{Type: measurement.TdxGuestV2, Registers: []string{4: register}}
-	opts := VerificationOptions{PinnedRegisters: pins, FreshnessMaxAge: time.Hour}
-	first, err := NewSecureClient("enclave.example", "org/repo", &opts)
+	opts := Options{PinnedRegisters: pins, FreshnessMaxAge: time.Hour}
+	first, err := NewHandle("enclave.example", "org/repo", &opts)
 	require.NoError(t, err)
-	second, err := NewSecureClient("enclave.example", "org/repo", &opts)
+	second, err := NewHandle("enclave.example", "org/repo", &opts)
 	require.NoError(t, err)
 
 	// Mutating the caller's options and measurement after construction must
@@ -40,7 +40,7 @@ func TestLiveVerify(t *testing.T) {
 	enclave := os.Getenv(enclaveEnvVar)
 	repo := os.Getenv(repoEnvVar)
 
-	client, err := NewSecureClient(enclave, repo, nil)
+	client, err := NewHandle(enclave, repo, nil)
 	require.NoError(t, err)
 	_, err = client.Verify()
 	assert.NoError(t, err)
@@ -62,7 +62,7 @@ func TestClientVerificationJSON(t *testing.T) {
 		CodeMeasurement:    codeMeasurement,
 		EnclaveMeasurement: enclaveMeasurement,
 	}
-	client := &SecureClient{
+	client := &Handle{
 		state: &enclaveState{Verification: verified},
 	}
 
@@ -79,9 +79,9 @@ func TestClientVerificationJSON(t *testing.T) {
 	assert.Equal(t, &decoded, client.Verification(), "returned measurements must not alias cached verification")
 }
 
-func TestLiveNewDefaultSecureClient(t *testing.T) {
+func TestLiveNewDefaultHandle(t *testing.T) {
 	testutil.RequireLive(t)
-	client, err := NewDefaultClient(nil)
+	client, err := NewDefaultHandle(nil)
 	assert.NoError(t, err)
 	assert.NotNil(t, client)
 
@@ -102,7 +102,7 @@ func TestLiveClientFetchRouters(t *testing.T) {
 
 func TestLiveClientFallbackEnclave(t *testing.T) {
 	testutil.RequireLive(t)
-	defaultClient, err := NewSecureClient("inference.tinfoil.sh", defaultRouterRepo, nil)
+	defaultClient, err := NewHandle("inference.tinfoil.sh", defaultRouterRepo, nil)
 	require.NoError(t, err)
 	enclave := defaultClient.Enclave()
 	assert.NotEmpty(t, enclave)

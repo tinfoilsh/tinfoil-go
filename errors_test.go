@@ -10,8 +10,8 @@ import (
 
 	"github.com/stretchr/testify/require"
 	tinfoil "github.com/tinfoilsh/tinfoil-go"
-	"github.com/tinfoilsh/tinfoil-go/client"
 	"github.com/tinfoilsh/tinfoil-go/document"
+	"github.com/tinfoilsh/tinfoil-go/enclave"
 	"github.com/tinfoilsh/tinfoil-go/internal/fetch"
 	"github.com/tinfoilsh/tinfoil-go/verify"
 	"github.com/tinfoilsh/tinfoil-go/verify/measurement"
@@ -58,17 +58,17 @@ func TestPublicInputErrors(t *testing.T) {
 	require.ErrorAs(t, err, &config)
 	_, err = verifier.VerifyV3(nil, nil, "org/repo")
 	require.ErrorAs(t, err, &config)
-	_, err = client.NewSecureClient("enclave.example", "", nil)
+	_, err = enclave.NewHandle("enclave.example", "", nil)
 	require.ErrorAs(t, err, &config, "reject missing trust configuration before fetching")
 	for _, repo := range []string{"owner", "owner/repo/extra", "owner/repo@sha256:bad"} {
-		_, err = client.NewSecureClient("enclave.example", repo, nil)
+		_, err = enclave.NewHandle("enclave.example", repo, nil)
 		require.ErrorAs(t, err, &config)
 		_, err = verifier.VerifyV3(nil, nil, repo)
 		require.ErrorAs(t, err, &config)
 	}
-	_, err = client.NewSecureClient("enclave.example", "org/repo@v1@sha256:"+strings.Repeat("a", 64), nil)
+	_, err = enclave.NewHandle("enclave.example", "org/repo@v1@sha256:"+strings.Repeat("a", 64), nil)
 	require.NoError(t, err)
-	s, err := client.NewSecureClient("enclave.example", "org/repo", nil)
+	s, err := enclave.NewHandle("enclave.example", "org/repo", nil)
 	require.NoError(t, err)
 	_, err = s.Request("GET", "://", "", nil)
 	require.ErrorAs(t, err, &config)
@@ -91,11 +91,11 @@ func TestMalformedPinsAreConfigurationErrors(t *testing.T) {
 		{Type: measurement.SevGuestV2, Registers: []string{"bad"}},
 		{Type: measurement.TdxGuestV2, Registers: []string{4: strings.Repeat("zz", 48)}},
 	} {
-		opts := &client.VerificationOptions{PinnedRegisters: pins}
-		_, err := client.NewSecureClient("enclave.example", "org/repo", opts)
+		opts := &enclave.Options{PinnedRegisters: pins}
+		_, err := enclave.NewHandle("enclave.example", "org/repo", opts)
 		var config *tinfoil.ConfigurationError
 		require.ErrorAs(t, err, &config)
-		_, err = client.NewDefaultClient(opts)
+		_, err = enclave.NewDefaultHandle(opts)
 		require.ErrorAs(t, err, &config, "reject malformed pins before discovery")
 		_, err = verify.NewVerifier(verify.WithPinnedRegisters(pins))
 		require.ErrorAs(t, err, &config)
@@ -104,7 +104,7 @@ func TestMalformedPinsAreConfigurationErrors(t *testing.T) {
 		{Type: measurement.SevGuestV2, Registers: []string{strings.Repeat("AB", 48)}},
 		{Type: measurement.TdxGuestV2, Registers: []string{4: ""}},
 	} {
-		_, err := client.NewSecureClient("enclave.example", "org/repo", &client.VerificationOptions{PinnedRegisters: pins})
+		_, err := enclave.NewHandle("enclave.example", "org/repo", &enclave.Options{PinnedRegisters: pins})
 		require.NoError(t, err, "valid uppercase and sparse pins remain supported")
 	}
 }

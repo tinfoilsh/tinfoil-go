@@ -116,7 +116,7 @@ case errors.As(err, &attestation):
 }
 ```
 
-All three implement `tinfoil.Error`. Upstream OpenAI errors pass through unchanged. Let `SecureClient` own key-rotation recovery rather than retrying every `AttestationError` in application code.
+All three implement `tinfoil.Error`. Upstream OpenAI errors pass through unchanged. Let `enclave.Handle` own key-rotation recovery rather than retrying every `AttestationError` in application code.
 
 ## API Documentation
 

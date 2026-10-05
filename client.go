@@ -7,25 +7,25 @@ import (
 
 	"github.com/openai/openai-go/v3"
 	"github.com/openai/openai-go/v3/option"
-	"github.com/tinfoilsh/tinfoil-go/client"
+	"github.com/tinfoilsh/tinfoil-go/enclave"
 	"github.com/tinfoilsh/tinfoil-go/verify"
 )
 
 // Client wraps the OpenAI client to provide secure inference through Tinfoil
 type Client struct {
 	*openai.Client
-	secure     *client.SecureClient
+	secure     *enclave.Handle
 	httpClient *http.Client
 	transport  TransportMode
 }
 
 // NewClient creates a new secure OpenAI client using default parameters
 func NewClient(openaiOpts ...option.RequestOption) (*Client, error) {
-	secureClient, err := client.NewDefaultClient(nil)
+	handle, err := enclave.NewDefaultHandle(nil)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create secure client: %w", err)
+		return nil, fmt.Errorf("failed to create enclave handle: %w", err)
 	}
-	return createClientFromSecureClient(secureClient, defaultTransportMode, "", resolveUserCacheSecret("", false), openaiOpts...)
+	return createClientFromHandle(handle, defaultTransportMode, "", resolveUserCacheSecret("", false), openaiOpts...)
 }
 
 // NewClientWithOptions creates a secure OpenAI client configured through
@@ -63,30 +63,30 @@ func NewClientWithOptions(opts ...ClientOption) (*Client, error) {
 		return nil, &ConfigurationError{Err: fmt.Errorf("custom repository requires an enclave")}
 	}
 
-	var secureClient *client.SecureClient
+	var handle *enclave.Handle
 	var err error
 	if cfg.enclave == "" {
-		secureClient, err = client.NewDefaultClient(&cfg.verification)
+		handle, err = enclave.NewDefaultHandle(&cfg.verification)
 	} else {
-		secureClient, err = client.NewSecureClient(cfg.enclave, cfg.repo, &cfg.verification)
+		handle, err = enclave.NewHandle(cfg.enclave, cfg.repo, &cfg.verification)
 	}
 	if err != nil {
 		return nil, err
 	}
 
-	return createClientFromSecureClient(secureClient, cfg.transport, cfg.baseURL,
+	return createClientFromHandle(handle, cfg.transport, cfg.baseURL,
 		resolveUserCacheSecret(cfg.userCacheSecret, cfg.userCacheSecretSet), cfg.openaiOpts...)
 }
 
-func createClientFromSecureClient(secureClient *client.SecureClient, mode TransportMode, baseURL, userCacheSecret string, openaiOpts ...option.RequestOption) (*Client, error) {
-	httpClient, err := secureHTTPClient(secureClient, mode, baseURL, userCacheSecret)
+func createClientFromHandle(handle *enclave.Handle, mode TransportMode, baseURL, userCacheSecret string, openaiOpts ...option.RequestOption) (*Client, error) {
+	httpClient, err := secureHTTPClient(handle, mode, baseURL, userCacheSecret)
 	if err != nil {
 		return nil, err
 	}
 
 	resolvedBaseURL := baseURL
 	if resolvedBaseURL == "" {
-		resolvedBaseURL = fmt.Sprintf("https://%s/v1/", secureClient.Enclave())
+		resolvedBaseURL = fmt.Sprintf("https://%s/v1/", handle.Enclave())
 	}
 
 	// Add our HTTP client and base URL to the options
@@ -98,7 +98,7 @@ func createClientFromSecureClient(secureClient *client.SecureClient, mode Transp
 	openaiClient := openai.NewClient(allOpts...)
 	return &Client{
 		Client:     &openaiClient,
-		secure:     secureClient,
+		secure:     handle,
 		httpClient: httpClient,
 		transport:  mode,
 	}, nil

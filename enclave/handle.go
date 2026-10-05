@@ -1,4 +1,7 @@
-package client
+// Package enclave connects to attested enclaves. A Handle fetches and verifies
+// one enclave's attestation, keeps the result until it expires, and binds HTTP
+// traffic to the keys the enclave endorses.
+package enclave
 
 import (
 	"bytes"
@@ -14,9 +17,14 @@ import (
 	"github.com/tinfoilsh/tinfoil-go/verify/measurement"
 )
 
-type SecureClient struct {
+// Handle is the client-side handle for one attested enclave. It verifies the
+// enclave's attestation on first use, verifies again when the result expires or
+// the enclave rejects its keys, and hands out HTTP clients and transports bound
+// to the verified keys. Everything it hands out shares one verification and one
+// refresh.
+type Handle struct {
 	enclave, repo, relay string
-	// verifier is the immutable verification policy, shared by every client
+	// verifier is the immutable verification policy, shared by every handle
 	// derived from this one.
 	verifier *verify.Verifier
 
@@ -71,8 +79,8 @@ func fetchRouters() ([]string, error) {
 	return routers, nil
 }
 
-// VerificationOptions is copied at construction. Create a new client to change it.
-type VerificationOptions struct {
+// Options is copied at construction. Create a new client to change it.
+type Options struct {
 	// PinnedRegisters adds register checks; empty entries retain defaults.
 	PinnedRegisters *measurement.Measurement `json:"pinned_registers,omitempty"`
 	// FreshnessMaxAge defaults to seven days when zero. Negative ages are invalid.
@@ -81,7 +89,7 @@ type VerificationOptions struct {
 
 // verifier builds the immutable policy these options describe, validating
 // them once. A nil receiver selects the defaults.
-func (input *VerificationOptions) verifier() (*verify.Verifier, error) {
+func (input *Options) verifier() (*verify.Verifier, error) {
 	if input == nil {
 		return verify.NewVerifier()
 	}
@@ -91,9 +99,9 @@ func (input *VerificationOptions) verifier() (*verify.Verifier, error) {
 	)
 }
 
-// NewSecureClient creates a secure client for an enclave and repository
+// NewHandle creates a handle for an enclave and repository
 // reference, owner/name[@tag][@sha256:digest]. Verification happens on first use.
-func NewSecureClient(enclave, repo string, opts *VerificationOptions) (*SecureClient, error) {
+func NewHandle(enclave, repo string, opts *Options) (*Handle, error) {
 	if _, _, _, err := verify.ParseReference(repo); err != nil {
 		return nil, &ConfigurationError{Err: err}
 	}
@@ -101,12 +109,12 @@ func NewSecureClient(enclave, repo string, opts *VerificationOptions) (*SecureCl
 	if err != nil {
 		return nil, err
 	}
-	return &SecureClient{enclave: enclave, repo: repo, verifier: verifier}, nil
+	return &Handle{enclave: enclave, repo: repo, verifier: verifier}, nil
 }
 
-// NewDefaultClient applies opts to every discovered router and fallback.
-func NewDefaultClient(opts *VerificationOptions) (*SecureClient, error) {
-	fallback, err := NewSecureClient("inference.tinfoil.sh", defaultRouterRepo, opts)
+// NewDefaultHandle applies opts to every discovered router and fallback.
+func NewDefaultHandle(opts *Options) (*Handle, error) {
+	fallback, err := NewHandle("inference.tinfoil.sh", defaultRouterRepo, opts)
 	if err != nil {
 		return nil, err
 	}
@@ -123,27 +131,27 @@ func NewDefaultClient(opts *VerificationOptions) (*SecureClient, error) {
 }
 
 // ForEnclave keeps the repository reference and verification options.
-func (s *SecureClient) ForEnclave(enclave string) *SecureClient {
-	return &SecureClient{enclave: enclave, repo: s.repo, verifier: s.verifier}
+func (s *Handle) ForEnclave(enclave string) *Handle {
+	return &Handle{enclave: enclave, repo: s.repo, verifier: s.verifier}
 }
 
 // ViaRelay fetches attestation through relay, which forwards it to the enclave.
-func (s *SecureClient) ViaRelay(relay string) *SecureClient {
-	return &SecureClient{enclave: s.enclave, repo: s.repo, relay: relay, verifier: s.verifier}
+func (s *Handle) ViaRelay(relay string) *Handle {
+	return &Handle{enclave: s.enclave, repo: s.repo, relay: relay, verifier: s.verifier}
 }
 
 // Enclave returns the enclave URL
-func (s *SecureClient) Enclave() string {
+func (s *Handle) Enclave() string {
 	return s.enclave
 }
 
 // Repo returns the trusted repository reference, including any tag or digest pins.
-func (s *SecureClient) Repo() string {
+func (s *Handle) Repo() string {
 	return s.repo
 }
 
 // Verification returns a copy of the last verified enclave state.
-func (s *SecureClient) Verification() *verify.Verification {
+func (s *Handle) Verification() *verify.Verification {
 	s.stateMu.RLock()
 	defer s.stateMu.RUnlock()
 	if s.state == nil {
@@ -153,7 +161,7 @@ func (s *SecureClient) Verification() *verify.Verification {
 }
 
 // VerificationJSON returns the last verification as JSON.
-func (s *SecureClient) VerificationJSON() (string, error) {
+func (s *Handle) VerificationJSON() (string, error) {
 	encoded, err := json.Marshal(s.Verification())
 	if err != nil {
 		return "", err
@@ -162,7 +170,7 @@ func (s *SecureClient) VerificationJSON() (string, error) {
 }
 
 // HTTPClient returns an HTTP client that only accepts TLS connections to the verified enclave
-func (s *SecureClient) HTTPClient() (*http.Client, error) {
+func (s *Handle) HTTPClient() (*http.Client, error) {
 	s.stateMu.Lock()
 	if s.tlsTransport == nil {
 		s.tlsTransport = &clientTransport{client: s, build: func(verified *verify.Verification) (http.RoundTripper, error) {
@@ -182,7 +190,7 @@ func (s *SecureClient) HTTPClient() (*http.Client, error) {
 }
 
 // Request sends an HTTPS request. headersJSON is a JSON object or empty.
-func (s *SecureClient) Request(method, url, headersJSON string, body []byte) (result *Response, err error) {
+func (s *Handle) Request(method, url, headersJSON string, body []byte) (result *Response, err error) {
 	defer func() { err = mobileError(err) }()
 	req, err := http.NewRequest(method, url, bytes.NewReader(body))
 	if err != nil {

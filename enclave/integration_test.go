@@ -1,4 +1,4 @@
-package client
+package enclave
 
 import (
 	"encoding/json"
@@ -42,8 +42,8 @@ func TestLiveBasicChatCompletion(t *testing.T) {
 	testutil.RequireLive(t, enclaveEnvVar, repoEnvVar, apiKeyEnvVar)
 	enclave, repo, apiKey := os.Getenv(enclaveEnvVar), os.Getenv(repoEnvVar), os.Getenv(apiKeyEnvVar)
 
-	// Create secure client
-	client, err := NewSecureClient(enclave, repo, nil)
+	// Create the enclave handle
+	client, err := NewHandle(enclave, repo, nil)
 	require.NoError(t, err)
 
 	// Prepare chat completion request

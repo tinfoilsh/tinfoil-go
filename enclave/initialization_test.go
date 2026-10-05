@@ -1,4 +1,4 @@
-package client
+package enclave
 
 import (
 	"errors"
@@ -27,7 +27,7 @@ func TestDefaultClientProbesOncePerDiscovery(t *testing.T) {
 			}
 			return nil, cause
 		})}
-		s, err := NewDefaultClient(nil)
+		s, err := NewDefaultHandle(nil)
 		if err == nil {
 			// Complete initialization if the constructor returned a lazy fallback.
 			_, err = s.Verify()
@@ -56,7 +56,7 @@ func TestInitializationRecovery(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
-				s := &SecureClient{}
+				s := &Handle{}
 				var attempts int
 				s.verify = func() (*verify.Verification, error) {
 					attempts++
@@ -89,7 +89,7 @@ func TestInitializationRetryIsShared(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		var attempts int
 		release := make(chan struct{})
-		s := &SecureClient{verify: func() (*verify.Verification, error) {
+		s := &Handle{verify: func() (*verify.Verification, error) {
 			attempts++
 			if attempts == 1 {
 				<-release
@@ -111,7 +111,7 @@ func TestInitializationRetryIsShared(t *testing.T) {
 }
 
 func TestRefreshRejectsExpiredPublication(t *testing.T) {
-	s := &SecureClient{}
+	s := &Handle{}
 	deadline := make(chan time.Time, 1)
 	s.verify = func() (*verify.Verification, error) {
 		s.stateMu.Lock()

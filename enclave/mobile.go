@@ -1,4 +1,4 @@
-package client
+package enclave
 
 import (
 	jsonv1 "encoding/json"
@@ -26,10 +26,10 @@ func mobileError(err error) error {
 	return fmt.Errorf("%s%w", prefix, err)
 }
 
-// ParseVerificationOptionsJSON decodes policy for use with the Go and mobile APIs.
+// ParseOptionsJSON decodes policy for use with the Go and mobile APIs.
 // Use {} for defaults. Freshness age is encoded in integer nanoseconds.
-func ParseVerificationOptionsJSON(raw string) (*VerificationOptions, error) {
-	var opts *VerificationOptions
+func ParseOptionsJSON(raw string) (*Options, error) {
+	var opts *Options
 	if err := json.Unmarshal([]byte(raw), &opts, json.RejectUnknownMembers(true), jsonv1.FormatDurationAsNano(true)); err != nil {
 		return nil, &ConfigurationError{Err: fmt.Errorf("parsing verification options: %w", err)}
 	}

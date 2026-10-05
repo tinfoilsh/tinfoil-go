@@ -11,7 +11,7 @@ import (
 
 	"github.com/openai/openai-go/v3"
 	"github.com/openai/openai-go/v3/option"
-	"github.com/tinfoilsh/tinfoil-go/client"
+	"github.com/tinfoilsh/tinfoil-go/enclave"
 	"github.com/tinfoilsh/tinfoil-go/verify"
 )
 
@@ -36,7 +36,7 @@ type GatewayOptions struct {
 // Zero FreshnessMaxAge in a replacement uses the SDK's seven-day default.
 type ModelPin struct {
 	Repo         string
-	Verification *client.VerificationOptions
+	Verification *enclave.Options
 }
 
 // NewGateway copies opts and reads catalog on every request; nil fetches it once.
@@ -76,7 +76,7 @@ func NewGateway(baseURL string, catalog func() Catalog, opts GatewayOptions) (*G
 			var err error
 			if pinned {
 				secure = secure.ForEnclave(r.host)
-			} else if secure, err = client.NewSecureClient(r.host, r.ref, &policy.defaults); err != nil {
+			} else if secure, err = enclave.NewHandle(r.host, r.ref, &policy.defaults); err != nil {
 				return nil, err
 			}
 			secure = secure.ViaRelay(base.Host)

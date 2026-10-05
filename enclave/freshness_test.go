@@ -1,4 +1,4 @@
-package client
+package enclave
 
 import (
 	"cmp"
@@ -26,8 +26,8 @@ func defaultFreshnessMaxAge(t *testing.T) time.Duration {
 	return verifier.FreshnessMaxAge()
 }
 
-// verifyDocument verifies raw with the verifier a SecureClient builds from opts.
-func verifyDocument(raw, nonce []byte, repo string, opts *VerificationOptions) (*verify.Verification, error) {
+// verifyDocument verifies raw with the verifier a Handle builds from opts.
+func verifyDocument(raw, nonce []byte, repo string, opts *Options) (*verify.Verification, error) {
 	verifier, err := opts.verifier()
 	if err != nil {
 		return nil, err
@@ -37,15 +37,15 @@ func verifyDocument(raw, nonce []byte, repo string, opts *VerificationOptions) (
 
 func TestClientFreshnessMaxAge(t *testing.T) {
 	defaultMaxAge := defaultFreshnessMaxAge(t)
-	defaults, err := NewSecureClient("enclave.example", "org/repo", nil)
+	defaults, err := NewHandle("enclave.example", "org/repo", nil)
 	require.NoError(t, err)
 	require.Equal(t, defaultMaxAge, defaults.verifier.FreshnessMaxAge())
 	for _, maxAge := range []time.Duration{-time.Nanosecond, -time.Hour} {
-		opts := VerificationOptions{FreshnessMaxAge: maxAge}
-		s, err := NewSecureClient("enclave.example", "org/repo", &opts)
+		opts := Options{FreshnessMaxAge: maxAge}
+		s, err := NewHandle("enclave.example", "org/repo", &opts)
 		require.Nil(t, s)
 		require.ErrorContains(t, err, "freshness maximum age must not be negative")
-		s, err = NewDefaultClient(&opts)
+		s, err = NewDefaultHandle(&opts)
 		require.Nil(t, s)
 		require.ErrorContains(t, err, "freshness maximum age must not be negative")
 		_, err = verifyDocument(nil, nil, "org/repo", &opts)
@@ -57,8 +57,8 @@ func TestClientFreshnessMaxAge(t *testing.T) {
 	defaultRouterURL = server.URL
 	t.Cleanup(func() { defaultRouterURL = originalURL })
 	for _, maxAge := range []time.Duration{0, 24 * time.Hour, 30 * 24 * time.Hour} {
-		opts := VerificationOptions{FreshnessMaxAge: maxAge, PinnedRegisters: &measurement.Measurement{Type: measurement.TdxGuestV2, Registers: []string{4: measurement.RTMR3_ZERO}}}
-		s, err := NewDefaultClient(&opts)
+		opts := Options{FreshnessMaxAge: maxAge, PinnedRegisters: &measurement.Measurement{Type: measurement.TdxGuestV2, Registers: []string{4: measurement.RTMR3_ZERO}}}
+		s, err := NewDefaultHandle(&opts)
 		require.NoError(t, err)
 		require.Equal(t, "inference.tinfoil.sh", s.Enclave())
 		require.Equal(t, cmp.Or(maxAge, defaultMaxAge), s.verifier.FreshnessMaxAge())
@@ -78,7 +78,7 @@ func TestLiveVerifyFreshnessExpiration(t *testing.T) {
 	require.NoError(t, err)
 	const maxAge = 30 * 24 * time.Hour
 	for _, age := range []time.Duration{0, maxAge} {
-		opts := VerificationOptions{FreshnessMaxAge: age, PinnedRegisters: verified.EnclaveMeasurement}
+		opts := Options{FreshnessMaxAge: age, PinnedRegisters: verified.EnclaveMeasurement}
 		custom, err := verifyDocument(raw, nonce, repo, &opts)
 		require.NoError(t, err)
 		require.Equal(t, verified.FreshnessExpiresAt.Add(cmp.Or(age, defaultMaxAge)-defaultMaxAge), custom.FreshnessExpiresAt)
@@ -86,10 +86,10 @@ func TestLiveVerifyFreshnessExpiration(t *testing.T) {
 	badPins := cloneMeasurement(verified.EnclaveMeasurement)
 	badPins.Registers[0] = strings.Repeat("ab", 48)
 	require.NotEqual(t, verified.EnclaveMeasurement.Registers[0], badPins.Registers[0])
-	_, err = verifyDocument(raw, nonce, repo, &VerificationOptions{PinnedRegisters: badPins})
+	_, err = verifyDocument(raw, nonce, repo, &Options{PinnedRegisters: badPins})
 	var attestation *AttestationError
 	require.ErrorAs(t, err, &attestation)
-	s, err := NewDefaultClient(&VerificationOptions{PinnedRegisters: badPins, FreshnessMaxAge: maxAge})
+	s, err := NewDefaultHandle(&Options{PinnedRegisters: badPins, FreshnessMaxAge: maxAge})
 	require.NoError(t, err)
 	_, err = s.Verify()
 	require.ErrorAs(t, err, &attestation)

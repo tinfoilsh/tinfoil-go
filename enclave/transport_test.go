@@ -1,4 +1,4 @@
-package client
+package enclave
 
 import (
 	"bytes"
@@ -48,7 +48,7 @@ func TestTransportExpirationAndUnchangedWitness(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		witnessedAt := time.Now()
 		var verifications, requests int
-		s, err := NewSecureClient("enclave.example", "org/repo", &VerificationOptions{FreshnessMaxAge: time.Minute})
+		s, err := NewHandle("enclave.example", "org/repo", &Options{FreshnessMaxAge: time.Minute})
 		require.NoError(t, err)
 		deadline := witnessedAt.Add(time.Minute)
 		s.verify = func() (*verify.Verification, error) {
@@ -86,7 +86,7 @@ func TestRefreshCoalescesRequestsAndExplicitVerify(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
 				release := make(chan struct{})
 				var attempts, requests atomic.Int32
-				s := &SecureClient{state: testEnclaveState(time.Now().Add(time.Minute), "old")}
+				s := &Handle{state: testEnclaveState(time.Now().Add(time.Minute), "old")}
 				s.verify = func() (*verify.Verification, error) {
 					attempts.Add(1)
 					<-release
@@ -138,7 +138,7 @@ func errorString(err error) string {
 func TestRefreshWaitersCancelIndependentlyWithoutVerificationTimeout(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		release := make(chan struct{})
-		s := &SecureClient{verify: func() (*verify.Verification, error) {
+		s := &Handle{verify: func() (*verify.Verification, error) {
 			<-release
 			return testState(time.Now().Add(time.Hour), "key"), nil
 		}}
@@ -172,7 +172,7 @@ func TestVerificationFetchStillTimesOut(t *testing.T) {
 			return nil, req.Context().Err()
 		})}
 		start := time.Now()
-		client, err := NewSecureClient("enclave.example", "org/repo", nil)
+		client, err := NewHandle("enclave.example", "org/repo", nil)
 		require.NoError(t, err)
 		_, err = client.Verify()
 		require.ErrorIs(t, err, context.DeadlineExceeded)
@@ -186,7 +186,7 @@ func TestVerificationFetchStillTimesOut(t *testing.T) {
 
 func TestPreviouslyReturnedTransportsUseExplicitVerification(t *testing.T) {
 	var attempts int
-	s := &SecureClient{verify: func() (*verify.Verification, error) {
+	s := &Handle{verify: func() (*verify.Verification, error) {
 		attempts++
 		key := "old"
 		if attempts > 1 {
@@ -231,7 +231,7 @@ func TestKeyRejectionInvalidatesWithoutReplay(t *testing.T) {
 	} {
 		t.Run(mode.name, func(t *testing.T) {
 			var sends, refreshes int
-			s := &SecureClient{state: testEnclaveState(time.Now().Add(time.Hour), "old"), verify: func() (*verify.Verification, error) {
+			s := &Handle{state: testEnclaveState(time.Now().Add(time.Hour), "old"), verify: func() (*verify.Verification, error) {
 				refreshes++
 				return testState(time.Now().Add(time.Hour), "new"), nil
 			}}
@@ -275,7 +275,7 @@ func TestKeyRejectionInvalidatesWithoutReplay(t *testing.T) {
 func TestExpirationDoesNotInterruptStream(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		deadline := time.Now().Add(time.Minute)
-		s := &SecureClient{state: testEnclaveState(deadline, "key"), verify: func() (*verify.Verification, error) {
+		s := &Handle{state: testEnclaveState(deadline, "key"), verify: func() (*verify.Verification, error) {
 			return testState(deadline, "key"), nil
 		}}
 		reader, writer := io.Pipe()
@@ -305,7 +305,7 @@ func TestRedirectChecksExpiration(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		deadline := time.Now().Add(time.Minute)
 		var sends int
-		s := &SecureClient{state: testEnclaveState(deadline, "key"), verify: func() (*verify.Verification, error) {
+		s := &Handle{state: testEnclaveState(deadline, "key"), verify: func() (*verify.Verification, error) {
 			return testState(deadline, "key"), nil
 		}}
 		transport, err := s.NewTransport(func(*verify.Verification) (http.RoundTripper, error) {
@@ -345,7 +345,7 @@ func TestHTTPClientChecksExpirationOnReusedTLSConnections(t *testing.T) {
 			roots.AddCert(target.Certificate())
 			key, err := CertPubkeyFP(target.Certificate())
 			require.NoError(t, err)
-			s := &SecureClient{state: testEnclaveState(time.Now().Add(time.Hour), key), verify: func() (*verify.Verification, error) {
+			s := &Handle{state: testEnclaveState(time.Now().Add(time.Hour), key), verify: func() (*verify.Verification, error) {
 				return testState(time.Now().Add(-time.Second), key), nil
 			}}
 			hc, err := s.HTTPClient()
