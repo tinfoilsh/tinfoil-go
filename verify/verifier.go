@@ -16,11 +16,11 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/tinfoilsh/tinfoil-go/tinfoil-config/endorsement"
 	"github.com/tinfoilsh/tinfoil-go/document"
 	"github.com/tinfoilsh/tinfoil-go/document/collateral"
 	"github.com/tinfoilsh/tinfoil-go/internal/errs"
 	"github.com/tinfoilsh/tinfoil-go/internal/sdkinfo"
+	"github.com/tinfoilsh/tinfoil-go/tinfoil-config/endorsement"
 	"github.com/tinfoilsh/tinfoil-go/verify/internal/provenance"
 	"github.com/tinfoilsh/tinfoil-go/verify/internal/quote"
 	"github.com/tinfoilsh/tinfoil-go/verify/measurement"

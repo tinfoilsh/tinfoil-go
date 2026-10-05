@@ -27,7 +27,7 @@ type Handle struct {
 	enclave, repo, relay string
 	// verifier is the immutable verification policy, shared by every handle
 	// derived from this one.
-	verifier *verify.Verifier
+	verifier     *verify.Verifier
 	configPolicy *verify.ConfigPolicy
 
 	stateMu      sync.RWMutex

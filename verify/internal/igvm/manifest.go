@@ -8,7 +8,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/tinfoilsh/tinfoil-go/verifier/document/collateral"
+	"github.com/tinfoilsh/tinfoil-go/document/collateral"
 )
 
 const (

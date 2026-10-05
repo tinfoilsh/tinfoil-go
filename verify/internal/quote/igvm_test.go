@@ -5,9 +5,9 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
-	"github.com/tinfoilsh/tinfoil-go/verifier/internal/igvm"
-	"github.com/tinfoilsh/tinfoil-go/verifier/internal/policy"
-	"github.com/tinfoilsh/tinfoil-go/verifier/measurement"
+	"github.com/tinfoilsh/tinfoil-go/verify/internal/igvm"
+	"github.com/tinfoilsh/tinfoil-go/verify/internal/policy"
+	"github.com/tinfoilsh/tinfoil-go/verify/measurement"
 )
 
 func TestIGVMRuntimePinsCannotOverrideMeasurements(t *testing.T) {

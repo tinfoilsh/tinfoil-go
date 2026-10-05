@@ -6,9 +6,9 @@ import (
 	"strings"
 
 	"github.com/sigstore/sigstore-go/pkg/verify"
+	"github.com/tinfoilsh/tinfoil-go/document/collateral"
 	"github.com/tinfoilsh/tinfoil-go/tinfoil-config/endorsement"
-	"github.com/tinfoilsh/tinfoil-go/verifier/document/collateral"
-	"github.com/tinfoilsh/tinfoil-go/verifier/internal/igvm"
+	"github.com/tinfoilsh/tinfoil-go/verify/internal/igvm"
 )
 
 const slsaProvenanceV1 = "https://slsa.dev/provenance/v1"

@@ -1,6 +1,6 @@
 //go:build tinfoil_conformance
 
-package verifier
+package verify
 
 import (
 	"crypto/x509"
@@ -14,7 +14,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"github.com/tinfoilsh/tinfoil-go/tinfoil-config/endorsement"
-	"github.com/tinfoilsh/tinfoil-go/verifier/measurement"
+	"github.com/tinfoilsh/tinfoil-go/verify/measurement"
 )
 
 type igvmSignedFixture struct {
@@ -52,11 +52,12 @@ func TestVerifyIGVMSignedSNPDocument(t *testing.T) {
 	nonce, err := hex.DecodeString(f.NonceHex)
 	require.NoError(t, err)
 	now := f.VerificationTime
-	v, err := New(
+	v, err := NewVerifier(
 		WithConfigSigningKeys([]endorsement.SigningKey{{PublicKey: key, AuditScope: f.ConfigPolicy.AuditScope}}),
 		DangerousTestOnlyWithSigstoreRoot(f.SigstoreRoot),
 		DangerousTestOnlyWithVendorRoots([]byte(f.AMDTrustPEM), nil),
 		DangerousTestOnlyWithClock(func() time.Time { return now }),
+		WithSoftwareIdentity(SoftwareIdentity{Name: "test-sdk", Version: "1.0.0"}),
 	)
 	require.NoError(t, err)
 
@@ -69,6 +70,8 @@ func TestVerifyIGVMSignedSNPDocument(t *testing.T) {
 		require.Equal(t, f.Expected.ConfigDigest, got.Config.Digest)
 		require.Equal(t, f.Expected.RuntimeDigest, got.CodeDigest)
 		require.Equal(t, f.Expected.RuntimeTag, got.CodeTag)
+		require.Equal(t, "tinfoilsh/cvmimage", got.ConfigRepo)
+		require.Equal(t, VerificationMetadata{Verifier: v.Identity(), VerifiedAt: now}, got.Metadata)
 		wantMeasurement := &measurement.Measurement{Type: measurement.SevGuestV2, Registers: []string{f.Expected.Measurement}}
 		require.Equal(t, wantMeasurement, got.CodeMeasurement)
 		require.Equal(t, wantMeasurement, got.EnclaveMeasurement)

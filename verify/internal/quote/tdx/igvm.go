@@ -3,8 +3,8 @@ package tdx
 import (
 	"fmt"
 
-	"github.com/tinfoilsh/tinfoil-go/verifier/internal/igvm"
-	"github.com/tinfoilsh/tinfoil-go/verifier/internal/policy"
+	"github.com/tinfoilsh/tinfoil-go/verify/internal/igvm"
+	"github.com/tinfoilsh/tinfoil-go/verify/internal/policy"
 )
 
 func AssembleIGVM(p *policy.TDXPolicy, runtime *igvm.TDXLaunch, configHash [32]byte, reportData [64]byte) (*Expectations, error) {

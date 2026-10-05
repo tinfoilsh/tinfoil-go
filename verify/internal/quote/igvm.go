@@ -5,13 +5,13 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/tinfoilsh/tinfoil-go/verifier/document"
-	"github.com/tinfoilsh/tinfoil-go/verifier/internal/errs"
-	"github.com/tinfoilsh/tinfoil-go/verifier/internal/igvm"
-	"github.com/tinfoilsh/tinfoil-go/verifier/internal/policy"
-	"github.com/tinfoilsh/tinfoil-go/verifier/internal/quote/sev"
-	"github.com/tinfoilsh/tinfoil-go/verifier/internal/quote/tdx"
-	"github.com/tinfoilsh/tinfoil-go/verifier/measurement"
+	"github.com/tinfoilsh/tinfoil-go/document"
+	"github.com/tinfoilsh/tinfoil-go/internal/errs"
+	"github.com/tinfoilsh/tinfoil-go/verify/internal/igvm"
+	"github.com/tinfoilsh/tinfoil-go/verify/internal/policy"
+	"github.com/tinfoilsh/tinfoil-go/verify/internal/quote/sev"
+	"github.com/tinfoilsh/tinfoil-go/verify/internal/quote/tdx"
+	"github.com/tinfoilsh/tinfoil-go/verify/measurement"
 )
 
 func AssembleIGVM(doc *document.Document, endorsements *policy.Artifact, runtime *igvm.Measurements, pins *measurement.Measurement, configHash [32]byte, q *Authenticated) (result *AssembledPolicy, err error) {

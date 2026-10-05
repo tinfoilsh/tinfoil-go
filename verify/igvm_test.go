@@ -1,4 +1,4 @@
-package verifier
+package verify
 
 import (
 	"crypto/ecdsa"
@@ -8,9 +8,9 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	"github.com/tinfoilsh/tinfoil-go/document"
+	"github.com/tinfoilsh/tinfoil-go/document/collateral"
 	"github.com/tinfoilsh/tinfoil-go/tinfoil-config/endorsement"
-	"github.com/tinfoilsh/tinfoil-go/verifier/document"
-	"github.com/tinfoilsh/tinfoil-go/verifier/document/collateral"
 )
 
 func TestIGVMRequiresIndependentTrustAndFreshness(t *testing.T) {
@@ -18,18 +18,18 @@ func TestIGVMRequiresIndependentTrustAndFreshness(t *testing.T) {
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	require.NoError(t, err)
 	keys := []endorsement.SigningKey{{PublicKey: key.Public(), AuditScope: policy.AuditScope}}
-	v, err := New()
+	v, err := NewVerifier()
 	require.NoError(t, err)
 	_, err = v.VerifyIGVM(nil, nil, policy)
 	require.ErrorContains(t, err, "pinned signing keys")
-	_, err = New(WithConfigSigningKeys(nil))
+	_, err = NewVerifier(WithConfigSigningKeys(nil))
 	require.ErrorContains(t, err, "must not be empty")
-	v, err = New(WithConfigSigningKeys(keys), WithIgnoreFreshness())
+	v, err = NewVerifier(WithConfigSigningKeys(keys), WithIgnoreFreshness())
 	require.NoError(t, err)
 	_, err = v.VerifyIGVM(nil, nil, policy)
 	require.ErrorContains(t, err, "requires config and platform freshness")
 
-	v, err = New(WithConfigSigningKeys(keys))
+	v, err = NewVerifier(WithConfigSigningKeys(keys))
 	require.NoError(t, err)
 	nonce := make([]byte, document.NonceSize)
 	raw, err := document.Build(document.BuildInput{Nonce: nonce}, func([64]byte) (string, []byte, error) { return document.SEVSNPReportV1Format, []byte("quote"), nil })

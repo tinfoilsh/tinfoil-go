@@ -8,8 +8,8 @@ import (
 
 	"gopkg.in/yaml.v3"
 
+	"github.com/tinfoilsh/tinfoil-go/document/collateral"
 	"github.com/tinfoilsh/tinfoil-go/tinfoil-config/endorsement"
-	"github.com/tinfoilsh/tinfoil-go/verifier/document/collateral"
 )
 
 const runtimeArtifactsURL = "https://images.tinfoil.sh/cvm"

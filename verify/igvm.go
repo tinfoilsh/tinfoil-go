@@ -1,4 +1,4 @@
-package verifier
+package verify
 
 import (
 	"crypto/sha256"
@@ -6,12 +6,12 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/tinfoilsh/tinfoil-go/document"
+	"github.com/tinfoilsh/tinfoil-go/document/collateral"
+	"github.com/tinfoilsh/tinfoil-go/internal/errs"
 	"github.com/tinfoilsh/tinfoil-go/tinfoil-config/endorsement"
-	"github.com/tinfoilsh/tinfoil-go/verifier/document"
-	"github.com/tinfoilsh/tinfoil-go/verifier/document/collateral"
-	"github.com/tinfoilsh/tinfoil-go/verifier/internal/errs"
-	"github.com/tinfoilsh/tinfoil-go/verifier/internal/igvm"
-	"github.com/tinfoilsh/tinfoil-go/verifier/internal/quote"
+	"github.com/tinfoilsh/tinfoil-go/verify/internal/igvm"
+	"github.com/tinfoilsh/tinfoil-go/verify/internal/quote"
 )
 
 // ConfigPolicy contains caller expectations; none may be learned from collateral.
@@ -136,8 +136,9 @@ func (v *Verifier) VerifyIGVM(docBytes, nonce []byte, policy ConfigPolicy) (resu
 		return nil, err
 	}
 	return &Verification{
-		CodeDigest: runtime.Digest, CodeTag: runtime.Tag, CodeMeasurement: measurement,
+		ConfigRepo: runtime.Repo, CodeDigest: runtime.Digest, CodeTag: runtime.Tag, CodeMeasurement: measurement,
 		EnclaveMeasurement: authenticated.Measurement, Config: approved, CryptoMaterial: doc.CryptoMaterialItems(),
 		FreshnessExpiresAt: freshnessExpiration(approved.ApprovalTime, platformApprovedAt, v.freshnessMaxAge),
+		Metadata:           VerificationMetadata{Verifier: v.identity, VerifiedAt: now},
 	}, nil
 }

@@ -11,9 +11,9 @@ import (
 	"github.com/tinfoilsh/go-sev-guest/proto/sevsnp"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/tinfoilsh/tinfoil-go/verifier/internal/igvm"
-	"github.com/tinfoilsh/tinfoil-go/verifier/internal/policy"
-	sevtestdata "github.com/tinfoilsh/tinfoil-go/verifier/internal/testdata"
+	"github.com/tinfoilsh/tinfoil-go/verify/internal/igvm"
+	"github.com/tinfoilsh/tinfoil-go/verify/internal/policy"
+	sevtestdata "github.com/tinfoilsh/tinfoil-go/verify/internal/testdata"
 )
 
 func TestIGVMEnforcesConfigAndPlatformConstraints(t *testing.T) {

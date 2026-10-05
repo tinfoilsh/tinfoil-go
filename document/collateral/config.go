@@ -7,7 +7,7 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/tinfoilsh/tinfoil-go/verifier/internal/canonical"
+	"github.com/tinfoilsh/tinfoil-go/internal/canonical"
 )
 
 type configCollateral struct {

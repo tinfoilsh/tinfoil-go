@@ -12,10 +12,6 @@ func cloneMeasurement(value *measurement.Measurement) *measurement.Measurement {
 	}
 	cloned := *value
 	cloned.Registers = append([]string(nil), value.Registers...)
-	if verified.Config != nil {
-		config := *verified.Config
-		cloned.Config = &config
-	}
 	return &cloned
 }
 

@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"slices"
 
-	"github.com/tinfoilsh/tinfoil-go/verifier/internal/canonical"
+	"github.com/tinfoilsh/tinfoil-go/internal/canonical"
 	"golang.org/x/mod/semver"
 )
 

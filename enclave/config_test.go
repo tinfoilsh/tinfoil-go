@@ -1,4 +1,4 @@
-package client
+package enclave
 
 import (
 	"crypto/ecdsa"
@@ -11,13 +11,13 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	"github.com/tinfoilsh/tinfoil-go/document"
+	"github.com/tinfoilsh/tinfoil-go/document/collateral"
 	"github.com/tinfoilsh/tinfoil-go/tinfoil-config/endorsement"
-	"github.com/tinfoilsh/tinfoil-go/verifier"
-	"github.com/tinfoilsh/tinfoil-go/verifier/document"
-	"github.com/tinfoilsh/tinfoil-go/verifier/document/collateral"
+	"github.com/tinfoilsh/tinfoil-go/verify"
 )
 
-func TestConfigClientsRetainExplicitProfile(t *testing.T) {
+func TestConfigHandlesRetainExplicitProfile(t *testing.T) {
 	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		nonce, err := hex.DecodeString(r.URL.Query().Get("nonce"))
 		if err != nil {
@@ -39,22 +39,24 @@ func TestConfigClientsRetainExplicitProfile(t *testing.T) {
 	t.Cleanup(func() { http.DefaultClient = original })
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	require.NoError(t, err)
-	policy := verifier.ConfigPolicy{Identity: "/org/project", AuditScope: "16a44d18-3387-44ce-9bfb-d77c4d27dbba"}
+	policy := verify.ConfigPolicy{Identity: "/org/project", AuditScope: "16a44d18-3387-44ce-9bfb-d77c4d27dbba"}
 	keys := []endorsement.SigningKey{{PublicKey: key.Public(), AuditScope: policy.AuditScope}}
 	host := strings.TrimPrefix(server.URL, "https://")
-	client, err := NewConfigClient(host, policy, keys, nil)
+	sdk := verify.SoftwareIdentity{Name: "test-sdk", Version: "1.0.0"}
+	client, err := NewConfigHandle(host, policy, keys, &Options{SDK: &sdk})
 	require.NoError(t, err)
 	policy.Identity = "/other/project"
-	for _, derived := range []*SecureClient{client, client.ForEnclave(host), client.ViaRelay(host)} {
+	for _, derived := range []*Handle{client, client.ForEnclave(host), client.ViaRelay(host)} {
 		require.Equal(t, "/org/project", derived.configPolicy.Identity)
+		require.Equal(t, sdk, derived.verifier.Identity())
 		_, err := derived.fetchVerification()
 		require.ErrorContains(t, err, collateral.ConfigID)
 	}
-	legacy, err := NewSecureClient(host, "org/repo", nil)
+	legacy, err := NewHandle(host, "org/repo", nil)
 	require.NoError(t, err)
 	_, err = legacy.fetchVerification()
 	require.ErrorContains(t, err, collateral.SigstoreCodeV1Format)
-	verified := &VerifiedDocumentV3{Config: &endorsement.Verified{Name: "/org/project/v1"}}
+	verified := &verify.Verification{Config: &endorsement.Verified{Name: "/org/project/v1"}}
 	cloned := cloneVerification(verified)
 	cloned.Config.Name = "changed"
 	require.Equal(t, "/org/project/v1", verified.Config.Name)
