@@ -15,6 +15,7 @@
 package conformance
 
 import (
+	"crypto"
 	"crypto/x509"
 	"encoding/base64"
 	"encoding/hex"
@@ -60,6 +61,8 @@ type Input struct {
 	NonceHex      string       `json:"nonce_hex"`
 	Repo          string       `json:"repo"`
 	Config        *ConfigInput `json:"config,omitempty"`
+
+	FreshnessSigningKeyPEM string `json:"freshness_signing_key_pem,omitempty"`
 
 	// AMD SEV-SNP anchor, supplied as the ARK plus its ASK (KDS convention).
 	AMDRootCAPEM string `json:"amd_root_ca_pem,omitempty"`
@@ -178,6 +181,17 @@ func Run(stage string, in Input) (Output, int) {
 			return malformed(stage)
 		}
 		opts = append(opts, verify.WithConfigSigningKeys([]endorsement.SigningKey{{PublicKey: key, AuditScope: in.Config.AuditScope}}))
+	}
+	if in.FreshnessSigningKeyPEM != "" {
+		block, rest := pem.Decode([]byte(in.FreshnessSigningKeyPEM))
+		if block == nil || len(rest) != 0 {
+			return malformed(stage)
+		}
+		key, err := x509.ParsePKIXPublicKey(block.Bytes)
+		if err != nil {
+			return malformed(stage)
+		}
+		opts = append(opts, verify.WithFreshnessSigningKeys([]crypto.PublicKey{key}))
 	}
 	verifier, err := verify.NewVerifier(opts...)
 	if err != nil {
