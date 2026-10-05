@@ -9,7 +9,6 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/tinfoilsh/tinfoil-go/document/collateral"
-	"github.com/tinfoilsh/tinfoil-go/tinfoil-config/endorsement"
 )
 
 const runtimeArtifactsURL = "https://images.tinfoil.sh/cvm"
@@ -23,9 +22,6 @@ func ConfigRuntime(data []byte) (collateral.RuntimeReference, error) {
 			Repo      string `yaml:"repo"`
 			Artifacts string `yaml:"artifacts"`
 		} `yaml:"cvm-source"`
-	}
-	if len(data) == 0 || len(data) > endorsement.MaxConfigSize {
-		return collateral.RuntimeReference{}, fmt.Errorf("config size is outside allowed bounds")
 	}
 	decoder := yaml.NewDecoder(bytes.NewReader(data))
 	if err := decoder.Decode(&fields); err != nil {

@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/tinfoilsh/tinfoil-go/document/collateral"
+	"github.com/tinfoilsh/tinfoil-go/internal/canonical"
 )
 
 const (
@@ -19,22 +20,14 @@ const (
 )
 
 type Manifest struct {
-	Version     string        `json:"version"`
-	Root        string        `json:"root"`
-	Kernel      string        `json:"kernel"`
-	Initrd      string        `json:"initrd"`
-	Raw         string        `json:"raw"`
-	CVMCompiler string        `json:"cvm_compiler"`
-	IGVM        *Measurements `json:"igvm"`
+	Version string        `json:"version"`
+	IGVM    *Measurements `json:"igvm"`
 }
 
 type Measurements struct {
 	FormatVersion int        `json:"format_version"`
-	SNP           string     `json:"snp"`
-	TDX           string     `json:"tdx"`
 	SNPLaunch     *SNPLaunch `json:"snp_launch"`
 	TDXLaunch     *TDXLaunch `json:"tdx_launch"`
-	Cmdline       string     `json:"cmdline"`
 }
 
 type SNPLaunch struct {
@@ -65,9 +58,6 @@ func (s TDXLaunch) Registers() [5]string {
 }
 
 func ParseManifest(data []byte, expected collateral.RuntimeReference) (*Manifest, error) {
-	if err := expected.Validate(); err != nil {
-		return nil, err
-	}
 	if len(data) == 0 || len(data) > MaxManifestSize {
 		return nil, fmt.Errorf("runtime manifest size is outside allowed bounds")
 	}
@@ -76,22 +66,17 @@ func ParseManifest(data []byte, expected collateral.RuntimeReference) (*Manifest
 		return nil, fmt.Errorf("runtime manifest does not match the config's digest pin")
 	}
 	var m Manifest
-	if err := json.Unmarshal(data, &m, json.RejectUnknownMembers(true)); err != nil {
+	if err := json.Unmarshal(data, &m); err != nil {
 		return nil, fmt.Errorf("parsing runtime manifest: %w", err)
 	}
 	if m.Version != expected.Tag || m.IGVM == nil || m.IGVM.FormatVersion != FormatVersion {
 		return nil, fmt.Errorf("runtime manifest version or IGVM format is unsupported")
 	}
 	g := m.IGVM
-	if g.SNPLaunch == nil || g.TDXLaunch == nil || g.Cmdline == "" {
-		return nil, fmt.Errorf("runtime manifest requires complete launch measurements and cmdline")
+	if g.SNPLaunch == nil || g.TDXLaunch == nil {
+		return nil, fmt.Errorf("runtime manifest requires complete launch measurements")
 	}
-	for name, value := range map[string]string{"root": m.Root, "kernel": m.Kernel, "initrd": m.Initrd, "raw": m.Raw, "cvm_compiler": m.CVMCompiler, "snp": g.SNP, "tdx": g.TDX} {
-		if err := validateHex(name, value, sha256.Size); err != nil {
-			return nil, err
-		}
-	}
-	if err := validateHex("SNP measurement", g.SNPLaunch.Measurement, MeasurementSize); err != nil {
+	if _, err := canonical.DecodeLowerHex("SNP measurement", g.SNPLaunch.Measurement, MeasurementSize); err != nil {
 		return nil, err
 	}
 	if _, err := g.SNPLaunch.PolicyValue(); err != nil {
@@ -100,7 +85,7 @@ func ParseManifest(data []byte, expected collateral.RuntimeReference) (*Manifest
 	if g.SNPLaunch.GuestSVN == nil || *g.SNPLaunch.GuestSVN != 0 || g.SNPLaunch.IDKeyDigest != strings.Repeat("0", MeasurementSize*2) {
 		return nil, fmt.Errorf("IGVM v1 requires zero SNP guest SVN and ID-key digest")
 	}
-	if err := validateHex("MRTD", g.TDXLaunch.MRTD, MeasurementSize); err != nil {
+	if _, err := canonical.DecodeLowerHex("MRTD", g.TDXLaunch.MRTD, MeasurementSize); err != nil {
 		return nil, err
 	}
 	registers := g.TDXLaunch.Registers()
@@ -110,12 +95,4 @@ func ParseManifest(data []byte, expected collateral.RuntimeReference) (*Manifest
 		}
 	}
 	return &m, nil
-}
-
-func validateHex(name, value string, size int) error {
-	decoded, err := hex.DecodeString(value)
-	if err != nil || len(decoded) != size || strings.ToLower(value) != value {
-		return fmt.Errorf("%s must be %d bytes of lowercase hexadecimal", name, size)
-	}
-	return nil
 }

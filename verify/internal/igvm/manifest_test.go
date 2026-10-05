@@ -13,13 +13,12 @@ import (
 
 func validManifest() Manifest {
 	zero := uint32(0)
-	hash := strings.Repeat("ab", sha256.Size)
 	measurement := strings.Repeat("cd", MeasurementSize)
 	zeroRegister := strings.Repeat("0", MeasurementSize*2)
-	return Manifest{Version: "v0.15.0", Root: hash, Kernel: hash, Initrd: hash, Raw: hash, CVMCompiler: hash, IGVM: &Measurements{
-		FormatVersion: FormatVersion, SNP: hash, TDX: hash, Cmdline: "console=ttyS0",
-		SNPLaunch: &SNPLaunch{Measurement: measurement, Policy: "0x30133", GuestSVN: &zero, IDKeyDigest: zeroRegister},
-		TDXLaunch: &TDXLaunch{MRTD: measurement, RTMR0: zeroRegister, RTMR1: zeroRegister, RTMR2: zeroRegister, RTMR3: zeroRegister},
+	return Manifest{Version: "v0.15.0", IGVM: &Measurements{
+		FormatVersion: FormatVersion,
+		SNPLaunch:     &SNPLaunch{Measurement: measurement, Policy: "0x30133", GuestSVN: &zero, IDKeyDigest: zeroRegister},
+		TDXLaunch:     &TDXLaunch{MRTD: measurement, RTMR0: zeroRegister, RTMR1: zeroRegister, RTMR2: zeroRegister, RTMR3: zeroRegister},
 	}}
 }
 
@@ -49,9 +48,8 @@ func TestManifestRequiresCompleteSupportedMeasurements(t *testing.T) {
 		"ID block":            func(m *Manifest) { m.IGVM.SNPLaunch.IDKeyDigest = strings.Repeat("ab", MeasurementSize) },
 		"nonzero RTMR":        func(m *Manifest) { m.IGVM.TDXLaunch.RTMR2 = strings.Repeat("ab", MeasurementSize) },
 		"missing RTMR":        func(m *Manifest) { m.IGVM.TDXLaunch.RTMR3 = "" },
-		"missing cmdline":     func(m *Manifest) { m.IGVM.Cmdline = "" },
 		"bad MRTD":            func(m *Manifest) { m.IGVM.TDXLaunch.MRTD = "bad" },
-		"uppercase digest":    func(m *Manifest) { m.IGVM.SNP = strings.ToUpper(m.IGVM.SNP) },
+		"uppercase SNP":       func(m *Manifest) { m.IGVM.SNPLaunch.Measurement = strings.ToUpper(m.IGVM.SNPLaunch.Measurement) },
 		"decimal policy":      func(m *Manifest) { m.IGVM.SNPLaunch.Policy = "196915" },
 		"noncanonical policy": func(m *Manifest) { m.IGVM.SNPLaunch.Policy = "0x030133" },
 	} {
@@ -63,14 +61,28 @@ func TestManifestRequiresCompleteSupportedMeasurements(t *testing.T) {
 			require.Error(t, err)
 		})
 	}
-	for name, prefix := range map[string]string{"unknown member": `{"unknown":true,`, "duplicate member": `{"version":"v0.15.0",`} {
+	for name, tc := range map[string]struct {
+		prefix  string
+		wantErr bool
+	}{
+		"download metadata":        {`{"root":"host image digest",`, false},
+		"duplicate member":         {`{"version":"v0.15.0",`, true},
+		"duplicate ignored member": {`{"root":"one","root":"two",`, true},
+	} {
 		t.Run(name, func(t *testing.T) {
-			changed := append([]byte(prefix), data[1:]...)
+			changed := append([]byte(tc.prefix), data[1:]...)
 			digest := sha256.Sum256(changed)
 			pinned := ref
 			pinned.Digest = hex.EncodeToString(digest[:])
-			_, err := ParseManifest(changed, pinned)
-			require.ErrorContains(t, err, "parsing runtime manifest")
+			got, err := ParseManifest(changed, pinned)
+			if tc.wantErr {
+				require.ErrorContains(t, err, "parsing runtime manifest")
+			} else {
+				require.NoError(t, err)
+				require.Equal(t, validManifest(), *got)
+				_, err = ParseManifest(changed, ref)
+				require.ErrorContains(t, err, "digest pin")
+			}
 		})
 	}
 }
