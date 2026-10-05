@@ -14,13 +14,8 @@ import (
 	"encoding/json"
 
 	"github.com/tinfoilsh/tinfoil-go/enclave"
-	"github.com/tinfoilsh/tinfoil-go/internal/sdkinfo"
 	"github.com/tinfoilsh/tinfoil-go/verify"
 )
-
-// Version reports the SDK version from the framework's build information. A
-// framework bound from a source checkout carries none, so it reports "devel".
-func Version() string { return sdkinfo.Version() }
 
 // Client verifies an enclave and reports what it proved. It wraps the SDK's
 // own client, which is not itself bound.
@@ -38,9 +33,11 @@ func NewClient(host, repo string) (*Client, error) {
 	return &Client{inner: inner}, nil
 }
 
-// NewClientWithOptions is NewClient with a policy, as the JSON object
-// enclave.Options describes: pinned registers and a freshness bound, the
-// latter in integer nanoseconds. An empty string selects the default policy.
+// NewClientWithOptions is NewClient with options, as the JSON object
+// enclave.Options describes: pinned registers, a freshness bound in integer
+// nanoseconds, and the identity of the SDK built on this one, such as
+// {"name":"tinfoil-swift","version":"0.8.2"}. An empty string selects the
+// defaults.
 func NewClientWithOptions(host, repo, optionsJSON string) (*Client, error) {
 	if optionsJSON == "" {
 		return NewClient(host, repo)

@@ -19,7 +19,6 @@ func checkMobileSurface() throws {
     }
     let _: String = client.enclave()
     let _: String = client.repo()
-    let _: String = MobileVersion()
     let _: Int64 = MobileVerificationSchemaVersion
 
     // Options travel as JSON: pinned_registers, and freshness_max_age_ns in

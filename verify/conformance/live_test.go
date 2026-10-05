@@ -31,7 +31,7 @@ func TestLiveVerification(t *testing.T) {
 	if err != nil {
 		t.Fatalf("nonce: %v", err)
 	}
-	doc, err := fetch.Document(t.Context(), host, "", nonce)
+	doc, err := fetch.Document(t.Context(), host, "", nonce, fetch.SDK{})
 	if err != nil {
 		t.Fatalf("fetch from %s: %v", host, err)
 	}

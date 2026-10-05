@@ -2,6 +2,8 @@ package enclave
 
 import (
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"strings"
 	"testing"
@@ -109,4 +111,26 @@ func TestLiveClientFallbackEnclave(t *testing.T) {
 
 	_, err = defaultClient.Verify()
 	assert.NoError(t, err)
+}
+
+func TestHandleReportsSDKIdentity(t *testing.T) {
+	requests := make(chan *http.Request, 1)
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests <- r.Clone(r.Context())
+		_, _ = w.Write([]byte("{}"))
+	}))
+	defer server.Close()
+	original := http.DefaultClient
+	http.DefaultClient = server.Client()
+	t.Cleanup(func() { http.DefaultClient = original })
+
+	swift := verify.SoftwareIdentity{Name: "tinfoil-swift", Version: "0.8.2"}
+	h, err := NewHandle(strings.TrimPrefix(server.URL, "https://"), "org/repo", &Options{SDK: &swift})
+	require.NoError(t, err)
+	require.Equal(t, swift, h.verifier.Identity())
+	_, err = h.fetchVerification()
+	require.Error(t, err, "the stub serves no valid document")
+	request := <-requests
+	require.Equal(t, "tinfoil-swift", request.Header.Get("Tinfoil-SDK"))
+	require.Equal(t, "0.8.2", request.Header.Get("Tinfoil-SDK-Version"))
 }
