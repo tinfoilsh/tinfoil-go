@@ -167,6 +167,9 @@ func options(p *policy.SEVSNPPolicy, productLine string) (*sevvalidate.Options, 
 	if err := p.Validate(); err != nil {
 		return nil, err
 	}
+	if p.ConfigBinding != "" {
+		return nil, fmt.Errorf("policy declares config_binding %q and was never resolved against a config", p.ConfigBinding)
+	}
 	switch productLine {
 	case ProductGenoa:
 		if p.MinimumTCB.FmcSpl != nil || p.MinimumLaunchTCB.FmcSpl != nil {

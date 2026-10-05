@@ -28,6 +28,15 @@ func loadFixture(t *testing.T) *policy.Artifact {
 	return a
 }
 
+func loadIGVMFixture(t *testing.T) *policy.Artifact {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join("..", "..", "..", "testdata", "igvm", "platform-endorsements-igvm.json"))
+	require.NoError(t, err)
+	a, err := policy.Parse(data)
+	require.NoError(t, err)
+	return a
+}
+
 func mustHex(t *testing.T, s string) []byte {
 	t.Helper()
 	b, err := hex.DecodeString(s)

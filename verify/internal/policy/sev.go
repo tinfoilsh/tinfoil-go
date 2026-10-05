@@ -14,22 +14,29 @@ type SEVSNPPolicy struct {
 	MinimumBuild *uint8 `json:"minimum_build"`
 	// MinimumAPIVersion floors the firmware version; MinimumABIVersion
 	// floors the guest policy's ABI version (both maj.min).
-	MinimumAPIVersion              string      `json:"minimum_api_version"`
-	MinimumABIVersion              string      `json:"minimum_abi_version"`
-	MinimumGuestSVN                *uint32     `json:"minimum_guest_svn"`
-	MinimumTCB                     TCB         `json:"minimum_tcb"`
-	MinimumLaunchTCB               TCB         `json:"minimum_launch_tcb"`
-	GuestPolicy                    GuestPolicy `json:"guest_policy"`
-	PlatformInfo                   SNPPlatform `json:"platform_info"`
-	PermitProvisionalFirmware      bool        `json:"permit_provisional_firmware"`
-	VMPL                           *int        `json:"vmpl"`
-	HostData                       string      `json:"host_data"`
-	ImageID                        string      `json:"image_id"`
-	FamilyID                       string      `json:"family_id"`
-	RequireAuthorKey               bool        `json:"require_author_key,omitempty"`
-	RequireIDBlock                 bool        `json:"require_id_block,omitempty"`
-	MinimumLaunchMitigationVector  *uint64     `json:"minimum_launch_mitigation_vector"`
-	MinimumCurrentMitigationVector *uint64     `json:"minimum_current_mitigation_vector"`
+	MinimumAPIVersion         string      `json:"minimum_api_version"`
+	MinimumABIVersion         string      `json:"minimum_abi_version"`
+	MinimumGuestSVN           *uint32     `json:"minimum_guest_svn"`
+	MinimumTCB                TCB         `json:"minimum_tcb"`
+	MinimumLaunchTCB          TCB         `json:"minimum_launch_tcb"`
+	GuestPolicy               GuestPolicy `json:"guest_policy"`
+	PlatformInfo              SNPPlatform `json:"platform_info"`
+	PermitProvisionalFirmware bool        `json:"permit_provisional_firmware"`
+	VMPL                      *int        `json:"vmpl"`
+	// HostData is the expected HOST_DATA. Exactly one of it and
+	// ConfigBinding is set: a shape-independent launch cannot name a fixed
+	// HOST_DATA, because the value is the config's digest.
+	HostData string `json:"host_data,omitempty"`
+	// ConfigBinding names how the launch binds its config into HOST_DATA.
+	// Artifact.Resolve turns it into a HostData; assembly refuses a policy
+	// that still carries one.
+	ConfigBinding                  string  `json:"config_binding,omitempty"`
+	ImageID                        string  `json:"image_id"`
+	FamilyID                       string  `json:"family_id"`
+	RequireAuthorKey               bool    `json:"require_author_key,omitempty"`
+	RequireIDBlock                 bool    `json:"require_id_block,omitempty"`
+	MinimumLaunchMitigationVector  *uint64 `json:"minimum_launch_mitigation_vector"`
+	MinimumCurrentMitigationVector *uint64 `json:"minimum_current_mitigation_vector"`
 }
 
 // Validate rejects a block with any absent required member or an
@@ -48,8 +55,12 @@ func (p *SEVSNPPolicy) Validate() error {
 		return fmt.Errorf("vmpl is required")
 	case *p.VMPL < 0 || *p.VMPL > 3:
 		return fmt.Errorf("vmpl must be between 0 and 3")
-	case p.HostData == "":
-		return fmt.Errorf("host_data is required")
+	case p.HostData == "" && p.ConfigBinding == "":
+		return fmt.Errorf("exactly one of host_data and config_binding is required")
+	case p.HostData != "" && p.ConfigBinding != "":
+		return fmt.Errorf("host_data and config_binding are mutually exclusive")
+	case p.ConfigBinding != "" && p.ConfigBinding != ConfigBindingSHA256:
+		return fmt.Errorf("unsupported config_binding %q", p.ConfigBinding)
 	case p.ImageID == "":
 		return fmt.Errorf("image_id is required")
 	case p.FamilyID == "":
@@ -81,6 +92,9 @@ func (p *SEVSNPPolicy) Validate() error {
 		"image_id":  {p.ImageID, 16},
 		"family_id": {p.FamilyID, 16},
 	} {
+		if name == "host_data" && p.ConfigBinding != "" {
+			continue
+		}
 		if err := validatePolicyHex(name, field.value, field.byteLen); err != nil {
 			return err
 		}

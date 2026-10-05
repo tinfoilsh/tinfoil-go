@@ -28,9 +28,6 @@ func Assemble(a *policy.Artifact, p *policy.TDXPolicy, required *policy.Shape, q
 	if a == nil || p == nil {
 		return nil, "", &errs.ConfigurationError{Err: fmt.Errorf("endorsements and TDX policy are required")}
 	}
-	if required == nil {
-		return nil, "", &errs.ConfigurationError{Err: fmt.Errorf("VM shape is required")}
-	}
 	if q == nil || q.quote == nil {
 		return nil, "", &errs.ConfigurationError{Err: fmt.Errorf("authenticated TDX quote is required")}
 	}
@@ -38,15 +35,30 @@ func Assemble(a *policy.Artifact, p *policy.TDXPolicy, required *policy.Shape, q
 	if err != nil {
 		return nil, "", err
 	}
-	body := q.quote.GetTdQuoteBody()
-	name, m, err := a.ResolvePlatformMeasurement(p, required,
-		hex.EncodeToString(body.GetMrTd()),
-		hex.EncodeToString(body.GetRtmrs()[0]))
-	if err != nil {
-		return nil, "", err
+	// A shape-independent image supplies all five registers itself, so there
+	// is no measurements-map entry to select and no VM shape to match. Only
+	// a policy that still enumerates platform measurements needs either.
+	if len(p.PlatformMeasurements) > 0 {
+		if required == nil {
+			return nil, "", &errs.ConfigurationError{Err: fmt.Errorf("VM shape is required")}
+		}
+		body := q.quote.GetTdQuoteBody()
+		var m *policy.PlatformMeasurement
+		name, m, err = a.ResolvePlatformMeasurement(p, required,
+			hex.EncodeToString(body.GetMrTd()),
+			hex.EncodeToString(body.GetRtmrs()[0]))
+		if err != nil {
+			return nil, "", err
+		}
+		registers[0] = cmp.Or(registers[0], m.MRTD)
+		registers[1] = cmp.Or(registers[1], m.RTMR0)
+	} else if registers[0] == "" || registers[1] == "" {
+		// A policy naming no platform measurement is appraising an image
+		// that fixes MRTD and RTMR0 itself. Reference values that do not
+		// supply them leave both unconstrained, so say so here rather than
+		// let the hex decode below report an empty string.
+		return nil, "", fmt.Errorf("policy names no platform measurement and the reference values supply no MRTD or RTMR0")
 	}
-	registers[0] = cmp.Or(registers[0], m.MRTD)
-	registers[1] = cmp.Or(registers[1], m.RTMR0)
 	registers[4] = cmp.Or(registers[4], measurement.RTMR3_ZERO)
 	var decoded [5][]byte
 	for i, label := range [5]string{"mrtd", "rtmr0", "rtmr1", "rtmr2", "rtmr3"} {
@@ -90,6 +102,9 @@ func options(p *policy.TDXPolicy) (*tdxvalidate.Options, error) {
 	if err := p.Validate(); err != nil {
 		return nil, err
 	}
+	if p.ConfigBinding != "" {
+		return nil, fmt.Errorf("policy declares config_binding %q and was never resolved against a config", p.ConfigBinding)
+	}
 	qeVendor, err := policy.DecodeHex("qe_vendor_id", p.QEVendorID, 16)
 	if err != nil {
 		return nil, err
@@ -111,8 +126,16 @@ func options(p *policy.TDXPolicy) (*tdxvalidate.Options, error) {
 		return nil, err
 	}
 
-	// MR_CONFIG_ID, MR_OWNER, and MR_OWNER_CONFIG are unconditionally
-	// pinned to zero: Tinfoil launches never populate them.
+	// MR_OWNER and MR_OWNER_CONFIG are unconditionally pinned to zero:
+	// Tinfoil launches never populate them. MR_CONFIG_ID is zero too unless
+	// the policy was resolved against a config binding, which sets it to the
+	// config digest.
+	mrConfigID := make([]byte, 48)
+	if p.MRConfigID != "" {
+		if mrConfigID, err = policy.DecodeHex("mr_config_id", p.MRConfigID, 48); err != nil {
+			return nil, err
+		}
+	}
 	// The QE and PCE security versions are enforced by quote verification
 	// against Intel's signed QE Identity and TCB Info collateral; the
 	// library's header minimums compare reserved header bytes (pinned to
@@ -126,7 +149,7 @@ func options(p *policy.TDXPolicy) (*tdxvalidate.Options, error) {
 			MrSeam:           mrSeam,
 			TdAttributes:     tdAttributes,
 			Xfam:             xfam,
-			MrConfigID:       make([]byte, 48),
+			MrConfigID:       mrConfigID,
 			MrOwner:          make([]byte, 48),
 			MrOwnerConfig:    make([]byte, 48),
 		},
