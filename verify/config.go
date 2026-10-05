@@ -1,6 +1,7 @@
 package verify
 
 import (
+	"cmp"
 	"crypto/sha256"
 	"fmt"
 	"time"
@@ -8,6 +9,7 @@ import (
 	"github.com/tinfoilsh/tinfoil-go/document"
 	"github.com/tinfoilsh/tinfoil-go/internal/canonical"
 	"github.com/tinfoilsh/tinfoil-go/tinfoil-config/endorsement"
+	"github.com/tinfoilsh/tinfoil-go/verify/internal/provenance"
 )
 
 // runtimeRepo publishes the measured IGVM images. It is pinned here rather
@@ -26,6 +28,17 @@ type ConfigPin struct {
 	AuditScope string
 	Revision   string
 	Digest     string
+	// Runtime optionally pins which cvmimage release this caller accepts, in
+	// VerifyV3's owner/name[@tag][@sha256:digest] grammar. Empty accepts
+	// whichever release the document names, bounded only by its freshness
+	// witness.
+	//
+	// This is the caller asserting what it expects, so it binds only for
+	// callers that set it. A pin inside the signed config would bind for
+	// everyone; that was deliberately not taken, because it would require
+	// every config to adopt the @sha256: form and be re-approved on every
+	// runtime upgrade.
+	Runtime string
 }
 
 // Validate reports whether the pin is usable.
@@ -44,6 +57,15 @@ func (p ConfigPin) Validate() error {
 	if p.Digest != "" {
 		if _, err := canonical.DecodeLowerHex("config digest pin", p.Digest, sha256.Size); err != nil {
 			return err
+		}
+	}
+	if p.Runtime != "" {
+		repo, _, _, err := provenance.ParseReference(p.Runtime)
+		if err != nil {
+			return err
+		}
+		if repo != runtimeRepo {
+			return fmt.Errorf("runtime pin names repository %q, want %q", repo, runtimeRepo)
 		}
 	}
 	return nil
@@ -82,7 +104,9 @@ func (v *Verifier) configReferences(doc *document.Document, pin ConfigPin, appra
 	if err != nil {
 		return nil, fmt.Errorf("verifying config approval: %w", err)
 	}
-	refs, err := v.codeReferences(doc, runtimeRepo, appraisalTime)
+	// A pin in the reference takes precedence over the document's tag and
+	// digest hints, which is AuthenticateCode's existing rule.
+	refs, err := v.codeReferences(doc, cmp.Or(pin.Runtime, runtimeRepo), appraisalTime)
 	if err != nil {
 		return nil, err
 	}

@@ -1,10 +1,12 @@
 package verify
 
 import (
+	"cmp"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
 	"encoding/base64"
+	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"strings"
 	"testing"
@@ -164,4 +166,78 @@ func TestRuntimeFreshnessIsTheCodeWitness(t *testing.T) {
 	_, err = v.witness(doc, collateral.FreshnessIDCode, &provenance.AuthenticatedArtifact{}, time.Now(), "code")
 	require.ErrorIs(t, err, collateral.ErrNotFound)
 	require.ErrorContains(t, err, collateral.FreshnessIDCode)
+}
+
+// A caller may pin which cvmimage release it accepts. Validation keeps the pin
+// to that one repository, so it can narrow which release is acceptable but
+// never redirect the runtime somewhere else.
+func TestConfigPinRuntimeValidate(t *testing.T) {
+	for _, runtime := range []string{
+		"tinfoilsh/cvmimage",
+		"tinfoilsh/cvmimage@v0.15.0-rc6",
+		"tinfoilsh/cvmimage@sha256:" + strings.Repeat("ab", 32),
+		"tinfoilsh/cvmimage@v0.15.0-rc6@sha256:" + strings.Repeat("ab", 32),
+	} {
+		pin := testPin()
+		pin.Runtime = runtime
+		require.NoError(t, pin.Validate(), runtime)
+	}
+	for _, tt := range []struct{ name, runtime, wantErr string }{
+		{"another repository", "evil/cvmimage", "want \"tinfoilsh/cvmimage\""},
+		{"a fork", "tinfoilsh/cvmimage-fork", "want \"tinfoilsh/cvmimage\""},
+		{"not a reference", "not a repo", "invalid release reference"},
+		{"no owner", "cvmimage", "invalid release reference"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			pin := testPin()
+			pin.Runtime = tt.runtime
+			require.ErrorContains(t, pin.Validate(), tt.wantErr)
+		})
+	}
+}
+
+// An unset pin leaves the reference the constant, so no existing caller
+// changes behaviour; a set one replaces it and reaches AuthenticateCode, whose
+// own rule is that a pinned tag and digest beat the document's hints. That
+// rule, including rejecting a release the pin does not name, is covered
+// against a real signed bundle by provenance's TestAuthenticateCode.
+//
+// What is checked here is that the reference codeReferences is given is the
+// one AuthenticateCode enforces, digest pin and all. The real
+// platform-endorsements bundle stands in for a code artifact, under its own
+// repository because the signing identity is keyed on it: with no digest pin
+// it gets as far as its predicate being the wrong kind, and with one naming a
+// digest it does not carry it is refused before that.
+func TestRuntimeReferenceReachesAuthenticateCode(t *testing.T) {
+	v, err := NewVerifier(WithConfigSigningKeys([]endorsement.SigningKey{testSigningKey(t)}))
+	require.NoError(t, err)
+	bundle := igvmFixture(t, "platform-bundle.json")
+	const platformRepo = "tinfoilsh/platform-endorsements"
+	data, err := json.Marshal(map[string]any{
+		"repo": platformRepo, "tag": realPlatformTag, "digest": realPlatformSHA,
+		"sigstore_bundle": jsontext.Value(bundle),
+	})
+	require.NoError(t, err)
+	docBytes, nonce := buildIGVMDocument(t, []collateral.Entry{{
+		ID: "code", Role: collateral.RoleReferenceValues,
+		Format: collateral.SigstoreCodeV1Format, Data: data,
+	}})
+	doc, err := document.Parse(docBytes, nonce)
+	require.NoError(t, err)
+
+	_, unpinned := v.codeReferences(doc, platformRepo, time.Now())
+	require.ErrorContains(t, unpinned, "unsupported predicate type",
+		"the document's own digest verified, so appraisal reached the predicate")
+
+	_, pinned := v.codeReferences(doc, platformRepo+"@sha256:"+strings.Repeat("cd", 32), time.Now())
+	require.ErrorContains(t, pinned, "verifying bundle",
+		"the pinned digest replaced the document's and was refused first")
+}
+
+// An unset pin must leave the reference exactly the constant, so no caller
+// written before the pin existed changes behaviour.
+func TestConfigPinRuntimeDefaultsToTheConstant(t *testing.T) {
+	assert.Empty(t, testPin().Runtime)
+	assert.Equal(t, runtimeRepo, cmp.Or(testPin().Runtime, runtimeRepo))
+	assert.Equal(t, "tinfoilsh/cvmimage", runtimeRepo)
 }
