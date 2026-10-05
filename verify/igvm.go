@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/tinfoilsh/tinfoil-go/document"
+	"github.com/tinfoilsh/tinfoil-go/document/collateral"
 	"github.com/tinfoilsh/tinfoil-go/internal/errs"
 	"github.com/tinfoilsh/tinfoil-go/tinfoil-config/endorsement"
 	"github.com/tinfoilsh/tinfoil-go/verify/internal/igvm"
@@ -90,12 +91,16 @@ func (v *Verifier) verifyIGVM(docBytes, nonce []byte, policy ConfigPolicy) (resu
 	if err != nil {
 		return nil, layerProvenance, err
 	}
-	platform, platformApprovedAt, err := v.authenticatePlatform(doc, platformCollateral, now)
+	platform, err := v.provenance.AuthenticatePlatformEndorsements(platformCollateral.Bundle, platformCollateral.Repo, platformCollateral.Tag, platformCollateral.Digest)
 	if err != nil {
 		return nil, layerProvenance, err
 	}
 	if platform.SubjectName != igvm.PlatformSubject {
 		return nil, layerProvenance, fmt.Errorf("IGVM requires its dedicated platform endorsement artifact")
+	}
+	platformApprovedAt, err := v.authenticateFreshness(doc, collateral.FreshnessIDPlatform, &platform.AuthenticatedArtifact, now)
+	if err != nil {
+		return nil, layerProvenance, fmt.Errorf("verifying platform freshness: %w", err)
 	}
 	authenticated, err := quote.Authenticate(doc.CPUEvidence(), doc.CPUEndorsements(), v.quoteOptions(now))
 	if err != nil {

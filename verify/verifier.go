@@ -195,7 +195,7 @@ func (v *Verifier) authenticateReferenceValues(doc *document.Document, repo stri
 	if err != nil {
 		return nil, nil, time.Time{}, err
 	}
-	endorsements, platformWitnessedAt, err := v.authenticatePlatform(doc, platformRef, appraisalTime)
+	endorsements, err := v.provenance.AuthenticatePlatformEndorsements(platformRef.Bundle, platformRef.Repo, platformRef.Tag, platformRef.Digest)
 	if err != nil {
 		return nil, nil, time.Time{}, fmt.Errorf("verifying platform endorsements: %w", err)
 	}
@@ -203,31 +203,23 @@ func (v *Verifier) authenticateReferenceValues(doc *document.Document, repo stri
 		return code, endorsements, time.Time{}, nil
 	}
 
-	codeFreshness, err := doc.Freshness(collateral.FreshnessIDCode)
-	if err != nil {
-		return nil, nil, time.Time{}, err
-	}
-	codeWitnessedAt, err := v.provenance.AuthenticateFreshness(codeFreshness.Bundle, &code.AuthenticatedArtifact, appraisalTime, v.freshnessMaxAge)
+	codeWitnessedAt, err := v.authenticateFreshness(doc, collateral.FreshnessIDCode, &code.AuthenticatedArtifact, appraisalTime)
 	if err != nil {
 		return nil, nil, time.Time{}, fmt.Errorf("verifying code freshness: %w", err)
+	}
+	platformWitnessedAt, err := v.authenticateFreshness(doc, collateral.FreshnessIDPlatform, &endorsements.AuthenticatedArtifact, appraisalTime)
+	if err != nil {
+		return nil, nil, time.Time{}, fmt.Errorf("verifying platform freshness: %w", err)
 	}
 	return code, endorsements, freshnessExpiration(codeWitnessedAt, platformWitnessedAt, v.freshnessMaxAge), nil
 }
 
-func (v *Verifier) authenticatePlatform(doc *document.Document, ref collateral.SigstoreRef, now time.Time) (*provenance.PlatformEndorsements, time.Time, error) {
-	platform, err := v.provenance.AuthenticatePlatformEndorsements(ref.Bundle, ref.Repo, ref.Tag, ref.Digest)
-	if err != nil || v.ignoreFreshness {
-		return platform, time.Time{}, err
-	}
-	freshness, err := doc.Freshness(collateral.FreshnessIDPlatform)
+func (v *Verifier) authenticateFreshness(doc *document.Document, id string, artifact *provenance.AuthenticatedArtifact, now time.Time) (time.Time, error) {
+	freshness, err := doc.Freshness(id)
 	if err != nil {
-		return nil, time.Time{}, err
+		return time.Time{}, err
 	}
-	approvedAt, err := v.provenance.AuthenticateFreshness(freshness.Bundle, &platform.AuthenticatedArtifact, now, v.freshnessMaxAge)
-	if err != nil {
-		return nil, time.Time{}, fmt.Errorf("verifying platform freshness: %w", err)
-	}
-	return platform, approvedAt, nil
+	return v.provenance.AuthenticateFreshness(freshness.Bundle, artifact, now, v.freshnessMaxAge)
 }
 
 // freshnessExpiration uses authenticated witness times, never local verification time.
