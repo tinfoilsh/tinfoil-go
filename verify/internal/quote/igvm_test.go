@@ -16,7 +16,7 @@ func TestIGVMRuntimePinsCannotOverrideMeasurements(t *testing.T) {
 	pins := &measurement.Measurement{Type: measurement.TdxGuestV2, Registers: []string{"", "", strings.ToUpper(register), "", ""}}
 	got, err := applyPins(runtime.Registers, runtime.Type, pins)
 	require.NoError(t, err)
-	require.Equal(t, runtime.Registers, got)
+	require.Equal(t, []string{register, register, register, register, register}, got)
 	pins.Registers[2] = strings.Repeat("cd", igvm.MeasurementSize)
 	_, err = applyPins(runtime.Registers, runtime.Type, pins)
 	require.ErrorContains(t, err, "does not match")

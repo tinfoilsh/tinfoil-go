@@ -5,10 +5,10 @@
 // language-neutral wire contract below. Every SDK implements the same
 // Input/Output shapes and exit codes so the suite drives them identically.
 //
-// The full-verify stage is one Verifier.VerifyV3WithLayer call, so the shared
-// fixtures appraise exactly the code production runs; the layer it reports
-// names the rejection. The block stages isolate a single layer by calling into
-// the document, provenance and quote packages the verifier uses.
+// The full-verify stage calls Verifier.VerifyV3WithLayer or VerifyIGVMWithLayer
+// according to the fixture's profile, so shared fixtures appraise exactly the
+// code production runs; the reported layer names the rejection. The block stages
+// isolate a single layer through the document, provenance and quote packages.
 //
 // Synthetic roots and the appraisal clock travel as ordinary per-call options,
 // so the adapter mutates no production state.
