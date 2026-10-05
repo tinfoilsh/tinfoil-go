@@ -10,9 +10,11 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"crypto/x509"
+	"crypto/x509/pkix"
 	"encoding/asn1"
 	"encoding/hex"
 	"encoding/json/jsontext"
+	"math/big"
 	"testing"
 	"time"
 
@@ -26,7 +28,6 @@ import (
 	rekornote "github.com/sigstore/rekor-tiles/v2/pkg/note"
 	"github.com/sigstore/rekor-tiles/v2/pkg/types/hashedrekord"
 	"github.com/sigstore/sigstore-go/pkg/root"
-	"github.com/sigstore/sigstore-go/pkg/testing/ca"
 	"github.com/sigstore/sigstore/pkg/signature"
 	"github.com/stretchr/testify/require"
 	"github.com/tinfoilsh/tinfoil-go/internal/approval"
@@ -68,14 +69,34 @@ func New(t *testing.T) *Fixture {
 		return key
 	}
 	f := &Fixture{Key: newKey(), LogKey: newKey(), TSAKey: newKey(), Now: time.Now().UTC().Truncate(time.Second)}
-	rootCert, rootKey, err := ca.GenerateRootCa()
+	createCert := func(template, parent *x509.Certificate, key *ecdsa.PublicKey, signer *ecdsa.PrivateKey) *x509.Certificate {
+		der, err := x509.CreateCertificate(rand.Reader, template, parent, key, signer)
+		require.NoError(t, err)
+		cert, err := x509.ParseCertificate(der)
+		require.NoError(t, err)
+		return cert
+	}
+	const rootSerial, leafSerial = 1, 2
+	rootKey := newKey()
+	rootTemplate := &x509.Certificate{
+		SerialNumber: big.NewInt(rootSerial), Subject: pkix.Name{CommonName: "test timestamp root"},
+		NotBefore: f.Now.Add(-time.Hour), NotAfter: f.Now.Add(time.Hour),
+		KeyUsage: x509.KeyUsageCertSign, BasicConstraintsValid: true, IsCA: true,
+	}
+	rootCert := createCert(rootTemplate, rootTemplate, &rootKey.PublicKey, rootKey)
+	ekuOID := asn1.ObjectIdentifier{2, 5, 29, 37}
+	timestampingOID := asn1.ObjectIdentifier{1, 3, 6, 1, 5, 5, 7, 3, 8}
+	eku, err := asn1.Marshal([]asn1.ObjectIdentifier{timestampingOID})
 	require.NoError(t, err)
-	intermediate, intermediateKey, err := ca.GenerateTSAIntermediate(rootCert, rootKey)
-	require.NoError(t, err)
-	leaf, err := ca.GenerateTSALeafCert(f.Now.Add(-time.Minute), f.TSAKey, intermediate, intermediateKey)
-	require.NoError(t, err)
+	leafTemplate := &x509.Certificate{
+		SerialNumber: big.NewInt(leafSerial), Subject: pkix.Name{CommonName: "test timestamp signer"},
+		NotBefore: f.Now.Add(-time.Minute), NotAfter: f.Now.Add(time.Hour),
+		KeyUsage:        x509.KeyUsageDigitalSignature,
+		ExtraExtensions: []pkix.Extension{{Id: ekuOID, Critical: true, Value: eku}},
+	}
+	leaf := createCert(leafTemplate, rootCert, &f.TSAKey.PublicKey, rootKey)
 	f.Trust.TSA = &root.SigstoreTimestampingAuthority{
-		Root: rootCert, Intermediates: []*x509.Certificate{intermediate}, Leaf: leaf,
+		Root: rootCert, Leaf: leaf,
 		URI: "https://tsa.test.invalid", ValidityPeriodStart: f.Now.Add(-time.Hour),
 	}
 	logDER, err := x509.MarshalPKIXPublicKey(f.LogKey.Public())
