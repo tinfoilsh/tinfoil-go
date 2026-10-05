@@ -139,6 +139,7 @@ func TestRequestErrorsLeadWithCategory(t *testing.T) {
 		_, err = client.Request("GET", "/", "", nil)
 		require.Error(t, err)
 		assert.True(t, strings.HasPrefix(err.Error(), FetchErrorPrefix), err.Error())
+		assert.NotContains(t, err.Error(), FetchErrorPrefix+FetchErrorPrefix)
 	})
 }
 
