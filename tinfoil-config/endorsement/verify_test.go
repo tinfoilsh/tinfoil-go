@@ -220,6 +220,26 @@ func TestVerifyConfigApproval(t *testing.T) {
 	require.NoError(t, err)
 }
 
+func TestPolicyValidatePins(t *testing.T) {
+	policy := endorsement.Policy{Identity: testIdentity, AuditScope: testScope}
+	require.NoError(t, policy.ValidatePins())
+	policy.Revision = "v0.0.155"
+	policy.Digest = strings.Repeat("ab", sha256.Size)
+	require.NoError(t, policy.ValidatePins())
+	for name, mutate := range map[string]func(*endorsement.Policy){
+		"identity": func(p *endorsement.Policy) { p.Identity = "/tinfoil" },
+		"scope":    func(p *endorsement.Policy) { p.AuditScope = "invalid" },
+		"revision": func(p *endorsement.Policy) { p.Revision = "../v1" },
+		"digest":   func(p *endorsement.Policy) { p.Digest = strings.ToUpper(p.Digest) },
+	} {
+		t.Run(name, func(t *testing.T) {
+			invalid := policy
+			mutate(&invalid)
+			require.Error(t, invalid.ValidatePins())
+		})
+	}
+}
+
 func TestVerifyPreparedRequiresAuthenticatedApprovalBeforeLogging(t *testing.T) {
 	f := newFixture(t)
 	b := f.bundle(t, f.statement(t, f.now))

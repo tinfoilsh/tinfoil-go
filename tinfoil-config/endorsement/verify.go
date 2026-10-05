@@ -115,20 +115,28 @@ func (m scopedMaterial) PublicKeyVerifier(hint string) (root.TimeConstrainedVeri
 	return m.key, nil
 }
 
-func (p Policy) normalized() (Policy, error) {
+// ValidatePins checks config expectations independently of clock and freshness settings.
+func (p Policy) ValidatePins() error {
 	if err := ValidateIdentity(p.Identity); err != nil {
-		return p, err
+		return err
 	}
 	if err := ValidateAuditScope(p.AuditScope); err != nil {
-		return p, err
+		return err
 	}
 	if p.Revision != "" {
 		if _, _, err := ParseName(p.Identity + "/" + p.Revision); err != nil {
-			return p, err
+			return err
 		}
 	}
 	if p.Digest != "" && !digestPattern.MatchString(p.Digest) {
-		return p, fmt.Errorf("digest pin must be lowercase SHA-256")
+		return fmt.Errorf("digest pin must be lowercase SHA-256")
+	}
+	return nil
+}
+
+func (p Policy) normalized() (Policy, error) {
+	if err := p.ValidatePins(); err != nil {
+		return p, err
 	}
 	if (p.Now.IsZero() && !p.IgnoreFreshness) || p.MaxAge < 0 || p.FutureSkew < 0 {
 		return p, fmt.Errorf("clock and nonnegative age and skew are required")
