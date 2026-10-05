@@ -3,12 +3,14 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"os"
 
 	"github.com/tinfoilsh/tinfoil-go/document"
+	"github.com/tinfoilsh/tinfoil-go/internal/fetch"
 	"github.com/tinfoilsh/tinfoil-go/verify"
 	"github.com/tinfoilsh/tinfoil-go/verify/conformance"
 )
@@ -47,7 +49,7 @@ func runLive() int {
 		fmt.Fprintf(os.Stderr, "nonce: %v\n", err)
 		return conformance.ExitInternal
 	}
-	doc, err := document.Fetch(req.Host, nonce)
+	doc, err := fetch.Document(context.Background(), req.Host, "", nonce)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "fetching attestation from %s: %v\n", req.Host, err)
 		return conformance.ExitInternal

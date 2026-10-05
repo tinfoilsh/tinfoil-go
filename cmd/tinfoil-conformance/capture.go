@@ -3,6 +3,7 @@
 package main
 
 import (
+	"context"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
@@ -12,6 +13,7 @@ import (
 	"time"
 
 	"github.com/tinfoilsh/tinfoil-go/document"
+	"github.com/tinfoilsh/tinfoil-go/internal/fetch"
 	"github.com/tinfoilsh/tinfoil-go/verify/conformance"
 )
 
@@ -40,7 +42,7 @@ func runCapture(args []string) int {
 		return conformance.ExitMalformed
 	}
 
-	doc, err := document.Fetch(*host, nonce)
+	doc, err := fetch.Document(context.Background(), *host, "", nonce)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "fetching attestation from %s: %v\n", *host, err)
 		return conformance.ExitInternal
