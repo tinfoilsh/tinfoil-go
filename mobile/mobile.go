@@ -14,11 +14,13 @@ import (
 	"encoding/json"
 
 	"github.com/tinfoilsh/tinfoil-go/enclave"
+	"github.com/tinfoilsh/tinfoil-go/internal/sdkinfo"
 	"github.com/tinfoilsh/tinfoil-go/verify"
 )
 
-// Version is the Tinfoil SDK version.
-const Version = enclave.Version
+// Version reports the SDK version from the framework's build information. A
+// framework bound from a source checkout carries none, so it reports "devel".
+func Version() string { return sdkinfo.Version() }
 
 // Client verifies an enclave and reports what it proved. It wraps the SDK's
 // own client, which is not itself bound.

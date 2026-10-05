@@ -6,11 +6,6 @@ import (
 	"github.com/tinfoilsh/tinfoil-go/verify/measurement"
 )
 
-const (
-	// Version is the Tinfoil Go SDK release version.
-	Version = "0.16.1"
-)
-
 func cloneMeasurement(value *measurement.Measurement) *measurement.Measurement {
 	if value == nil {
 		return nil
