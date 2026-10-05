@@ -82,3 +82,8 @@ func (v *Verifier) VerifyV3WithLayer(docBytes, nonce []byte, repo string) (*Veri
 	verified, layer, err := v.verifyV3(docBytes, nonce, repo)
 	return verified, string(layer), err
 }
+
+func (v *Verifier) VerifyIGVMWithLayer(docBytes, nonce []byte, policy ConfigPolicy) (*Verification, string, error) {
+	verified, layer, err := v.verifyIGVM(docBytes, nonce, policy)
+	return verified, string(layer), err
+}
