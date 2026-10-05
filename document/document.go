@@ -462,6 +462,16 @@ func sigstoreRef(ref *collateral.SigstoreRef, format string) (collateral.Sigstor
 	return ref.Clone(), nil
 }
 
+// ConfigEndorsement returns the config-endorsement entry: the exact config
+// bytes and the registry approval bundle. A document without one returns an
+// error wrapping collateral.ErrNotFound.
+func (d *Document) ConfigEndorsement() (collateral.ConfigEndorsement, error) {
+	if d.collateral.Config == nil {
+		return collateral.ConfigEndorsement{}, fmt.Errorf("%w: document carries no %s reference-values entry", collateral.ErrNotFound, collateral.ConfigEndorsementV1Format)
+	}
+	return d.collateral.Config.Clone(), nil
+}
+
 // Freshness returns the freshness witness with the given collateral ID, such
 // as collateral.FreshnessIDCode. A document without it returns an error
 // wrapping collateral.ErrNotFound.

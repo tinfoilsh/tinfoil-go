@@ -34,7 +34,7 @@ const (
 	// reference-values artifact.
 	SigstoreFreshnessV1Format = "https://tinfoil.sh/collateral/sigstore-freshness/v1"
 	// ConfigEndorsementV1Format carries an exact config and its timestamped
-	// registry approval bundle.
+	// registry approval bundle {config_base64, sigstore_bundle}.
 	ConfigEndorsementV1Format = "https://tinfoil.sh/collateral/config-endorsement/v1"
 )
 
@@ -89,6 +89,9 @@ type Set struct {
 	CPU              CPUEndorsements
 	SigstoreCode     *SigstoreRef
 	SigstorePlatform *SigstoreRef
+	// Config is the registry approval of the exact config bound into the
+	// launch register.
+	Config *ConfigEndorsement
 	// Freshness holds the freshness witnesses by entry ID.
 	Freshness map[string]Freshness
 }
@@ -96,8 +99,7 @@ type Set struct {
 // Decode checks the entries' shape and decodes every entry of a known role and
 // format, so a malformed entry fails whether or not verification would read
 // it. An entry whose role and format have no decoder (an unknown format, a
-// known format under another role, or ConfigEndorsementV1Format until a
-// consumer defines its payload) is checked for shape only and not retained.
+// known format under another role) is checked for shape only and not retained.
 // An endorsement entry serves the CPU only when its subjects include
 // SubjectCPU.
 func Decode(entries []Entry) (Set, error) {
@@ -148,6 +150,14 @@ func Decode(entries []Entry) (Set, error) {
 			}
 			if set.SigstorePlatform == nil {
 				set.SigstorePlatform = v
+			}
+		case entry.Role == RoleReferenceValues && entry.Format == ConfigEndorsementV1Format:
+			v, err := decodeConfigEndorsement(entry)
+			if err != nil {
+				return set, err
+			}
+			if set.Config == nil {
+				set.Config = v
 			}
 		case entry.Role == RoleReferenceValues && entry.Format == SigstoreFreshnessV1Format:
 			f, err := decodeFreshness(entry)
