@@ -195,7 +195,7 @@ func (v *Verifier) authenticateReferenceValues(doc *document.Document, repo stri
 	if err != nil {
 		return nil, nil, time.Time{}, err
 	}
-	endorsements, err := v.provenance.AuthenticatePlatformEndorsements(platformRef.Bundle, platformRef.Repo, platformRef.Tag, platformRef.Digest)
+	endorsements, platformWitnessedAt, err := v.authenticatePlatform(doc, platformRef, appraisalTime)
 	if err != nil {
 		return nil, nil, time.Time{}, fmt.Errorf("verifying platform endorsements: %w", err)
 	}
@@ -211,16 +211,23 @@ func (v *Verifier) authenticateReferenceValues(doc *document.Document, repo stri
 	if err != nil {
 		return nil, nil, time.Time{}, fmt.Errorf("verifying code freshness: %w", err)
 	}
-	platformFreshness, err := doc.Freshness(collateral.FreshnessIDPlatform)
-	if err != nil {
-		return nil, nil, time.Time{}, err
-	}
-	platformWitnessedAt, err := v.provenance.AuthenticateFreshness(platformFreshness.Bundle, &endorsements.AuthenticatedArtifact, appraisalTime, v.freshnessMaxAge)
-	if err != nil {
-		return nil, nil, time.Time{}, fmt.Errorf("verifying platform freshness: %w", err)
-	}
-
 	return code, endorsements, freshnessExpiration(codeWitnessedAt, platformWitnessedAt, v.freshnessMaxAge), nil
+}
+
+func (v *Verifier) authenticatePlatform(doc *document.Document, ref collateral.SigstoreRef, now time.Time) (*provenance.PlatformEndorsements, time.Time, error) {
+	platform, err := v.provenance.AuthenticatePlatformEndorsements(ref.Bundle, ref.Repo, ref.Tag, ref.Digest)
+	if err != nil || v.ignoreFreshness {
+		return platform, time.Time{}, err
+	}
+	freshness, err := doc.Freshness(collateral.FreshnessIDPlatform)
+	if err != nil {
+		return nil, time.Time{}, err
+	}
+	approvedAt, err := v.provenance.AuthenticateFreshness(freshness.Bundle, &platform.AuthenticatedArtifact, now, v.freshnessMaxAge)
+	if err != nil {
+		return nil, time.Time{}, fmt.Errorf("verifying platform freshness: %w", err)
+	}
+	return platform, approvedAt, nil
 }
 
 // freshnessExpiration uses authenticated witness times, never local verification time.
