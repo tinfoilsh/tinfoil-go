@@ -17,9 +17,6 @@ import (
 	"github.com/tinfoilsh/tinfoil-go/verify"
 )
 
-// Version is the Tinfoil SDK version.
-const Version = enclave.Version
-
 // Client verifies an enclave and reports what it proved. It wraps the SDK's
 // own client, which is not itself bound.
 type Client struct {
@@ -36,9 +33,11 @@ func NewClient(host, repo string) (*Client, error) {
 	return &Client{inner: inner}, nil
 }
 
-// NewClientWithOptions is NewClient with a policy, as the JSON object
-// enclave.Options describes: pinned registers and a freshness bound, the
-// latter in integer nanoseconds. An empty string selects the default policy.
+// NewClientWithOptions is NewClient with options, as the JSON object
+// enclave.Options describes: pinned registers, a freshness bound in integer
+// nanoseconds, and the identity of the SDK built on this one, such as
+// {"name":"tinfoil-swift","version":"0.8.2"}. An empty string selects the
+// defaults.
 func NewClientWithOptions(host, repo, optionsJSON string) (*Client, error) {
 	if optionsJSON == "" {
 		return NewClient(host, repo)

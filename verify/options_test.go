@@ -9,6 +9,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/tinfoilsh/tinfoil-go/internal/errs"
+	"github.com/tinfoilsh/tinfoil-go/internal/sdkinfo"
 	"github.com/tinfoilsh/tinfoil-go/verify/internal/provenance"
 	"github.com/tinfoilsh/tinfoil-go/verify/measurement"
 )
@@ -103,4 +104,19 @@ func TestVerifyV3RejectsUnbuiltVerifier(t *testing.T) {
 			require.ErrorContains(t, err, "verifier must be built with NewVerifier")
 		})
 	}
+}
+
+func TestWithSoftwareIdentity(t *testing.T) {
+	v, err := NewVerifier()
+	require.NoError(t, err)
+	assert.Equal(t, SoftwareIdentity{Name: sdkinfo.Name, Version: sdkinfo.Version()}, v.Identity())
+
+	swift := SoftwareIdentity{Name: "tinfoil-swift", Version: "0.8.2"}
+	v, err = NewVerifier(WithSoftwareIdentity(swift))
+	require.NoError(t, err)
+	assert.Equal(t, swift, v.Identity())
+
+	_, err = NewVerifier(WithSoftwareIdentity(SoftwareIdentity{Version: "0.8.2"}))
+	var config *errs.ConfigurationError
+	require.ErrorAs(t, err, &config)
 }

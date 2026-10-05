@@ -30,7 +30,8 @@ func (s *Handle) fetchVerification() (*verify.Verification, error) {
 	}
 	// One refresh serves every waiting request, so no single caller's context
 	// applies; fetch.Document still caps the request's duration.
-	docBytes, err := fetch.Document(context.Background(), s.enclave, s.relay, nonce)
+	sdk := s.verifier.Identity()
+	docBytes, err := fetch.Document(context.Background(), s.enclave, s.relay, nonce, fetch.SDK{Name: sdk.Name, Version: sdk.Version})
 	if err != nil {
 		return nil, err
 	}

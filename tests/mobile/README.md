@@ -18,7 +18,9 @@ method names would not notice a field going missing.
 
 `MobileNewClientWithOptions` takes the policy as a JSON object with
 `pinned_registers` and integer `freshness_max_age_ns`; an empty string selects
-the default policy.
+the default policy. Its `sdk` object, `{"name": "tinfoil-swift", "version": …}`,
+names the Swift SDK in attestation requests and verification metadata in place
+of `tinfoil-go`.
 
 V3 removes the old attestation-bundle discovery/verification APIs, and this
 framework renames the binding surface from `Client*` to `Mobile*`. Swift callers
