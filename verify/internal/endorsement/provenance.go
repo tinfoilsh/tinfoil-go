@@ -140,6 +140,10 @@ func (c *Client) verifyBundle(bundleJSON []byte, repo, hexDigest string) (*verif
 // verifyBundleWithIdentity verifies a Sigstore bundle against an explicit
 // signing certificate SAN regex and returns the original signed payload.
 func (c *Client) verifyBundleWithIdentity(bundleJSON []byte, sanRegex, hexDigest string) (*verify.VerificationResult, []byte, error) {
+	return c.verifyBundleForSubject(bundleJSON, sanRegex, hexDigest, "")
+}
+
+func (c *Client) verifyBundleForSubject(bundleJSON []byte, sanRegex, hexDigest, subjectName string) (*verify.VerificationResult, []byte, error) {
 	if c.trustRoot == nil {
 		return nil, nil, fmt.Errorf("trust root is not set")
 	}
@@ -213,7 +217,7 @@ func (c *Client) verifyBundleWithIdentity(bundleJSON []byte, sanRegex, hexDigest
 		return nil, nil, err
 	}
 
-	if err := enforceSubject0Digest(result, hexDigest); err != nil {
+	if err := enforceArtifactSubject(result, subjectName, hexDigest); err != nil {
 		return nil, nil, err
 	}
 
