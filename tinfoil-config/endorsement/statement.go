@@ -1,6 +1,4 @@
-// Package endorsement verifies registry config approvals. It does not establish
-// that an enclave runs the approved config; hardware and runtime binding remain
-// a separate verification step.
+// Package endorsement defines and constructs registry config endorsement statements.
 package endorsement
 
 import (
@@ -14,18 +12,18 @@ import (
 	"strings"
 	"uuid"
 
-	"github.com/tinfoilsh/tinfoil-go/internal/approval"
+	"github.com/tinfoilsh/tinfoil-go/internal/statement"
 )
 
 const (
-	StatementType    = approval.StatementType
+	StatementType    = statement.StatementType
 	PredicateType    = "https://tinfoil.sh/predicate/config-endorsement/v1"
-	PayloadType      = approval.PayloadType
-	BundleType       = approval.BundleType
+	PayloadType      = statement.PayloadType
+	BundleType       = statement.BundleType
 	MaxConfigSize    = 1 << 20
-	MaxBundleSize    = approval.MaxBundleSize
-	MaxStatementSize = approval.MaxStatementSize
-	MaxTimestampSize = approval.MaxTimestampSize
+	MaxBundleSize    = statement.MaxBundleSize
+	MaxStatementSize = statement.MaxStatementSize
+	MaxTimestampSize = statement.MaxTimestampSize
 
 	identityComponentCount = 2
 	maxSlugLength          = 63
@@ -69,7 +67,7 @@ func NewStatement(name, auditScope string, config []byte) (*Statement, error) {
 	digest := sha256.Sum256(config)
 	s := &Statement{
 		Type:          StatementType,
-		Subject:       []Subject{{Name: name, Digest: map[string]string{"sha256": hex.EncodeToString(digest[:])}}},
+		Subject:       []Subject{{Name: name, Digest: map[string]string{statement.DigestAlgorithm: hex.EncodeToString(digest[:])}}},
 		PredicateType: PredicateType,
 		Predicate:     Predicate{AuditScope: auditScope},
 	}
@@ -130,7 +128,7 @@ func (s *Statement) validate(requireTimestamp bool) error {
 	if _, _, err := ParseName(s.Subject[0].Name); err != nil {
 		return err
 	}
-	if len(s.Subject[0].Digest) != 1 || !digestPattern.MatchString(s.Subject[0].Digest["sha256"]) {
+	if len(s.Subject[0].Digest) != 1 || !digestPattern.MatchString(s.Subject[0].Digest[statement.DigestAlgorithm]) {
 		return fmt.Errorf("subject requires one lowercase SHA-256 digest")
 	}
 	if err := ValidateAuditScope(s.Predicate.AuditScope); err != nil {
@@ -153,7 +151,7 @@ func (s *Statement) TimestampInput() ([]byte, error) {
 	}
 	core := *s
 	core.Predicate.Freshness = nil
-	return approval.TimestampInput(freshnessDomain, core)
+	return statement.TimestampInput(freshnessDomain, core)
 }
 
 func (s *Statement) TimestampImprint() ([sha256.Size]byte, error) {
@@ -165,13 +163,13 @@ func (s *Statement) TimestampImprint() ([sha256.Size]byte, error) {
 }
 
 // Complete embeds a response over the prepared core. This checks its imprint,
-// not TSA trust; a completed bundle must still pass Verifier.Verify.
+// not TSA trust; the completed publication still requires verification.
 func (s *Statement) Complete(response []byte) ([]byte, error) {
 	input, err := s.TimestampInput()
 	if err != nil {
 		return nil, err
 	}
-	if _, err := approval.ParseTimestamp(response, input); err != nil {
+	if _, err := statement.ParseTimestamp(response, input); err != nil {
 		return nil, err
 	}
 	complete := *s
@@ -200,9 +198,9 @@ func EndorsementReference(payload []byte) (string, error) {
 	if _, err := ParseStatement(payload); err != nil {
 		return "", err
 	}
-	return approval.EndorsementReference(payload), nil
+	return statement.EndorsementReference(payload), nil
 }
 
 func KeyHint(publicKey crypto.PublicKey) (string, error) {
-	return approval.KeyHint(publicKey)
+	return statement.KeyHint(publicKey)
 }

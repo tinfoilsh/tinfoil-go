@@ -1,4 +1,4 @@
-package endorsement_test
+package provenance_test
 
 import (
 	"bytes"
@@ -17,8 +17,9 @@ import (
 	protobundle "github.com/sigstore/protobuf-specs/gen/pb-go/bundle/v1"
 	common "github.com/sigstore/protobuf-specs/gen/pb-go/common/v1"
 	"github.com/stretchr/testify/require"
-	"github.com/tinfoilsh/tinfoil-go/internal/approvaltest"
+	"github.com/tinfoilsh/tinfoil-go/internal/sigstoretest"
 	"github.com/tinfoilsh/tinfoil-go/tinfoil-config/endorsement"
+	"github.com/tinfoilsh/tinfoil-go/verify/internal/provenance"
 )
 
 const (
@@ -30,21 +31,21 @@ const (
 
 var testConfig = []byte("# Approved config bytes\nname: gpt-oss-120b\n")
 
-type fixture struct{ *approvaltest.Fixture }
+type fixture struct{ *sigstoretest.Fixture }
 
-func newFixture(t *testing.T) *fixture { return &fixture{approvaltest.New(t)} }
+func newFixture(t *testing.T) *fixture { return &fixture{sigstoretest.New(t)} }
 
-func (f *fixture) policy() endorsement.Policy {
-	return endorsement.Policy{Identity: testIdentity, AuditScope: testScope, Now: f.Now}
+func (f *fixture) policy() provenance.ConfigPolicy {
+	return provenance.ConfigPolicy{Identity: testIdentity, AuditScope: testScope, Now: f.Now}
 }
 
-func (f *fixture) signingKey() endorsement.SigningKey {
-	return endorsement.SigningKey{PublicKey: f.Key.Public(), AuditScope: testScope}
+func (f *fixture) signingKey() provenance.ConfigSigningKey {
+	return provenance.ConfigSigningKey{PublicKey: f.Key.Public(), AuditScope: testScope}
 }
 
-func (f *fixture) verifier(t *testing.T) *endorsement.Verifier {
+func (f *fixture) verifier(t *testing.T) *provenance.ConfigVerifier {
 	t.Helper()
-	v, err := endorsement.NewVerifier(&f.Trust, []endorsement.SigningKey{f.signingKey()})
+	v, err := provenance.NewConfigVerifier(&f.Trust, []provenance.ConfigSigningKey{f.signingKey()})
 	require.NoError(t, err)
 	return v
 }
@@ -64,7 +65,7 @@ func TestVerifyConfigApproval(t *testing.T) {
 	f := newFixture(t)
 	payload := f.statement(t, f.Now.Add(-time.Minute))
 	b := f.Bundle(t, payload)
-	got, err := f.verifier(t).Verify(testConfig, approvaltest.MarshalBundle(t, b), f.policy())
+	got, err := f.verifier(t).Verify(testConfig, sigstoretest.MarshalBundle(t, b), f.policy())
 	require.NoError(t, err)
 	require.Equal(t, testName, got.Name)
 	require.Equal(t, testScope, got.AuditScope)
@@ -76,21 +77,21 @@ func TestVerifyConfigApproval(t *testing.T) {
 	policy := f.policy()
 	policy.Revision = "v0.0.155"
 	policy.Digest = got.Digest
-	_, err = f.verifier(t).Verify(testConfig, approvaltest.MarshalBundle(t, b), policy)
+	_, err = f.verifier(t).Verify(testConfig, sigstoretest.MarshalBundle(t, b), policy)
 	require.NoError(t, err)
 }
 
 func TestPolicyValidatePins(t *testing.T) {
-	policy := endorsement.Policy{Identity: testIdentity, AuditScope: testScope}
+	policy := provenance.ConfigPolicy{Identity: testIdentity, AuditScope: testScope}
 	require.NoError(t, policy.ValidatePins())
 	policy.Revision = "v0.0.155"
 	policy.Digest = strings.Repeat("ab", sha256.Size)
 	require.NoError(t, policy.ValidatePins())
-	for name, mutate := range map[string]func(*endorsement.Policy){
-		"identity": func(p *endorsement.Policy) { p.Identity = "/tinfoil" },
-		"scope":    func(p *endorsement.Policy) { p.AuditScope = "invalid" },
-		"revision": func(p *endorsement.Policy) { p.Revision = "../v1" },
-		"digest":   func(p *endorsement.Policy) { p.Digest = strings.ToUpper(p.Digest) },
+	for name, mutate := range map[string]func(*provenance.ConfigPolicy){
+		"identity": func(p *provenance.ConfigPolicy) { p.Identity = "/tinfoil" },
+		"scope":    func(p *provenance.ConfigPolicy) { p.AuditScope = "invalid" },
+		"revision": func(p *provenance.ConfigPolicy) { p.Revision = "../v1" },
+		"digest":   func(p *provenance.ConfigPolicy) { p.Digest = strings.ToUpper(p.Digest) },
 	} {
 		t.Run(name, func(t *testing.T) {
 			invalid := policy
@@ -103,33 +104,33 @@ func TestPolicyValidatePins(t *testing.T) {
 func TestVerifyPreparedRequiresAuthenticatedApprovalBeforeLogging(t *testing.T) {
 	f := newFixture(t)
 	b := f.Bundle(t, f.statement(t, f.Now))
-	require.ErrorContains(t, f.verifier(t).VerifyPrepared(testConfig, approvaltest.MarshalBundle(t, b), f.policy()), "must not contain log receipts")
+	require.ErrorContains(t, f.verifier(t).VerifyPrepared(testConfig, sigstoretest.MarshalBundle(t, b), f.policy()), "must not contain log receipts")
 	b.VerificationMaterial.TlogEntries = nil
-	prepared := approvaltest.MarshalBundle(t, b)
+	prepared := sigstoretest.MarshalBundle(t, b)
 	require.NoError(t, f.verifier(t).VerifyPrepared(testConfig, prepared, f.policy()))
 	_, err := f.verifier(t).Verify(testConfig, prepared, f.policy())
 	require.Error(t, err, "preflight validation cannot replace log inclusion")
 
 	b.GetDsseEnvelope().Signatures[0].Sig[0] ^= 1
-	require.Error(t, f.verifier(t).VerifyPrepared(testConfig, approvaltest.MarshalBundle(t, b), f.policy()), "an invalid signature must not become durable work")
+	require.Error(t, f.verifier(t).VerifyPrepared(testConfig, sigstoretest.MarshalBundle(t, b), f.policy()), "an invalid signature must not become durable work")
 }
 
 func TestVerifyRejectsWrongPinsAndUntrustedKeys(t *testing.T) {
 	f := newFixture(t)
-	b := approvaltest.MarshalBundle(t, f.Bundle(t, f.statement(t, f.Now)))
+	b := sigstoretest.MarshalBundle(t, f.Bundle(t, f.statement(t, f.Now)))
 	for _, tc := range []struct {
 		name   string
-		mutate func(*endorsement.Policy)
+		mutate func(*provenance.ConfigPolicy)
 	}{
-		{"identity", func(p *endorsement.Policy) { p.Identity = "/tinfoil/other" }},
-		{"scope", func(p *endorsement.Policy) { p.AuditScope = testOtherScope }},
-		{"revision", func(p *endorsement.Policy) { p.Revision = "v0.0.156" }},
-		{"digest", func(p *endorsement.Policy) { p.Digest = strings.Repeat("0", sha256.Size*2) }},
-		{"missing clock", func(p *endorsement.Policy) { p.Now = time.Time{} }},
-		{"negative age", func(p *endorsement.Policy) { p.MaxAge = -time.Second }},
-		{"negative skew", func(p *endorsement.Policy) { p.FutureSkew = -time.Second }},
-		{"archived negative age", func(p *endorsement.Policy) { p.IgnoreFreshness = true; p.MaxAge = -time.Second }},
-		{"archived negative skew", func(p *endorsement.Policy) { p.IgnoreFreshness = true; p.FutureSkew = -time.Second }},
+		{"identity", func(p *provenance.ConfigPolicy) { p.Identity = "/tinfoil/other" }},
+		{"scope", func(p *provenance.ConfigPolicy) { p.AuditScope = testOtherScope }},
+		{"revision", func(p *provenance.ConfigPolicy) { p.Revision = "v0.0.156" }},
+		{"digest", func(p *provenance.ConfigPolicy) { p.Digest = strings.Repeat("0", sha256.Size*2) }},
+		{"missing clock", func(p *provenance.ConfigPolicy) { p.Now = time.Time{} }},
+		{"negative age", func(p *provenance.ConfigPolicy) { p.MaxAge = -time.Second }},
+		{"negative skew", func(p *provenance.ConfigPolicy) { p.FutureSkew = -time.Second }},
+		{"archived negative age", func(p *provenance.ConfigPolicy) { p.IgnoreFreshness = true; p.MaxAge = -time.Second }},
+		{"archived negative skew", func(p *provenance.ConfigPolicy) { p.IgnoreFreshness = true; p.FutureSkew = -time.Second }},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			policy := f.policy()
@@ -178,7 +179,7 @@ func TestVerifyRequiresSignedApprovalAndLogInclusion(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			b := f.Bundle(t, payload)
 			tc.mutate(b)
-			_, err := f.verifier(t).Verify(testConfig, approvaltest.MarshalBundle(t, b), f.policy())
+			_, err := f.verifier(t).Verify(testConfig, sigstoretest.MarshalBundle(t, b), f.policy())
 			require.Error(t, err)
 		})
 	}
@@ -202,7 +203,7 @@ func TestInnerTimestampBindsCompleteCore(t *testing.T) {
 			payload, err := json.Marshal(s)
 			require.NoError(t, err)
 			b := f.Bundle(t, payload)
-			_, err = f.verifier(t).Verify(testConfig, approvaltest.MarshalBundle(t, b), f.policy())
+			_, err = f.verifier(t).Verify(testConfig, sigstoretest.MarshalBundle(t, b), f.policy())
 			require.ErrorContains(t, err, "inner timestamp")
 		})
 	}
@@ -211,9 +212,9 @@ func TestInnerTimestampBindsCompleteCore(t *testing.T) {
 func TestFreshnessUsesInnerTimeAndInclusiveBounds(t *testing.T) {
 	f := newFixture(t)
 	inner := f.Now.Add(-time.Minute)
-	b := approvaltest.MarshalBundle(t, f.Bundle(t, f.statement(t, inner)))
+	b := sigstoretest.MarshalBundle(t, f.Bundle(t, f.statement(t, inner)))
 	policy := f.policy()
-	policy.Now = inner.Add(endorsement.DefaultMaxAge)
+	policy.Now = inner.Add(provenance.DefaultMaxAge)
 	_, err := f.verifier(t).Verify(testConfig, b, policy)
 	require.NoError(t, err)
 	policy.Now = policy.Now.Add(time.Nanosecond)
@@ -221,7 +222,7 @@ func TestFreshnessUsesInnerTimeAndInclusiveBounds(t *testing.T) {
 	require.ErrorContains(t, err, "too old")
 
 	policy = f.policy()
-	policy.Now = inner.Add(-endorsement.DefaultFutureSkew)
+	policy.Now = inner.Add(-provenance.DefaultFutureSkew)
 	_, err = f.verifier(t).Verify(testConfig, b, policy)
 	require.NoError(t, err)
 	policy.Now = policy.Now.Add(-time.Nanosecond)
@@ -232,13 +233,13 @@ func TestFreshnessUsesInnerTimeAndInclusiveBounds(t *testing.T) {
 func TestIgnoreFreshnessSkipsOnlyTheAgeCheck(t *testing.T) {
 	f := newFixture(t)
 	inner := f.Now.Add(-time.Minute)
-	b := approvaltest.MarshalBundle(t, f.Bundle(t, f.statement(t, inner)))
+	b := sigstoretest.MarshalBundle(t, f.Bundle(t, f.statement(t, inner)))
 	stale := f.policy()
-	stale.Now = inner.Add(endorsement.DefaultMaxAge + time.Hour)
+	stale.Now = inner.Add(provenance.DefaultMaxAge + time.Hour)
 	_, err := f.verifier(t).Verify(testConfig, b, stale)
 	require.ErrorContains(t, err, "too old")
 
-	policy := endorsement.Policy{Identity: testIdentity, AuditScope: testScope, IgnoreFreshness: true}
+	policy := provenance.ConfigPolicy{Identity: testIdentity, AuditScope: testScope, IgnoreFreshness: true}
 	verified, err := f.verifier(t).Verify(testConfig, b, policy)
 	require.NoError(t, err)
 	require.True(t, verified.ApprovalTime.Equal(inner))
@@ -263,7 +264,7 @@ func TestUntrustedInnerTSAAndWrongPolicy(t *testing.T) {
 	} {
 		payload, err := s.Complete(response)
 		require.NoError(t, err)
-		_, err = f.verifier(t).Verify(testConfig, approvaltest.MarshalBundle(t, f.Bundle(t, payload)), f.policy())
+		_, err = f.verifier(t).Verify(testConfig, sigstoretest.MarshalBundle(t, f.Bundle(t, payload)), f.policy())
 		require.ErrorContains(t, err, "inner timestamp")
 	}
 }
@@ -271,19 +272,19 @@ func TestUntrustedInnerTSAAndWrongPolicy(t *testing.T) {
 func TestSigningKeyRotationAllowsOverlapAndRejectsRemovedKeys(t *testing.T) {
 	f := newFixture(t)
 	oldKey := f.signingKey()
-	oldBundle := approvaltest.MarshalBundle(t, f.Bundle(t, f.statement(t, f.Now)))
+	oldBundle := sigstoretest.MarshalBundle(t, f.Bundle(t, f.statement(t, f.Now)))
 	newKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	require.NoError(t, err)
 	f.Key = newKey
 	newTrust := f.signingKey()
-	newBundle := approvaltest.MarshalBundle(t, f.Bundle(t, f.statement(t, f.Now)))
-	verifier, err := endorsement.NewVerifier(&f.Trust, []endorsement.SigningKey{oldKey, newTrust})
+	newBundle := sigstoretest.MarshalBundle(t, f.Bundle(t, f.statement(t, f.Now)))
+	verifier, err := provenance.NewConfigVerifier(&f.Trust, []provenance.ConfigSigningKey{oldKey, newTrust})
 	require.NoError(t, err)
 	for _, b := range [][]byte{oldBundle, newBundle} {
 		_, err := verifier.Verify(testConfig, b, f.policy())
 		require.NoError(t, err)
 	}
-	verifier, err = endorsement.NewVerifier(&f.Trust, []endorsement.SigningKey{newTrust})
+	verifier, err = provenance.NewConfigVerifier(&f.Trust, []provenance.ConfigSigningKey{newTrust})
 	require.NoError(t, err)
 	_, err = verifier.Verify(testConfig, oldBundle, f.policy())
 	require.ErrorContains(t, err, "signer is not authorized")

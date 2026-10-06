@@ -1,4 +1,4 @@
-package endorsement
+package provenance
 
 import (
 	"crypto"
@@ -8,27 +8,22 @@ import (
 	"time"
 
 	"github.com/sigstore/sigstore-go/pkg/root"
-	"github.com/tinfoilsh/tinfoil-go/internal/approval"
+	"github.com/tinfoilsh/tinfoil-go/internal/statement"
+	"github.com/tinfoilsh/tinfoil-go/tinfoil-config/endorsement"
 )
 
-const (
-	DefaultMaxAge           = approval.DefaultMaxAge
-	DefaultFutureSkew       = approval.DefaultFutureSkew
-	SigstoreTimestampPolicy = approval.SigstoreTimestampPolicy
-)
-
-// SigningKey is application-provisioned trust, never material from collateral.
+// ConfigSigningKey is application-provisioned trust, never material from collateral.
 // A key remains authorized for its scope until removed from the trusted set.
-type SigningKey struct {
+type ConfigSigningKey struct {
 	PublicKey  crypto.PublicKey
 	AuditScope string
 }
 
-// Policy pins the identity and supplies the client's clock and freshness rules.
+// ConfigPolicy pins the identity and supplies the client's clock and freshness rules.
 // Zero MaxAge and FutureSkew select the defaults. IgnoreFreshness skips the
 // approval age check for archived material; Now is then optional and every
-// other check still applies. Verified.ApprovalTime reports the authenticated time.
-type Policy struct {
+// other check still applies. ConfigVerified.ApprovalTime reports the authenticated time.
+type ConfigPolicy struct {
 	Identity        string
 	AuditScope      string
 	Revision        string
@@ -39,7 +34,7 @@ type Policy struct {
 	IgnoreFreshness bool
 }
 
-type Verified struct {
+type ConfigVerified struct {
 	Name           string
 	AuditScope     string
 	Digest         string
@@ -48,83 +43,83 @@ type Verified struct {
 	ApprovalTime   time.Time
 }
 
-type Verifier struct {
-	cryptographic *approval.Verifier
+type ConfigVerifier struct {
+	cryptographic *endorsementVerifier
 	scopes        map[string]string
 }
 
-// NewVerifier builds an offline verifier. The supplied roots authenticate TSA
+// NewConfigVerifier builds an offline verifier. The supplied roots authenticate TSA
 // and Rekor evidence; only keys in signingKeys can authorize a config approval.
-func NewVerifier(trust root.TrustedMaterial, signingKeys []SigningKey) (*Verifier, error) {
+func NewConfigVerifier(trust root.TrustedMaterial, signingKeys []ConfigSigningKey) (*ConfigVerifier, error) {
 	keys := make([]crypto.PublicKey, 0, len(signingKeys))
 	scopes := make(map[string]string, len(signingKeys))
 	for _, key := range signingKeys {
-		if err := ValidateAuditScope(key.AuditScope); err != nil {
+		if err := endorsement.ValidateAuditScope(key.AuditScope); err != nil {
 			return nil, err
 		}
-		hint, err := KeyHint(key.PublicKey)
+		hint, err := statement.KeyHint(key.PublicKey)
 		if err != nil {
 			return nil, err
 		}
 		scopes[hint] = key.AuditScope
 		keys = append(keys, key.PublicKey)
 	}
-	cryptographic, err := approval.NewVerifier(trust, keys)
+	cryptographic, err := newEndorsementVerifier(trust, keys)
 	if err != nil {
 		return nil, err
 	}
-	return &Verifier{cryptographic: cryptographic, scopes: scopes}, nil
+	return &ConfigVerifier{cryptographic: cryptographic, scopes: scopes}, nil
 }
 
 // ValidatePins checks config expectations independently of clock and freshness settings.
-func (p Policy) ValidatePins() error {
-	if err := ValidateIdentity(p.Identity); err != nil {
+func (p ConfigPolicy) ValidatePins() error {
+	if err := endorsement.ValidateIdentity(p.Identity); err != nil {
 		return err
 	}
-	if err := ValidateAuditScope(p.AuditScope); err != nil {
+	if err := endorsement.ValidateAuditScope(p.AuditScope); err != nil {
 		return err
 	}
 	if p.Revision != "" {
-		if _, _, err := ParseName(p.Identity + "/" + p.Revision); err != nil {
+		if _, _, err := endorsement.ParseName(p.Identity + "/" + p.Revision); err != nil {
 			return err
 		}
 	}
-	if p.Digest != "" && !digestPattern.MatchString(p.Digest) {
+	if p.Digest != "" && !sha256DigestRE.MatchString(p.Digest) {
 		return fmt.Errorf("digest pin must be lowercase SHA-256")
 	}
 	return nil
 }
 
-func (p Policy) timePolicy() (approval.TimePolicy, error) {
+func (p ConfigPolicy) timePolicy() (timePolicy, error) {
 	if err := p.ValidatePins(); err != nil {
-		return approval.TimePolicy{}, err
+		return timePolicy{}, err
 	}
-	return approval.NewTimePolicy(p.Now, p.MaxAge, p.FutureSkew, p.IgnoreFreshness)
+	return newTimePolicy(p.Now, p.MaxAge, p.FutureSkew, p.IgnoreFreshness)
 }
 
 // Verify authenticates exact config bytes, approval identity, signing authority,
 // an independent approval timestamp, and Rekor v2 inclusion. It never accesses a network.
-func (v *Verifier) Verify(config, bundleJSON []byte, policy Policy) (*Verified, error) {
+func (v *ConfigVerifier) Verify(config, bundleJSON []byte, policy ConfigPolicy) (*ConfigVerified, error) {
 	return v.verify(config, bundleJSON, policy, true)
 }
 
 // VerifyPrepared checks an approval without requiring log receipts.
 // It authenticates the signed statement and timestamp but not transparency.
 // Only Verify can authenticate a published approval.
-func (v *Verifier) VerifyPrepared(config, bundleJSON []byte, policy Policy) error {
+func (v *ConfigVerifier) VerifyPrepared(config, bundleJSON []byte, policy ConfigPolicy) error {
 	_, err := v.verify(config, bundleJSON, policy, false)
 	return err
 }
 
-func (v *Verifier) verify(config, bundleJSON []byte, policy Policy, requirePublication bool) (*Verified, error) {
+func (v *ConfigVerifier) verify(config, bundleJSON []byte, policy ConfigPolicy, requirePublication bool) (*ConfigVerified, error) {
 	timePolicy, err := policy.timePolicy()
 	if err != nil {
 		return nil, err
 	}
-	if len(config) == 0 || len(config) > MaxConfigSize {
+	if len(config) == 0 || len(config) > endorsement.MaxConfigSize {
 		return nil, fmt.Errorf("config size is outside allowed bounds")
 	}
-	b, err := approval.ParseBundle(bundleJSON, requirePublication)
+	b, err := parseEndorsementBundle(bundleJSON, requirePublication)
 	if err != nil {
 		return nil, err
 	}
@@ -133,11 +128,11 @@ func (v *Verifier) verify(config, bundleJSON []byte, policy Policy, requirePubli
 		return nil, fmt.Errorf("signer is not authorized for the expected audit scope")
 	}
 	payload := b.GetDsseEnvelope().GetPayload()
-	s, err := ParseStatement(payload)
+	s, err := endorsement.ParseStatement(payload)
 	if err != nil {
 		return nil, err
 	}
-	identity, revision, err := ParseName(s.Subject[0].Name)
+	identity, revision, err := endorsement.ParseName(s.Subject[0].Name)
 	if err != nil {
 		return nil, err
 	}
@@ -146,7 +141,7 @@ func (v *Verifier) verify(config, bundleJSON []byte, policy Policy, requirePubli
 	}
 	digest := sha256.Sum256(config)
 	hexDigest := hex.EncodeToString(digest[:])
-	if s.Subject[0].Digest["sha256"] != hexDigest || (policy.Digest != "" && policy.Digest != hexDigest) {
+	if s.Subject[0].Digest[statement.DigestAlgorithm] != hexDigest || (policy.Digest != "" && policy.Digest != hexDigest) {
 		return nil, fmt.Errorf("config bytes do not match the endorsed or pinned digest")
 	}
 	if _, err := v.cryptographic.Verify(b, digest[:], requirePublication); err != nil {
@@ -160,19 +155,23 @@ func (v *Verifier) verify(config, bundleJSON []byte, policy Policy, requirePubli
 	if err != nil {
 		return nil, fmt.Errorf("inner timestamp: %w", err)
 	}
-	return &Verified{
+	return &ConfigVerified{
 		Name: s.Subject[0].Name, AuditScope: policy.AuditScope, Digest: hexDigest,
-		Reference: approval.EndorsementReference(payload), SigningKeyHint: hint, ApprovalTime: inner,
+		Reference: statement.EndorsementReference(payload), SigningKeyHint: hint, ApprovalTime: inner,
 	}, nil
 }
 
 // VerifyTimestamp authenticates a core's TSA response and checks its freshness.
 // This does not authenticate a config endorsement or bind the response to a
 // particular signing key.
-func (v *Verifier) VerifyTimestamp(input, response []byte, policy Policy) (time.Time, error) {
+func (v *ConfigVerifier) VerifyTimestamp(input, response []byte, policy ConfigPolicy) (time.Time, error) {
 	timePolicy, err := policy.timePolicy()
 	if err != nil {
 		return time.Time{}, err
 	}
 	return v.cryptographic.VerifyTimestamp(response, input, timePolicy)
+}
+
+func (c *Client) ConfigVerifier(keys []ConfigSigningKey) (*ConfigVerifier, error) {
+	return NewConfigVerifier(c.trustRoot, keys)
 }

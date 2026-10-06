@@ -1,13 +1,8 @@
-// Package approval contains shared Sigstore approval verification.
-package approval
+package provenance
 
 import (
 	"crypto"
-	"crypto/ecdsa"
-	"crypto/elliptic"
-	"crypto/sha256"
 	"crypto/x509"
-	"encoding/base64"
 	"fmt"
 	"time"
 
@@ -15,33 +10,30 @@ import (
 	"github.com/sigstore/sigstore-go/pkg/root"
 	"github.com/sigstore/sigstore-go/pkg/verify"
 	"github.com/sigstore/sigstore/pkg/signature"
+
+	"github.com/tinfoilsh/tinfoil-go/internal/statement"
 )
 
 const (
-	PayloadType             = "application/vnd.in-toto+json"
-	BundleType              = "application/vnd.dev.sigstore.bundle.v0.3+json"
-	MaxBundleSize           = 4 << 20
-	MaxStatementSize        = 128 << 10
-	MaxTimestampSize        = 64 << 10
 	SigstoreTimestampPolicy = "1.3.6.1.4.1.57264.2"
 	maxLogReceipts          = 8
 )
 
-type Verifier struct {
+type endorsementVerifier struct {
 	trust root.TrustedMaterial
 	keys  map[string]*root.ExpiringKey
 }
 
-func NewVerifier(trust root.TrustedMaterial, keys []crypto.PublicKey) (*Verifier, error) {
+func newEndorsementVerifier(trust root.TrustedMaterial, keys []crypto.PublicKey) (*endorsementVerifier, error) {
 	if trust == nil || len(trust.RekorLogs()) == 0 || len(trust.TimestampingAuthorities()) == 0 {
 		return nil, fmt.Errorf("Rekor and timestamp authority trust are required")
 	}
 	if len(keys) == 0 {
 		return nil, fmt.Errorf("at least one independently trusted signing key is required")
 	}
-	v := &Verifier{trust: trust, keys: make(map[string]*root.ExpiringKey, len(keys))}
+	v := &endorsementVerifier{trust: trust, keys: make(map[string]*root.ExpiringKey, len(keys))}
 	for _, key := range keys {
-		hint, err := KeyHint(key)
+		hint, err := statement.KeyHint(key)
 		if err != nil {
 			return nil, err
 		}
@@ -78,21 +70,21 @@ func (m scopedMaterial) PublicKeyVerifier(hint string) (root.TimeConstrainedVeri
 	return m.key, nil
 }
 
-func ParseBundle(raw []byte, published bool) (*bundle.Bundle, error) {
-	if len(raw) == 0 || len(raw) > MaxBundleSize {
+func parseEndorsementBundle(raw []byte, published bool) (*bundle.Bundle, error) {
+	if len(raw) == 0 || len(raw) > statement.MaxBundleSize {
 		return nil, fmt.Errorf("bundle size is outside allowed bounds")
 	}
 	var b bundle.Bundle
 	if err := b.UnmarshalJSON(raw); err != nil {
 		return nil, fmt.Errorf("parsing endorsement bundle: %w", err)
 	}
-	if err := validateBundle(&b, published); err != nil {
+	if err := validateEndorsementBundle(&b, published); err != nil {
 		return nil, err
 	}
 	return &b, nil
 }
 
-func (v *Verifier) Verify(b *bundle.Bundle, digest []byte, published bool) (string, error) {
+func (v *endorsementVerifier) Verify(b *bundle.Bundle, digest []byte, published bool) (string, error) {
 	hint := b.GetVerificationMaterial().GetPublicKey().GetHint()
 	key, ok := v.keys[hint]
 	if !ok {
@@ -109,27 +101,14 @@ func (v *Verifier) Verify(b *bundle.Bundle, digest []byte, published bool) (stri
 	if err != nil {
 		return "", err
 	}
-	if _, err := verifier.Verify(b, verify.NewPolicy(verify.WithArtifactDigest("sha256", digest), verify.WithKey())); err != nil {
+	if _, err := verifier.Verify(b, verify.NewPolicy(verify.WithArtifactDigest(statement.DigestAlgorithm, digest), verify.WithKey())); err != nil {
 		return "", fmt.Errorf("verifying endorsement bundle: %w", err)
 	}
 	return hint, nil
 }
 
-func KeyHint(publicKey crypto.PublicKey) (string, error) {
-	key, ok := publicKey.(*ecdsa.PublicKey)
-	if !ok || key == nil || key.Curve != elliptic.P256() || key.X == nil || key.Y == nil || !key.Curve.IsOnCurve(key.X, key.Y) {
-		return "", fmt.Errorf("approval requires an ECDSA P-256 key")
-	}
-	der, err := x509.MarshalPKIXPublicKey(key)
-	if err != nil {
-		return "", fmt.Errorf("encoding signing key: %w", err)
-	}
-	digest := sha256.Sum256(der)
-	return base64.StdEncoding.EncodeToString(digest[:]), nil
-}
-
-func validateBundle(b *bundle.Bundle, requirePublication bool) error {
-	if b.GetMediaType() != BundleType || b.GetDsseEnvelope() == nil || b.GetDsseEnvelope().GetPayloadType() != PayloadType {
+func validateEndorsementBundle(b *bundle.Bundle, requirePublication bool) error {
+	if b.GetMediaType() != statement.BundleType || b.GetDsseEnvelope() == nil || b.GetDsseEnvelope().GetPayloadType() != statement.PayloadType {
 		return fmt.Errorf("expected a v0.3 approval DSSE bundle")
 	}
 	vm := b.GetVerificationMaterial()
@@ -161,11 +140,11 @@ func validateBundle(b *bundle.Bundle, requirePublication bool) error {
 	return nil
 }
 
-func (v *Verifier) VerifyTimestamp(response, input []byte, policy TimePolicy) (time.Time, error) {
-	if len(input) == 0 || len(input) > MaxStatementSize {
+func (v *endorsementVerifier) VerifyTimestamp(response, input []byte, policy timePolicy) (time.Time, error) {
+	if len(input) == 0 || len(input) > statement.MaxStatementSize {
 		return time.Time{}, fmt.Errorf("timestamp input size is outside allowed bounds")
 	}
-	ts, err := ParseTimestamp(response, input)
+	ts, err := statement.ParseTimestamp(response, input)
 	if err != nil {
 		return time.Time{}, err
 	}

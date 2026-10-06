@@ -1,5 +1,5 @@
-// Package approvaltest builds signed TSA and Rekor fixtures for approval tests.
-package approvaltest
+// Package sigstoretest builds signed TSA and Rekor fixtures for approval tests.
+package sigstoretest
 
 import (
 	"bytes"
@@ -30,7 +30,7 @@ import (
 	"github.com/sigstore/sigstore-go/pkg/root"
 	"github.com/sigstore/sigstore/pkg/signature"
 	"github.com/stretchr/testify/require"
-	"github.com/tinfoilsh/tinfoil-go/internal/approval"
+	"github.com/tinfoilsh/tinfoil-go/internal/statement"
 	f_log "github.com/transparency-dev/formats/log"
 	"github.com/transparency-dev/merkle/rfc6962"
 	"golang.org/x/mod/sumdb/note"
@@ -129,18 +129,18 @@ func (f *Fixture) TimestampWithPolicy(t *testing.T, input []byte, at time.Time, 
 
 func (f *Fixture) Bundle(t *testing.T, payload []byte) *protobundle.Bundle {
 	t.Helper()
-	message := dsse.PAE(approval.PayloadType, payload)
+	message := dsse.PAE(statement.PayloadType, payload)
 	signer, err := signature.LoadECDSASignerVerifier(f.Key, crypto.SHA256)
 	require.NoError(t, err)
 	sig, err := signer.SignMessage(bytes.NewReader(message))
 	require.NoError(t, err)
-	hint, err := approval.KeyHint(f.Key.Public())
+	hint, err := statement.KeyHint(f.Key.Public())
 	require.NoError(t, err)
 	digest := sha256.Sum256(message)
 	b := &protobundle.Bundle{
-		MediaType: approval.BundleType,
+		MediaType: statement.BundleType,
 		Content: &protobundle.Bundle_DsseEnvelope{DsseEnvelope: &protodsse.Envelope{
-			Payload: payload, PayloadType: approval.PayloadType, Signatures: []*protodsse.Signature{{Sig: sig}},
+			Payload: payload, PayloadType: statement.PayloadType, Signatures: []*protodsse.Signature{{Sig: sig}},
 		}},
 		VerificationMaterial: &protobundle.VerificationMaterial{
 			Content: &protobundle.VerificationMaterial_PublicKey{PublicKey: &common.PublicKeyIdentifier{Hint: hint}},

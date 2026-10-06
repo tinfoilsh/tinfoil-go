@@ -10,13 +10,30 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
+	"github.com/tinfoilsh/tinfoil-go/internal/sigstoretest"
 	"github.com/tinfoilsh/tinfoil-go/tinfoil-config/endorsement"
 )
 
 const (
+	testScope             = "16a44d18-3387-44ce-9bfb-d77c4d27dbba"
+	testIdentity          = "/tinfoil/model-router"
+	testName              = testIdentity + "/v0.0.155"
 	specMaxSlugLength     = 63
 	specMaxRevisionLength = 128
 )
+
+var testConfig = []byte("# Approved config bytes\nname: gpt-oss-120b\n")
+
+func configStatement(t *testing.T, f *sigstoretest.Fixture, at time.Time) []byte {
+	t.Helper()
+	s, err := endorsement.NewStatement(testName, testScope, testConfig)
+	require.NoError(t, err)
+	input, err := s.TimestampInput()
+	require.NoError(t, err)
+	payload, err := s.Complete(f.Timestamp(t, input, at))
+	require.NoError(t, err)
+	return payload
+}
 
 func TestTimestampCoreCanonicalization(t *testing.T) {
 	s := &endorsement.Statement{
@@ -84,8 +101,8 @@ func TestNamesAndAuditScopesAreCanonical(t *testing.T) {
 }
 
 func TestStrictStatementDecoding(t *testing.T) {
-	f := newFixture(t)
-	payload := f.statement(t, f.Now)
+	f := sigstoretest.New(t)
+	payload := configStatement(t, f, f.Now)
 	for _, tc := range []struct {
 		name   string
 		mutate func([]byte) []byte
@@ -121,9 +138,9 @@ func TestStrictStatementDecoding(t *testing.T) {
 }
 
 func TestRenewalChangesApprovalWithoutChangingArtifact(t *testing.T) {
-	f := newFixture(t)
-	firstPayload := f.statement(t, f.Now.Add(-time.Minute))
-	secondPayload := f.statement(t, f.Now)
+	f := sigstoretest.New(t)
+	firstPayload := configStatement(t, f, f.Now.Add(-time.Minute))
+	secondPayload := configStatement(t, f, f.Now)
 	first, err := endorsement.ParseStatement(firstPayload)
 	require.NoError(t, err)
 	second, err := endorsement.ParseStatement(secondPayload)
