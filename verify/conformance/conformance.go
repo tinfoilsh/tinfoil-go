@@ -172,22 +172,14 @@ func Run(stage string, in Input) (Output, int) {
 		verify.DangerousTestOnlyWithVendorRoots(rts.amd, rts.intel),
 	}
 	if in.Config != nil {
-		block, rest := pem.Decode([]byte(in.Config.PublicKeyPEM))
-		if block == nil || len(rest) != 0 {
-			return malformed(stage)
-		}
-		key, err := x509.ParsePKIXPublicKey(block.Bytes)
+		key, err := parsePublicKey(in.Config.PublicKeyPEM)
 		if err != nil {
 			return malformed(stage)
 		}
 		opts = append(opts, verify.WithConfigSigningKeys([]configendorsement.SigningKey{{PublicKey: key, AuditScope: in.Config.AuditScope}}))
 	}
 	if in.FreshnessSigningKeyPEM != "" {
-		block, rest := pem.Decode([]byte(in.FreshnessSigningKeyPEM))
-		if block == nil || len(rest) != 0 {
-			return malformed(stage)
-		}
-		key, err := x509.ParsePKIXPublicKey(block.Bytes)
+		key, err := parsePublicKey(in.FreshnessSigningKeyPEM)
 		if err != nil {
 			return malformed(stage)
 		}
@@ -251,6 +243,14 @@ func Run(stage string, in Input) (Output, int) {
 	default:
 		return Output{Stage: stage}, ExitUnsupported
 	}
+}
+
+func parsePublicKey(encoded string) (crypto.PublicKey, error) {
+	block, rest := pem.Decode([]byte(encoded))
+	if block == nil || len(rest) != 0 {
+		return nil, fmt.Errorf("expected one PEM-encoded public key")
+	}
+	return x509.ParsePKIXPublicKey(block.Bytes)
 }
 
 // verifyFull runs the whole flow through the verifier; the layer it reports
