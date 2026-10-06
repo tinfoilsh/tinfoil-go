@@ -101,20 +101,6 @@ func TestPolicyValidatePins(t *testing.T) {
 	}
 }
 
-func TestVerifyPreparedRequiresAuthenticatedApprovalBeforeLogging(t *testing.T) {
-	f := newFixture(t)
-	b := f.Bundle(t, f.statement(t, f.Now))
-	require.ErrorContains(t, f.verifier(t).VerifyPrepared(testConfig, sigstoretest.MarshalBundle(t, b), f.policy()), "must not contain log receipts")
-	b.VerificationMaterial.TlogEntries = nil
-	prepared := sigstoretest.MarshalBundle(t, b)
-	require.NoError(t, f.verifier(t).VerifyPrepared(testConfig, prepared, f.policy()))
-	_, err := f.verifier(t).Verify(testConfig, prepared, f.policy())
-	require.Error(t, err, "preflight validation cannot replace log inclusion")
-
-	b.GetDsseEnvelope().Signatures[0].Sig[0] ^= 1
-	require.Error(t, f.verifier(t).VerifyPrepared(testConfig, sigstoretest.MarshalBundle(t, b), f.policy()), "an invalid signature must not become durable work")
-}
-
 func TestVerifyRejectsWrongPinsAndUntrustedKeys(t *testing.T) {
 	f := newFixture(t)
 	b := sigstoretest.MarshalBundle(t, f.Bundle(t, f.statement(t, f.Now)))

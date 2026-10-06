@@ -100,18 +100,6 @@ func (p ConfigPolicy) timePolicy() (timePolicy, error) {
 // Verify authenticates exact config bytes, approval identity, signing authority,
 // an independent approval timestamp, and Rekor v2 inclusion. It never accesses a network.
 func (v *ConfigVerifier) Verify(config, bundleJSON []byte, policy ConfigPolicy) (*ConfigVerified, error) {
-	return v.verify(config, bundleJSON, policy, true)
-}
-
-// VerifyPrepared checks an approval without requiring log receipts.
-// It authenticates the signed statement and timestamp but not transparency.
-// Only Verify can authenticate a published approval.
-func (v *ConfigVerifier) VerifyPrepared(config, bundleJSON []byte, policy ConfigPolicy) error {
-	_, err := v.verify(config, bundleJSON, policy, false)
-	return err
-}
-
-func (v *ConfigVerifier) verify(config, bundleJSON []byte, policy ConfigPolicy, requirePublication bool) (*ConfigVerified, error) {
 	timePolicy, err := policy.timePolicy()
 	if err != nil {
 		return nil, err
@@ -119,7 +107,7 @@ func (v *ConfigVerifier) verify(config, bundleJSON []byte, policy ConfigPolicy, 
 	if len(config) == 0 || len(config) > configendorsement.MaxConfigSize {
 		return nil, fmt.Errorf("config size is outside allowed bounds")
 	}
-	b, err := parseEndorsementBundle(bundleJSON, requirePublication)
+	b, err := parseEndorsementBundle(bundleJSON)
 	if err != nil {
 		return nil, err
 	}
@@ -144,7 +132,7 @@ func (v *ConfigVerifier) verify(config, bundleJSON []byte, policy ConfigPolicy, 
 	if s.Subject[0].Digest[statement.DigestAlgorithm] != hexDigest || (policy.Digest != "" && policy.Digest != hexDigest) {
 		return nil, fmt.Errorf("config bytes do not match the endorsed or pinned digest")
 	}
-	if _, err := v.cryptographic.Verify(b, digest[:], requirePublication); err != nil {
+	if _, err := v.cryptographic.Verify(b, digest[:]); err != nil {
 		return nil, err
 	}
 	input, err := s.TimestampInput()
@@ -159,17 +147,6 @@ func (v *ConfigVerifier) verify(config, bundleJSON []byte, policy ConfigPolicy, 
 		Name: s.Subject[0].Name, AuditScope: policy.AuditScope, Digest: hexDigest,
 		Reference: statement.EndorsementReference(payload), SigningKeyHint: hint, ApprovalTime: inner,
 	}, nil
-}
-
-// VerifyTimestamp authenticates a core's TSA response and checks its freshness.
-// This does not authenticate a config endorsement or bind the response to a
-// particular signing key.
-func (v *ConfigVerifier) VerifyTimestamp(input, response []byte, policy ConfigPolicy) (time.Time, error) {
-	timePolicy, err := policy.timePolicy()
-	if err != nil {
-		return time.Time{}, err
-	}
-	return v.cryptographic.VerifyTimestamp(response, input, timePolicy)
 }
 
 func (c *Client) ConfigVerifier(keys []ConfigSigningKey) (*ConfigVerifier, error) {

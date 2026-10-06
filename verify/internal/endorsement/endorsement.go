@@ -70,7 +70,7 @@ func (m scopedMaterial) PublicKeyVerifier(hint string) (root.TimeConstrainedVeri
 	return m.key, nil
 }
 
-func parseEndorsementBundle(raw []byte, published bool) (*bundle.Bundle, error) {
+func parseEndorsementBundle(raw []byte) (*bundle.Bundle, error) {
 	if len(raw) == 0 || len(raw) > statement.MaxBundleSize {
 		return nil, fmt.Errorf("bundle size is outside allowed bounds")
 	}
@@ -78,13 +78,13 @@ func parseEndorsementBundle(raw []byte, published bool) (*bundle.Bundle, error) 
 	if err := b.UnmarshalJSON(raw); err != nil {
 		return nil, fmt.Errorf("parsing endorsement bundle: %w", err)
 	}
-	if err := validateEndorsementBundle(&b, published); err != nil {
+	if err := validateEndorsementBundle(&b); err != nil {
 		return nil, err
 	}
 	return &b, nil
 }
 
-func (v *endorsementVerifier) Verify(b *bundle.Bundle, digest []byte, published bool) (string, error) {
+func (v *endorsementVerifier) Verify(b *bundle.Bundle, digest []byte) (string, error) {
 	hint := b.GetVerificationMaterial().GetPublicKey().GetHint()
 	key, ok := v.keys[hint]
 	if !ok {
@@ -93,11 +93,7 @@ func (v *endorsementVerifier) Verify(b *bundle.Bundle, digest []byte, published 
 	material := scopedMaterial{TrustedMaterial: v.trust, hint: hint, key: key}
 	// Signing authority comes from the pinned key set. The signed inner token
 	// independently establishes freshness.
-	options := []verify.VerifierOption{verify.WithNoObserverTimestamps()}
-	if published {
-		options = append(options, verify.WithTransparencyLog(1))
-	}
-	verifier, err := verify.NewSignedEntityVerifier(material, options...)
+	verifier, err := verify.NewSignedEntityVerifier(material, verify.WithNoObserverTimestamps(), verify.WithTransparencyLog(1))
 	if err != nil {
 		return "", err
 	}
@@ -107,7 +103,7 @@ func (v *endorsementVerifier) Verify(b *bundle.Bundle, digest []byte, published 
 	return hint, nil
 }
 
-func validateEndorsementBundle(b *bundle.Bundle, requirePublication bool) error {
+func validateEndorsementBundle(b *bundle.Bundle) error {
 	if b.GetMediaType() != statement.BundleType || b.GetDsseEnvelope() == nil || b.GetDsseEnvelope().GetPayloadType() != statement.PayloadType {
 		return fmt.Errorf("expected a v0.3 approval DSSE bundle")
 	}
@@ -123,11 +119,8 @@ func validateEndorsementBundle(b *bundle.Bundle, requirePublication bool) error 
 		return fmt.Errorf("DSSE key ID disagrees with key hint")
 	}
 	entries := vm.GetTlogEntries()
-	if requirePublication && (len(entries) == 0 || len(entries) > maxLogReceipts) {
+	if len(entries) == 0 || len(entries) > maxLogReceipts {
 		return fmt.Errorf("approval requires bounded Rekor inclusion evidence")
-	}
-	if !requirePublication && len(entries) != 0 {
-		return fmt.Errorf("prepared approval must not contain log receipts")
 	}
 	for _, entry := range entries {
 		if entry.GetKindVersion().GetKind() != "hashedrekord" || entry.GetKindVersion().GetVersion() != "0.0.2" || entry.GetIntegratedTime() != 0 || entry.GetInclusionProof() == nil || entry.GetInclusionPromise() != nil {
