@@ -129,11 +129,11 @@ func TestLiveVerifySEV(t *testing.T) {
 	assert.Error(t, err)
 
 	// An assembly without the required code expectation must reject.
-	_, err = assemble(artifact, nil, nil, testShape, reportData, q)
+	_, err = assemble(ReferenceValues{Endorsements: artifact, Shape: testShape}, nil, reportData, q)
 	assert.ErrorContains(t, err, "code measurement is required")
 
 	// SEV assembly does not consume the code artifact's VM shape.
-	_, err = assemble(artifact, asCode(q.Measurement), nil, nil, reportData, q)
+	_, err = assemble(ReferenceValues{Endorsements: artifact, Code: asCode(q.Measurement)}, nil, reportData, q)
 	require.NoError(t, err)
 
 	// A machine absent from the artifact must reject.
@@ -219,7 +219,7 @@ func TestPinnedLayoutUsesAuthenticatedPlatform(t *testing.T) {
 
 func TestMissingTDXShapePrecedesPolicyLookup(t *testing.T) {
 	q := &Authenticated{platform: policy.PlatformTDX, tdx: &tdx.Quote{}}
-	_, err := assemble(&policy.Artifact{}, &measurement.Measurement{}, nil, nil, [64]byte{}, q)
+	_, err := assemble(ReferenceValues{Endorsements: &policy.Artifact{}, Code: &measurement.Measurement{}}, nil, [64]byte{}, q)
 	var config *errs.ConfigurationError
 	require.ErrorAs(t, err, &config)
 	require.ErrorContains(t, err, "VM shape", "missing input must be reported before the unendorsed machine")
@@ -241,7 +241,7 @@ func verify(ev document.CPUEvidence, en collateral.CPUEndorsements, endorsements
 	if err != nil {
 		return nil, nil, err
 	}
-	assembled, err := assemble(endorsements, code, pins, shape, reportData, q)
+	assembled, err := assemble(ReferenceValues{Endorsements: endorsements, Code: code, Shape: shape}, pins, reportData, q)
 	if err != nil {
 		return nil, nil, err
 	}

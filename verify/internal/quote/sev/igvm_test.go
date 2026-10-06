@@ -3,7 +3,6 @@ package sev
 import (
 	"crypto/sha256"
 	"encoding/hex"
-	"strconv"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -11,7 +10,6 @@ import (
 	"github.com/tinfoilsh/go-sev-guest/proto/sevsnp"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/tinfoilsh/tinfoil-go/verify/internal/igvm"
 	"github.com/tinfoilsh/tinfoil-go/verify/internal/policy"
 	sevtestdata "github.com/tinfoilsh/tinfoil-go/verify/internal/testdata"
 )
@@ -32,14 +30,18 @@ func TestIGVMEnforcesConfigAndPlatformConstraints(t *testing.T) {
 	require.NoError(t, err)
 	configHash := sha256.Sum256([]byte("approved YAML bytes"))
 	report.HostData = append([]byte(nil), configHash[:]...)
-	runtime := &igvm.SNPLaunch{Measurement: hex.EncodeToString(report.Measurement), Policy: "0x" + strconv.FormatUint(report.Policy, 16), GuestSVN: ptr(uint32(0))}
+	measurement := hex.EncodeToString(report.Measurement)
+	runtimePolicy := report.Policy
 	p.SEVSNP.ConfigBinding = policy.ConfigBindingSHA256
 	p.SEVSNP.HostData = ""
 	var reportData [64]byte
 	copy(reportData[:], report.ReportData)
-	_, err = Assemble(p.SEVSNP, q, runtime.Measurement, reportData)
+	_, err = Assemble(p.SEVSNP, q, measurement, reportData, nil)
 	require.ErrorContains(t, err, "requires IGVM")
-	e, err := AssembleIGVM(p.SEVSNP, q, runtime, configHash, reportData)
+	resolved := *p.SEVSNP
+	resolved.ConfigBinding = ""
+	resolved.HostData = hex.EncodeToString(configHash[:])
+	e, err := Assemble(&resolved, q, measurement, reportData, &runtimePolicy)
 	require.NoError(t, err)
 	require.NoError(t, e.Validate(q))
 
@@ -63,15 +65,9 @@ func TestIGVMEnforcesConfigAndPlatformConstraints(t *testing.T) {
 			require.Error(t, e.Validate(&bad))
 		})
 	}
-	badRuntime := *runtime
-	badRuntime.Policy = "0x30133"
-	if badRuntime.Policy == runtime.Policy {
-		badRuntime.Policy = "0x30132"
-	}
-	e, err = AssembleIGVM(p.SEVSNP, q, &badRuntime, configHash, reportData)
+	runtimePolicy ^= 1
+	require.NoError(t, e.Validate(q), "assembled expectations must not alias the runtime policy")
+	e, err = Assemble(&resolved, q, measurement, reportData, &runtimePolicy)
 	require.NoError(t, err)
 	require.Error(t, e.Validate(q))
-	p.SEVSNP.ConfigBinding = ""
-	_, err = AssembleIGVM(p.SEVSNP, q, runtime, configHash, reportData)
-	require.ErrorContains(t, err, "config-binding")
 }

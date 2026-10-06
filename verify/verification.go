@@ -30,7 +30,7 @@ type Verification struct {
 	// deadline. Cached verification must not authorize new requests at or
 	// after this time; re-verifying the same witness does not extend it.
 	// It is zero when WithIgnoreFreshness skips witness verification.
-	// IGVM uses the config approval and platform witness deadlines.
+	// IGVM uses the earliest config, platform, or runtime approval deadline.
 	FreshnessExpiresAt time.Time
 	// Metadata describes the verification rather than the document.
 	Metadata VerificationMetadata

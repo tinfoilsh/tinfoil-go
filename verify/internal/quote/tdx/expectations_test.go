@@ -91,7 +91,7 @@ func TestValidate(t *testing.T) {
 	}
 
 	assemble := func(a *policy.Artifact, p *policy.TDXPolicy) *Expectations {
-		e, name, err := Assemble(a, p, shape, quote, code, reportData)
+		e, name, err := Assemble(a, p, shape, quote, code, reportData, nil)
 		require.NoError(t, err)
 		assert.Equal(t, "sample", name)
 		return e
@@ -111,7 +111,7 @@ func TestValidate(t *testing.T) {
 			changed := mustHex(t, *target)
 			changed[0] ^= 1
 			*target = hex.EncodeToString(changed)
-			e, _, err := Assemble(a, &bad, shape, quote, code, reportData)
+			e, _, err := Assemble(a, &bad, shape, quote, code, reportData, nil)
 			require.NoError(t, err)
 			assert.ErrorContains(t, e.Validate(quote), strings.ToUpper(field))
 		})
@@ -131,7 +131,7 @@ func TestValidate(t *testing.T) {
 			"sample": {MRTD: hex.EncodeToString(badMRTD), RTMR0: a.Measurements["sample"].RTMR0, Shape: shape},
 		},
 	}
-	_, _, err = Assemble(badMeasurements, matching, shape, quote, code, reportData)
+	_, _, err = Assemble(badMeasurements, matching, shape, quote, code, reportData, nil)
 	assert.ErrorContains(t, err, "do not match any allowed configuration")
 
 	// A workload register differing from code provenance must reject.
@@ -139,14 +139,14 @@ func TestValidate(t *testing.T) {
 	badRTMR1 := mustHex(t, code[2])
 	badRTMR1[0] ^= 1
 	badCode[2] = hex.EncodeToString(badRTMR1)
-	e, _, err := Assemble(a, matching, shape, quote, badCode, reportData)
+	e, _, err := Assemble(a, matching, shape, quote, badCode, reportData, nil)
 	require.NoError(t, err)
 	assert.Error(t, e.Validate(quote))
 
 	// A REPORT_DATA differing from the document's expectation must reject.
 	badReportData := reportData
 	badReportData[0] ^= 1
-	e, _, err = Assemble(a, matching, shape, quote, code, badReportData)
+	e, _, err = Assemble(a, matching, shape, quote, code, badReportData, nil)
 	require.NoError(t, err)
 	assert.Error(t, e.Validate(quote))
 

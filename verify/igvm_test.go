@@ -62,6 +62,6 @@ func TestIGVMFreshnessExpirationIncludesEveryApproval(t *testing.T) {
 	now := time.Now()
 	older := now.Add(-time.Hour)
 	for _, times := range [][3]time.Time{{older, now, now}, {now, older, now}, {now, now, older}} {
-		require.Equal(t, older.Add(time.Hour), igvmFreshnessExpiration(times[0], times[1], times[2], time.Hour))
+		require.Equal(t, older.Add(time.Hour), freshnessExpiration(time.Hour, times[0], times[1], times[2]))
 	}
 }

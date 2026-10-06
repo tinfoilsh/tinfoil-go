@@ -33,7 +33,7 @@ type Expectations struct {
 }
 
 // Assemble combines policy with the launch digest, REPORT_DATA, and authenticated CHIP_ID.
-func Assemble(p *policy.SEVSNPPolicy, q *Quote, launchDigest string, reportData [64]byte) (result *Expectations, err error) {
+func Assemble(p *policy.SEVSNPPolicy, q *Quote, launchDigest string, reportData [64]byte, runtimePolicy *uint64) (result *Expectations, err error) {
 	defer func() { err = errs.WrapAttestation(err) }()
 	if p == nil {
 		return nil, &errs.ConfigurationError{Err: fmt.Errorf("SEV policy is required")}
@@ -59,10 +59,14 @@ func Assemble(p *policy.SEVSNPPolicy, q *Quote, launchDigest string, reportData 
 	opts.Measurement = digest
 	opts.ReportData = reportData[:]
 	opts.ChipID = chipID
+	if runtimePolicy != nil {
+		runtimePolicy = new(*runtimePolicy)
+	}
 	return &Expectations{
-		opts:             opts,
-		wantGuestPolicy:  expectedGuestPolicy(p),
-		wantPlatformInfo: expectedPlatformInfo(p),
+		opts:               opts,
+		wantGuestPolicy:    expectedGuestPolicy(p),
+		wantPlatformInfo:   expectedPlatformInfo(p),
+		runtimeGuestPolicy: runtimePolicy,
 	}, nil
 }
 

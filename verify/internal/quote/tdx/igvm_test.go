@@ -39,10 +39,14 @@ func TestIGVMEnforcesConfigPaddingAndEveryRuntimeRegister(t *testing.T) {
 	}
 	var reportData [64]byte
 	copy(reportData[:], body.ReportData)
-	e, err := AssembleIGVM(p, runtime, configHash, reportData)
+	var configID [ConfigIDSize]byte
+	copy(configID[:], configHash[:])
+	e, _, err := Assemble(&policy.Artifact{}, p, nil, q, runtime.Registers(), reportData, &configID)
 	require.NoError(t, err)
 	require.NoError(t, e.Validate(q))
-	_, _, err = Assemble(&policy.Artifact{}, p, &policy.Shape{}, q, runtime.Registers(), reportData)
+	require.Equal(t, policy.ConfigBindingSHA256, p.ConfigBinding)
+	require.Empty(t, p.PlatformMeasurements)
+	_, _, err = Assemble(&policy.Artifact{}, p, &policy.Shape{}, q, runtime.Registers(), reportData, nil)
 	require.ErrorContains(t, err, "requires IGVM")
 	for name, mutate := range map[string]func(*tdxpb.TDQuoteBody){
 		"config hash":    func(b *tdxpb.TDQuoteBody) { b.MrConfigId[0] ^= 1 },
@@ -66,7 +70,10 @@ func TestIGVMEnforcesConfigPaddingAndEveryRuntimeRegister(t *testing.T) {
 	bad := *q
 	bad.tcbEvaluationDataNumber = minimum - 1
 	require.ErrorContains(t, e.Validate(&bad), "below the policy minimum")
+	configID[0] ^= 1
+	runtime.MRTD = zero
+	require.NoError(t, e.Validate(q), "assembled expectations must not alias the config binding")
 	p.ConfigBinding = ""
-	_, err = AssembleIGVM(p, runtime, configHash, reportData)
+	_, _, err = Assemble(&policy.Artifact{}, p, nil, q, runtime.Registers(), reportData, &configID)
 	require.ErrorContains(t, err, "config-binding")
 }

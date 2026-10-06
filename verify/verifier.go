@@ -148,20 +148,31 @@ func (v *Verifier) verifyV3(docBytes, nonce []byte, repo string) (*Verification,
 	if v == nil || v.now == nil || v.provenance == nil {
 		return nil, layerNone, &errs.ConfigurationError{Err: fmt.Errorf("verifier must be built with NewVerifier")}
 	}
-	configRepo, _, _, err := provenance.ParseReference(repo)
-	if err != nil {
+	if _, _, _, err := provenance.ParseReference(repo); err != nil {
 		return nil, layerProvenance, &errs.ConfigurationError{Err: err}
 	}
+	return v.verify(docBytes, nonce, func(doc *document.Document, now time.Time) (*referenceValues, error) {
+		return v.codeReferences(doc, repo, now)
+	})
+}
+
+type referenceValues struct {
+	quote              quote.ReferenceValues
+	artifact           provenance.AuthenticatedArtifact
+	config             *endorsement.Verified
+	freshnessExpiresAt time.Time
+}
+
+func (v *Verifier) verify(docBytes, nonce []byte, references func(*document.Document, time.Time) (*referenceValues, error)) (*Verification, layer, error) {
 	doc, err := document.Parse(docBytes, nonce)
 	if err != nil {
 		return nil, layerEnvelope, err
 	}
 
-	// Sampled once, so freshness appraisal and the CPU evidence windows judge
-	// this document against the same instant.
+	// All reference values are appraised against the same instant.
 	now := v.now()
 
-	code, endorsements, freshnessExpiresAt, err := v.authenticateReferenceValues(doc, repo, now)
+	refs, err := references(doc, now)
 	if err != nil {
 		return nil, layerProvenance, errs.WrapAttestation(fmt.Errorf("reference values: %w", err))
 	}
@@ -170,7 +181,7 @@ func (v *Verifier) verifyV3(docBytes, nonce []byte, repo string) (*Verification,
 	if err != nil {
 		return nil, layerQuote, err
 	}
-	assembled, err := quote.Assemble(doc, endorsements.Artifact, code.Measurement, v.pinnedRegisters, code.Shape, authenticated)
+	assembled, err := quote.Assemble(doc, refs.quote, v.pinnedRegisters, authenticated)
 	if err != nil {
 		return nil, layerPolicy, err
 	}
@@ -179,13 +190,14 @@ func (v *Verifier) verifyV3(docBytes, nonce []byte, repo string) (*Verification,
 	}
 
 	return &Verification{
-		ConfigRepo:         configRepo,
-		CodeDigest:         code.Digest,
-		CodeTag:            code.Tag,
-		CodeMeasurement:    code.Measurement,
+		ConfigRepo:         refs.artifact.Repo,
+		CodeDigest:         refs.artifact.Digest,
+		CodeTag:            refs.artifact.Tag,
+		CodeMeasurement:    assembled.CodeMeasurement,
+		Config:             refs.config,
 		EnclaveMeasurement: authenticated.Measurement,
 		CryptoMaterial:     doc.CryptoMaterialItems(),
-		FreshnessExpiresAt: freshnessExpiresAt,
+		FreshnessExpiresAt: refs.freshnessExpiresAt,
 		Metadata: VerificationMetadata{
 			Verifier:   v.identity,
 			VerifiedAt: now.UTC(),
@@ -193,36 +205,43 @@ func (v *Verifier) verifyV3(docBytes, nonce []byte, repo string) (*Verification,
 	}, layerNone, nil
 }
 
-func (v *Verifier) authenticateReferenceValues(doc *document.Document, repo string, appraisalTime time.Time) (*provenance.Code, *provenance.PlatformEndorsements, time.Time, error) {
+func (v *Verifier) codeReferences(doc *document.Document, repo string, appraisalTime time.Time) (*referenceValues, error) {
 	codeRef, err := doc.SigstoreCode()
 	if err != nil {
-		return nil, nil, time.Time{}, err
+		return nil, err
 	}
 	code, err := v.provenance.AuthenticateCode(codeRef.Bundle, repo, codeRef.Tag, codeRef.Digest)
 	if err != nil {
-		return nil, nil, time.Time{}, fmt.Errorf("verifying code measurement: %w", err)
+		return nil, fmt.Errorf("verifying code measurement: %w", err)
 	}
 	platformRef, err := doc.SigstorePlatform()
 	if err != nil {
-		return nil, nil, time.Time{}, err
+		return nil, err
 	}
 	endorsements, err := v.provenance.AuthenticatePlatformEndorsements(platformRef.Bundle, platformRef.Repo, platformRef.Tag, platformRef.Digest)
 	if err != nil {
-		return nil, nil, time.Time{}, fmt.Errorf("verifying platform endorsements: %w", err)
+		return nil, fmt.Errorf("verifying platform endorsements: %w", err)
+	}
+	refs := &referenceValues{
+		quote: quote.ReferenceValues{
+			Endorsements: endorsements.Artifact, Code: code.Measurement, Shape: code.Shape,
+		},
+		artifact: code.AuthenticatedArtifact,
 	}
 	if v.ignoreFreshness {
-		return code, endorsements, time.Time{}, nil
+		return refs, nil
 	}
 
 	codeWitnessedAt, err := v.authenticateFreshness(doc, collateral.FreshnessIDCode, &code.AuthenticatedArtifact, appraisalTime)
 	if err != nil {
-		return nil, nil, time.Time{}, fmt.Errorf("verifying code freshness: %w", err)
+		return nil, fmt.Errorf("verifying code freshness: %w", err)
 	}
 	platformWitnessedAt, err := v.authenticateFreshness(doc, collateral.FreshnessIDPlatform, &endorsements.AuthenticatedArtifact, appraisalTime)
 	if err != nil {
-		return nil, nil, time.Time{}, fmt.Errorf("verifying platform freshness: %w", err)
+		return nil, fmt.Errorf("verifying platform freshness: %w", err)
 	}
-	return code, endorsements, freshnessExpiration(codeWitnessedAt, platformWitnessedAt, v.freshnessMaxAge), nil
+	refs.freshnessExpiresAt = freshnessExpiration(v.freshnessMaxAge, codeWitnessedAt, platformWitnessedAt)
+	return refs, nil
 }
 
 func (v *Verifier) authenticateFreshness(doc *document.Document, id string, artifact *provenance.AuthenticatedArtifact, now time.Time) (time.Time, error) {
@@ -237,11 +256,11 @@ func (v *Verifier) authenticateFreshness(doc *document.Document, id string, arti
 }
 
 // freshnessExpiration uses authenticated witness times, never local verification time.
-func freshnessExpiration(codeWitnessedAt, platformWitnessedAt time.Time, maxAge time.Duration) time.Time {
-	expiresAt := codeWitnessedAt.Add(maxAge)
-	platformExpiresAt := platformWitnessedAt.Add(maxAge)
-	if platformExpiresAt.Before(expiresAt) {
-		expiresAt = platformExpiresAt
+func freshnessExpiration(maxAge time.Duration, first time.Time, rest ...time.Time) time.Time {
+	for _, issuedAt := range rest {
+		if issuedAt.Before(first) {
+			first = issuedAt
+		}
 	}
-	return expiresAt
+	return first.Add(maxAge)
 }
