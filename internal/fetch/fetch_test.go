@@ -35,9 +35,9 @@ func TestFetchReportsSDKIdentity(t *testing.T) {
 		var body []byte
 		var err error
 		if relay {
-			body, err = Document(t.Context(), "enclave.example", host, testNonce(), SDK{})
+			body, err = Document(t.Context(), "enclave.example", host, testNonce())
 		} else {
-			body, err = Document(t.Context(), host, "", testNonce(), SDK{})
+			body, err = Document(t.Context(), host, "", testNonce())
 		}
 		require.NoError(t, err)
 		require.Equal(t, responseBody, string(body))
@@ -52,12 +52,6 @@ func TestFetchReportsSDKIdentity(t *testing.T) {
 			require.Empty(t, request.URL.Query().Get("enclave"))
 		}
 	}
-
-	_, err := Document(t.Context(), host, "", testNonce(), SDK{Name: "tinfoil-swift", Version: "0.8.2"})
-	require.NoError(t, err)
-	request := <-requests
-	require.Equal(t, "tinfoil-swift", request.Header.Get("Tinfoil-SDK"))
-	require.Equal(t, "0.8.2", request.Header.Get("Tinfoil-SDK-Version"))
 }
 
 // URL is the wire format other SDKs fetch with too, so it rejects anything
@@ -103,7 +97,7 @@ func TestFetchSizeLimitAndRedirects(t *testing.T) {
 				return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(strings.Repeat("x", size)))}, nil
 			}),
 		}
-		body, err := Document(t.Context(), "enclave.example", "", testNonce(), SDK{})
+		body, err := Document(t.Context(), "enclave.example", "", testNonce())
 		require.Equal(t, 1, redirects)
 		if size > limit {
 			require.ErrorContains(t, err, "exceeds 33554432 bytes")
@@ -129,7 +123,7 @@ func TestFetchTimeout(t *testing.T) {
 				return &http.Response{StatusCode: http.StatusOK, Body: body}, nil
 			})}
 			start := time.Now()
-			_, err := Document(t.Context(), "enclave.example", "", testNonce(), SDK{})
+			_, err := Document(t.Context(), "enclave.example", "", testNonce())
 			require.ErrorIs(t, err, context.DeadlineExceeded)
 			if timeout == 0 {
 				timeout = 30 * time.Second
@@ -154,7 +148,7 @@ func TestFetchHonorsCallerDeadline(t *testing.T) {
 		ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 		defer cancel()
 		start := time.Now()
-		_, err := Document(ctx, "enclave.example", "", testNonce(), SDK{})
+		_, err := Document(ctx, "enclave.example", "", testNonce())
 		require.ErrorIs(t, err, context.DeadlineExceeded)
 		require.Equal(t, 5*time.Second, time.Since(start), "a caller deadline shorter than the cap applies")
 	})
@@ -174,7 +168,7 @@ func TestFetchRejectsNonHTTPSRedirect(t *testing.T) {
 			return &http.Response{StatusCode: http.StatusFound, Header: http.Header{"Location": {"http://enclave.example/redirect"}}, Body: http.NoBody}, nil
 		}),
 	}
-	_, err := Document(t.Context(), "enclave.example", "", testNonce(), SDK{})
+	_, err := Document(t.Context(), "enclave.example", "", testNonce())
 	require.ErrorContains(t, err, "refusing redirect to non-HTTPS URL")
 	require.Equal(t, []string{"https"}, schemes)
 }
@@ -187,7 +181,7 @@ func TestFetchKeepsDefaultRedirectLimit(t *testing.T) {
 		requests++
 		return &http.Response{StatusCode: http.StatusFound, Header: http.Header{"Location": {"/loop"}}, Body: http.NoBody}, nil
 	})}
-	_, err := Document(t.Context(), "enclave.example", "", testNonce(), SDK{})
+	_, err := Document(t.Context(), "enclave.example", "", testNonce())
 	require.ErrorContains(t, err, "stopped after 10 redirects")
 	require.Equal(t, 10, requests)
 }
@@ -246,7 +240,7 @@ func TestFetchUsesFreshConnectionAfterCutover(t *testing.T) {
 			address.Store(newServer.Listener.Addr().String())
 			host := strings.TrimPrefix(oldServer.URL, "https://")
 			for _, relay := range []string{"", host} {
-				body, err := Document(t.Context(), host, relay, testNonce(), SDK{})
+				body, err := Document(t.Context(), host, relay, testNonce())
 				require.NoError(t, err)
 				require.Equal(t, "new "+protocol, string(body))
 			}

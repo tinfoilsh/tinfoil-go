@@ -14,8 +14,8 @@ func checkMobileSurface() throws {
     var error: NSError?
     let _: Int64 = MobileVerificationSchemaVersion
 
-    // Options travel as JSON: pinned_registers, freshness_max_age_ns in integer
-    // nanoseconds, and sdk. An empty string selects the default policy.
+    // Options travel as JSON: pinned_registers, and freshness_max_age_ns in
+    // integer nanoseconds. An empty string selects the default policy.
     guard let verifier = MobileNewVerifier("{}", &error) else {
         if let error { throw error }
         return
@@ -54,7 +54,6 @@ struct Verification: Decodable {
     let cryptoMaterial: [CryptoMaterial]
     let freshnessExpiresAt: String
     let verifiedAt: String
-    let verifier: SoftwareIdentity
 
     struct Measurement: Decodable {
         let type: String
@@ -65,11 +64,6 @@ struct Verification: Decodable {
         let id: String
         let format: String
         let data: String
-    }
-
-    struct SoftwareIdentity: Decodable {
-        let name: String
-        let version: String
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -84,7 +78,6 @@ struct Verification: Decodable {
         case cryptoMaterial = "crypto_material"
         case freshnessExpiresAt = "freshness_expires_at"
         case verifiedAt = "verified_at"
-        case verifier
     }
 }
 

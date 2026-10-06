@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
-	"github.com/tinfoilsh/tinfoil-go/verify"
 	"github.com/tinfoilsh/tinfoil-go/verify/measurement"
 )
 
@@ -17,7 +16,6 @@ func TestMobileOptions(t *testing.T) {
 		opts Options
 	}{
 		{`{}`, Options{}},
-		{`{"sdk":{"name":"tinfoil-swift","version":"0.8.2"}}`, Options{SDK: &verify.SoftwareIdentity{Name: "tinfoil-swift", Version: "0.8.2"}}},
 		{
 			`{"freshness_max_age_ns":3600000000000,"pinned_registers":{"type":"https://tinfoil.sh/predicate/tdx-guest/v2","registers":["","","","","` + register + `"]}}`,
 			Options{FreshnessMaxAge: time.Hour, PinnedRegisters: &measurement.Measurement{Type: measurement.TdxGuestV2, Registers: []string{4: register}}},
@@ -31,7 +29,6 @@ func TestMobileOptions(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, goClient.verifier.FreshnessMaxAge(), mobileClient.verifier.FreshnessMaxAge())
 		require.Equal(t, goClient.verifier.PinnedRegisters(), mobileClient.verifier.PinnedRegisters())
-		require.Equal(t, goClient.verifier.Identity(), mobileClient.verifier.Identity())
 	}
 }
 

@@ -20,7 +20,7 @@ func TestLiveVerificationRecordsRepoAndMetadata(t *testing.T) {
 	require.NoError(t, err)
 	nonce, err := document.RandomNonce()
 	require.NoError(t, err)
-	raw, err := fetch.Document(t.Context(), os.Getenv(enclaveEnvVar), "", nonce, fetch.SDK{})
+	raw, err := fetch.Document(t.Context(), os.Getenv(enclaveEnvVar), "", nonce)
 	require.NoError(t, err)
 	verifier, err := NewVerifier()
 	require.NoError(t, err)

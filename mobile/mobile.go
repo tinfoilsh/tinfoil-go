@@ -50,10 +50,8 @@ type Verifier struct {
 }
 
 // NewVerifier builds a verifier from options, as the JSON object
-// enclave.Options describes: pinned registers, a freshness bound in integer
-// nanoseconds, and the identity of the SDK built on this one, such as
-// {"name":"tinfoil-swift","version":"0.8.2"}. An empty string selects the
-// defaults.
+// enclave.Options describes: pinned registers and a freshness bound in integer
+// nanoseconds. An empty string selects the defaults.
 func NewVerifier(optionsJSON string) (*Verifier, error) {
 	opts := &enclave.Options{}
 	if optionsJSON != "" {
@@ -62,14 +60,10 @@ func NewVerifier(optionsJSON string) (*Verifier, error) {
 			return nil, err
 		}
 	}
-	policy := []verify.Option{
+	inner, err := verify.NewVerifier(
 		verify.WithPinnedRegisters(opts.PinnedRegisters),
 		verify.WithFreshnessMaxAge(opts.FreshnessMaxAge),
-	}
-	if opts.SDK != nil {
-		policy = append(policy, verify.WithSoftwareIdentity(*opts.SDK))
-	}
-	inner, err := verify.NewVerifier(policy...)
+	)
 	if err != nil {
 		return nil, err
 	}

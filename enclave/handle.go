@@ -85,9 +85,6 @@ type Options struct {
 	PinnedRegisters *measurement.Measurement `json:"pinned_registers,omitempty"`
 	// FreshnessMaxAge defaults to seven days when zero. Negative ages are invalid.
 	FreshnessMaxAge time.Duration `json:"freshness_max_age_ns,omitempty"`
-	// SDK identifies an SDK built on this one, such as a mobile wrapper, in
-	// attestation requests and verification metadata. Nil reports this module.
-	SDK *verify.SoftwareIdentity `json:"sdk,omitempty"`
 }
 
 // verifier builds the immutable policy these options describe, validating
@@ -96,14 +93,10 @@ func (input *Options) verifier() (*verify.Verifier, error) {
 	if input == nil {
 		return verify.NewVerifier()
 	}
-	opts := []verify.Option{
+	return verify.NewVerifier(
 		verify.WithPinnedRegisters(input.PinnedRegisters),
 		verify.WithFreshnessMaxAge(input.FreshnessMaxAge),
-	}
-	if input.SDK != nil {
-		opts = append(opts, verify.WithSoftwareIdentity(*input.SDK))
-	}
-	return verify.NewVerifier(opts...)
+	)
 }
 
 // NewHandle creates a handle for an enclave and repository

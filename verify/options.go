@@ -41,18 +41,6 @@ func WithFreshnessMaxAge(maxAge time.Duration) Option {
 	}
 }
 
-// WithSoftwareIdentity sets the verifier recorded in each result's metadata, for
-// an SDK built on this one. The default is this module's name and version.
-func WithSoftwareIdentity(identity SoftwareIdentity) Option {
-	return func(v *Verifier) error {
-		if identity.Name == "" {
-			return fmt.Errorf("software identity name is required")
-		}
-		v.identity = identity
-		return nil
-	}
-}
-
 // WithIgnoreFreshness skips code and platform freshness witnesses for archived
 // documents. FreshnessExpiresAt is zero; certificate validity and all other
 // attestation checks still apply.

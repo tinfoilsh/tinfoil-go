@@ -72,7 +72,7 @@ func TestLiveVerifyFreshnessExpiration(t *testing.T) {
 	host, repo := os.Getenv(enclaveEnvVar), os.Getenv(repoEnvVar)
 	nonce, err := document.RandomNonce()
 	require.NoError(t, err)
-	raw, err := fetch.Document(t.Context(), host, "", nonce, fetch.SDK{})
+	raw, err := fetch.Document(t.Context(), host, "", nonce)
 	require.NoError(t, err)
 	verified, err := verifyDocument(raw, nonce, repo, nil)
 	require.NoError(t, err)
