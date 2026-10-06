@@ -183,7 +183,7 @@ func TestValidateBox2TurinAttestation(t *testing.T) {
 	a := loadFixture(t)
 	_, p, err := a.PolicyFor(identity, policy.PlatformSEVSNP)
 	require.NoError(t, err)
-	expectations, err := Assemble(p.SEVSNP, q, hex.EncodeToString(report.GetMeasurement()), reportData)
+	expectations, err := Assemble(p.SEVSNP, q, hex.EncodeToString(report.GetMeasurement()), reportData, nil)
 	require.NoError(t, err)
 	require.NoError(t, expectations.Validate(q))
 	reportData[0] ^= 0xff
