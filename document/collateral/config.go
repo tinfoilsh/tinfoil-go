@@ -40,6 +40,9 @@ func decodeConfigEndorsement(entry *Entry) (ConfigEndorsement, error) {
 	if err != nil {
 		return ConfigEndorsement{}, err
 	}
+	if len(config) == 0 {
+		return ConfigEndorsement{}, fmt.Errorf("config_base64 must not be empty")
+	}
 	if c.Bundle.Kind() != '{' {
 		return ConfigEndorsement{}, fmt.Errorf("sigstore_bundle must be an object")
 	}

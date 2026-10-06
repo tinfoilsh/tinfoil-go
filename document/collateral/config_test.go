@@ -40,6 +40,12 @@ func TestConfigEndorsement(t *testing.T) {
 		"noncanonical base64": func(entries *[]Entry) {
 			(*entries)[0].Data = []byte(strings.Replace(string(data), `"config_base64":"`, `"config_base64":"\n`, 1))
 		},
+		"empty config": func(entries *[]Entry) {
+			(*entries)[0].Data = []byte(strings.Replace(string(data), base64.StdEncoding.EncodeToString(config), "", 1))
+		},
+		"missing config": func(entries *[]Entry) {
+			(*entries)[0].Data = []byte(strings.Replace(string(data), `"config_base64":"`+base64.StdEncoding.EncodeToString(config)+`",`, "", 1))
+		},
 		"bad reference": func(entries *[]Entry) {
 			(*entries)[0].Data = []byte(strings.Replace(string(data), reference, "sha256:bad", 1))
 		},
