@@ -1,4 +1,4 @@
-package freshness
+package provenance
 
 import (
 	"crypto"
@@ -7,50 +7,46 @@ import (
 	"time"
 
 	"github.com/sigstore/sigstore-go/pkg/root"
-	"github.com/tinfoilsh/tinfoil-go/internal/approval"
+	"github.com/tinfoilsh/tinfoil-go/freshness"
+	"github.com/tinfoilsh/tinfoil-go/internal/statement"
 )
 
-const (
-	DefaultMaxAge     = approval.DefaultMaxAge
-	DefaultFutureSkew = approval.DefaultFutureSkew
-)
-
-type Policy struct {
-	Artifact   Artifact
+type FreshnessPolicy struct {
+	Artifact   freshness.Artifact
 	Now        time.Time
 	MaxAge     time.Duration
 	FutureSkew time.Duration
 }
 
-func (p Policy) timePolicy() (approval.TimePolicy, error) {
+func (p FreshnessPolicy) timePolicy() (timePolicy, error) {
 	if err := p.Artifact.Validate(); err != nil {
-		return approval.TimePolicy{}, err
+		return timePolicy{}, err
 	}
-	return approval.NewTimePolicy(p.Now, p.MaxAge, p.FutureSkew, false)
+	return newTimePolicy(p.Now, p.MaxAge, p.FutureSkew, false)
 }
 
-type Verified struct {
-	Artifact
+type FreshnessVerified struct {
+	freshness.Artifact
 	Reference      string
 	SigningKeyHint string
 	ApprovalTime   time.Time
 }
 
-type Verifier struct{ cryptographic *approval.Verifier }
+type FreshnessVerifier struct{ cryptographic *endorsementVerifier }
 
-// NewVerifier pins Tinfoil's artifact approval keys, independently of any org's
+// NewFreshnessVerifier pins Tinfoil's artifact approval keys, independently of any org's
 // config signing authority. Verification never learns keys from collateral.
-func NewVerifier(trust root.TrustedMaterial, keys []crypto.PublicKey) (*Verifier, error) {
-	v, err := approval.NewVerifier(trust, keys)
+func NewFreshnessVerifier(trust root.TrustedMaterial, keys []crypto.PublicKey) (*FreshnessVerifier, error) {
+	v, err := newEndorsementVerifier(trust, keys)
 	if err != nil {
 		return nil, err
 	}
-	return &Verifier{cryptographic: v}, nil
+	return &FreshnessVerifier{cryptographic: v}, nil
 }
 
 // Verify authenticates the artifact binding, signature, inner TSA token, and
 // Rekor v2 inclusion. The caller separately verifies the artifact's build provenance.
-func (v *Verifier) Verify(bundleJSON []byte, policy Policy) (*Verified, error) {
+func (v *FreshnessVerifier) Verify(bundleJSON []byte, policy FreshnessPolicy) (*FreshnessVerified, error) {
 	if v == nil || v.cryptographic == nil {
 		return nil, fmt.Errorf("uninitialized freshness verifier")
 	}
@@ -58,16 +54,17 @@ func (v *Verifier) Verify(bundleJSON []byte, policy Policy) (*Verified, error) {
 	if err != nil {
 		return nil, err
 	}
-	b, err := approval.ParseBundle(bundleJSON, true)
+	b, err := parseEndorsementBundle(bundleJSON, true)
 	if err != nil {
 		return nil, err
 	}
 	payload := b.GetDsseEnvelope().GetPayload()
-	s, err := ParseStatement(payload)
+	s, err := freshness.ParseStatement(payload)
 	if err != nil {
 		return nil, err
 	}
-	if s.artifact() != policy.Artifact {
+	artifact := freshness.Artifact{Kind: s.Predicate.Kind, Repo: s.Predicate.Repo, Tag: s.Predicate.Tag, Name: s.Subject[0].Name, Digest: s.Subject[0].Digest[statement.DigestAlgorithm]}
+	if artifact != policy.Artifact {
 		return nil, fmt.Errorf("freshness approval does not match the expected artifact")
 	}
 	digest, err := hex.DecodeString(policy.Artifact.Digest)
@@ -86,11 +83,11 @@ func (v *Verifier) Verify(bundleJSON []byte, policy Policy) (*Verified, error) {
 	if err != nil {
 		return nil, fmt.Errorf("inner timestamp: %w", err)
 	}
-	return &Verified{Artifact: policy.Artifact, Reference: approval.EndorsementReference(payload), SigningKeyHint: hint, ApprovalTime: at}, nil
+	return &FreshnessVerified{Artifact: policy.Artifact, Reference: statement.EndorsementReference(payload), SigningKeyHint: hint, ApprovalTime: at}, nil
 }
 
 // VerifyTimestamp authenticates the prepared core's timestamp before signing.
-func (v *Verifier) VerifyTimestamp(input, response []byte, policy Policy) (time.Time, error) {
+func (v *FreshnessVerifier) VerifyTimestamp(input, response []byte, policy FreshnessPolicy) (time.Time, error) {
 	if v == nil || v.cryptographic == nil {
 		return time.Time{}, fmt.Errorf("uninitialized freshness verifier")
 	}
@@ -99,4 +96,8 @@ func (v *Verifier) VerifyTimestamp(input, response []byte, policy Policy) (time.
 		return time.Time{}, err
 	}
 	return v.cryptographic.VerifyTimestamp(response, input, timePolicy)
+}
+
+func (c *Client) FreshnessVerifier(keys []crypto.PublicKey) (*FreshnessVerifier, error) {
+	return NewFreshnessVerifier(c.trustRoot, keys)
 }

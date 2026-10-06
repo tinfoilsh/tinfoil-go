@@ -1,4 +1,4 @@
-// Package freshness authenticates Tinfoil approvals of platform and runtime releases.
+// Package freshness defines and constructs Tinfoil freshness statements for platform and runtime releases.
 package freshness
 
 import (
@@ -8,22 +8,21 @@ import (
 	"encoding/json/v2"
 	"fmt"
 
-	"github.com/tinfoilsh/tinfoil-go/internal/approval"
 	"github.com/tinfoilsh/tinfoil-go/internal/canonical"
+	"github.com/tinfoilsh/tinfoil-go/internal/statement"
 	"golang.org/x/mod/semver"
 )
 
 const (
-	StatementType   = approval.StatementType
+	StatementType   = statement.StatementType
 	PredicateType   = "https://tinfoil.sh/predicate/artifact-freshness/v1"
-	PayloadType     = approval.PayloadType
-	BundleType      = approval.BundleType
+	PayloadType     = statement.PayloadType
+	BundleType      = statement.BundleType
 	KindPlatform    = "platform"
 	KindRuntime     = "runtime"
 	PlatformRepo    = "tinfoilsh/platform-endorsements"
 	RuntimeRepo     = "tinfoilsh/cvmimage"
 	PlatformName    = "platform-endorsements-igvm.json"
-	digestAlgorithm = "sha256"
 	freshnessDomain = "tinfoil-artifact-freshness/v1\x00"
 )
 
@@ -87,13 +86,13 @@ func NewStatement(artifact Artifact) (*Statement, error) {
 	}
 	return &Statement{
 		Type: StatementType, PredicateType: PredicateType,
-		Subject:   []Subject{{Name: artifact.Name, Digest: map[string]string{digestAlgorithm: artifact.Digest}}},
+		Subject:   []Subject{{Name: artifact.Name, Digest: map[string]string{statement.DigestAlgorithm: artifact.Digest}}},
 		Predicate: Predicate{Kind: artifact.Kind, Repo: artifact.Repo, Tag: artifact.Tag},
 	}, nil
 }
 
 func (s *Statement) artifact() Artifact {
-	return Artifact{Kind: s.Predicate.Kind, Repo: s.Predicate.Repo, Tag: s.Predicate.Tag, Name: s.Subject[0].Name, Digest: s.Subject[0].Digest[digestAlgorithm]}
+	return Artifact{Kind: s.Predicate.Kind, Repo: s.Predicate.Repo, Tag: s.Predicate.Tag, Name: s.Subject[0].Name, Digest: s.Subject[0].Digest[statement.DigestAlgorithm]}
 }
 
 func (s *Statement) validate(requireTimestamp bool) error {
@@ -106,7 +105,7 @@ func (s *Statement) validate(requireTimestamp bool) error {
 	if requireTimestamp && (s.Predicate.Freshness == nil || len(s.Predicate.Freshness.RFC3161Timestamp) == 0) {
 		return fmt.Errorf("artifact freshness requires an inner timestamp")
 	}
-	if s.Predicate.Freshness != nil && len(s.Predicate.Freshness.RFC3161Timestamp) > approval.MaxTimestampSize {
+	if s.Predicate.Freshness != nil && len(s.Predicate.Freshness.RFC3161Timestamp) > statement.MaxTimestampSize {
 		return fmt.Errorf("inner timestamp exceeds size limit")
 	}
 	return nil
@@ -120,17 +119,17 @@ func (s *Statement) TimestampInput() ([]byte, error) {
 	}
 	core := *s
 	core.Predicate.Freshness = nil
-	return approval.TimestampInput(freshnessDomain, core)
+	return statement.TimestampInput(freshnessDomain, core)
 }
 
-// Complete checks the timestamp imprint, not TSA trust. Clients must call
-// Verifier.Verify to authenticate the completed publication.
+// Complete checks the timestamp imprint, not TSA trust. The completed
+// publication still requires verification.
 func (s *Statement) Complete(response []byte) ([]byte, error) {
 	input, err := s.TimestampInput()
 	if err != nil {
 		return nil, err
 	}
-	if _, err := approval.ParseTimestamp(response, input); err != nil {
+	if _, err := statement.ParseTimestamp(response, input); err != nil {
 		return nil, err
 	}
 	complete := *s
@@ -139,7 +138,7 @@ func (s *Statement) Complete(response []byte) ([]byte, error) {
 }
 
 func ParseStatement(payload []byte) (*Statement, error) {
-	if len(payload) == 0 || len(payload) > approval.MaxStatementSize {
+	if len(payload) == 0 || len(payload) > statement.MaxStatementSize {
 		return nil, fmt.Errorf("statement size is outside allowed bounds")
 	}
 	var s Statement
@@ -156,7 +155,7 @@ func EndorsementReference(payload []byte) (string, error) {
 	if _, err := ParseStatement(payload); err != nil {
 		return "", err
 	}
-	return approval.EndorsementReference(payload), nil
+	return statement.EndorsementReference(payload), nil
 }
 
-func KeyHint(key crypto.PublicKey) (string, error) { return approval.KeyHint(key) }
+func KeyHint(key crypto.PublicKey) (string, error) { return statement.KeyHint(key) }
