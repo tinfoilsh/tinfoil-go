@@ -45,8 +45,10 @@ type verificationJSON struct {
 	// requests at or after it, and verify again.
 	FreshnessExpiresAt string `json:"freshness_expires_at"`
 
-	Verifier   softwareIdentityJSON `json:"verifier"`
-	VerifiedAt string               `json:"verified_at"`
+	// VerifiedAt is RFC 3339: the instant the document was appraised at. The
+	// caller records which SDK did the verifying; this package is built from
+	// source, so it could only report its own version as "devel".
+	VerifiedAt string `json:"verified_at"`
 }
 
 type measurementJSON struct {
@@ -58,11 +60,6 @@ type cryptoMaterialJSON struct {
 	ID     string `json:"id"`
 	Format string `json:"format"`
 	Data   string `json:"data"`
-}
-
-type softwareIdentityJSON struct {
-	Name    string `json:"name"`
-	Version string `json:"version"`
 }
 
 // toVerificationJSON maps a verification onto the contract. A missing
@@ -78,7 +75,6 @@ func toVerificationJSON(v *verify.Verification) verificationJSON {
 		EnclaveMeasurement: toMeasurementJSON(v.EnclaveMeasurement),
 		CryptoMaterial:     make([]cryptoMaterialJSON, 0, len(v.CryptoMaterial)),
 		FreshnessExpiresAt: v.FreshnessExpiresAt.UTC().Format(time.RFC3339Nano),
-		Verifier:           softwareIdentityJSON{Name: v.Metadata.Verifier.Name, Version: v.Metadata.Verifier.Version},
 		VerifiedAt:         v.Metadata.VerifiedAt.UTC().Format(time.RFC3339Nano),
 	}
 	out.TLSPublicKeyFP, _ = v.CryptoMaterialData(document.CryptoMaterialIDTLS, document.KeySPKIFPSHA256V1Format)

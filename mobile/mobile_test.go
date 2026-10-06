@@ -17,10 +17,7 @@ import (
 	"github.com/tinfoilsh/tinfoil-go/verify/measurement"
 )
 
-const (
-	swiftOptions = `{"sdk":{"name":"tinfoil-swift","version":"0.8.2"}}`
-	routerRepo   = "tinfoilsh/confidential-model-router"
-)
+const routerRepo = "tinfoilsh/confidential-model-router"
 
 // Swift tells error categories apart by prefix alone, so the exported prefixes
 // must be the ones the SDK's error types produce.
@@ -69,12 +66,10 @@ func TestNewNonceIsFresh(t *testing.T) {
 func TestNewVerifierAppliesOptions(t *testing.T) {
 	register := strings.Repeat("ab", 48)
 	verifier, err := NewVerifier(`{"freshness_max_age_ns":3600000000000,` +
-		`"pinned_registers":{"type":"https://tinfoil.sh/predicate/tdx-guest/v2","registers":["","","","","` + register + `"]},` +
-		`"sdk":{"name":"tinfoil-swift","version":"0.8.2"}}`)
+		`"pinned_registers":{"type":"https://tinfoil.sh/predicate/tdx-guest/v2","registers":["","","","","` + register + `"]}}`)
 	require.NoError(t, err)
 	assert.Equal(t, time.Hour, verifier.inner.FreshnessMaxAge())
 	assert.Equal(t, &measurement.Measurement{Type: measurement.TdxGuestV2, Registers: []string{4: register}}, verifier.inner.PinnedRegisters())
-	assert.Equal(t, verify.SoftwareIdentity{Name: "tinfoil-swift", Version: "0.8.2"}, verifier.inner.Identity())
 
 	defaults, err := NewVerifier("")
 	require.NoError(t, err)
@@ -100,7 +95,7 @@ func TestLiveVerify(t *testing.T) {
 	require.NoError(t, err)
 	doc, err := testutil.Get(url)
 	require.NoError(t, err)
-	verifier, err := NewVerifier(swiftOptions)
+	verifier, err := NewVerifier("")
 	require.NoError(t, err)
 	payload, err := verifier.Verify(doc, nonce, routerRepo)
 	require.NoError(t, err)
@@ -109,7 +104,6 @@ func TestLiveVerify(t *testing.T) {
 	require.NoError(t, json.Unmarshal([]byte(payload), &got))
 	assert.Equal(t, routerRepo, got.ConfigRepo)
 	assert.NotEmpty(t, got.HPKEPublicKey)
-	assert.Equal(t, softwareIdentityJSON{Name: "tinfoil-swift", Version: "0.8.2"}, got.Verifier)
 
 	_, err = verifier.Verify(doc, nonce[:len(nonce)-1], routerRepo)
 	require.Error(t, err, "a document verifies only against the nonce it was fetched with")

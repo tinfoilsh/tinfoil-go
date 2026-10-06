@@ -49,7 +49,7 @@ func runLive() int {
 		fmt.Fprintf(os.Stderr, "nonce: %v\n", err)
 		return conformance.ExitInternal
 	}
-	doc, err := fetch.Document(context.Background(), req.Host, "", nonce, fetch.SDK{})
+	doc, err := fetch.Document(context.Background(), req.Host, "", nonce)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "fetching attestation from %s: %v\n", req.Host, err)
 		return conformance.ExitInternal

@@ -19,10 +19,9 @@ going missing.
 
 `MobileNewVerifier` takes the policy as a JSON object with `pinned_registers`
 and integer `freshness_max_age_ns`; an empty string selects the default policy.
-Its `sdk` object, `{"name": "tinfoil-swift", "version": …}`, names the Swift SDK
-in verification metadata in place of `tinfoil-go`. The Swift SDK sends the same
-identity in the `Tinfoil-SDK` and `Tinfoil-SDK-Version` headers of its own
-attestation requests.
+The Swift SDK identifies itself: in the `Tinfoil-SDK` and `Tinfoil-SDK-Version`
+headers of its own attestation requests, and in whatever record it keeps of a
+verification. The payload names no verifying SDK.
 
 The Swift SDK fetches each document itself: `MobileNewNonce` makes the
 challenge, `MobileAttestationURL` says where to GET it from (directly, or

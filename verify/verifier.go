@@ -45,7 +45,6 @@ type Verifier struct {
 	freshnessMaxAge time.Duration
 	ignoreFreshness bool
 	now             func() time.Time
-	identity        SoftwareIdentity
 
 	// provenance authenticates reference values against its own copy of the
 	// trusted root. NewVerifier builds one from the embedded root; only the
@@ -68,7 +67,6 @@ func NewVerifier(opts ...Option) (*Verifier, error) {
 	v := &Verifier{
 		freshnessMaxAge: provenance.MaxFreshnessAge,
 		now:             time.Now,
-		identity:        SoftwareIdentity{Name: sdkinfo.Name, Version: sdkinfo.Version()},
 		provenance:      provenanceClient,
 	}
 	for _, opt := range opts {
@@ -86,9 +84,6 @@ func NewVerifier(opts ...Option) (*Verifier, error) {
 func ParseReference(ref string) (repo, tag, digest string, err error) {
 	return provenance.ParseReference(ref)
 }
-
-// Identity reports the verifier recorded in each result's metadata.
-func (v *Verifier) Identity() SoftwareIdentity { return v.identity }
 
 // FreshnessMaxAge reports the configured witness age bound.
 func (v *Verifier) FreshnessMaxAge() time.Duration { return v.freshnessMaxAge }
@@ -166,7 +161,7 @@ func (v *Verifier) verifyV3(docBytes, nonce []byte, repo string) (*Verification,
 		CryptoMaterial:     doc.CryptoMaterialItems(),
 		FreshnessExpiresAt: freshnessExpiresAt,
 		Metadata: VerificationMetadata{
-			Verifier:   v.identity,
+			Verifier:   SoftwareIdentity{Name: sdkinfo.Name, Version: sdkinfo.Version()},
 			VerifiedAt: now.UTC(),
 		},
 	}, layerNone, nil

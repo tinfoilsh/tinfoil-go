@@ -78,9 +78,9 @@ func TestVerificationFormatsFreshnessDeadline(t *testing.T) {
 	assert.True(t, parsed.Equal(sampleVerification().FreshnessExpiresAt))
 }
 
-// The verifier and time come from the verification's metadata; the contract
-// keeps them as flat fields. The host is the caller's: nothing attests it.
-func TestVerificationKeepsMetadata(t *testing.T) {
+// The appraisal time comes from the verification's metadata. The host and the
+// verifying SDK are the caller's: nothing attests either.
+func TestVerificationKeepsAppraisalTimeOnly(t *testing.T) {
 	encoded, err := encode(sampleVerification())
 	require.NoError(t, err)
 
@@ -88,6 +88,6 @@ func TestVerificationKeepsMetadata(t *testing.T) {
 	require.NoError(t, json.Unmarshal([]byte(encoded), &got))
 	assert.Equal(t, "tinfoilsh/confidential-model-router", got["config_repo"])
 	assert.NotContains(t, got, "enclave_host")
-	assert.Equal(t, map[string]any{"name": "tinfoil-go", "version": "0.15.7"}, got["verifier"])
+	assert.NotContains(t, got, "verifier")
 	assert.Equal(t, "2026-09-26T12:00:00Z", got["verified_at"])
 }

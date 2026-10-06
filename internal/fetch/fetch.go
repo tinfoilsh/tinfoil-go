@@ -17,16 +17,12 @@ import (
 	"github.com/tinfoilsh/tinfoil-go/internal/sdkinfo"
 )
 
-// SDK identifies the SDK making a request, in the Tinfoil-SDK and
-// Tinfoil-SDK-Version headers. The zero value identifies this module.
-type SDK struct{ Name, Version string }
-
 // Document retrieves a v3 attestation document from an enclave host using a
 // fresh challenge nonce, returning the raw response bytes for verification. If
 // relay is an empty string, the document is fetched from the host URL.
 // Otherwise, the request is made to the relay URL. The fetch stops when ctx is
 // done or after 30 seconds, whichever comes first.
-func Document(ctx context.Context, host, relay string, nonce []byte, sdk SDK) (result []byte, err error) {
+func Document(ctx context.Context, host, relay string, nonce []byte) (result []byte, err error) {
 	defer func() { err = errs.WrapFetch(err) }()
 	target, err := URL(host, relay, nonce)
 	if err != nil {
@@ -38,11 +34,8 @@ func Document(ctx context.Context, host, relay string, nonce []byte, sdk SDK) (r
 	if err != nil {
 		return nil, &errs.ConfigurationError{Err: err}
 	}
-	if sdk.Name == "" {
-		sdk = SDK{Name: sdkinfo.Name, Version: sdkinfo.Version()}
-	}
-	req.Header.Set(sdkNameHeader, sdk.Name)
-	req.Header.Set(sdkVersionHeader, sdk.Version)
+	req.Header.Set(sdkNameHeader, sdkinfo.Name)
+	req.Header.Set(sdkVersionHeader, sdkinfo.Version())
 	// Copy http.DefaultClient so an application's process-wide settings (its
 	// transport, proxy or timeout) still apply, while the CheckRedirect below
 	// leaves the shared client untouched.
