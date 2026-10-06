@@ -127,6 +127,9 @@ func TestVerifyRejectsWrongPinsAndUntrustedKeys(t *testing.T) {
 		{"digest", func(p *endorsement.Policy) { p.Digest = strings.Repeat("0", sha256.Size*2) }},
 		{"missing clock", func(p *endorsement.Policy) { p.Now = time.Time{} }},
 		{"negative age", func(p *endorsement.Policy) { p.MaxAge = -time.Second }},
+		{"negative skew", func(p *endorsement.Policy) { p.FutureSkew = -time.Second }},
+		{"archived negative age", func(p *endorsement.Policy) { p.IgnoreFreshness = true; p.MaxAge = -time.Second }},
+		{"archived negative skew", func(p *endorsement.Policy) { p.IgnoreFreshness = true; p.FutureSkew = -time.Second }},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			policy := f.policy()

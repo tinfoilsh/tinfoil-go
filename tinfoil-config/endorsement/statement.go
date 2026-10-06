@@ -8,27 +8,24 @@ import (
 	"crypto"
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"fmt"
 	"regexp"
 	"strings"
 	"uuid"
 
-	"github.com/digitorus/timestamp"
-	"github.com/secure-systems-lab/go-securesystemslib/dsse"
 	"github.com/tinfoilsh/tinfoil-go/internal/approval"
 )
 
 const (
-	StatementType    = "https://in-toto.io/Statement/v1"
+	StatementType    = approval.StatementType
 	PredicateType    = "https://tinfoil.sh/predicate/config-endorsement/v1"
-	PayloadType      = "application/vnd.in-toto+json"
-	BundleType       = "application/vnd.dev.sigstore.bundle.v0.3+json"
+	PayloadType      = approval.PayloadType
+	BundleType       = approval.BundleType
 	MaxConfigSize    = 1 << 20
-	MaxBundleSize    = 4 << 20
-	MaxStatementSize = 128 << 10
-	MaxTimestampSize = 64 << 10
+	MaxBundleSize    = approval.MaxBundleSize
+	MaxStatementSize = approval.MaxStatementSize
+	MaxTimestampSize = approval.MaxTimestampSize
 
 	identityComponentCount = 2
 	maxSlugLength          = 63
@@ -156,15 +153,7 @@ func (s *Statement) TimestampInput() ([]byte, error) {
 	}
 	core := *s
 	core.Predicate.Freshness = nil
-	encoded, err := json.Marshal(core)
-	if err != nil {
-		return nil, err
-	}
-	canonical := jsontext.Value(encoded)
-	if err := canonical.Canonicalize(); err != nil {
-		return nil, fmt.Errorf("canonicalizing endorsement core: %w", err)
-	}
-	return append([]byte(freshnessDomain), canonical...), nil
+	return approval.TimestampInput(freshnessDomain, core)
 }
 
 func (s *Statement) TimestampImprint() ([sha256.Size]byte, error) {
@@ -178,19 +167,12 @@ func (s *Statement) TimestampImprint() ([sha256.Size]byte, error) {
 // Complete embeds a response over the prepared core. This checks its imprint,
 // not TSA trust; a completed bundle must still pass Verifier.Verify.
 func (s *Statement) Complete(response []byte) ([]byte, error) {
-	if len(response) == 0 || len(response) > MaxTimestampSize {
-		return nil, fmt.Errorf("timestamp response size is outside allowed bounds")
-	}
-	imprint, err := s.TimestampImprint()
+	input, err := s.TimestampInput()
 	if err != nil {
 		return nil, err
 	}
-	ts, err := timestamp.ParseResponse(response)
-	if err != nil {
-		return nil, fmt.Errorf("parsing timestamp response: %w", err)
-	}
-	if ts.HashAlgorithm != crypto.SHA256 || !bytes.Equal(ts.HashedMessage, imprint[:]) {
-		return nil, fmt.Errorf("timestamp response does not match endorsement core")
+	if _, err := approval.ParseTimestamp(response, input); err != nil {
+		return nil, err
 	}
 	complete := *s
 	complete.Predicate.Freshness = &Freshness{RFC3161Timestamp: bytes.Clone(response)}
@@ -218,8 +200,7 @@ func EndorsementReference(payload []byte) (string, error) {
 	if _, err := ParseStatement(payload); err != nil {
 		return "", err
 	}
-	digest := sha256.Sum256(dsse.PAE(PayloadType, payload))
-	return "sha256:" + hex.EncodeToString(digest[:]), nil
+	return approval.EndorsementReference(payload), nil
 }
 
 func KeyHint(publicKey crypto.PublicKey) (string, error) {

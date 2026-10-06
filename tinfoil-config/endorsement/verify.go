@@ -12,9 +12,9 @@ import (
 )
 
 const (
-	DefaultMaxAge           = 7 * 24 * time.Hour
-	DefaultFutureSkew       = 5 * time.Minute
-	SigstoreTimestampPolicy = "1.3.6.1.4.1.57264.2"
+	DefaultMaxAge           = approval.DefaultMaxAge
+	DefaultFutureSkew       = approval.DefaultFutureSkew
+	SigstoreTimestampPolicy = approval.SigstoreTimestampPolicy
 )
 
 // SigningKey is application-provisioned trust, never material from collateral.
@@ -95,20 +95,11 @@ func (p Policy) ValidatePins() error {
 	return nil
 }
 
-func (p Policy) normalized() (Policy, error) {
+func (p Policy) timePolicy() (approval.TimePolicy, error) {
 	if err := p.ValidatePins(); err != nil {
-		return p, err
+		return approval.TimePolicy{}, err
 	}
-	if (p.Now.IsZero() && !p.IgnoreFreshness) || p.MaxAge < 0 || p.FutureSkew < 0 {
-		return p, fmt.Errorf("clock and nonnegative age and skew are required")
-	}
-	if p.MaxAge == 0 {
-		p.MaxAge = DefaultMaxAge
-	}
-	if p.FutureSkew == 0 {
-		p.FutureSkew = DefaultFutureSkew
-	}
-	return p, nil
+	return approval.NewTimePolicy(p.Now, p.MaxAge, p.FutureSkew, p.IgnoreFreshness)
 }
 
 // Verify authenticates exact config bytes, approval identity, signing authority,
@@ -126,12 +117,12 @@ func (v *Verifier) VerifyPrepared(config, bundleJSON []byte, policy Policy) erro
 }
 
 func (v *Verifier) verify(config, bundleJSON []byte, policy Policy, requirePublication bool) (*Verified, error) {
-	policy, err := policy.normalized()
+	timePolicy, err := policy.timePolicy()
 	if err != nil {
 		return nil, err
 	}
-	if len(config) == 0 || len(config) > MaxConfigSize || len(bundleJSON) == 0 || len(bundleJSON) > MaxBundleSize {
-		return nil, fmt.Errorf("config or bundle size is outside allowed bounds")
+	if len(config) == 0 || len(config) > MaxConfigSize {
+		return nil, fmt.Errorf("config size is outside allowed bounds")
 	}
 	b, err := approval.ParseBundle(bundleJSON, requirePublication)
 	if err != nil {
@@ -165,20 +156,13 @@ func (v *Verifier) verify(config, bundleJSON []byte, policy Policy, requirePubli
 	if err != nil {
 		return nil, err
 	}
-	inner, err := v.cryptographic.VerifyTimestamp(s.Predicate.Freshness.RFC3161Timestamp, input)
+	inner, err := v.cryptographic.VerifyTimestamp(s.Predicate.Freshness.RFC3161Timestamp, input, timePolicy)
 	if err != nil {
 		return nil, fmt.Errorf("inner timestamp: %w", err)
 	}
-	if err := verifyApprovalTime(inner, policy); err != nil {
-		return nil, err
-	}
-	ref, err := EndorsementReference(payload)
-	if err != nil {
-		return nil, err
-	}
 	return &Verified{
 		Name: s.Subject[0].Name, AuditScope: policy.AuditScope, Digest: hexDigest,
-		Reference: ref, SigningKeyHint: hint, ApprovalTime: inner,
+		Reference: approval.EndorsementReference(payload), SigningKeyHint: hint, ApprovalTime: inner,
 	}, nil
 }
 
@@ -186,29 +170,9 @@ func (v *Verifier) verify(config, bundleJSON []byte, policy Policy, requirePubli
 // This does not authenticate a config endorsement or bind the response to a
 // particular signing key.
 func (v *Verifier) VerifyTimestamp(input, response []byte, policy Policy) (time.Time, error) {
-	policy, err := policy.normalized()
+	timePolicy, err := policy.timePolicy()
 	if err != nil {
 		return time.Time{}, err
 	}
-	at, err := v.cryptographic.VerifyTimestamp(response, input)
-	if err != nil {
-		return time.Time{}, err
-	}
-	if err := verifyApprovalTime(at, policy); err != nil {
-		return time.Time{}, err
-	}
-	return at, nil
-}
-
-func verifyApprovalTime(at time.Time, policy Policy) error {
-	if policy.IgnoreFreshness {
-		return nil
-	}
-	if at.Before(policy.Now.Add(-policy.MaxAge)) {
-		return fmt.Errorf("config approval is too old")
-	}
-	if at.After(policy.Now.Add(policy.FutureSkew)) {
-		return fmt.Errorf("timestamp is in the future")
-	}
-	return nil
+	return v.cryptographic.VerifyTimestamp(response, input, timePolicy)
 }

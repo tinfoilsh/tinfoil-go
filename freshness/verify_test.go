@@ -133,6 +133,7 @@ func TestApprovalAgeUsesInnerTime(t *testing.T) {
 		now    time.Time
 		accept bool
 	}{
+		{"missing clock", time.Time{}, false},
 		{"age boundary", f.Now.Add(freshness.DefaultMaxAge), true},
 		{"expired", f.Now.Add(freshness.DefaultMaxAge + time.Nanosecond), false},
 		{"future boundary", f.Now.Add(-freshness.DefaultFutureSkew), true},
@@ -147,6 +148,13 @@ func TestApprovalAgeUsesInnerTime(t *testing.T) {
 			}
 		})
 	}
+	for _, policy := range []freshness.Policy{
+		{Artifact: a, Now: f.Now, MaxAge: -time.Second},
+		{Artifact: a, Now: f.Now, FutureSkew: -time.Second},
+	} {
+		_, err := verifier(t, f).Verify(b, policy)
+		require.ErrorContains(t, err, "nonnegative age and skew")
+	}
 }
 
 func TestTimestampBindsEveryArtifactField(t *testing.T) {
@@ -156,7 +164,8 @@ func TestTimestampBindsEveryArtifactField(t *testing.T) {
 	require.NoError(t, err)
 	input, err := s.TimestampInput()
 	require.NoError(t, err)
-	require.True(t, strings.HasPrefix(string(input), "tinfoil-artifact-freshness/v1\x00"))
+	const core = `{"_type":"https://in-toto.io/Statement/v1","predicate":{"kind":"runtime","repo":"tinfoilsh/cvmimage","tag":"v1.2.3"},"predicateType":"https://tinfoil.sh/predicate/artifact-freshness/v1","subject":[{"digest":{"sha256":"abababababababababababababababababababababababababababababababab"},"name":"tinfoil-inference-v1.2.3-manifest.json"}]}`
+	require.Equal(t, "tinfoil-artifact-freshness/v1\x00"+core, string(input))
 	response := f.Timestamp(t, input, f.Now)
 	_, err = verifier(t, f).VerifyTimestamp(input, response, freshness.Policy{Artifact: a, Now: f.Now})
 	require.NoError(t, err)

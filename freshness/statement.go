@@ -5,20 +5,16 @@ import (
 	"bytes"
 	"crypto"
 	"crypto/sha256"
-	"encoding/hex"
-	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"fmt"
 
-	"github.com/digitorus/timestamp"
-	"github.com/secure-systems-lab/go-securesystemslib/dsse"
 	"github.com/tinfoilsh/tinfoil-go/internal/approval"
 	"github.com/tinfoilsh/tinfoil-go/internal/canonical"
 	"golang.org/x/mod/semver"
 )
 
 const (
-	StatementType   = "https://in-toto.io/Statement/v1"
+	StatementType   = approval.StatementType
 	PredicateType   = "https://tinfoil.sh/predicate/artifact-freshness/v1"
 	PayloadType     = approval.PayloadType
 	BundleType      = approval.BundleType
@@ -123,34 +119,18 @@ func (s *Statement) TimestampInput() ([]byte, error) {
 	}
 	core := *s
 	core.Predicate.Freshness = nil
-	encoded, err := json.Marshal(core)
-	if err != nil {
-		return nil, err
-	}
-	canonical := jsontext.Value(encoded)
-	if err := canonical.Canonicalize(); err != nil {
-		return nil, err
-	}
-	return append([]byte(freshnessDomain), canonical...), nil
+	return approval.TimestampInput(freshnessDomain, core)
 }
 
 // Complete checks the timestamp imprint, not TSA trust. Clients must call
 // Verifier.Verify to authenticate the completed publication.
 func (s *Statement) Complete(response []byte) ([]byte, error) {
-	if len(response) == 0 || len(response) > approval.MaxTimestampSize {
-		return nil, fmt.Errorf("timestamp response size is outside allowed bounds")
-	}
 	input, err := s.TimestampInput()
 	if err != nil {
 		return nil, err
 	}
-	imprint := sha256.Sum256(input)
-	ts, err := timestamp.ParseResponse(response)
-	if err != nil {
+	if _, err := approval.ParseTimestamp(response, input); err != nil {
 		return nil, err
-	}
-	if ts.HashAlgorithm != crypto.SHA256 || !bytes.Equal(ts.HashedMessage, imprint[:]) {
-		return nil, fmt.Errorf("timestamp response does not match approval core")
 	}
 	complete := *s
 	complete.Predicate.Freshness = &Timestamp{RFC3161Timestamp: bytes.Clone(response)}
@@ -175,8 +155,7 @@ func EndorsementReference(payload []byte) (string, error) {
 	if _, err := ParseStatement(payload); err != nil {
 		return "", err
 	}
-	digest := sha256.Sum256(dsse.PAE(PayloadType, payload))
-	return "sha256:" + hex.EncodeToString(digest[:]), nil
+	return approval.EndorsementReference(payload), nil
 }
 
 func KeyHint(key crypto.PublicKey) (string, error) { return approval.KeyHint(key) }

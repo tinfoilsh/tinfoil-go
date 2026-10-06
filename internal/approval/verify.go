@@ -2,7 +2,6 @@
 package approval
 
 import (
-	"bytes"
 	"crypto"
 	"crypto/ecdsa"
 	"crypto/elliptic"
@@ -12,7 +11,6 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/digitorus/timestamp"
 	"github.com/sigstore/sigstore-go/pkg/bundle"
 	"github.com/sigstore/sigstore-go/pkg/root"
 	"github.com/sigstore/sigstore-go/pkg/verify"
@@ -117,10 +115,6 @@ func (v *Verifier) Verify(b *bundle.Bundle, digest []byte, published bool) (stri
 	return hint, nil
 }
 
-func (v *Verifier) VerifyTimestamp(response, input []byte) (time.Time, error) {
-	return verifyTimestamp(response, input, v.trust)
-}
-
 func KeyHint(publicKey crypto.PublicKey) (string, error) {
 	key, ok := publicKey.(*ecdsa.PublicKey)
 	if !ok || key == nil || key.Curve != elliptic.P256() || key.X == nil || key.Y == nil || !key.Curve.IsOnCurve(key.X, key.Y) {
@@ -167,21 +161,23 @@ func validateBundle(b *bundle.Bundle, requirePublication bool) error {
 	return nil
 }
 
-func verifyTimestamp(response, input []byte, trust root.TrustedMaterial) (time.Time, error) {
-	if len(response) == 0 || len(response) > MaxTimestampSize || len(input) == 0 || len(input) > MaxStatementSize {
-		return time.Time{}, fmt.Errorf("timestamp response or input size is outside allowed bounds")
+func (v *Verifier) VerifyTimestamp(response, input []byte, policy TimePolicy) (time.Time, error) {
+	if len(input) == 0 || len(input) > MaxStatementSize {
+		return time.Time{}, fmt.Errorf("timestamp input size is outside allowed bounds")
 	}
-	ts, err := timestamp.ParseResponse(response)
+	ts, err := ParseTimestamp(response, input)
 	if err != nil {
 		return time.Time{}, err
 	}
-	digest := sha256.Sum256(input)
-	if ts.HashAlgorithm != crypto.SHA256 || !bytes.Equal(ts.HashedMessage, digest[:]) || ts.Policy.String() != SigstoreTimestampPolicy {
-		return time.Time{}, fmt.Errorf("unexpected timestamp imprint, algorithm, or policy")
+	if ts.Policy.String() != SigstoreTimestampPolicy {
+		return time.Time{}, fmt.Errorf("unexpected timestamp policy")
 	}
-	for _, authority := range trust.TimestampingAuthorities() {
+	for _, authority := range v.trust.TimestampingAuthorities() {
 		verified, err := authority.Verify(response, input)
 		if err == nil && verified.Time.Equal(ts.Time) {
+			if err := policy.verify(ts.Time); err != nil {
+				return time.Time{}, err
+			}
 			return ts.Time, nil
 		}
 	}
