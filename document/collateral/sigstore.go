@@ -25,12 +25,13 @@ func (r SigstoreRef) Clone() SigstoreRef {
 // Freshness is a decoded freshness witness: the independently signed bundle
 // that attests a reference-values artifact was recently published.
 type Freshness struct {
+	Format string
 	Bundle jsontext.Value
 }
 
 // Clone returns a deep copy of f.
 func (f Freshness) Clone() Freshness {
-	return Freshness{Bundle: slices.Clone(f.Bundle)}
+	return Freshness{Format: f.Format, Bundle: slices.Clone(f.Bundle)}
 }
 
 // sigstoreData is the data of a SigstoreCodeV1Format or
@@ -73,7 +74,7 @@ func decodeFreshness(entry *Entry) (Freshness, error) {
 	if err := requireBundle(entry, data.SigstoreBundle); err != nil {
 		return Freshness{}, err
 	}
-	return Freshness{Bundle: data.SigstoreBundle}, nil
+	return Freshness{Format: entry.Format, Bundle: data.SigstoreBundle}, nil
 }
 
 // requireBundle rejects an entry whose sigstore_bundle member is missing or

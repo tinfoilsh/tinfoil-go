@@ -33,6 +33,8 @@ const (
 	// SigstoreFreshnessV1Format carries a freshness witness for a Sigstore
 	// reference-values artifact.
 	SigstoreFreshnessV1Format = "https://tinfoil.sh/collateral/sigstore-freshness/v1"
+	// ArtifactFreshnessV1Format carries a Tinfoil-signed release approval.
+	ArtifactFreshnessV1Format = "https://tinfoil.sh/collateral/artifact-freshness/v1"
 	// ConfigEndorsementV1Format carries an exact config and its timestamped
 	// registry approval bundle.
 	ConfigEndorsementV1Format = "https://tinfoil.sh/collateral/config-endorsement/v1"
@@ -56,6 +58,7 @@ const (
 	// reference-values entry it refreshes.
 	FreshnessIDCode     = "code-freshness"
 	FreshnessIDPlatform = "platform-freshness"
+	FreshnessIDRuntime  = "runtime-freshness"
 	// ConfigID is the ID of the config-endorsement entry.
 	ConfigID = "tinfoil-config"
 )
@@ -89,6 +92,10 @@ type Set struct {
 	CPU              CPUEndorsements
 	SigstoreCode     *SigstoreRef
 	SigstorePlatform *SigstoreRef
+	Config           *ConfigEndorsement
+	Runtime          *IGVMRuntime
+	platformCount    int
+	igvmPlatform     *SigstoreRef
 	// Freshness holds the freshness witnesses by entry ID.
 	Freshness map[string]Freshness
 }
@@ -96,8 +103,8 @@ type Set struct {
 // Decode checks the entries' shape and decodes every entry of a known role and
 // format, so a malformed entry fails whether or not verification would read
 // it. An entry whose role and format have no decoder (an unknown format, a
-// known format under another role, or ConfigEndorsementV1Format until a
-// consumer defines its payload) is checked for shape only and not retained.
+// known format under another role) is checked for shape only and not retained.
+// Config and runtime entries require their reserved IDs, formats, and roles.
 // An endorsement entry serves the CPU only when its subjects include
 // SubjectCPU.
 func Decode(entries []Entry) (Set, error) {
@@ -108,7 +115,37 @@ func Decode(entries []Entry) (Set, error) {
 	for i := range entries {
 		entry := &entries[i]
 		cpu := slices.Contains(entry.Subjects, SubjectCPU)
+		if entry.ID == PlatformID || entry.Format == SigstorePlatformV1Format {
+			set.platformCount++
+		}
 		switch {
+		case entry.ID == ConfigID || entry.Format == ConfigEndorsementV1Format:
+			if entry.ID != ConfigID || entry.Format != ConfigEndorsementV1Format || entry.Role != RoleReferenceValues {
+				return set, fmt.Errorf("conflicting collateral entry for %q", ConfigID)
+			}
+			v, err := decodeConfigEndorsement(entry)
+			if err != nil {
+				return set, err
+			}
+			set.Config = &v
+		case entry.ID == RuntimeID || entry.Format == IGVMRuntimeV1Format:
+			if entry.ID != RuntimeID || entry.Format != IGVMRuntimeV1Format || entry.Role != RoleReferenceValues {
+				return set, fmt.Errorf("conflicting collateral entry for %q", RuntimeID)
+			}
+			v, err := decodeRuntime(entry)
+			if err != nil {
+				return set, err
+			}
+			set.Runtime = &v
+		case entry.Format == ArtifactFreshnessV1Format || entry.ID == FreshnessIDRuntime:
+			if (entry.ID != FreshnessIDPlatform && entry.ID != FreshnessIDRuntime) || entry.Format != ArtifactFreshnessV1Format || entry.Role != RoleReferenceValues {
+				return set, fmt.Errorf("conflicting artifact freshness collateral %q", entry.ID)
+			}
+			f, err := decodeFreshness(entry)
+			if err != nil {
+				return set, err
+			}
+			set.Freshness[entry.ID] = f
 		case entry.Role == RoleEndorsement && entry.Format == AMDVCEKV1Format:
 			v, err := decodeAMDVCEK(entry)
 			if err != nil {
@@ -148,6 +185,9 @@ func Decode(entries []Entry) (Set, error) {
 			}
 			if set.SigstorePlatform == nil {
 				set.SigstorePlatform = v
+			}
+			if entry.ID == PlatformID {
+				set.igvmPlatform = v
 			}
 		case entry.Role == RoleReferenceValues && entry.Format == SigstoreFreshnessV1Format:
 			f, err := decodeFreshness(entry)

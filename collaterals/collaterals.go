@@ -15,16 +15,26 @@ import (
 	"github.com/tinfoilsh/tinfoil-go/document/collateral"
 )
 
-// FormatV2 identifies the collaterals response carrying v3 collateral entries.
+// FormatV2 identifies the legacy GitHub workload-release collateral response.
 const FormatV2 = "https://tinfoil.sh/predicate/attestation-collaterals/v2"
+
+const (
+	// FormatV3 identifies the request profile and response carrying config
+	// endorsement, runtime/platform provenance, and Tinfoil-signed freshness.
+	FormatV3    = "https://tinfoil.sh/predicate/attestation-collaterals/v3"
+	RuntimeRepo = collateral.RuntimeRepo
+)
 
 // Request asks the collaterals service for everything a v3 document must
 // carry. The raw quote is the only platform input: the service derives the
 // AMD KDS parameters (SEV-SNP) or the Intel PCS URLs (TDX) from it, so the
 // enclave does no report parsing.
 type Request struct {
+	// Profile is FormatV3 for registry configs, or empty for legacy releases.
+	Profile string                       `json:"profile,omitempty"`
+	Runtime *collateral.RuntimeReference `json:"runtime,omitempty"`
 	// Repo is the code repository whose Sigstore bundle is returned.
-	// Exactly one of Repo or Config selects the config source.
+	// The IGVM profile requires Runtime and Config instead of Repo and Tag.
 	Repo string `json:"repo,omitempty"`
 	// Tag optionally pins a code release; latest when empty.
 	Tag string `json:"tag,omitempty"`
@@ -37,9 +47,9 @@ type Request struct {
 	QuoteBase64 string `json:"quote_base64"`
 }
 
-// Response carries the complete collateral array for a v3 attestation
-// document: the platform endorsement entry (amd-vcek or intel-pcs) and the
-// two reference-values entries (sigstore-code, sigstore-platform).
+// Response carries the collateral array for a v3 attestation document.
+// Format must match the requested profile: FormatV2 for an empty profile,
+// or FormatV3 for a FormatV3 request.
 type Response struct {
 	Format    string    `json:"format"`
 	ExpiresAt time.Time `json:"expires_at"`
