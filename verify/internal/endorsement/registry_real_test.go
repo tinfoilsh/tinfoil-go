@@ -1,23 +1,20 @@
-package verify
+package endorsement
 
 import (
-	"crypto/ecdsa"
-	"crypto/elliptic"
-	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json/jsontext"
 	"encoding/json/v2"
+	"os"
 	"testing"
 	"time"
 
 	"github.com/sigstore/sigstore-go/pkg/bundle"
 	"github.com/stretchr/testify/require"
 	configendorsement "github.com/tinfoilsh/tinfoil-go/endorsement/config"
-	"github.com/tinfoilsh/tinfoil-go/verify/internal/endorsement"
 )
 
-const capturedCanaryIdentity = "/tinfoil/registry-canary"
+const capturedRegistryFixture = "../../testdata/registry/canary-endorsement.json"
 
 func TestCapturedRegistryTimestamp(t *testing.T) {
 	var registry struct {
@@ -28,7 +25,9 @@ func TestCapturedRegistryTimestamp(t *testing.T) {
 		Config         []byte         `json:"config"`
 		Bundle         jsontext.Value `json:"bundle"`
 	}
-	require.NoError(t, json.Unmarshal(capturedFixture(t, "registry", "canary-endorsement.json"), &registry))
+	data, err := os.ReadFile(capturedRegistryFixture)
+	require.NoError(t, err)
+	require.NoError(t, json.Unmarshal(data, &registry))
 	var b bundle.Bundle
 	require.NoError(t, b.UnmarshalJSON(registry.Bundle))
 	payload := b.GetDsseEnvelope().GetPayload()
@@ -45,23 +44,19 @@ func TestCapturedRegistryTimestamp(t *testing.T) {
 	input, err := statement.TimestampInput()
 	require.NoError(t, err)
 
-	// This authenticates the production TSA token only. The generated key is
-	// not registry trust, and this test does not authenticate the endorsement.
-	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	// This authenticates the production TSA token only, not the endorsement.
+	client, err := NewDefaultClient()
 	require.NoError(t, err)
-	client, err := endorsement.NewDefaultClient()
+	v := &endorsementVerifier{trust: client.trustRoot}
+	archived, err := newTimePolicy(time.Time{}, 0, 0, true)
 	require.NoError(t, err)
-	v, err := client.ConfigVerifier([]endorsement.ConfigSigningKey{{PublicKey: key.Public(), AuditScope: registry.AuditScope}})
-	require.NoError(t, err)
-	archived := endorsement.ConfigPolicy{Identity: capturedCanaryIdentity, AuditScope: registry.AuditScope, IgnoreFreshness: true}
-	at, err := v.VerifyTimestamp(input, statement.Predicate.Freshness.RFC3161Timestamp, archived)
+	at, err := v.VerifyTimestamp(statement.Predicate.Freshness.RFC3161Timestamp, input, archived)
 	require.NoError(t, err)
 	require.False(t, at.IsZero())
-	stale := archived
-	stale.IgnoreFreshness = false
-	stale.Now = at.Add(endorsement.DefaultMaxAge + time.Nanosecond)
-	_, err = v.VerifyTimestamp(input, statement.Predicate.Freshness.RFC3161Timestamp, stale)
+	stale, err := newTimePolicy(at.Add(DefaultMaxAge+time.Nanosecond), 0, 0, false)
+	require.NoError(t, err)
+	_, err = v.VerifyTimestamp(statement.Predicate.Freshness.RFC3161Timestamp, input, stale)
 	require.ErrorContains(t, err, "too old")
-	_, err = v.VerifyTimestamp(append(input, 'x'), statement.Predicate.Freshness.RFC3161Timestamp, archived)
+	_, err = v.VerifyTimestamp(statement.Predicate.Freshness.RFC3161Timestamp, append(input, 'x'), archived)
 	require.ErrorContains(t, err, "does not match")
 }
