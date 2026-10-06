@@ -54,7 +54,7 @@ func (v *FreshnessVerifier) Verify(bundleJSON []byte, policy FreshnessPolicy) (*
 	if err != nil {
 		return nil, err
 	}
-	b, err := parseEndorsementBundle(bundleJSON, true)
+	b, err := parseEndorsementBundle(bundleJSON)
 	if err != nil {
 		return nil, err
 	}
@@ -71,7 +71,7 @@ func (v *FreshnessVerifier) Verify(bundleJSON []byte, policy FreshnessPolicy) (*
 	if err != nil {
 		return nil, err
 	}
-	hint, err := v.cryptographic.Verify(b, digest, true)
+	hint, err := v.cryptographic.Verify(b, digest)
 	if err != nil {
 		return nil, err
 	}
@@ -84,18 +84,6 @@ func (v *FreshnessVerifier) Verify(bundleJSON []byte, policy FreshnessPolicy) (*
 		return nil, fmt.Errorf("inner timestamp: %w", err)
 	}
 	return &FreshnessVerified{Artifact: policy.Artifact, Reference: statement.EndorsementReference(payload), SigningKeyHint: hint, ApprovalTime: at}, nil
-}
-
-// VerifyTimestamp authenticates the prepared core's timestamp before signing.
-func (v *FreshnessVerifier) VerifyTimestamp(input, response []byte, policy FreshnessPolicy) (time.Time, error) {
-	if v == nil || v.cryptographic == nil {
-		return time.Time{}, fmt.Errorf("uninitialized freshness verifier")
-	}
-	timePolicy, err := policy.timePolicy()
-	if err != nil {
-		return time.Time{}, err
-	}
-	return v.cryptographic.VerifyTimestamp(response, input, timePolicy)
 }
 
 func (c *Client) FreshnessVerifier(keys []crypto.PublicKey) (*FreshnessVerifier, error) {

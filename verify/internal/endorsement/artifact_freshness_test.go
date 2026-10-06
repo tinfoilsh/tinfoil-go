@@ -68,23 +68,14 @@ func TestUninitializedVerifierReturnsError(t *testing.T) {
 	policy := endorsement.FreshnessPolicy{Artifact: a, Now: f.Now}
 	payload := statement(t, f, a, f.Now)
 	bundle := sigstoretest.MarshalBundle(t, f.Bundle(t, payload))
-	s, err := freshness.ParseStatement(payload)
-	require.NoError(t, err)
-	input, err := s.TimestampInput()
-	require.NoError(t, err)
 	for name, v := range map[string]*endorsement.FreshnessVerifier{
 		"nil":  nil,
 		"zero": {},
 	} {
-		t.Run(name+"/approval", func(t *testing.T) {
+		t.Run(name, func(t *testing.T) {
 			got, err := v.Verify(bundle, policy)
 			require.ErrorContains(t, err, "uninitialized freshness verifier")
 			require.Nil(t, got)
-		})
-		t.Run(name+"/timestamp", func(t *testing.T) {
-			got, err := v.VerifyTimestamp(input, s.Predicate.Freshness.RFC3161Timestamp, policy)
-			require.ErrorContains(t, err, "uninitialized freshness verifier")
-			require.True(t, got.IsZero())
 		})
 	}
 }
@@ -195,7 +186,9 @@ func TestTimestampBindsEveryArtifactField(t *testing.T) {
 	const core = `{"_type":"https://in-toto.io/Statement/v1","predicate":{"kind":"runtime","repo":"tinfoilsh/cvmimage","tag":"v1.2.3"},"predicateType":"https://tinfoil.sh/predicate/artifact-freshness/v1","subject":[{"digest":{"sha256":"abababababababababababababababababababababababababababababababab"},"name":"tinfoil-inference-v1.2.3-manifest.json"}]}`
 	require.Equal(t, "tinfoil-artifact-freshness/v1\x00"+core, string(input))
 	response := f.Timestamp(t, input, f.Now)
-	_, err = verifier(t, f).VerifyTimestamp(input, response, endorsement.FreshnessPolicy{Artifact: a, Now: f.Now})
+	payload, err := s.Complete(response)
+	require.NoError(t, err)
+	_, err = verifier(t, f).Verify(sigstoretest.MarshalBundle(t, f.Bundle(t, payload)), endorsement.FreshnessPolicy{Artifact: a, Now: f.Now})
 	require.NoError(t, err)
 	s.Subject[0].Digest["sha256"] = strings.Repeat("cd", 32)
 	_, err = s.Complete(response)
