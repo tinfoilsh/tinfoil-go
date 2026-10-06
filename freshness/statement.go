@@ -134,8 +134,8 @@ func (s *Statement) TimestampInput() ([]byte, error) {
 	return append([]byte(freshnessDomain), canonical...), nil
 }
 
-// Complete checks the timestamp imprint, not TSA trust. Publishers must call
-// Verifier.VerifyTimestamp before signing and Verify after logging.
+// Complete checks the timestamp imprint, not TSA trust. Clients must call
+// Verifier.Verify to authenticate the completed publication.
 func (s *Statement) Complete(response []byte) ([]byte, error) {
 	if len(response) == 0 || len(response) > approval.MaxTimestampSize {
 		return nil, fmt.Errorf("timestamp response size is outside allowed bounds")

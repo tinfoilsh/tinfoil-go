@@ -117,8 +117,8 @@ func (v *Verifier) Verify(config, bundleJSON []byte, policy Policy) (*Verified, 
 	return v.verify(config, bundleJSON, policy, true)
 }
 
-// VerifyPrepared checks an unpublished approval before its immutable bytes are
-// persisted. It requires no log receipts and does not establish transparency.
+// VerifyPrepared checks an approval without requiring log receipts.
+// It authenticates the signed statement and timestamp but not transparency.
 // Only Verify can authenticate a published approval.
 func (v *Verifier) VerifyPrepared(config, bundleJSON []byte, policy Policy) error {
 	_, err := v.verify(config, bundleJSON, policy, false)
@@ -182,9 +182,9 @@ func (v *Verifier) verify(config, bundleJSON []byte, policy Policy, requirePubli
 	}, nil
 }
 
-// VerifyTimestamp authenticates a prepared core's TSA response before a
-// publisher signs it. This does not authenticate a config endorsement or bind
-// the response to a particular signing key.
+// VerifyTimestamp authenticates a core's TSA response and checks its freshness.
+// This does not authenticate a config endorsement or bind the response to a
+// particular signing key.
 func (v *Verifier) VerifyTimestamp(input, response []byte, policy Policy) (time.Time, error) {
 	policy, err := policy.normalized()
 	if err != nil {
