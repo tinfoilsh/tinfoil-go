@@ -23,6 +23,7 @@ const (
 	PlatformRepo    = "tinfoilsh/platform-endorsements"
 	RuntimeRepo     = "tinfoilsh/cvmimage"
 	PlatformName    = "platform-endorsements-igvm.json"
+	digestAlgorithm = "sha256"
 	freshnessDomain = "tinfoil-artifact-freshness/v1\x00"
 )
 
@@ -86,13 +87,13 @@ func NewStatement(artifact Artifact) (*Statement, error) {
 	}
 	return &Statement{
 		Type: StatementType, PredicateType: PredicateType,
-		Subject:   []Subject{{Name: artifact.Name, Digest: map[string]string{"sha256": artifact.Digest}}},
+		Subject:   []Subject{{Name: artifact.Name, Digest: map[string]string{digestAlgorithm: artifact.Digest}}},
 		Predicate: Predicate{Kind: artifact.Kind, Repo: artifact.Repo, Tag: artifact.Tag},
 	}, nil
 }
 
 func (s *Statement) artifact() Artifact {
-	return Artifact{Kind: s.Predicate.Kind, Repo: s.Predicate.Repo, Tag: s.Predicate.Tag, Name: s.Subject[0].Name, Digest: s.Subject[0].Digest["sha256"]}
+	return Artifact{Kind: s.Predicate.Kind, Repo: s.Predicate.Repo, Tag: s.Predicate.Tag, Name: s.Subject[0].Name, Digest: s.Subject[0].Digest[digestAlgorithm]}
 }
 
 func (s *Statement) validate(requireTimestamp bool) error {
