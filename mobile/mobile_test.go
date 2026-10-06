@@ -37,8 +37,7 @@ func TestErrorPrefixesMatchCategories(t *testing.T) {
 // Every error crossing the FFI reaches Swift as text, so each must lead with
 // the category Swift maps it to.
 func TestErrorsLeadWithCategory(t *testing.T) {
-	nonce, err := NewNonce()
-	require.NoError(t, err)
+	nonce := NewNonce()
 	verifier, err := NewVerifier("")
 	require.NoError(t, err)
 	for _, tt := range []struct {
@@ -62,10 +61,7 @@ func TestErrorsLeadWithCategory(t *testing.T) {
 }
 
 func TestNewNonceIsFresh(t *testing.T) {
-	first, err := NewNonce()
-	require.NoError(t, err)
-	second, err := NewNonce()
-	require.NoError(t, err)
+	first, second := NewNonce(), NewNonce()
 	assert.Len(t, first, document.NonceSize)
 	assert.False(t, bytes.Equal(first, second))
 }
@@ -99,8 +95,7 @@ func TestCheckFreshRejectsExpired(t *testing.T) {
 // The flow a mobile caller runs: its own fetch, then a stateless verify.
 func TestLiveVerify(t *testing.T) {
 	testutil.RequireLive(t)
-	nonce, err := NewNonce()
-	require.NoError(t, err)
+	nonce := NewNonce()
 	url, err := AttestationURL("inference.tinfoil.sh", "", nonce)
 	require.NoError(t, err)
 	doc, err := testutil.Get(url)
@@ -118,8 +113,6 @@ func TestLiveVerify(t *testing.T) {
 
 	_, err = verifier.Verify(doc, nonce[:len(nonce)-1], routerRepo)
 	require.Error(t, err, "a document verifies only against the nonce it was fetched with")
-	other, err := NewNonce()
-	require.NoError(t, err)
-	_, err = verifier.Verify(doc, other, routerRepo)
+	_, err = verifier.Verify(doc, NewNonce(), routerRepo)
 	require.Error(t, err, "a document verifies only against the nonce it was fetched with")
 }

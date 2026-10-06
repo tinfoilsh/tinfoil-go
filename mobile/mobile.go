@@ -16,6 +16,7 @@
 package mobile
 
 import (
+	"crypto/rand"
 	"encoding/json"
 	"fmt"
 	"time"
@@ -28,8 +29,11 @@ import (
 
 // NewNonce returns a fresh random challenge for one attestation fetch. Pass
 // the same bytes to AttestationURL and to Verify, and never reuse them.
-func NewNonce() ([]byte, error) {
-	return document.RandomNonce()
+func NewNonce() []byte {
+	nonce := make([]byte, document.NonceSize)
+	// crypto/rand.Read never returns an error; it crashes the program instead.
+	rand.Read(nonce)
+	return nonce
 }
 
 // AttestationURL returns the HTTPS URL to GET host's attestation document

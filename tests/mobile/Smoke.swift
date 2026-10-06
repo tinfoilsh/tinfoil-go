@@ -23,10 +23,7 @@ func checkMobileSurface() throws {
 
     // The caller fetches the document itself, with a fresh nonce per fetch. A
     // relay is a host with an optional port, not a URL; "" fetches directly.
-    guard let nonce = MobileNewNonce(&error) else {
-        if let error { throw error }
-        return
-    }
+    guard let nonce = MobileNewNonce() else { return }
     let _: String = MobileAttestationURL("enclave.example", "relay.example:8443", nonce, &error)
     if let error { throw error }
 

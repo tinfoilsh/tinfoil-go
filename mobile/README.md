@@ -32,7 +32,11 @@ at `freshness_expires_at`. `Verify` already fails for a result past that
 deadline, so verifying again cannot loop on an expired one.
 
 The URL comes from Go rather than being rebuilt by the caller so the wire
-format has one definition: the Go SDK fetches through the same function.
+format has one definition: the Go SDK fetches through the same function. The
+rest of the fetch is the caller's to match: HTTPS only, including every
+redirect; a 30 second timeout; a 32 MiB cap on the body; a non-2xx status as a
+failure; and a connection of its own rather than one pooled with other
+traffic, which may still reach a replica draining after a cutover.
 
 ## Errors
 
@@ -41,8 +45,8 @@ survive in the text. It does: the SDK's categories lead their messages with
 `configuration error:` or `attestation error:`, and fetching is the caller's, so
 no fetch error starts here. Nothing in this package adds a prefix of its own. The
 prefixes are exported as constants in `errors.go`, so a caller matches on them
-instead of on literals. The one uncategorized failure is `NewNonce` finding the
-system's random source unavailable.
+instead of on literals. `NewNonce` cannot fail: Go's random source crashes the
+program rather than return an error.
 
 ## Checking a change
 
