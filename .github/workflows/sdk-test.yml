@@ -96,7 +96,7 @@ jobs:
               exit 1
             fi
             TINFOIL_CONFORMANCE_FIXTURES="$d" \
-              go test -count=1 -tags tinfoil_conformance -run TestFixtures ./verify/conformance/
+              go test -race -count=1 -tags tinfoil_conformance -run TestFixtures ./verify/conformance/
           done
 
   live:
