@@ -13,8 +13,6 @@ import (
 	"github.com/tinfoilsh/tinfoil-go/verify/measurement"
 )
 
-const sampleHost = "inference.tinfoil.sh"
-
 func sampleVerification() *verify.Verification {
 	return &verify.Verification{
 		ConfigRepo: "tinfoilsh/confidential-model-router",
@@ -42,7 +40,7 @@ func sampleVerification() *verify.Verification {
 // real work this mapping does: binding a connection is what a caller has a
 // verification for, and it should not have to repeat the lookup.
 func TestVerificationLiftsChannelKeys(t *testing.T) {
-	encoded, err := encode(sampleVerification(), sampleHost)
+	encoded, err := encode(sampleVerification())
 	require.NoError(t, err)
 
 	var got map[string]any
@@ -58,7 +56,7 @@ func TestVerificationOmitsMissingHPKE(t *testing.T) {
 	v := sampleVerification()
 	v.CryptoMaterial = v.CryptoMaterial[:1]
 
-	encoded, err := encode(v, sampleHost)
+	encoded, err := encode(v)
 	require.NoError(t, err)
 
 	var got map[string]any
@@ -70,7 +68,7 @@ func TestVerificationOmitsMissingHPKE(t *testing.T) {
 // time.Time cannot cross the FFI boundary, so the deadline a caller must honour
 // is formatted here and parsed back on the other side.
 func TestVerificationFormatsFreshnessDeadline(t *testing.T) {
-	encoded, err := encode(sampleVerification(), sampleHost)
+	encoded, err := encode(sampleVerification())
 	require.NoError(t, err)
 
 	var got map[string]any
@@ -80,16 +78,16 @@ func TestVerificationFormatsFreshnessDeadline(t *testing.T) {
 	assert.True(t, parsed.Equal(sampleVerification().FreshnessExpiresAt))
 }
 
-// The host comes from the client and the verifier and time from the
-// verification's metadata; the contract keeps them as flat fields.
-func TestVerificationKeepsHostAndMetadata(t *testing.T) {
-	encoded, err := encode(sampleVerification(), sampleHost)
+// The verifier and time come from the verification's metadata; the contract
+// keeps them as flat fields. The host is the caller's: nothing attests it.
+func TestVerificationKeepsMetadata(t *testing.T) {
+	encoded, err := encode(sampleVerification())
 	require.NoError(t, err)
 
 	var got map[string]any
 	require.NoError(t, json.Unmarshal([]byte(encoded), &got))
 	assert.Equal(t, "tinfoilsh/confidential-model-router", got["config_repo"])
-	assert.Equal(t, sampleHost, got["enclave_host"])
+	assert.NotContains(t, got, "enclave_host")
 	assert.Equal(t, map[string]any{"name": "tinfoil-go", "version": "0.15.7"}, got["verifier"])
 	assert.Equal(t, "2026-09-26T12:00:00Z", got["verified_at"])
 }

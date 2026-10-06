@@ -28,27 +28,15 @@ type SDK struct{ Name, Version string }
 // done or after 30 seconds, whichever comes first.
 func Document(ctx context.Context, host, relay string, nonce []byte, sdk SDK) (result []byte, err error) {
 	defer func() { err = errs.WrapFetch(err) }()
-	if host == "" {
-		return nil, &errs.ConfigurationError{Err: fmt.Errorf("enclave host is required")}
-	}
-	if len(nonce) != document.NonceSize {
-		return nil, &errs.ConfigurationError{Err: fmt.Errorf("nonce must be %d bytes, got %d", document.NonceSize, len(nonce))}
-	}
-	u := url.URL{
-		Scheme:   "https",
-		Host:     host,
-		Path:     attestationEndpoint,
-		RawQuery: "nonce=" + hex.EncodeToString(nonce),
-	}
-	if relay != "" {
-		u.Host = relay
-		u.RawQuery += "&enclave=" + url.QueryEscape(host)
+	target, err := URL(host, relay, nonce)
+	if err != nil {
+		return nil, err
 	}
 	ctx, cancel := context.WithTimeout(ctx, attestationFetchTimeout)
 	defer cancel()
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, target, nil)
 	if err != nil {
-		return nil, &errs.ConfigurationError{Err: fmt.Errorf("invalid enclave host: %w", err)}
+		return nil, &errs.ConfigurationError{Err: err}
 	}
 	if sdk.Name == "" {
 		sdk = SDK{Name: sdkinfo.Name, Version: sdkinfo.Version()}
@@ -89,7 +77,7 @@ func Document(ctx context.Context, host, relay string, nonce []byte, sdk SDK) (r
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode > 299 {
-		return nil, fmt.Errorf("HTTP GET %s: %d %s", u.String(), resp.StatusCode, resp.Status)
+		return nil, fmt.Errorf("HTTP GET %s: %d %s", target, resp.StatusCode, resp.Status)
 	}
 	// LimitReader truncates silently. Reading one byte past the limit tells an
 	// oversized document apart from one of exactly the maximum size.
@@ -101,6 +89,41 @@ func Document(ctx context.Context, host, relay string, nonce []byte, sdk SDK) (r
 		return nil, fmt.Errorf("attestation document exceeds %d bytes", maxAttestationBytes)
 	}
 	return body, nil
+}
+
+// URL returns where the attestation document of host is fetched with nonce:
+// from host itself, or from relay, which forwards the request to host, when
+// relay is not empty. Both are a host with an optional port, not a URL.
+func URL(host, relay string, nonce []byte) (string, error) {
+	if host == "" {
+		return "", &errs.ConfigurationError{Err: fmt.Errorf("enclave host is required")}
+	}
+	if len(nonce) != document.NonceSize {
+		return "", &errs.ConfigurationError{Err: fmt.Errorf("nonce must be %d bytes, got %d", document.NonceSize, len(nonce))}
+	}
+	for _, authority := range []string{host, relay} {
+		if authority != "" && !isAuthority(authority) {
+			return "", &errs.ConfigurationError{Err: fmt.Errorf("invalid host %q: want a host with an optional port", authority)}
+		}
+	}
+	u := url.URL{
+		Scheme:   "https",
+		Host:     host,
+		Path:     attestationEndpoint,
+		RawQuery: "nonce=" + hex.EncodeToString(nonce),
+	}
+	if relay != "" {
+		u.Host = relay
+		u.RawQuery += "&enclave=" + url.QueryEscape(host)
+	}
+	return u.String(), nil
+}
+
+// isAuthority reports whether s parses back as exactly the host of an HTTPS
+// URL, which rejects a URL, a path or user information passed as a host.
+func isAuthority(s string) bool {
+	parsed, err := url.Parse((&url.URL{Scheme: "https", Host: s}).String())
+	return err == nil && parsed.Host == s && parsed.Path == "" && parsed.User == nil
 }
 
 const (

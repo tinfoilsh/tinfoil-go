@@ -12,49 +12,29 @@ import Tinfoil
 // file when it changes.
 func checkMobileSurface() throws {
     var error: NSError?
-
-    guard let client = MobileNewClient("enclave.example", "org/repo", &error) else {
-        if let error { throw error }
-        return
-    }
-    let _: String = client.enclave()
-    let _: String = client.repo()
     let _: Int64 = MobileVerificationSchemaVersion
 
-    // Options travel as JSON: pinned_registers, and freshness_max_age_ns in
-    // integer nanoseconds. An empty string selects the default policy.
-    _ = MobileNewClientWithOptions("enclave.example", "org/repo", "{}", &error)
-    if let error { throw error }
-
-    // Verifying contacts an enclave, so this is a signature check only.
-    let _: String = client.verify(&error)
-    if let error { throw error }
-
-    // Empty before this client has verified, rather than an error.
-    let cached = client.verification(&error)
-    if let error { throw error }
-    _ = try decodeVerification(cached)
-
-    // Discovery verifies the router it selects; a fallback is left unverified,
-    // so read the cached verification before verifying again.
-    guard let discovered = MobileNewDefaultClient("", &error) else {
+    // Options travel as JSON: pinned_registers, freshness_max_age_ns in integer
+    // nanoseconds, and sdk. An empty string selects the default policy.
+    guard let verifier = MobileNewVerifier("{}", &error) else {
         if let error { throw error }
         return
     }
-    let _: String = discovered.enclave()
 
-    // A relay is a host with an optional port, not a URL.
-    let _: MobileClient? = client.viaRelay("relay.example:8443")
+    // The caller fetches the document itself, with a fresh nonce per fetch. A
+    // relay is a host with an optional port, not a URL; "" fetches directly.
+    guard let nonce = MobileNewNonce() else { return }
+    let _: String = MobileAttestationURL("enclave.example", "relay.example:8443", nonce, &error)
+    if let error { throw error }
 
-    // Pinned to the verified TLS key. headersJSON is a JSON object or empty.
-    let response = try client.request("GET", url: "/", headersJSON: "", body: nil)
-    let _: Int = response.statusCode
-    let _: Data? = response.body
+    // Verifying performs no I/O; it appraises the fetched bytes.
+    let payload: String = verifier.verify(Data(), nonce: nonce, repo: "org/repo", error: &error)
+    if let error { throw error }
+    _ = try decodeVerification(payload)
 
     // Errors cross as NSError with only a message; the prefix is the category.
     let _: [String] = [
         MobileConfigurationErrorPrefix,
-        MobileFetchErrorPrefix,
         MobileAttestationErrorPrefix,
     ]
 }
@@ -65,7 +45,6 @@ func checkMobileSurface() throws {
 struct Verification: Decodable {
     let schemaVersion: Int
     let configRepo: String
-    let enclaveHost: String?
     let codeDigest: String
     let codeTag: String?
     let codeMeasurement: Measurement?
@@ -96,7 +75,6 @@ struct Verification: Decodable {
     private enum CodingKeys: String, CodingKey {
         case schemaVersion = "schema_version"
         case configRepo = "config_repo"
-        case enclaveHost = "enclave_host"
         case codeDigest = "code_digest"
         case codeTag = "code_tag"
         case codeMeasurement = "code_measurement"

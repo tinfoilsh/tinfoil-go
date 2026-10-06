@@ -7,8 +7,6 @@ const (
 	// ConfigurationErrorPrefix leads an error in the caller's arguments or
 	// options. Retrying will not help.
 	ConfigurationErrorPrefix = "configuration error: "
-	// FetchErrorPrefix leads a failure to fetch attestation material.
-	FetchErrorPrefix = "fetch error: "
 	// AttestationErrorPrefix leads rejected evidence, policy or channel binding.
 	AttestationErrorPrefix = "attestation error: "
 )
