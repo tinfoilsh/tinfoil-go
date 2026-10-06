@@ -1,4 +1,4 @@
-package provenance
+package endorsement
 
 import (
 	"crypto"
@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/sigstore/sigstore-go/pkg/root"
-	"github.com/tinfoilsh/tinfoil-go/freshness"
+	"github.com/tinfoilsh/tinfoil-go/endorsement/freshness"
 	"github.com/tinfoilsh/tinfoil-go/internal/statement"
 )
 

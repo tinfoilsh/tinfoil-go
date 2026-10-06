@@ -1,4 +1,4 @@
-package provenance_test
+package endorsement_test
 
 import (
 	"crypto"
@@ -10,9 +10,9 @@ import (
 	protobundle "github.com/sigstore/protobuf-specs/gen/pb-go/bundle/v1"
 	common "github.com/sigstore/protobuf-specs/gen/pb-go/common/v1"
 	"github.com/stretchr/testify/require"
-	"github.com/tinfoilsh/tinfoil-go/freshness"
+	"github.com/tinfoilsh/tinfoil-go/endorsement/freshness"
 	"github.com/tinfoilsh/tinfoil-go/internal/sigstoretest"
-	"github.com/tinfoilsh/tinfoil-go/verify/internal/provenance"
+	"github.com/tinfoilsh/tinfoil-go/verify/internal/endorsement"
 )
 
 func artifact(kind string) freshness.Artifact {
@@ -36,9 +36,9 @@ func statement(t *testing.T, f *sigstoretest.Fixture, a freshness.Artifact, at t
 	return payload
 }
 
-func verifier(t *testing.T, f *sigstoretest.Fixture) *provenance.FreshnessVerifier {
+func verifier(t *testing.T, f *sigstoretest.Fixture) *endorsement.FreshnessVerifier {
 	t.Helper()
-	v, err := provenance.NewFreshnessVerifier(&f.Trust, []crypto.PublicKey{f.Key.Public()})
+	v, err := endorsement.NewFreshnessVerifier(&f.Trust, []crypto.PublicKey{f.Key.Public()})
 	require.NoError(t, err)
 	return v
 }
@@ -51,7 +51,7 @@ func TestVerifyArtifactApproval(t *testing.T) {
 			at := f.Now.Add(-time.Minute)
 			payload := statement(t, f, a, at)
 			b := f.Bundle(t, payload)
-			got, err := verifier(t, f).Verify(sigstoretest.MarshalBundle(t, b), provenance.FreshnessPolicy{Artifact: a, Now: f.Now})
+			got, err := verifier(t, f).Verify(sigstoretest.MarshalBundle(t, b), endorsement.FreshnessPolicy{Artifact: a, Now: f.Now})
 			require.NoError(t, err)
 			require.Equal(t, a, got.Artifact)
 			require.Equal(t, at, got.ApprovalTime)
@@ -65,14 +65,14 @@ func TestVerifyArtifactApproval(t *testing.T) {
 func TestUninitializedVerifierReturnsError(t *testing.T) {
 	f := sigstoretest.New(t)
 	a := artifact(freshness.KindRuntime)
-	policy := provenance.FreshnessPolicy{Artifact: a, Now: f.Now}
+	policy := endorsement.FreshnessPolicy{Artifact: a, Now: f.Now}
 	payload := statement(t, f, a, f.Now)
 	bundle := sigstoretest.MarshalBundle(t, f.Bundle(t, payload))
 	s, err := freshness.ParseStatement(payload)
 	require.NoError(t, err)
 	input, err := s.TimestampInput()
 	require.NoError(t, err)
-	for name, v := range map[string]*provenance.FreshnessVerifier{
+	for name, v := range map[string]*endorsement.FreshnessVerifier{
 		"nil":  nil,
 		"zero": {},
 	} {
@@ -103,14 +103,14 @@ func TestVerifyRejectsWrongArtifactAndKey(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			pin := a
 			mutate(&pin)
-			_, err := verifier(t, f).Verify(b, provenance.FreshnessPolicy{Artifact: pin, Now: f.Now})
+			_, err := verifier(t, f).Verify(b, endorsement.FreshnessPolicy{Artifact: pin, Now: f.Now})
 			require.Error(t, err)
 		})
 	}
 	other := sigstoretest.New(t)
-	v, err := provenance.NewFreshnessVerifier(&f.Trust, []crypto.PublicKey{other.Key.Public()})
+	v, err := endorsement.NewFreshnessVerifier(&f.Trust, []crypto.PublicKey{other.Key.Public()})
 	require.NoError(t, err)
-	_, err = v.Verify(b, provenance.FreshnessPolicy{Artifact: a, Now: f.Now})
+	_, err = v.Verify(b, endorsement.FreshnessPolicy{Artifact: a, Now: f.Now})
 	require.ErrorContains(t, err, "untrusted approval signing key")
 }
 
@@ -131,7 +131,7 @@ func TestVerifyRequiresSignatureTimestampAndInclusion(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			b := f.Bundle(t, payload)
 			mutate(b)
-			_, err := verifier(t, f).Verify(sigstoretest.MarshalBundle(t, b), provenance.FreshnessPolicy{Artifact: a, Now: f.Now})
+			_, err := verifier(t, f).Verify(sigstoretest.MarshalBundle(t, b), endorsement.FreshnessPolicy{Artifact: a, Now: f.Now})
 			require.Error(t, err)
 		})
 	}
@@ -147,7 +147,7 @@ func TestVerifyRequiresSignatureTimestampAndInclusion(t *testing.T) {
 		}
 		altered, err := json.Marshal(s)
 		require.NoError(t, err)
-		_, err = verifier(t, f).Verify(sigstoretest.MarshalBundle(t, f.Bundle(t, altered)), provenance.FreshnessPolicy{Artifact: a, Now: f.Now})
+		_, err = verifier(t, f).Verify(sigstoretest.MarshalBundle(t, f.Bundle(t, altered)), endorsement.FreshnessPolicy{Artifact: a, Now: f.Now})
 		require.ErrorContains(t, err, "inner timestamp")
 	}
 }
@@ -162,13 +162,13 @@ func TestApprovalAgeUsesInnerTime(t *testing.T) {
 		accept bool
 	}{
 		{"missing clock", time.Time{}, false},
-		{"age boundary", f.Now.Add(provenance.DefaultMaxAge), true},
-		{"expired", f.Now.Add(provenance.DefaultMaxAge + time.Nanosecond), false},
-		{"future boundary", f.Now.Add(-provenance.DefaultFutureSkew), true},
-		{"future", f.Now.Add(-provenance.DefaultFutureSkew - time.Nanosecond), false},
+		{"age boundary", f.Now.Add(endorsement.DefaultMaxAge), true},
+		{"expired", f.Now.Add(endorsement.DefaultMaxAge + time.Nanosecond), false},
+		{"future boundary", f.Now.Add(-endorsement.DefaultFutureSkew), true},
+		{"future", f.Now.Add(-endorsement.DefaultFutureSkew - time.Nanosecond), false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			_, err := verifier(t, f).Verify(b, provenance.FreshnessPolicy{Artifact: a, Now: tc.now})
+			_, err := verifier(t, f).Verify(b, endorsement.FreshnessPolicy{Artifact: a, Now: tc.now})
 			if tc.accept {
 				require.NoError(t, err)
 			} else {
@@ -176,7 +176,7 @@ func TestApprovalAgeUsesInnerTime(t *testing.T) {
 			}
 		})
 	}
-	for _, policy := range []provenance.FreshnessPolicy{
+	for _, policy := range []endorsement.FreshnessPolicy{
 		{Artifact: a, Now: f.Now, MaxAge: -time.Second},
 		{Artifact: a, Now: f.Now, FutureSkew: -time.Second},
 	} {
@@ -195,7 +195,7 @@ func TestTimestampBindsEveryArtifactField(t *testing.T) {
 	const core = `{"_type":"https://in-toto.io/Statement/v1","predicate":{"kind":"runtime","repo":"tinfoilsh/cvmimage","tag":"v1.2.3"},"predicateType":"https://tinfoil.sh/predicate/artifact-freshness/v1","subject":[{"digest":{"sha256":"abababababababababababababababababababababababababababababababab"},"name":"tinfoil-inference-v1.2.3-manifest.json"}]}`
 	require.Equal(t, "tinfoil-artifact-freshness/v1\x00"+core, string(input))
 	response := f.Timestamp(t, input, f.Now)
-	_, err = verifier(t, f).VerifyTimestamp(input, response, provenance.FreshnessPolicy{Artifact: a, Now: f.Now})
+	_, err = verifier(t, f).VerifyTimestamp(input, response, endorsement.FreshnessPolicy{Artifact: a, Now: f.Now})
 	require.NoError(t, err)
 	s.Subject[0].Digest["sha256"] = strings.Repeat("cd", 32)
 	_, err = s.Complete(response)
