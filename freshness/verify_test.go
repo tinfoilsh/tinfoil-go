@@ -61,6 +61,33 @@ func TestVerifyArtifactApproval(t *testing.T) {
 	}
 }
 
+func TestUninitializedVerifierReturnsError(t *testing.T) {
+	f := approvaltest.New(t)
+	a := artifact(freshness.KindRuntime)
+	policy := freshness.Policy{Artifact: a, Now: f.Now}
+	payload := statement(t, f, a, f.Now)
+	bundle := approvaltest.MarshalBundle(t, f.Bundle(t, payload))
+	s, err := freshness.ParseStatement(payload)
+	require.NoError(t, err)
+	input, err := s.TimestampInput()
+	require.NoError(t, err)
+	for name, v := range map[string]*freshness.Verifier{
+		"nil":  nil,
+		"zero": {},
+	} {
+		t.Run(name+"/approval", func(t *testing.T) {
+			got, err := v.Verify(bundle, policy)
+			require.ErrorContains(t, err, "uninitialized freshness verifier")
+			require.Nil(t, got)
+		})
+		t.Run(name+"/timestamp", func(t *testing.T) {
+			got, err := v.VerifyTimestamp(input, s.Predicate.Freshness.RFC3161Timestamp, policy)
+			require.ErrorContains(t, err, "uninitialized freshness verifier")
+			require.True(t, got.IsZero())
+		})
+	}
+}
+
 func TestVerifyRejectsWrongArtifactAndKey(t *testing.T) {
 	f := approvaltest.New(t)
 	a := artifact(freshness.KindRuntime)

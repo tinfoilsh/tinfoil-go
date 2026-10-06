@@ -51,6 +51,9 @@ func NewVerifier(trust root.TrustedMaterial, keys []crypto.PublicKey) (*Verifier
 // Verify authenticates the artifact binding, signature, inner TSA token, and
 // Rekor v2 inclusion. The caller separately verifies the artifact's build provenance.
 func (v *Verifier) Verify(bundleJSON []byte, policy Policy) (*Verified, error) {
+	if v == nil || v.cryptographic == nil {
+		return nil, fmt.Errorf("uninitialized freshness verifier")
+	}
 	timePolicy, err := policy.timePolicy()
 	if err != nil {
 		return nil, err
@@ -88,6 +91,9 @@ func (v *Verifier) Verify(bundleJSON []byte, policy Policy) (*Verified, error) {
 
 // VerifyTimestamp authenticates the prepared core's timestamp before signing.
 func (v *Verifier) VerifyTimestamp(input, response []byte, policy Policy) (time.Time, error) {
+	if v == nil || v.cryptographic == nil {
+		return time.Time{}, fmt.Errorf("uninitialized freshness verifier")
+	}
 	timePolicy, err := policy.timePolicy()
 	if err != nil {
 		return time.Time{}, err
