@@ -15,6 +15,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"github.com/tinfoilsh/tinfoil-go/document"
+	"github.com/tinfoilsh/tinfoil-go/internal/errs"
 	"github.com/tinfoilsh/tinfoil-go/internal/sdkinfo"
 )
 
@@ -57,6 +58,30 @@ func TestFetchReportsSDKIdentity(t *testing.T) {
 	request := <-requests
 	require.Equal(t, "tinfoil-swift", request.Header.Get("Tinfoil-SDK"))
 	require.Equal(t, "0.8.2", request.Header.Get("Tinfoil-SDK-Version"))
+}
+
+// URL is the wire format other SDKs fetch with too, so it rejects anything
+// but a bare host rather than building a request to the wrong place.
+func TestURL(t *testing.T) {
+	nonce := hex.EncodeToString(testNonce())
+	direct, err := URL("enclave.example", "", testNonce())
+	require.NoError(t, err)
+	require.Equal(t, "https://enclave.example/.well-known/tinfoil-attestation?nonce="+nonce, direct)
+	relayed, err := URL("enclave.example", "relay.example:8443", testNonce())
+	require.NoError(t, err)
+	require.Equal(t, "https://relay.example:8443/.well-known/tinfoil-attestation?nonce="+nonce+"&enclave=enclave.example", relayed)
+
+	var config *errs.ConfigurationError
+	for _, bad := range []string{"https://enclave.example", "enclave.example/path", "user@enclave.example", "enclave.example:port", "enclave.example?x=1"} {
+		_, err = URL(bad, "", testNonce())
+		require.ErrorAs(t, err, &config, bad)
+		_, err = URL("enclave.example", bad, testNonce())
+		require.ErrorAs(t, err, &config, "relay "+bad)
+	}
+	_, err = URL("", "", testNonce())
+	require.ErrorAs(t, err, &config)
+	_, err = URL("enclave.example", "", testNonce()[1:])
+	require.ErrorAs(t, err, &config)
 }
 
 type fetchTransport func(*http.Request) (*http.Response, error)

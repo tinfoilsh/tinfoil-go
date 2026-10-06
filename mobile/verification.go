@@ -26,8 +26,6 @@ const VerificationSchemaVersion = 1
 type verificationJSON struct {
 	SchemaVersion int    `json:"schema_version"`
 	ConfigRepo    string `json:"config_repo"`
-	// EnclaveHost is empty when the verification contacted no enclave.
-	EnclaveHost string `json:"enclave_host,omitempty"`
 
 	CodeDigest         string           `json:"code_digest"`
 	CodeTag            string           `json:"code_tag,omitempty"`
@@ -67,15 +65,13 @@ type softwareIdentityJSON struct {
 	Version string `json:"version"`
 }
 
-// toVerificationJSON maps a verification of the enclave at host onto the
-// contract. A missing endorsed key is left empty rather than failing: the
-// document is verified either way, and a caller that needs a channel key checks
-// for it.
-func toVerificationJSON(v *verify.Verification, host string) verificationJSON {
+// toVerificationJSON maps a verification onto the contract. A missing
+// endorsed key is left empty rather than failing: the document is verified
+// either way, and a caller that needs a channel key checks for it.
+func toVerificationJSON(v *verify.Verification) verificationJSON {
 	out := verificationJSON{
 		SchemaVersion:      VerificationSchemaVersion,
 		ConfigRepo:         v.ConfigRepo,
-		EnclaveHost:        host,
 		CodeDigest:         v.CodeDigest,
 		CodeTag:            v.CodeTag,
 		CodeMeasurement:    toMeasurementJSON(v.CodeMeasurement),

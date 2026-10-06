@@ -1,56 +1,26 @@
 package mobile
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
-	"io"
-	"net/http"
 	"strings"
-	"sync"
 	"testing"
-	"testing/synctest"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/tinfoilsh/tinfoil-go/document"
 	"github.com/tinfoilsh/tinfoil-go/internal/testutil"
 	"github.com/tinfoilsh/tinfoil-go/verify"
+	"github.com/tinfoilsh/tinfoil-go/verify/measurement"
 )
 
-const swiftOptions = `{"sdk":{"name":"tinfoil-swift","version":"0.8.2"}}`
-
-type roundTripFunc func(*http.Request) (*http.Response, error)
-
-func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
-
-// network stands in for http.DefaultClient, which the SDK fetches router lists
-// and attestation through, and records what was sent.
-type network struct {
-	mu       sync.Mutex
-	requests []*http.Request
-}
-
-func stubNetwork(t *testing.T, respond func(*http.Request) (*http.Response, error)) *network {
-	t.Helper()
-	n := &network{}
-	original := http.DefaultClient
-	http.DefaultClient = &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
-		n.mu.Lock()
-		n.requests = append(n.requests, r)
-		n.mu.Unlock()
-		return respond(r)
-	})}
-	t.Cleanup(func() { http.DefaultClient = original })
-	return n
-}
-
-func (n *network) sent() []*http.Request {
-	n.mu.Lock()
-	defer n.mu.Unlock()
-	return append([]*http.Request(nil), n.requests...)
-}
-
-func unavailable(*http.Request) (*http.Response, error) { return nil, errors.New("unavailable") }
+const (
+	swiftOptions = `{"sdk":{"name":"tinfoil-swift","version":"0.8.2"}}`
+	routerRepo   = "tinfoilsh/confidential-model-router"
+)
 
 // Swift tells error categories apart by prefix alone, so the exported prefixes
 // must be the ones the SDK's error types produce.
@@ -58,105 +28,98 @@ func TestErrorPrefixesMatchCategories(t *testing.T) {
 	cause := errors.New("cause")
 	for prefix, err := range map[string]error{
 		ConfigurationErrorPrefix: &verify.ConfigurationError{Err: cause},
-		FetchErrorPrefix:         &verify.FetchError{Err: cause},
 		AttestationErrorPrefix:   &verify.AttestationError{Err: cause},
 	} {
 		assert.Equal(t, prefix+"cause", err.Error())
 	}
 }
 
-// A relayed client must send every attestation fetch to the relay, name the
-// enclave it is for, and keep the options it was derived with.
-func TestViaRelayFetchesAttestationThroughRelay(t *testing.T) {
-	synctest.Test(t, func(t *testing.T) {
-		network := stubNetwork(t, unavailable)
-		client, err := NewClientWithOptions("enclave.example", "org/repo", swiftOptions)
-		require.NoError(t, err)
-
-		relayed := client.ViaRelay("relay.example:8443")
-		assert.Equal(t, "enclave.example", relayed.Enclave())
-		assert.Equal(t, "org/repo", relayed.Repo())
-		_, err = relayed.Verify()
-		require.ErrorContains(t, err, "unavailable")
-
-		requests := network.sent()
-		require.NotEmpty(t, requests)
-		for _, r := range requests {
-			assert.Equal(t, "https", r.URL.Scheme)
-			assert.Equal(t, "relay.example:8443", r.URL.Host)
-			assert.Equal(t, "enclave.example", r.URL.Query().Get("enclave"))
-			assert.Equal(t, "tinfoil-swift", r.Header.Get("Tinfoil-SDK"))
-		}
-	})
-}
-
-// When no discovered router verifies, the client falls back to the default
-// host without having verified it, so a caller must not expect a cached result.
-func TestNewDefaultClientFallsBackUnverified(t *testing.T) {
-	network := stubNetwork(t, func(r *http.Request) (*http.Response, error) {
-		if r.URL.Host == "atc.tinfoil.sh" {
-			return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(`["router.example"]`))}, nil
-		}
-		return nil, errors.New("unavailable")
-	})
-	client, err := NewDefaultClient(swiftOptions)
+// Every error crossing the FFI reaches Swift as text, so each must lead with
+// the category Swift maps it to.
+func TestErrorsLeadWithCategory(t *testing.T) {
+	nonce, err := NewNonce()
 	require.NoError(t, err)
-	assert.Equal(t, "inference.tinfoil.sh", client.Enclave())
-	assert.Equal(t, "tinfoilsh/confidential-model-router", client.Repo())
-	cached, err := client.Verification()
+	verifier, err := NewVerifier("")
 	require.NoError(t, err)
-	assert.Empty(t, cached)
-
-	var probed bool
-	for _, r := range network.sent() {
-		if r.URL.Host == "router.example" {
-			probed = true
-			assert.Equal(t, "tinfoil-swift", r.Header.Get("Tinfoil-SDK"), "options apply to discovered routers")
-		}
+	for _, tt := range []struct {
+		name   string
+		prefix string
+		call   func() error
+	}{
+		{"invalid options", ConfigurationErrorPrefix, func() error { _, err := NewVerifier(`{"freshness_max_age_ns":-1}`); return err }},
+		{"unknown option", ConfigurationErrorPrefix, func() error { _, err := NewVerifier(`{"enclave":"x"}`); return err }},
+		{"URL as host", ConfigurationErrorPrefix, func() error { _, err := AttestationURL("https://enclave.example", "", nonce); return err }},
+		{"invalid repo", ConfigurationErrorPrefix, func() error { _, err := verifier.Verify([]byte("{}"), nonce, "owner"); return err }},
+		{"short nonce", ConfigurationErrorPrefix, func() error { _, err := verifier.Verify([]byte("{}"), nonce[1:], routerRepo); return err }},
+		{"malformed document", AttestationErrorPrefix, func() error { _, err := verifier.Verify([]byte("{}"), nonce, routerRepo); return err }},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			err := tt.call()
+			require.Error(t, err)
+			assert.True(t, strings.HasPrefix(err.Error(), tt.prefix), err.Error())
+		})
 	}
-	assert.True(t, probed, "the discovered router was tried")
 }
 
-func TestNewDefaultClientRejectsOptionsBeforeDiscovery(t *testing.T) {
-	network := stubNetwork(t, unavailable)
-	_, err := NewDefaultClient(`{"freshness_max_age_ns":-1}`)
+func TestNewNonceIsFresh(t *testing.T) {
+	first, err := NewNonce()
+	require.NoError(t, err)
+	second, err := NewNonce()
+	require.NoError(t, err)
+	assert.Len(t, first, document.NonceSize)
+	assert.False(t, bytes.Equal(first, second))
+}
+
+func TestNewVerifierAppliesOptions(t *testing.T) {
+	register := strings.Repeat("ab", 48)
+	verifier, err := NewVerifier(`{"freshness_max_age_ns":3600000000000,` +
+		`"pinned_registers":{"type":"https://tinfoil.sh/predicate/tdx-guest/v2","registers":["","","","","` + register + `"]},` +
+		`"sdk":{"name":"tinfoil-swift","version":"0.8.2"}}`)
+	require.NoError(t, err)
+	assert.Equal(t, time.Hour, verifier.inner.FreshnessMaxAge())
+	assert.Equal(t, &measurement.Measurement{Type: measurement.TdxGuestV2, Registers: []string{4: register}}, verifier.inner.PinnedRegisters())
+	assert.Equal(t, verify.SoftwareIdentity{Name: "tinfoil-swift", Version: "0.8.2"}, verifier.inner.Identity())
+
+	defaults, err := NewVerifier("")
+	require.NoError(t, err)
+	assert.Equal(t, 7*24*time.Hour, defaults.inner.FreshnessMaxAge())
+	assert.Nil(t, defaults.inner.PinnedRegisters())
+}
+
+// A verification that cannot authorize a request is reported as a failure, so
+// a caller that re-verifies at FreshnessExpiresAt cannot loop on it.
+func TestCheckFreshRejectsExpired(t *testing.T) {
+	verified := sampleVerification()
+	require.NoError(t, checkFresh(verified, verified.FreshnessExpiresAt.Add(-time.Second)))
+	err := checkFresh(verified, verified.FreshnessExpiresAt)
 	require.Error(t, err)
-	assert.True(t, strings.HasPrefix(err.Error(), ConfigurationErrorPrefix), err.Error())
-	assert.Empty(t, network.sent())
+	assert.True(t, strings.HasPrefix(err.Error(), AttestationErrorPrefix), err.Error())
 }
 
-// Request errors reach Swift as text, so each must still lead with its category.
-func TestRequestErrorsLeadWithCategory(t *testing.T) {
-	synctest.Test(t, func(t *testing.T) {
-		stubNetwork(t, unavailable)
-		client, err := NewClient("enclave.example", "org/repo")
-		require.NoError(t, err)
-
-		_, err = client.Request("GET", "/", "not json", nil)
-		require.Error(t, err)
-		assert.True(t, strings.HasPrefix(err.Error(), ConfigurationErrorPrefix), err.Error())
-
-		_, err = client.Request("GET", "/", "", nil)
-		require.Error(t, err)
-		assert.True(t, strings.HasPrefix(err.Error(), FetchErrorPrefix), err.Error())
-		assert.NotContains(t, err.Error(), FetchErrorPrefix+FetchErrorPrefix)
-	})
-}
-
-func TestLiveNewDefaultClient(t *testing.T) {
+// The flow a mobile caller runs: its own fetch, then a stateless verify.
+func TestLiveVerify(t *testing.T) {
 	testutil.RequireLive(t)
-	client, err := NewDefaultClient(swiftOptions)
+	nonce, err := NewNonce()
 	require.NoError(t, err)
-	payload, err := client.Verification()
+	url, err := AttestationURL("inference.tinfoil.sh", "", nonce)
 	require.NoError(t, err)
-	if payload == "" {
-		payload, err = client.Verify()
-		require.NoError(t, err)
-	}
+	doc, err := testutil.Get(url)
+	require.NoError(t, err)
+	verifier, err := NewVerifier(swiftOptions)
+	require.NoError(t, err)
+	payload, err := verifier.Verify(doc, nonce, routerRepo)
+	require.NoError(t, err)
 
 	var got verificationJSON
 	require.NoError(t, json.Unmarshal([]byte(payload), &got))
-	assert.Equal(t, client.Enclave(), got.EnclaveHost)
+	assert.Equal(t, routerRepo, got.ConfigRepo)
 	assert.NotEmpty(t, got.HPKEPublicKey)
 	assert.Equal(t, softwareIdentityJSON{Name: "tinfoil-swift", Version: "0.8.2"}, got.Verifier)
+
+	_, err = verifier.Verify(doc, nonce[:len(nonce)-1], routerRepo)
+	require.Error(t, err, "a document verifies only against the nonce it was fetched with")
+	other, err := NewNonce()
+	require.NoError(t, err)
+	_, err = verifier.Verify(doc, other, routerRepo)
+	require.Error(t, err, "a document verifies only against the nonce it was fetched with")
 }

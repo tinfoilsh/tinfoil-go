@@ -15,22 +15,34 @@ struct bound with no properties at all, and its verification result lost
 the expiry deadline.
 
 So everything structured crosses as a JSON string, and the typed surface is just
-`Client` and the flat `Response` of its pinned `Request`. The JSON shape is
-declared in `verification.go`, not derived from the SDK's types: callers are
-never compiled against this module, so a field rename inside the verifier would
-otherwise break them silently. That struct is the contract, and
-`schema_version` says which version a payload is.
+`Verifier`. The JSON shape is declared in `verification.go`, not derived from
+the SDK's types: callers are never compiled against this module, so a field
+rename inside the verifier would otherwise break them silently. That struct is
+the contract, and `schema_version` says which version a payload is.
+
+## What the caller does
+
+This package performs no I/O. The caller fetches each attestation document with
+its own HTTP stack, from `AttestationURL` with a nonce from `NewNonce`, and
+passes the bytes and the nonce to `Verifier.Verify`. Every trust decision stays
+here; the app's networking (system proxies, cancellation) carries every
+request. The caller owns router discovery, retries and caching, binds its
+traffic to the keys a verification returns, and stops authorizing new requests
+at `freshness_expires_at`. `Verify` already fails for a result past that
+deadline, so verifying again cannot loop on an expired one.
+
+The URL comes from Go rather than being rebuilt by the caller so the wire
+format has one definition: the Go SDK fetches through the same function.
+
+## Errors
 
 Errors flatten to an `NSError` carrying only a message, so the category has to
 survive in the text. It does: the SDK's categories lead their messages with
-`configuration error:`, `fetch error:` or `attestation error:`. When `Request`'s
-HTTP client wraps one, the prefix moves to the front of the whole message, once.
-This package adds no prefix of its own. The prefixes are exported as constants
-in `errors.go`, so a caller matches on them instead of on literals.
-
-Not every error has a category. One from outside the three, such as `Request`
-failing to connect to an enclave that has already verified, arrives with its
-native message and no prefix.
+`configuration error:` or `attestation error:`, and fetching is the caller's, so
+no fetch error starts here. Nothing in this package adds a prefix of its own. The
+prefixes are exported as constants in `errors.go`, so a caller matches on them
+instead of on literals. The one uncategorized failure is `NewNonce` finding the
+system's random source unavailable.
 
 ## Checking a change
 
