@@ -24,12 +24,12 @@ func TestIGVMEnforcesConfigPaddingAndEveryRuntimeRegister(t *testing.T) {
 	q := &Quote{quote: quote, tcbEvaluationDataNumber: 5}
 	body := q.quote.TdQuoteBody
 	configHash := sha256.Sum256([]byte("approved YAML bytes"))
-	body.MrConfigId = make([]byte, igvm.MeasurementSize)
+	body.MrConfigId = make([]byte, tdxabi.MrConfigIDSize)
 	copy(body.MrConfigId, configHash[:])
 	for i := range body.Rtmrs {
-		body.Rtmrs[i] = make([]byte, igvm.MeasurementSize)
+		body.Rtmrs[i] = make([]byte, tdxabi.RtmrSize)
 	}
-	zero := strings.Repeat("0", igvm.MeasurementSize*2)
+	zero := strings.Repeat("0", tdxabi.RtmrSize*2)
 	runtime := &igvm.TDXLaunch{MRTD: hex.EncodeToString(body.MrTd), RTMR0: zero, RTMR1: zero, RTMR2: zero, RTMR3: zero}
 	minimum := 5
 	p := &policy.TDXPolicy{
@@ -39,7 +39,7 @@ func TestIGVMEnforcesConfigPaddingAndEveryRuntimeRegister(t *testing.T) {
 	}
 	var reportData [64]byte
 	copy(reportData[:], body.ReportData)
-	var configID [ConfigIDSize]byte
+	var configID [tdxabi.MrConfigIDSize]byte
 	copy(configID[:], configHash[:])
 	e, _, err := Assemble(&policy.Artifact{}, p, nil, q, runtime.Registers(), reportData, &configID)
 	require.NoError(t, err)

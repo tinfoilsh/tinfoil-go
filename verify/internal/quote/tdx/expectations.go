@@ -5,14 +5,13 @@ import (
 	"encoding/hex"
 	"fmt"
 
+	tdxabi "github.com/google/go-tdx-guest/abi"
 	tdxvalidate "github.com/google/go-tdx-guest/validate"
 
 	"github.com/tinfoilsh/tinfoil-go/internal/errs"
 	"github.com/tinfoilsh/tinfoil-go/verify/internal/policy"
 	"github.com/tinfoilsh/tinfoil-go/verify/measurement"
 )
-
-const ConfigIDSize = 48
 
 // Expectations is the fully translated TDX expected state, resolved at
 // assembly so that validation performs no translation and no lookups. The
@@ -25,7 +24,7 @@ type Expectations struct {
 // Assemble resolves legacy MRTD/RTMR0 by VM shape. A config-bound runtime
 // supplies all five registers and the complete MRCONFIGID instead.
 // It returns the matching measurements-map entry's name for legacy releases.
-func Assemble(a *policy.Artifact, p *policy.TDXPolicy, required *policy.Shape, q *Quote, registers [5]string, reportData [64]byte, configID *[ConfigIDSize]byte) (result *Expectations, name string, err error) {
+func Assemble(a *policy.Artifact, p *policy.TDXPolicy, required *policy.Shape, q *Quote, registers [5]string, reportData [64]byte, configID *[tdxabi.MrConfigIDSize]byte) (result *Expectations, name string, err error) {
 	defer func() { err = errs.WrapAttestation(err) }()
 	if a == nil || p == nil {
 		return nil, "", &errs.ConfigurationError{Err: fmt.Errorf("endorsements and TDX policy are required")}
@@ -62,8 +61,9 @@ func Assemble(a *policy.Artifact, p *policy.TDXPolicy, required *policy.Shape, q
 		copy(opts.TdQuoteBodyOptions.MrConfigID, configID[:])
 	}
 	var decoded [5][]byte
+	registerSizes := [5]int{tdxabi.MrTdSize, tdxabi.RtmrSize, tdxabi.RtmrSize, tdxabi.RtmrSize, tdxabi.RtmrSize}
 	for i, label := range [5]string{"mrtd", "rtmr0", "rtmr1", "rtmr2", "rtmr3"} {
-		if decoded[i], err = policy.DecodeHex(label, registers[i], 48); err != nil {
+		if decoded[i], err = policy.DecodeHex(label, registers[i], registerSizes[i]); err != nil {
 			return nil, "", err
 		}
 	}
@@ -103,23 +103,23 @@ func options(p *policy.TDXPolicy) (*tdxvalidate.Options, error) {
 	if err := p.Validate(); err != nil {
 		return nil, err
 	}
-	qeVendor, err := policy.DecodeHex("qe_vendor_id", p.QEVendorID, 16)
+	qeVendor, err := policy.DecodeHex("qe_vendor_id", p.QEVendorID, tdxabi.QeVendorIDSize)
 	if err != nil {
 		return nil, err
 	}
-	teeTcbSvn, err := policy.DecodeHex("minimum_tee_tcb_svn", p.MinimumTEETCBSVN, 16)
+	teeTcbSvn, err := policy.DecodeHex("minimum_tee_tcb_svn", p.MinimumTEETCBSVN, tdxabi.TeeTcbSvnSize)
 	if err != nil {
 		return nil, err
 	}
-	mrSeam, err := policy.DecodeHex("mr_seam", p.MRSeam, 48)
+	mrSeam, err := policy.DecodeHex("mr_seam", p.MRSeam, tdxabi.MrSeamSize)
 	if err != nil {
 		return nil, err
 	}
-	tdAttributes, err := policy.DecodeHex("td_attributes", p.TDAttributes, 8)
+	tdAttributes, err := policy.DecodeHex("td_attributes", p.TDAttributes, tdxabi.TdAttributesSize)
 	if err != nil {
 		return nil, err
 	}
-	xfam, err := policy.DecodeHex("xfam", p.XFAM, 8)
+	xfam, err := policy.DecodeHex("xfam", p.XFAM, tdxabi.XfamSize)
 	if err != nil {
 		return nil, err
 	}
@@ -139,9 +139,9 @@ func options(p *policy.TDXPolicy) (*tdxvalidate.Options, error) {
 			MrSeam:           mrSeam,
 			TdAttributes:     tdAttributes,
 			Xfam:             xfam,
-			MrConfigID:       make([]byte, ConfigIDSize),
-			MrOwner:          make([]byte, 48),
-			MrOwnerConfig:    make([]byte, 48),
+			MrConfigID:       make([]byte, tdxabi.MrConfigIDSize),
+			MrOwner:          make([]byte, tdxabi.MrOwnerSize),
+			MrOwnerConfig:    make([]byte, tdxabi.MrOwnerConfigSize),
 		},
 	}, nil
 }

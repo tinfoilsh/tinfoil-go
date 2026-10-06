@@ -20,6 +20,8 @@ import (
 	"fmt"
 	"strings"
 
+	tdxabi "github.com/google/go-tdx-guest/abi"
+
 	"github.com/tinfoilsh/tinfoil-go/document"
 	"github.com/tinfoilsh/tinfoil-go/document/collateral"
 	"github.com/tinfoilsh/tinfoil-go/internal/errs"
@@ -252,9 +254,9 @@ func assemble(refs ReferenceValues, pins *measurement.Measurement, reportData [6
 		}
 		assembled.sev, err = sev.Assemble(p, q.sev, registers[0], reportData, runtimePolicy)
 	case policy.PlatformTDX:
-		var configID *[tdx.ConfigIDSize]byte
+		var configID *[tdxabi.MrConfigIDSize]byte
 		if refs.Config != nil {
-			configID = new([tdx.ConfigIDSize]byte)
+			configID = new([tdxabi.MrConfigIDSize]byte)
 			copy(configID[:], refs.Config.Hash[:])
 		}
 		assembled.tdx, assembled.PlatformMeasurementName, err = tdx.Assemble(
