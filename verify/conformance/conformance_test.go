@@ -17,13 +17,14 @@ type fixture struct {
 	Stage    string `json:"stage"`
 	Input    Input  `json:"input"`
 	Expected struct {
-		Accepted           bool         `json:"accepted"`
-		Code               string       `json:"code,omitempty"`
-		TLSPublicKeyFP     string       `json:"tls_public_key_fp,omitempty"`
-		HPKEPublicKey      string       `json:"hpke_public_key,omitempty"`
-		CodeDigest         string       `json:"code_digest,omitempty"`
-		CodeMeasurement    *Measurement `json:"code_measurement,omitempty"`
-		EnclaveMeasurement *Measurement `json:"enclave_measurement,omitempty"`
+		Accepted           bool           `json:"accepted"`
+		Code               string         `json:"code,omitempty"`
+		TLSPublicKeyFP     string         `json:"tls_public_key_fp,omitempty"`
+		HPKEPublicKey      string         `json:"hpke_public_key,omitempty"`
+		CodeDigest         string         `json:"code_digest,omitempty"`
+		CodeMeasurement    *Measurement   `json:"code_measurement,omitempty"`
+		EnclaveMeasurement *Measurement   `json:"enclave_measurement,omitempty"`
+		Config             *ConfigOutputs `json:"config,omitempty"`
 	} `json:"expected"`
 }
 
@@ -73,7 +74,7 @@ func TestFixtures(t *testing.T) {
 			// different code digest, measurement register set, or channel key is
 			// not conformant — this is what forces cross-SDK output equivalence.
 			e := f.Expected
-			if e.Accepted && (e.TLSPublicKeyFP != "" || e.HPKEPublicKey != "" || e.CodeDigest != "" || e.CodeMeasurement != nil || e.EnclaveMeasurement != nil) {
+			if e.Accepted && (e.TLSPublicKeyFP != "" || e.HPKEPublicKey != "" || e.CodeDigest != "" || e.CodeMeasurement != nil || e.EnclaveMeasurement != nil || e.Config != nil) {
 				if out.Outputs == nil {
 					t.Fatalf("accepted but no outputs; want declared facts")
 				}
@@ -92,6 +93,9 @@ func TestFixtures(t *testing.T) {
 				}
 				if e.EnclaveMeasurement != nil && !reflect.DeepEqual(o.EnclaveMeasurement, *e.EnclaveMeasurement) {
 					t.Errorf("enclave_measurement=%+v, want %+v", o.EnclaveMeasurement, *e.EnclaveMeasurement)
+				}
+				if e.Config != nil && !reflect.DeepEqual(o.Config, e.Config) {
+					t.Errorf("config=%+v, want %+v", o.Config, e.Config)
 				}
 			}
 		})

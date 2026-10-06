@@ -31,7 +31,7 @@ func TestFreshnessExpiration(t *testing.T) {
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			for _, maxAge := range []time.Duration{24 * time.Hour, endorsement.MaxFreshnessAge, 30 * 24 * time.Hour} {
-				require.Equal(t, issuedAt.Add(maxAge), freshnessExpiration(tt.codeWitnessedAt, tt.platformWitnessedAt, maxAge))
+				require.Equal(t, issuedAt.Add(maxAge), freshnessExpiration(maxAge, tt.codeWitnessedAt, tt.platformWitnessedAt))
 			}
 		})
 	}
