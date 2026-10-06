@@ -15,7 +15,6 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/tinfoilsh/tinfoil-go/document"
 	"github.com/tinfoilsh/tinfoil-go/document/collateral"
-	configendorsement "github.com/tinfoilsh/tinfoil-go/endorsement/config"
 	"github.com/tinfoilsh/tinfoil-go/verify"
 )
 
@@ -42,7 +41,7 @@ func TestConfigHandlesRetainExplicitProfile(t *testing.T) {
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	require.NoError(t, err)
 	policy := verify.ConfigPolicy{Identity: "/org/project", AuditScope: "16a44d18-3387-44ce-9bfb-d77c4d27dbba"}
-	keys := []configendorsement.SigningKey{{PublicKey: key.Public(), AuditScope: policy.AuditScope}}
+	keys := []verify.ConfigSigningKey{{PublicKey: key.Public(), AuditScope: policy.AuditScope}}
 	host := strings.TrimPrefix(server.URL, "https://")
 	const maxAge = time.Hour
 	client, err := NewConfigHandle(host, policy, keys, []crypto.PublicKey{key.Public()}, &Options{FreshnessMaxAge: maxAge})
@@ -58,7 +57,7 @@ func TestConfigHandlesRetainExplicitProfile(t *testing.T) {
 	require.NoError(t, err)
 	_, err = legacy.fetchVerification()
 	require.ErrorContains(t, err, collateral.SigstoreCodeV1Format)
-	verified := &verify.Verification{Config: &configendorsement.Verified{Name: "/org/project/v1"}}
+	verified := &verify.Verification{Config: &verify.ConfigVerification{Name: "/org/project/v1"}}
 	cloned := cloneVerification(verified)
 	cloned.Config.Name = "changed"
 	require.Equal(t, "/org/project/v1", verified.Config.Name)

@@ -12,14 +12,13 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/tinfoilsh/tinfoil-go/document"
 	"github.com/tinfoilsh/tinfoil-go/document/collateral"
-	configendorsement "github.com/tinfoilsh/tinfoil-go/endorsement/config"
 )
 
 func TestIGVMRequiresIndependentTrustAndFreshness(t *testing.T) {
 	policy := ConfigPolicy{Identity: "/org/project", AuditScope: "16a44d18-3387-44ce-9bfb-d77c4d27dbba"}
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	require.NoError(t, err)
-	keys := []configendorsement.SigningKey{{PublicKey: key.Public(), AuditScope: policy.AuditScope}}
+	keys := []ConfigSigningKey{{PublicKey: key.Public(), AuditScope: policy.AuditScope}}
 	v, err := NewVerifier()
 	require.NoError(t, err)
 	_, err = v.VerifyIGVM(nil, nil, policy)

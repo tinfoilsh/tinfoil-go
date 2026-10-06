@@ -51,15 +51,15 @@ func TestCapturedRegistryTimestamp(t *testing.T) {
 	require.NoError(t, err)
 	client, err := endorsement.NewDefaultClient()
 	require.NoError(t, err)
-	v, err := client.ConfigVerifier([]configendorsement.SigningKey{{PublicKey: key.Public(), AuditScope: registry.AuditScope}})
+	v, err := client.ConfigVerifier([]endorsement.ConfigSigningKey{{PublicKey: key.Public(), AuditScope: registry.AuditScope}})
 	require.NoError(t, err)
-	archived := configendorsement.Policy{Identity: capturedCanaryIdentity, AuditScope: registry.AuditScope, IgnoreFreshness: true}
+	archived := endorsement.ConfigPolicy{Identity: capturedCanaryIdentity, AuditScope: registry.AuditScope, IgnoreFreshness: true}
 	at, err := v.VerifyTimestamp(input, statement.Predicate.Freshness.RFC3161Timestamp, archived)
 	require.NoError(t, err)
 	require.False(t, at.IsZero())
 	stale := archived
 	stale.IgnoreFreshness = false
-	stale.Now = at.Add(configendorsement.DefaultMaxAge + time.Nanosecond)
+	stale.Now = at.Add(endorsement.DefaultMaxAge + time.Nanosecond)
 	_, err = v.VerifyTimestamp(input, statement.Predicate.Freshness.RFC3161Timestamp, stale)
 	require.ErrorContains(t, err, "too old")
 	_, err = v.VerifyTimestamp(append(input, 'x'), statement.Predicate.Freshness.RFC3161Timestamp, archived)

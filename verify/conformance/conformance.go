@@ -25,7 +25,6 @@ import (
 	"time"
 
 	"github.com/tinfoilsh/tinfoil-go/document"
-	configendorsement "github.com/tinfoilsh/tinfoil-go/endorsement/config"
 	"github.com/tinfoilsh/tinfoil-go/verify"
 	"github.com/tinfoilsh/tinfoil-go/verify/internal/endorsement"
 	"github.com/tinfoilsh/tinfoil-go/verify/internal/quote"
@@ -176,7 +175,7 @@ func Run(stage string, in Input) (Output, int) {
 		if err != nil {
 			return malformed(stage)
 		}
-		opts = append(opts, verify.WithConfigSigningKeys([]configendorsement.SigningKey{{PublicKey: key, AuditScope: in.Config.AuditScope}}))
+		opts = append(opts, verify.WithConfigSigningKeys([]verify.ConfigSigningKey{{PublicKey: key, AuditScope: in.Config.AuditScope}}))
 	}
 	if in.FreshnessSigningKeyPEM != "" {
 		key, err := parsePublicKey(in.FreshnessSigningKeyPEM)

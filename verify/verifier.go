@@ -19,8 +19,6 @@ import (
 
 	"github.com/tinfoilsh/tinfoil-go/document"
 	"github.com/tinfoilsh/tinfoil-go/document/collateral"
-	configendorsement "github.com/tinfoilsh/tinfoil-go/endorsement/config"
-	"github.com/tinfoilsh/tinfoil-go/endorsement/freshness"
 	"github.com/tinfoilsh/tinfoil-go/internal/errs"
 	"github.com/tinfoilsh/tinfoil-go/internal/sdkinfo"
 	"github.com/tinfoilsh/tinfoil-go/verify/internal/endorsement"
@@ -53,10 +51,10 @@ type Verifier struct {
 	// trusted root. NewVerifier builds one from the embedded root; only the
 	// conformance build can replace it.
 	endorsements      *endorsement.Client
-	configKeys        []configendorsement.SigningKey
-	configVerifier    *configendorsement.Verifier
+	configKeys        []ConfigSigningKey
+	configVerifier    *endorsement.ConfigVerifier
 	freshnessKeys     []crypto.PublicKey
-	freshnessVerifier *freshness.Verifier
+	freshnessVerifier *endorsement.FreshnessVerifier
 
 	// overrides is empty in a production build; the conformance build uses it
 	// to carry synthetic vendor roots down to the CPU evidence layer.
@@ -154,7 +152,7 @@ func (v *Verifier) verifyV3(docBytes, nonce []byte, repo string) (*Verification,
 type referenceValues struct {
 	quote              quote.ReferenceValues
 	artifact           endorsement.AuthenticatedArtifact
-	config             *configendorsement.Verified
+	config             *ConfigVerification
 	freshnessExpiresAt time.Time
 }
 

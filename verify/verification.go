@@ -5,10 +5,13 @@ import (
 	"time"
 
 	"github.com/tinfoilsh/tinfoil-go/document"
-	configendorsement "github.com/tinfoilsh/tinfoil-go/endorsement/config"
 	"github.com/tinfoilsh/tinfoil-go/internal/errs"
+	"github.com/tinfoilsh/tinfoil-go/verify/internal/endorsement"
 	"github.com/tinfoilsh/tinfoil-go/verify/measurement"
 )
+
+// ConfigVerification holds the authenticated config identity, digest, and approval time.
+type ConfigVerification = endorsement.ConfigVerified
 
 // Verification holds the facts proven during the verification of an
 // attestation document. It also contains metadata of the verification process
@@ -20,7 +23,7 @@ type Verification struct {
 	CodeDigest      string
 	CodeTag         string
 	CodeMeasurement *measurement.Measurement
-	Config          *configendorsement.Verified `json:",omitempty"`
+	Config          *ConfigVerification `json:",omitempty"`
 	// EnclaveMeasurement carries the quote's authenticated registers,
 	// proven to match the expectations.
 	EnclaveMeasurement *measurement.Measurement

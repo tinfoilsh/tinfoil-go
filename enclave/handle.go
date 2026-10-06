@@ -14,7 +14,6 @@ import (
 	"sync"
 	"time"
 
-	configendorsement "github.com/tinfoilsh/tinfoil-go/endorsement/config"
 	"github.com/tinfoilsh/tinfoil-go/verify"
 	"github.com/tinfoilsh/tinfoil-go/verify/measurement"
 )
@@ -118,7 +117,7 @@ func NewHandle(enclave, repo string, opts *Options) (*Handle, error) {
 
 // NewConfigHandle requires the IGVM config-binding profile. Keys and policy are
 // caller trust, independent of the enclave and collateral service.
-func NewConfigHandle(enclave string, policy verify.ConfigPolicy, keys []configendorsement.SigningKey, freshnessKeys []crypto.PublicKey, opts *Options) (*Handle, error) {
+func NewConfigHandle(enclave string, policy verify.ConfigPolicy, keys []verify.ConfigSigningKey, freshnessKeys []crypto.PublicKey, opts *Options) (*Handle, error) {
 	if err := policy.Validate(); err != nil {
 		return nil, &ConfigurationError{Err: err}
 	}

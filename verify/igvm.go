@@ -8,12 +8,14 @@ import (
 
 	"github.com/tinfoilsh/tinfoil-go/document"
 	"github.com/tinfoilsh/tinfoil-go/document/collateral"
-	configendorsement "github.com/tinfoilsh/tinfoil-go/endorsement/config"
 	"github.com/tinfoilsh/tinfoil-go/endorsement/freshness"
 	"github.com/tinfoilsh/tinfoil-go/verify/internal/endorsement"
 	"github.com/tinfoilsh/tinfoil-go/verify/internal/igvm"
 	"github.com/tinfoilsh/tinfoil-go/verify/internal/quote"
 )
+
+// ConfigSigningKey authorizes a config signer for its audit scope.
+type ConfigSigningKey = endorsement.ConfigSigningKey
 
 // ConfigPolicy contains caller expectations; none may be learned from collateral.
 type ConfigPolicy struct {
@@ -24,18 +26,18 @@ type ConfigPolicy struct {
 }
 
 func (p ConfigPolicy) Validate() error {
-	return (configendorsement.Policy{
+	return (endorsement.ConfigPolicy{
 		Identity: p.Identity, AuditScope: p.AuditScope, Revision: p.Revision, Digest: p.Digest,
 	}).ValidatePins()
 }
 
 // WithConfigSigningKeys pins the keys and scopes allowed to approve configs.
-func WithConfigSigningKeys(keys []configendorsement.SigningKey) Option {
+func WithConfigSigningKeys(keys []ConfigSigningKey) Option {
 	return func(v *Verifier) error {
 		if len(keys) == 0 {
 			return fmt.Errorf("config signing keys must not be empty")
 		}
-		v.configKeys = append([]configendorsement.SigningKey(nil), keys...)
+		v.configKeys = append([]ConfigSigningKey(nil), keys...)
 		return nil
 	}
 }
@@ -79,7 +81,7 @@ func (v *Verifier) configReferences(doc *document.Document, policy ConfigPolicy,
 	if err != nil {
 		return nil, err
 	}
-	approved, err := v.configVerifier.Verify(config.Config, config.Bundle, configendorsement.Policy{
+	approved, err := v.configVerifier.Verify(config.Config, config.Bundle, endorsement.ConfigPolicy{
 		Identity: policy.Identity, AuditScope: policy.AuditScope, Revision: policy.Revision, Digest: policy.Digest,
 		Now: now, MaxAge: v.freshnessMaxAge,
 	})
@@ -139,7 +141,7 @@ func (v *Verifier) authenticateArtifactFreshness(doc *document.Document, id, kin
 	if material.Format != collateral.ArtifactFreshnessV1Format {
 		return time.Time{}, fmt.Errorf("IGVM requires Tinfoil artifact freshness approvals")
 	}
-	approved, err := v.freshnessVerifier.Verify(material.Bundle, freshness.Policy{
+	approved, err := v.freshnessVerifier.Verify(material.Bundle, endorsement.FreshnessPolicy{
 		Artifact: freshness.Artifact{Kind: kind, Repo: artifact.Repo, Tag: artifact.Tag, Name: artifact.SubjectName, Digest: artifact.Digest},
 		Now:      now, MaxAge: v.freshnessMaxAge,
 	})
