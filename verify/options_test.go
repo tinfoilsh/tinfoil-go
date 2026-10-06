@@ -9,14 +9,14 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/tinfoilsh/tinfoil-go/internal/errs"
-	"github.com/tinfoilsh/tinfoil-go/verify/internal/provenance"
+	"github.com/tinfoilsh/tinfoil-go/verify/internal/endorsement"
 	"github.com/tinfoilsh/tinfoil-go/verify/measurement"
 )
 
 func TestNewDefaults(t *testing.T) {
 	v, err := NewVerifier()
 	require.NoError(t, err)
-	assert.Equal(t, provenance.MaxFreshnessAge, v.FreshnessMaxAge())
+	assert.Equal(t, endorsement.MaxFreshnessAge, v.FreshnessMaxAge())
 	assert.Nil(t, v.PinnedRegisters())
 }
 
@@ -25,7 +25,7 @@ func TestWithFreshnessMaxAge(t *testing.T) {
 	// not silently disable the bound.
 	v, err := NewVerifier(WithFreshnessMaxAge(0))
 	require.NoError(t, err)
-	assert.Equal(t, provenance.MaxFreshnessAge, v.FreshnessMaxAge())
+	assert.Equal(t, endorsement.MaxFreshnessAge, v.FreshnessMaxAge())
 
 	v, err = NewVerifier(WithFreshnessMaxAge(24 * time.Hour))
 	require.NoError(t, err)

@@ -1,4 +1,4 @@
-package endorsement_test
+package config_test
 
 import (
 	"bytes"
@@ -10,8 +10,8 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
+	configendorsement "github.com/tinfoilsh/tinfoil-go/endorsement/config"
 	"github.com/tinfoilsh/tinfoil-go/internal/sigstoretest"
-	"github.com/tinfoilsh/tinfoil-go/tinfoil-config/endorsement"
 )
 
 const (
@@ -26,7 +26,7 @@ var testConfig = []byte("# Approved config bytes\nname: gpt-oss-120b\n")
 
 func configStatement(t *testing.T, f *sigstoretest.Fixture, at time.Time) []byte {
 	t.Helper()
-	s, err := endorsement.NewStatement(testName, testScope, testConfig)
+	s, err := configendorsement.NewStatement(testName, testScope, testConfig)
 	require.NoError(t, err)
 	input, err := s.TimestampInput()
 	require.NoError(t, err)
@@ -36,11 +36,11 @@ func configStatement(t *testing.T, f *sigstoretest.Fixture, at time.Time) []byte
 }
 
 func TestTimestampCoreCanonicalization(t *testing.T) {
-	s := &endorsement.Statement{
-		Type:          endorsement.StatementType,
-		Subject:       []endorsement.Subject{{Name: testName, Digest: map[string]string{"sha256": strings.Repeat("a", sha256.Size*2)}}},
-		PredicateType: endorsement.PredicateType,
-		Predicate:     endorsement.Predicate{AuditScope: testScope},
+	s := &configendorsement.Statement{
+		Type:          configendorsement.StatementType,
+		Subject:       []configendorsement.Subject{{Name: testName, Digest: map[string]string{"sha256": strings.Repeat("a", sha256.Size*2)}}},
+		PredicateType: configendorsement.PredicateType,
+		Predicate:     configendorsement.Predicate{AuditScope: testScope},
 	}
 	const core = `{"_type":"https://in-toto.io/Statement/v1","predicate":{"auditScope":"16a44d18-3387-44ce-9bfb-d77c4d27dbba"},"predicateType":"https://tinfoil.sh/predicate/config-endorsement/v1","subject":[{"digest":{"sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},"name":"/tinfoil/model-router/v0.0.155"}]}`
 	want := append([]byte("tinfoil-config-freshness/v1\x00"), []byte(core)...)
@@ -50,7 +50,7 @@ func TestTimestampCoreCanonicalization(t *testing.T) {
 	imprint, err := s.TimestampImprint()
 	require.NoError(t, err)
 	require.Equal(t, sha256.Sum256(want), imprint)
-	s.Predicate.Freshness = &endorsement.Freshness{RFC3161Timestamp: []byte("excluded from core")}
+	s.Predicate.Freshness = &configendorsement.Freshness{RFC3161Timestamp: []byte("excluded from core")}
 	withFreshness, err := s.TimestampInput()
 	require.NoError(t, err)
 	require.Equal(t, got, withFreshness)
@@ -77,7 +77,7 @@ func TestNamesAndAuditScopesAreCanonical(t *testing.T) {
 		"/" + strings.Repeat("a", specMaxSlugLength+1) + "/project/v1",
 		"/org/" + strings.Repeat("a", specMaxSlugLength+1) + "/v1",
 	} {
-		_, _, err := endorsement.ParseName(invalid)
+		_, _, err := configendorsement.ParseName(invalid)
 		require.Error(t, err, invalid)
 	}
 	for _, valid := range []struct {
@@ -90,13 +90,13 @@ func TestNamesAndAuditScopesAreCanonical(t *testing.T) {
 		{"/org-1/project-2/Release_1.2-rc", "/org-1/project-2", "Release_1.2-rc"},
 		{"/" + strings.Repeat("a", specMaxSlugLength) + "/" + strings.Repeat("b", specMaxSlugLength) + "/" + strings.Repeat("c", specMaxRevisionLength), "/" + strings.Repeat("a", specMaxSlugLength) + "/" + strings.Repeat("b", specMaxSlugLength), strings.Repeat("c", specMaxRevisionLength)},
 	} {
-		identity, revision, err := endorsement.ParseName(valid.name)
+		identity, revision, err := configendorsement.ParseName(valid.name)
 		require.NoError(t, err)
 		require.Equal(t, valid.identity, identity)
 		require.Equal(t, valid.revision, revision)
 	}
 	for _, invalid := range []string{"", "00000000-0000-0000-0000-000000000000", strings.ToUpper(testScope), strings.ReplaceAll(testScope, "-", "")} {
-		require.Error(t, endorsement.ValidateAuditScope(invalid))
+		require.Error(t, configendorsement.ValidateAuditScope(invalid))
 	}
 }
 
@@ -117,7 +117,7 @@ func TestStrictStatementDecoding(t *testing.T) {
 		{"trailing JSON", func(p []byte) []byte { return append(p, []byte(`{}`)...) }},
 		{"invalid UTF-8", func(p []byte) []byte { return bytes.Replace(p, []byte(testName), []byte("/tinfoil/\xff"), 1) }},
 		{"missing timestamp", func(p []byte) []byte {
-			s, err := endorsement.ParseStatement(p)
+			s, err := configendorsement.ParseStatement(p)
 			require.NoError(t, err)
 			s.Predicate.Freshness = nil
 			encoded, err := json.Marshal(s)
@@ -126,14 +126,14 @@ func TestStrictStatementDecoding(t *testing.T) {
 		}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			_, err := endorsement.ParseStatement(tc.mutate(bytes.Clone(payload)))
+			_, err := configendorsement.ParseStatement(tc.mutate(bytes.Clone(payload)))
 			require.Error(t, err)
 		})
 	}
-	padded := append(bytes.Clone(payload), bytes.Repeat([]byte(" "), endorsement.MaxStatementSize-len(payload))...)
-	_, err := endorsement.ParseStatement(padded)
+	padded := append(bytes.Clone(payload), bytes.Repeat([]byte(" "), configendorsement.MaxStatementSize-len(payload))...)
+	_, err := configendorsement.ParseStatement(padded)
 	require.NoError(t, err)
-	_, err = endorsement.ParseStatement(append(padded, ' '))
+	_, err = configendorsement.ParseStatement(append(padded, ' '))
 	require.ErrorContains(t, err, "statement size is outside allowed bounds")
 }
 
@@ -141,9 +141,9 @@ func TestRenewalChangesApprovalWithoutChangingArtifact(t *testing.T) {
 	f := sigstoretest.New(t)
 	firstPayload := configStatement(t, f, f.Now.Add(-time.Minute))
 	secondPayload := configStatement(t, f, f.Now)
-	first, err := endorsement.ParseStatement(firstPayload)
+	first, err := configendorsement.ParseStatement(firstPayload)
 	require.NoError(t, err)
-	second, err := endorsement.ParseStatement(secondPayload)
+	second, err := configendorsement.ParseStatement(secondPayload)
 	require.NoError(t, err)
 	require.Equal(t, first.Subject, second.Subject)
 	firstInput, err := first.TimestampInput()
@@ -152,12 +152,12 @@ func TestRenewalChangesApprovalWithoutChangingArtifact(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, firstInput, secondInput)
 	require.NotEqual(t, first.Predicate.Freshness.RFC3161Timestamp, second.Predicate.Freshness.RFC3161Timestamp)
-	firstRef, err := endorsement.EndorsementReference(firstPayload)
+	firstRef, err := configendorsement.EndorsementReference(firstPayload)
 	require.NoError(t, err)
-	secondRef, err := endorsement.EndorsementReference(secondPayload)
+	secondRef, err := configendorsement.EndorsementReference(secondPayload)
 	require.NoError(t, err)
 	require.NotEqual(t, firstRef, secondRef)
-	paddedRef, err := endorsement.EndorsementReference(append(bytes.Clone(firstPayload), ' '))
+	paddedRef, err := configendorsement.EndorsementReference(append(bytes.Clone(firstPayload), ' '))
 	require.NoError(t, err)
 	require.NotEqual(t, firstRef, paddedRef)
 	digest := sha256.Sum256(testConfig)

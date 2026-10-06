@@ -1,8 +1,6 @@
-// Package provenance verifies Sigstore-signed reference values against the
-// pinned Tinfoil workflow identities, producing verified value types: the
-// code measurement (with its declared VM shape) and the
-// platform-endorsements artifact.
-package provenance
+// Package endorsement verifies Sigstore-signed reference values against pinned
+// GitHub workflow identities and Tinfoil signing keys.
+package endorsement
 
 import (
 	"cmp"

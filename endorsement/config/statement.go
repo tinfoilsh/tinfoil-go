@@ -1,5 +1,5 @@
-// Package endorsement defines and constructs registry config endorsement statements.
-package endorsement
+// Package config defines and constructs registry config endorsement statements.
+package config
 
 import (
 	"bytes"

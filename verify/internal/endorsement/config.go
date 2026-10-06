@@ -1,4 +1,4 @@
-package provenance
+package endorsement
 
 import (
 	"crypto"
@@ -8,8 +8,8 @@ import (
 	"time"
 
 	"github.com/sigstore/sigstore-go/pkg/root"
+	configendorsement "github.com/tinfoilsh/tinfoil-go/endorsement/config"
 	"github.com/tinfoilsh/tinfoil-go/internal/statement"
-	"github.com/tinfoilsh/tinfoil-go/tinfoil-config/endorsement"
 )
 
 // ConfigSigningKey is application-provisioned trust, never material from collateral.
@@ -54,7 +54,7 @@ func NewConfigVerifier(trust root.TrustedMaterial, signingKeys []ConfigSigningKe
 	keys := make([]crypto.PublicKey, 0, len(signingKeys))
 	scopes := make(map[string]string, len(signingKeys))
 	for _, key := range signingKeys {
-		if err := endorsement.ValidateAuditScope(key.AuditScope); err != nil {
+		if err := configendorsement.ValidateAuditScope(key.AuditScope); err != nil {
 			return nil, err
 		}
 		hint, err := statement.KeyHint(key.PublicKey)
@@ -73,14 +73,14 @@ func NewConfigVerifier(trust root.TrustedMaterial, signingKeys []ConfigSigningKe
 
 // ValidatePins checks config expectations independently of clock and freshness settings.
 func (p ConfigPolicy) ValidatePins() error {
-	if err := endorsement.ValidateIdentity(p.Identity); err != nil {
+	if err := configendorsement.ValidateIdentity(p.Identity); err != nil {
 		return err
 	}
-	if err := endorsement.ValidateAuditScope(p.AuditScope); err != nil {
+	if err := configendorsement.ValidateAuditScope(p.AuditScope); err != nil {
 		return err
 	}
 	if p.Revision != "" {
-		if _, _, err := endorsement.ParseName(p.Identity + "/" + p.Revision); err != nil {
+		if _, _, err := configendorsement.ParseName(p.Identity + "/" + p.Revision); err != nil {
 			return err
 		}
 	}
@@ -116,7 +116,7 @@ func (v *ConfigVerifier) verify(config, bundleJSON []byte, policy ConfigPolicy, 
 	if err != nil {
 		return nil, err
 	}
-	if len(config) == 0 || len(config) > endorsement.MaxConfigSize {
+	if len(config) == 0 || len(config) > configendorsement.MaxConfigSize {
 		return nil, fmt.Errorf("config size is outside allowed bounds")
 	}
 	b, err := parseEndorsementBundle(bundleJSON, requirePublication)
@@ -128,11 +128,11 @@ func (v *ConfigVerifier) verify(config, bundleJSON []byte, policy ConfigPolicy, 
 		return nil, fmt.Errorf("signer is not authorized for the expected audit scope")
 	}
 	payload := b.GetDsseEnvelope().GetPayload()
-	s, err := endorsement.ParseStatement(payload)
+	s, err := configendorsement.ParseStatement(payload)
 	if err != nil {
 		return nil, err
 	}
-	identity, revision, err := endorsement.ParseName(s.Subject[0].Name)
+	identity, revision, err := configendorsement.ParseName(s.Subject[0].Name)
 	if err != nil {
 		return nil, err
 	}

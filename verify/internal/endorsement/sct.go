@@ -1,4 +1,4 @@
-package provenance
+package endorsement
 
 import (
 	"crypto/x509"

@@ -14,7 +14,7 @@ import (
 	"github.com/tinfoilsh/tinfoil-go/document/collateral"
 	"github.com/tinfoilsh/tinfoil-go/internal/fetch"
 	"github.com/tinfoilsh/tinfoil-go/internal/testutil"
-	"github.com/tinfoilsh/tinfoil-go/verify/internal/provenance"
+	"github.com/tinfoilsh/tinfoil-go/verify/internal/endorsement"
 )
 
 func TestFreshnessExpiration(t *testing.T) {
@@ -30,7 +30,7 @@ func TestFreshnessExpiration(t *testing.T) {
 		{"same issuance time", issuedAt, issuedAt},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
-			for _, maxAge := range []time.Duration{24 * time.Hour, provenance.MaxFreshnessAge, 30 * 24 * time.Hour} {
+			for _, maxAge := range []time.Duration{24 * time.Hour, endorsement.MaxFreshnessAge, 30 * 24 * time.Hour} {
 				require.Equal(t, issuedAt.Add(maxAge), freshnessExpiration(tt.codeWitnessedAt, tt.platformWitnessedAt, maxAge))
 			}
 		})
@@ -153,7 +153,7 @@ func TestLiveFreshnessWitnessExpiration(t *testing.T) {
 	require.NoError(t, err)
 	codeRef, err := doc.SigstoreCode()
 	require.NoError(t, err)
-	provClient, err := provenance.NewDefaultClient()
+	provClient, err := endorsement.NewDefaultClient()
 	require.NoError(t, err)
 	code, err := provClient.AuthenticateCode(codeRef.Bundle, repo, codeRef.Tag, codeRef.Digest)
 	require.NoError(t, err)
@@ -162,7 +162,7 @@ func TestLiveFreshnessWitnessExpiration(t *testing.T) {
 	platform, err := provClient.AuthenticatePlatformEndorsements(platformRef.Bundle, platformRef.Repo, platformRef.Tag, platformRef.Digest)
 	require.NoError(t, err)
 	matched := false
-	for id, artifact := range map[string]*provenance.AuthenticatedArtifact{
+	for id, artifact := range map[string]*endorsement.AuthenticatedArtifact{
 		collateral.FreshnessIDCode:     &code.AuthenticatedArtifact,
 		collateral.FreshnessIDPlatform: &platform.AuthenticatedArtifact,
 	} {
@@ -178,7 +178,7 @@ func TestLiveFreshnessWitnessExpiration(t *testing.T) {
 		require.NoError(t, err)
 		_, err = provClient.AuthenticateFreshness(witness.Bundle, artifact, loggedAt.Add(7*24*time.Hour+time.Nanosecond), 0)
 		require.ErrorContains(t, err, "stale")
-		expiresAt := loggedAt.Add(provenance.MaxFreshnessAge)
+		expiresAt := loggedAt.Add(endorsement.MaxFreshnessAge)
 		require.False(t, verified.FreshnessExpiresAt.After(expiresAt), "%s witness expires before public deadline", id)
 		matched = matched || verified.FreshnessExpiresAt.Equal(expiresAt)
 	}
