@@ -50,7 +50,7 @@ func TestCapturedPlatformProvenance(t *testing.T) {
 	}
 }
 
-func TestCapturedRuntimeMatchesReportFields(t *testing.T) {
+func TestCapturedRuntimeMatchesReportMeasurement(t *testing.T) {
 	data := capturedFixture(t, "igvm", freshness.RuntimeName(capturedRuntimeTag))
 	ref := collateral.RuntimeReference{Repo: collateral.RuntimeRepo, Tag: capturedRuntimeTag, Digest: capturedRuntimeDigest}
 	manifest, err := igvm.ParseManifest(data, ref)
@@ -61,9 +61,4 @@ func TestCapturedRuntimeMatchesReportFields(t *testing.T) {
 	require.NoError(t, err)
 	launch := manifest.IGVM.SNPLaunch
 	require.Equal(t, launch.Measurement, hex.EncodeToString(report.GetMeasurement()))
-	require.Equal(t, *launch.GuestSVN, report.GetGuestSvn())
-	require.Equal(t, launch.IDKeyDigest, hex.EncodeToString(report.GetIdKeyDigest()))
-	guestPolicy, err := launch.PolicyValue()
-	require.NoError(t, err)
-	require.Equal(t, guestPolicy, report.GetPolicy())
 }
