@@ -113,7 +113,6 @@ type AcceptOutputs struct {
 
 type ConfigOutputs struct {
 	Name                   string `json:"name"`
-	AuditScope             string `json:"audit_scope"`
 	Digest                 string `json:"digest"`
 	ApprovalTimeUnix       int64  `json:"approval_time_unix"`
 	FreshnessExpiresAtUnix int64  `json:"freshness_expires_at_unix"`
@@ -287,7 +286,7 @@ func verifyFull(doc, nonce []byte, in Input, verifier *verify.Verifier) (Output,
 	}
 	if verified.Config != nil {
 		outputs.Config = &ConfigOutputs{
-			Name: verified.Config.Name, AuditScope: verified.Config.AuditScope, Digest: verified.Config.Digest,
+			Name: verified.Config.Name, Digest: verified.Config.Digest,
 			ApprovalTimeUnix: verified.Config.ApprovalTime.Unix(), FreshnessExpiresAtUnix: verified.FreshnessExpiresAt.Unix(),
 		}
 	}
