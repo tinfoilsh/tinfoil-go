@@ -11,7 +11,6 @@ import (
 	"github.com/tinfoilsh/tinfoil-go/document/collateral"
 	"github.com/tinfoilsh/tinfoil-go/endorsement/freshness"
 	"github.com/tinfoilsh/tinfoil-go/verify/internal/endorsement"
-	"github.com/tinfoilsh/tinfoil-go/verify/internal/policy"
 	"github.com/tinfoilsh/tinfoil-go/verify/internal/runtime"
 )
 
@@ -31,23 +30,12 @@ func capturedFixture(t *testing.T, directory, name string) []byte {
 	return data
 }
 
-func TestCapturedPlatformProvenance(t *testing.T) {
+func TestCapturedPlatformRejectsConfigBindingMarker(t *testing.T) {
 	client, err := endorsement.NewDefaultClient()
 	require.NoError(t, err)
 	bundle := capturedFixture(t, "igvm", "platform-bundle.json")
-	platform, err := client.AuthenticatePlatformEndorsements(bundle, freshness.PlatformRepo, capturedPlatformTag, capturedPlatformDigest)
-	require.NoError(t, err)
-	require.Equal(t, runtime.PlatformSubject, platform.SubjectName)
-	require.Empty(t, platform.Artifact.Measurements)
-	require.NotEmpty(t, platform.Artifact.Policies)
-	for name, p := range platform.Artifact.Policies {
-		switch p.Platform {
-		case policy.PlatformSEVSNP:
-			require.Equal(t, policy.ConfigBindingSHA256, p.SEVSNP.ConfigBinding, name)
-		case policy.PlatformTDX:
-			require.Equal(t, policy.ConfigBindingSHA256, p.TDX.ConfigBinding, name)
-		}
-	}
+	_, err = client.AuthenticatePlatformEndorsements(bundle, freshness.PlatformRepo, capturedPlatformTag, capturedPlatformDigest)
+	require.ErrorContains(t, err, "config_binding")
 }
 
 func TestCapturedRuntimeMatchesReportMeasurement(t *testing.T) {
