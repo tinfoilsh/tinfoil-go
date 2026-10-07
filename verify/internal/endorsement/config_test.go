@@ -2,6 +2,7 @@ package endorsement_test
 
 import (
 	"bytes"
+	"crypto"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
@@ -36,16 +37,12 @@ type fixture struct{ *sigstoretest.Fixture }
 func newFixture(t *testing.T) *fixture { return &fixture{sigstoretest.New(t)} }
 
 func (f *fixture) policy() endorsement.ConfigPolicy {
-	return endorsement.ConfigPolicy{Identity: testIdentity, AuditScope: testScope, Now: f.Now}
-}
-
-func (f *fixture) signingKey() endorsement.ConfigSigningKey {
-	return endorsement.ConfigSigningKey{PublicKey: f.Key.Public(), AuditScope: testScope}
+	return endorsement.ConfigPolicy{Identity: testIdentity, Now: f.Now}
 }
 
 func (f *fixture) verifier(t *testing.T) *endorsement.ConfigVerifier {
 	t.Helper()
-	v, err := endorsement.NewConfigVerifier(&f.Trust, []endorsement.ConfigSigningKey{f.signingKey()})
+	v, err := endorsement.NewConfigVerifier(&f.Trust, []crypto.PublicKey{f.Key.Public()})
 	require.NoError(t, err)
 	return v
 }
@@ -82,14 +79,13 @@ func TestVerifyConfigApproval(t *testing.T) {
 }
 
 func TestPolicyValidatePins(t *testing.T) {
-	policy := endorsement.ConfigPolicy{Identity: testIdentity, AuditScope: testScope}
+	policy := endorsement.ConfigPolicy{Identity: testIdentity}
 	require.NoError(t, policy.ValidatePins())
 	policy.Revision = "v0.0.155"
 	policy.Digest = strings.Repeat("ab", sha256.Size)
 	require.NoError(t, policy.ValidatePins())
 	for name, mutate := range map[string]func(*endorsement.ConfigPolicy){
 		"identity": func(p *endorsement.ConfigPolicy) { p.Identity = "/tinfoil" },
-		"scope":    func(p *endorsement.ConfigPolicy) { p.AuditScope = "invalid" },
 		"revision": func(p *endorsement.ConfigPolicy) { p.Revision = "../v1" },
 		"digest":   func(p *endorsement.ConfigPolicy) { p.Digest = strings.ToUpper(p.Digest) },
 	} {
@@ -101,6 +97,23 @@ func TestPolicyValidatePins(t *testing.T) {
 	}
 }
 
+func TestSigningKeyDefinesAuditScope(t *testing.T) {
+	f := newFixture(t)
+	v := f.verifier(t)
+	for _, scope := range []string{testScope, testOtherScope} {
+		s, err := configendorsement.NewStatement(testName, scope, testConfig)
+		require.NoError(t, err)
+		input, err := s.TimestampInput()
+		require.NoError(t, err)
+		payload, err := s.Complete(f.Timestamp(t, input, f.Now))
+		require.NoError(t, err)
+		b := f.Bundle(t, payload)
+		got, err := v.Verify(testConfig, sigstoretest.MarshalBundle(t, b), f.policy())
+		require.NoError(t, err)
+		require.Equal(t, b.GetVerificationMaterial().GetPublicKey().GetHint(), got.SigningKeyHint)
+	}
+}
+
 func TestVerifyRejectsWrongPinsAndUntrustedKeys(t *testing.T) {
 	f := newFixture(t)
 	b := sigstoretest.MarshalBundle(t, f.Bundle(t, f.statement(t, f.Now)))
@@ -109,7 +122,6 @@ func TestVerifyRejectsWrongPinsAndUntrustedKeys(t *testing.T) {
 		mutate func(*endorsement.ConfigPolicy)
 	}{
 		{"identity", func(p *endorsement.ConfigPolicy) { p.Identity = "/tinfoil/other" }},
-		{"scope", func(p *endorsement.ConfigPolicy) { p.AuditScope = testOtherScope }},
 		{"revision", func(p *endorsement.ConfigPolicy) { p.Revision = "v0.0.156" }},
 		{"digest", func(p *endorsement.ConfigPolicy) { p.Digest = strings.Repeat("0", sha256.Size*2) }},
 		{"missing clock", func(p *endorsement.ConfigPolicy) { p.Now = time.Time{} }},
@@ -129,7 +141,7 @@ func TestVerifyRejectsWrongPinsAndUntrustedKeys(t *testing.T) {
 	require.ErrorContains(t, err, "config bytes")
 	other := newFixture(t)
 	_, err = other.verifier(t).Verify(testConfig, b, f.policy())
-	require.ErrorContains(t, err, "signer is not authorized")
+	require.ErrorContains(t, err, "untrusted approval signing key")
 }
 
 func TestVerifyRequiresSignedApprovalAndLogInclusion(t *testing.T) {
@@ -178,6 +190,7 @@ func TestInnerTimestampBindsCompleteCore(t *testing.T) {
 		mutate func(*configendorsement.Statement)
 	}{
 		{"name", func(s *configendorsement.Statement) { s.Subject[0].Name = testIdentity + "/changed" }},
+		{"scope metadata", func(s *configendorsement.Statement) { s.Predicate.AuditScope = testOtherScope }},
 		{"timestamp on other input", func(s *configendorsement.Statement) {
 			s.Predicate.Freshness.RFC3161Timestamp = f.Timestamp(t, []byte("other"), f.Now)
 		}},
@@ -225,16 +238,15 @@ func TestIgnoreFreshnessSkipsOnlyTheAgeCheck(t *testing.T) {
 	_, err := f.verifier(t).Verify(testConfig, b, stale)
 	require.ErrorContains(t, err, "too old")
 
-	policy := endorsement.ConfigPolicy{Identity: testIdentity, AuditScope: testScope, IgnoreFreshness: true}
+	policy := endorsement.ConfigPolicy{Identity: testIdentity, IgnoreFreshness: true}
 	verified, err := f.verifier(t).Verify(testConfig, b, policy)
 	require.NoError(t, err)
 	require.True(t, verified.ApprovalTime.Equal(inner))
 
 	_, err = f.verifier(t).Verify(append(bytes.Clone(testConfig), '\n'), b, policy)
 	require.ErrorContains(t, err, "config bytes")
-	policy.AuditScope = testOtherScope
-	_, err = f.verifier(t).Verify(testConfig, b, policy)
-	require.ErrorContains(t, err, "signer is not authorized")
+	_, err = newFixture(t).verifier(t).Verify(testConfig, b, policy)
+	require.ErrorContains(t, err, "untrusted approval signing key")
 }
 
 func TestUntrustedInnerTSAAndWrongPolicy(t *testing.T) {
@@ -257,23 +269,23 @@ func TestUntrustedInnerTSAAndWrongPolicy(t *testing.T) {
 
 func TestSigningKeyRotationAllowsOverlapAndRejectsRemovedKeys(t *testing.T) {
 	f := newFixture(t)
-	oldKey := f.signingKey()
+	oldKey := f.Key.Public()
 	oldBundle := sigstoretest.MarshalBundle(t, f.Bundle(t, f.statement(t, f.Now)))
 	newKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	require.NoError(t, err)
 	f.Key = newKey
-	newTrust := f.signingKey()
+	newTrust := f.Key.Public()
 	newBundle := sigstoretest.MarshalBundle(t, f.Bundle(t, f.statement(t, f.Now)))
-	verifier, err := endorsement.NewConfigVerifier(&f.Trust, []endorsement.ConfigSigningKey{oldKey, newTrust})
+	verifier, err := endorsement.NewConfigVerifier(&f.Trust, []crypto.PublicKey{oldKey, newTrust})
 	require.NoError(t, err)
 	for _, b := range [][]byte{oldBundle, newBundle} {
 		_, err := verifier.Verify(testConfig, b, f.policy())
 		require.NoError(t, err)
 	}
-	verifier, err = endorsement.NewConfigVerifier(&f.Trust, []endorsement.ConfigSigningKey{newTrust})
+	verifier, err = endorsement.NewConfigVerifier(&f.Trust, []crypto.PublicKey{newTrust})
 	require.NoError(t, err)
 	_, err = verifier.Verify(testConfig, oldBundle, f.policy())
-	require.ErrorContains(t, err, "signer is not authorized")
+	require.ErrorContains(t, err, "untrusted approval signing key")
 	_, err = verifier.Verify(testConfig, newBundle, f.policy())
 	require.NoError(t, err)
 }

@@ -12,20 +12,12 @@ import (
 	"github.com/tinfoilsh/tinfoil-go/internal/statement"
 )
 
-// ConfigSigningKey is application-provisioned trust, never material from collateral.
-// A key remains authorized for its scope until removed from the trusted set.
-type ConfigSigningKey struct {
-	PublicKey  crypto.PublicKey
-	AuditScope string
-}
-
 // ConfigPolicy pins the identity and supplies the client's clock and freshness rules.
 // Zero MaxAge and FutureSkew select the defaults. IgnoreFreshness skips the
 // approval age check for archived material; Now is then optional and every
 // other check still applies. ConfigVerified.ApprovalTime reports the authenticated time.
 type ConfigPolicy struct {
 	Identity        string
-	AuditScope      string
 	Revision        string
 	Digest          string
 	Now             time.Time
@@ -45,38 +37,21 @@ type ConfigVerified struct {
 
 type ConfigVerifier struct {
 	cryptographic *endorsementVerifier
-	scopes        map[string]string
 }
 
 // NewConfigVerifier builds an offline verifier. The supplied roots authenticate TSA
 // and Rekor evidence; only keys in signingKeys can authorize a config approval.
-func NewConfigVerifier(trust root.TrustedMaterial, signingKeys []ConfigSigningKey) (*ConfigVerifier, error) {
-	keys := make([]crypto.PublicKey, 0, len(signingKeys))
-	scopes := make(map[string]string, len(signingKeys))
-	for _, key := range signingKeys {
-		if err := configendorsement.ValidateAuditScope(key.AuditScope); err != nil {
-			return nil, err
-		}
-		hint, err := statement.KeyHint(key.PublicKey)
-		if err != nil {
-			return nil, err
-		}
-		scopes[hint] = key.AuditScope
-		keys = append(keys, key.PublicKey)
-	}
+func NewConfigVerifier(trust root.TrustedMaterial, keys []crypto.PublicKey) (*ConfigVerifier, error) {
 	cryptographic, err := newEndorsementVerifier(trust, keys)
 	if err != nil {
 		return nil, err
 	}
-	return &ConfigVerifier{cryptographic: cryptographic, scopes: scopes}, nil
+	return &ConfigVerifier{cryptographic: cryptographic}, nil
 }
 
 // ValidatePins checks config expectations independently of clock and freshness settings.
 func (p ConfigPolicy) ValidatePins() error {
 	if err := configendorsement.ValidateIdentity(p.Identity); err != nil {
-		return err
-	}
-	if err := configendorsement.ValidateAuditScope(p.AuditScope); err != nil {
 		return err
 	}
 	if p.Revision != "" {
@@ -111,10 +86,6 @@ func (v *ConfigVerifier) Verify(config, bundleJSON []byte, policy ConfigPolicy) 
 	if err != nil {
 		return nil, err
 	}
-	hint := b.GetVerificationMaterial().GetPublicKey().GetHint()
-	if v.scopes[hint] != policy.AuditScope {
-		return nil, fmt.Errorf("signer is not authorized for the expected audit scope")
-	}
 	payload := b.GetDsseEnvelope().GetPayload()
 	s, err := configendorsement.ParseStatement(payload)
 	if err != nil {
@@ -124,15 +95,16 @@ func (v *ConfigVerifier) Verify(config, bundleJSON []byte, policy ConfigPolicy) 
 	if err != nil {
 		return nil, err
 	}
-	if s.Predicate.AuditScope != policy.AuditScope || identity != policy.Identity || (policy.Revision != "" && revision != policy.Revision) {
-		return nil, fmt.Errorf("config endorsement does not match the pinned identity, scope, or revision")
+	if identity != policy.Identity || (policy.Revision != "" && revision != policy.Revision) {
+		return nil, fmt.Errorf("config endorsement does not match the pinned identity or revision")
 	}
 	digest := sha256.Sum256(config)
 	hexDigest := hex.EncodeToString(digest[:])
 	if s.Subject[0].Digest[statement.DigestAlgorithm] != hexDigest || (policy.Digest != "" && policy.Digest != hexDigest) {
 		return nil, fmt.Errorf("config bytes do not match the endorsed or pinned digest")
 	}
-	if _, err := v.cryptographic.Verify(b, digest[:]); err != nil {
+	hint, err := v.cryptographic.Verify(b, digest[:])
+	if err != nil {
 		return nil, err
 	}
 	input, err := s.TimestampInput()
@@ -144,11 +116,11 @@ func (v *ConfigVerifier) Verify(config, bundleJSON []byte, policy ConfigPolicy) 
 		return nil, fmt.Errorf("inner timestamp: %w", err)
 	}
 	return &ConfigVerified{
-		Name: s.Subject[0].Name, AuditScope: policy.AuditScope, Digest: hexDigest,
+		Name: s.Subject[0].Name, AuditScope: s.Predicate.AuditScope, Digest: hexDigest,
 		Reference: statement.EndorsementReference(payload), SigningKeyHint: hint, ApprovalTime: inner,
 	}, nil
 }
 
-func (c *Client) ConfigVerifier(keys []ConfigSigningKey) (*ConfigVerifier, error) {
+func (c *Client) ConfigVerifier(keys []crypto.PublicKey) (*ConfigVerifier, error) {
 	return NewConfigVerifier(c.trustRoot, keys)
 }
