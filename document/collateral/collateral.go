@@ -93,9 +93,9 @@ type Set struct {
 	SigstoreCode     *SigstoreRef
 	SigstorePlatform *SigstoreRef
 	Config           *ConfigEndorsement
-	Runtime          *IGVMRuntime
+	Runtime          *Runtime
 	platformCount    int
-	igvmPlatform     *SigstoreRef
+	configPlatform   *SigstoreRef
 	// Freshness holds the freshness witnesses by entry ID.
 	Freshness map[string]Freshness
 }
@@ -128,8 +128,8 @@ func Decode(entries []Entry) (Set, error) {
 				return set, err
 			}
 			set.Config = &v
-		case entry.ID == RuntimeID || entry.Format == IGVMRuntimeV1Format:
-			if entry.ID != RuntimeID || entry.Format != IGVMRuntimeV1Format || entry.Role != RoleReferenceValues {
+		case entry.ID == RuntimeID || entry.Format == RuntimeV1Format:
+			if entry.ID != RuntimeID || entry.Format != RuntimeV1Format || entry.Role != RoleReferenceValues {
 				return set, fmt.Errorf("conflicting collateral entry for %q", RuntimeID)
 			}
 			v, err := decodeRuntime(entry)
@@ -187,7 +187,7 @@ func Decode(entries []Entry) (Set, error) {
 				set.SigstorePlatform = v
 			}
 			if entry.ID == PlatformID {
-				set.igvmPlatform = v
+				set.configPlatform = v
 			}
 		case entry.Role == RoleReferenceValues && entry.Format == SigstoreFreshnessV1Format:
 			f, err := decodeFreshness(entry)

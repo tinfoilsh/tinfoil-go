@@ -14,14 +14,14 @@ func (d *Document) ConfigEndorsement() (collateral.ConfigEndorsement, error) {
 	return d.collateral.Config.Clone(), nil
 }
 
-// IGVMRuntime returns a copy of the decoded, unauthenticated runtime approval.
-func (d *Document) IGVMRuntime() (collateral.IGVMRuntime, error) {
+// Runtime returns a copy of the decoded, unauthenticated runtime approval.
+func (d *Document) Runtime() (collateral.Runtime, error) {
 	if d.collateral.Runtime == nil {
-		return collateral.IGVMRuntime{}, fmt.Errorf("%w: document carries no %q reference-values entry", collateral.ErrNotFound, collateral.RuntimeID)
+		return collateral.Runtime{}, fmt.Errorf("%w: document carries no %q reference-values entry", collateral.ErrNotFound, collateral.RuntimeID)
 	}
 	return d.collateral.Runtime.Clone(), nil
 }
 
-func (d *Document) IGVMPlatform() (collateral.SigstoreRef, error) {
-	return d.collateral.IGVMPlatform()
+func (d *Document) ConfigPlatform() (collateral.SigstoreRef, error) {
+	return d.collateral.ConfigPlatform()
 }

@@ -10,7 +10,7 @@ import (
 func TestConfigCollateralAccessorsReturnCopies(t *testing.T) {
 	doc := &Document{collateral: collateral.Set{
 		Config:  &collateral.ConfigEndorsement{Reference: "ref", Config: []byte("config"), Bundle: []byte(`{}`)},
-		Runtime: &collateral.IGVMRuntime{Manifest: []byte("manifest"), Bundle: []byte(`{}`)},
+		Runtime: &collateral.Runtime{Manifest: []byte("manifest"), Bundle: []byte(`{}`)},
 	}}
 	config, err := doc.ConfigEndorsement()
 	require.NoError(t, err)
@@ -23,11 +23,11 @@ func TestConfigCollateralAccessorsReturnCopies(t *testing.T) {
 	require.Equal(t, "config", string(againConfig.Config))
 	require.Equal(t, "{}", string(againConfig.Bundle))
 
-	runtime, err := doc.IGVMRuntime()
+	runtime, err := doc.Runtime()
 	require.NoError(t, err)
 	runtime.Manifest[0] = '!'
 	runtime.Bundle[0] = '!'
-	againRuntime, err := doc.IGVMRuntime()
+	againRuntime, err := doc.Runtime()
 	require.NoError(t, err)
 	require.Equal(t, "manifest", string(againRuntime.Manifest))
 	require.Equal(t, "{}", string(againRuntime.Bundle))
@@ -35,6 +35,6 @@ func TestConfigCollateralAccessorsReturnCopies(t *testing.T) {
 	empty := &Document{}
 	_, err = empty.ConfigEndorsement()
 	require.ErrorIs(t, err, collateral.ErrNotFound)
-	_, err = empty.IGVMRuntime()
+	_, err = empty.Runtime()
 	require.ErrorIs(t, err, collateral.ErrNotFound)
 }

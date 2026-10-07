@@ -24,12 +24,12 @@ func TestRuntimeReference(t *testing.T) {
 	}
 }
 
-func TestIGVMRuntime(t *testing.T) {
+func TestRuntime(t *testing.T) {
 	ref := RuntimeReference{Repo: RuntimeRepo, Tag: "v0.15.0", Digest: strings.Repeat("ab", 32)}
 	manifest := []byte(`{"version":"v0.15.0"}`)
 	data, err := json.Marshal(runtimeCollateral{RuntimeReference: ref, Manifest: base64.StdEncoding.EncodeToString(manifest), Bundle: []byte(`{}`)})
 	require.NoError(t, err)
-	entry := Entry{ID: RuntimeID, Role: RoleReferenceValues, Format: IGVMRuntimeV1Format, Data: data}
+	entry := Entry{ID: RuntimeID, Role: RoleReferenceValues, Format: RuntimeV1Format, Data: data}
 	set, err := Decode([]Entry{entry})
 	require.NoError(t, err)
 	got := set.Runtime
@@ -42,16 +42,16 @@ func TestIGVMRuntime(t *testing.T) {
 	require.ErrorContains(t, err, "conflicting collateral")
 }
 
-func TestIGVMPlatform(t *testing.T) {
+func TestConfigPlatform(t *testing.T) {
 	entry := Entry{ID: PlatformID, Role: RoleReferenceValues, Format: SigstorePlatformV1Format,
 		Data: []byte(`{"repo":"tinfoilsh/platform-endorsements","tag":"v1.0.0","digest":"ab","sigstore_bundle":{}}`)}
 	set, err := Decode([]Entry{entry})
 	require.NoError(t, err)
-	platform, err := set.IGVMPlatform()
+	platform, err := set.ConfigPlatform()
 	require.NoError(t, err)
 	require.Equal(t, "tinfoilsh/platform-endorsements", platform.Repo)
 	platform.Bundle[0] = '!'
-	again, err := set.IGVMPlatform()
+	again, err := set.ConfigPlatform()
 	require.NoError(t, err)
 	require.Equal(t, "{}", string(again.Bundle))
 
@@ -71,7 +71,7 @@ func TestIGVMPlatform(t *testing.T) {
 			mutate(&entries)
 			set, err := Decode(entries)
 			require.NoError(t, err)
-			_, err = set.IGVMPlatform()
+			_, err = set.ConfigPlatform()
 			if name == "missing" {
 				require.ErrorIs(t, err, ErrNotFound)
 			} else {

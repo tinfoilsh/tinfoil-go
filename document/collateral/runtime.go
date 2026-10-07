@@ -11,10 +11,10 @@ import (
 )
 
 const (
-	RuntimeRepo         = "tinfoilsh/cvmimage"
-	RuntimeID           = "runtime"
-	IGVMRuntimeV1Format = "https://tinfoil.sh/collateral/igvm-runtime/v1"
-	PlatformID          = "platform"
+	RuntimeRepo     = "tinfoilsh/cvmimage"
+	RuntimeID       = "runtime"
+	RuntimeV1Format = "https://tinfoil.sh/collateral/igvm-runtime/v1"
+	PlatformID      = "platform"
 )
 
 type RuntimeReference struct {
@@ -40,43 +40,43 @@ type runtimeCollateral struct {
 	Bundle   jsontext.Value `json:"sigstore_bundle"`
 }
 
-type IGVMRuntime struct {
+type Runtime struct {
 	RuntimeReference
 	Manifest []byte
 	Bundle   jsontext.Value
 }
 
-func decodeRuntime(entry *Entry) (IGVMRuntime, error) {
+func decodeRuntime(entry *Entry) (Runtime, error) {
 	var c runtimeCollateral
 	if err := unmarshalData(entry, entry.Format, &c); err != nil {
-		return IGVMRuntime{}, err
+		return Runtime{}, err
 	}
 	if err := c.RuntimeReference.Validate(); err != nil {
-		return IGVMRuntime{}, err
+		return Runtime{}, err
 	}
 	manifest, err := canonical.DecodeBase64("manifest_base64", c.Manifest)
 	if err != nil {
-		return IGVMRuntime{}, err
+		return Runtime{}, err
 	}
 	if c.Bundle.Kind() != '{' {
-		return IGVMRuntime{}, fmt.Errorf("sigstore_bundle must be an object")
+		return Runtime{}, fmt.Errorf("sigstore_bundle must be an object")
 	}
-	return IGVMRuntime{RuntimeReference: c.RuntimeReference, Manifest: manifest, Bundle: c.Bundle}, nil
+	return Runtime{RuntimeReference: c.RuntimeReference, Manifest: manifest, Bundle: c.Bundle}, nil
 }
 
-func (r IGVMRuntime) Clone() IGVMRuntime {
+func (r Runtime) Clone() Runtime {
 	r.Manifest = slices.Clone(r.Manifest)
 	r.Bundle = slices.Clone(r.Bundle)
 	return r
 }
 
-// IGVMPlatform requires an unambiguous platform reference for the IGVM profile.
-func (s Set) IGVMPlatform() (SigstoreRef, error) {
+// ConfigPlatform requires an unambiguous platform reference for config verification.
+func (s Set) ConfigPlatform() (SigstoreRef, error) {
 	if s.platformCount == 0 {
 		return SigstoreRef{}, fmt.Errorf("%w: no platform reference-values entry", ErrNotFound)
 	}
-	if s.platformCount != 1 || s.igvmPlatform == nil {
-		return SigstoreRef{}, fmt.Errorf("conflicting platform collateral for IGVM")
+	if s.platformCount != 1 || s.configPlatform == nil {
+		return SigstoreRef{}, fmt.Errorf("conflicting platform collateral for config verification")
 	}
-	return s.igvmPlatform.Clone(), nil
+	return s.configPlatform.Clone(), nil
 }

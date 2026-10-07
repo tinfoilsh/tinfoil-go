@@ -34,7 +34,7 @@ type Request struct {
 	Profile string                       `json:"profile,omitempty"`
 	Runtime *collateral.RuntimeReference `json:"runtime,omitempty"`
 	// Repo is the code repository whose Sigstore bundle is returned.
-	// The IGVM profile requires Runtime and Config instead of Repo and Tag.
+	// The config registry flow requires Runtime and Config instead of Repo and Tag.
 	Repo string `json:"repo,omitempty"`
 	// Tag optionally pins a code release; latest when empty.
 	Tag string `json:"tag,omitempty"`
