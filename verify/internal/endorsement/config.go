@@ -28,7 +28,6 @@ type ConfigPolicy struct {
 
 type ConfigVerified struct {
 	Name           string
-	AuditScope     string
 	Digest         string
 	Reference      string
 	SigningKeyHint string
@@ -116,7 +115,7 @@ func (v *ConfigVerifier) Verify(config, bundleJSON []byte, policy ConfigPolicy) 
 		return nil, fmt.Errorf("inner timestamp: %w", err)
 	}
 	return &ConfigVerified{
-		Name: s.Subject[0].Name, AuditScope: s.Predicate.AuditScope, Digest: hexDigest,
+		Name: s.Subject[0].Name, Digest: hexDigest,
 		Reference: statement.EndorsementReference(payload), SigningKeyHint: hint, ApprovalTime: inner,
 	}, nil
 }

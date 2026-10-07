@@ -10,7 +10,6 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
-	"uuid"
 
 	"github.com/tinfoilsh/tinfoil-go/internal/statement"
 )
@@ -50,8 +49,7 @@ type Subject struct {
 }
 
 type Predicate struct {
-	AuditScope string     `json:"auditScope"`
-	Freshness  *Freshness `json:"freshness,omitempty"`
+	Freshness *Freshness `json:"freshness,omitempty"`
 }
 
 type Freshness struct {
@@ -60,7 +58,7 @@ type Freshness struct {
 
 // NewStatement prepares an unsigned approval of exact config bytes.
 // Config schema validation and publication authorization belong to the caller.
-func NewStatement(name, auditScope string, config []byte) (*Statement, error) {
+func NewStatement(name string, config []byte) (*Statement, error) {
 	if len(config) == 0 || len(config) > MaxConfigSize {
 		return nil, fmt.Errorf("config size must be between 1 and %d bytes", MaxConfigSize)
 	}
@@ -69,7 +67,6 @@ func NewStatement(name, auditScope string, config []byte) (*Statement, error) {
 		Type:          StatementType,
 		Subject:       []Subject{{Name: name, Digest: map[string]string{statement.DigestAlgorithm: hex.EncodeToString(digest[:])}}},
 		PredicateType: PredicateType,
-		Predicate:     Predicate{AuditScope: auditScope},
 	}
 	if err := s.validate(false); err != nil {
 		return nil, err
@@ -110,14 +107,6 @@ func ParseName(name string) (identity, revision string, err error) {
 	return identity, revision, nil
 }
 
-func ValidateAuditScope(scope string) error {
-	id, err := uuid.Parse(scope)
-	if err != nil || id == uuid.Nil() || id.String() != scope {
-		return fmt.Errorf("audit scope must be a canonical nonzero UUID")
-	}
-	return nil
-}
-
 func (s *Statement) validate(requireTimestamp bool) error {
 	if s == nil || s.Type != StatementType || s.PredicateType != PredicateType {
 		return fmt.Errorf("unsupported config endorsement statement type")
@@ -130,9 +119,6 @@ func (s *Statement) validate(requireTimestamp bool) error {
 	}
 	if len(s.Subject[0].Digest) != 1 || !digestPattern.MatchString(s.Subject[0].Digest[statement.DigestAlgorithm]) {
 		return fmt.Errorf("subject requires one lowercase SHA-256 digest")
-	}
-	if err := ValidateAuditScope(s.Predicate.AuditScope); err != nil {
-		return err
 	}
 	if requireTimestamp && (s.Predicate.Freshness == nil || len(s.Predicate.Freshness.RFC3161Timestamp) == 0) {
 		return fmt.Errorf("config endorsement requires an inner timestamp")

@@ -15,7 +15,6 @@ import (
 )
 
 const (
-	testScope             = "16a44d18-3387-44ce-9bfb-d77c4d27dbba"
 	testIdentity          = "/tinfoil/model-router"
 	testName              = testIdentity + "/v0.0.155"
 	specMaxSlugLength     = 63
@@ -26,7 +25,7 @@ var testConfig = []byte("# Approved config bytes\nname: gpt-oss-120b\n")
 
 func configStatement(t *testing.T, f *sigstoretest.Fixture, at time.Time) []byte {
 	t.Helper()
-	s, err := configendorsement.NewStatement(testName, testScope, testConfig)
+	s, err := configendorsement.NewStatement(testName, testConfig)
 	require.NoError(t, err)
 	input, err := s.TimestampInput()
 	require.NoError(t, err)
@@ -40,9 +39,8 @@ func TestTimestampCoreCanonicalization(t *testing.T) {
 		Type:          configendorsement.StatementType,
 		Subject:       []configendorsement.Subject{{Name: testName, Digest: map[string]string{"sha256": strings.Repeat("a", sha256.Size*2)}}},
 		PredicateType: configendorsement.PredicateType,
-		Predicate:     configendorsement.Predicate{AuditScope: testScope},
 	}
-	const core = `{"_type":"https://in-toto.io/Statement/v1","predicate":{"auditScope":"16a44d18-3387-44ce-9bfb-d77c4d27dbba"},"predicateType":"https://tinfoil.sh/predicate/config-endorsement/v1","subject":[{"digest":{"sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},"name":"/tinfoil/model-router/v0.0.155"}]}`
+	const core = `{"_type":"https://in-toto.io/Statement/v1","predicate":{},"predicateType":"https://tinfoil.sh/predicate/config-endorsement/v1","subject":[{"digest":{"sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},"name":"/tinfoil/model-router/v0.0.155"}]}`
 	want := append([]byte("tinfoil-config-freshness/v1\x00"), []byte(core)...)
 	got, err := s.TimestampInput()
 	require.NoError(t, err)
@@ -56,7 +54,7 @@ func TestTimestampCoreCanonicalization(t *testing.T) {
 	require.Equal(t, got, withFreshness)
 }
 
-func TestNamesAndAuditScopesAreCanonical(t *testing.T) {
+func TestNamesAreCanonical(t *testing.T) {
 	for _, invalid := range []string{
 		"/org/project",
 		"org/project/v1",
@@ -95,9 +93,6 @@ func TestNamesAndAuditScopesAreCanonical(t *testing.T) {
 		require.Equal(t, valid.identity, identity)
 		require.Equal(t, valid.revision, revision)
 	}
-	for _, invalid := range []string{"", "00000000-0000-0000-0000-000000000000", strings.ToUpper(testScope), strings.ReplaceAll(testScope, "-", "")} {
-		require.Error(t, configendorsement.ValidateAuditScope(invalid))
-	}
 }
 
 func TestStrictStatementDecoding(t *testing.T) {
@@ -113,7 +108,7 @@ func TestStrictStatementDecoding(t *testing.T) {
 		{"unknown property", func(p []byte) []byte {
 			return bytes.Replace(p, []byte(`"predicate":{`), []byte(`"predicate":{"issuedAt":"2026-01-01",`), 1)
 		}},
-		{"case folding", func(p []byte) []byte { return bytes.Replace(p, []byte(`"auditScope":`), []byte(`"AuditScope":`), 1) }},
+		{"case folding", func(p []byte) []byte { return bytes.Replace(p, []byte(`"freshness":`), []byte(`"Freshness":`), 1) }},
 		{"trailing JSON", func(p []byte) []byte { return append(p, []byte(`{}`)...) }},
 		{"invalid UTF-8", func(p []byte) []byte { return bytes.Replace(p, []byte(testName), []byte("/tinfoil/\xff"), 1) }},
 		{"missing timestamp", func(p []byte) []byte {

@@ -24,10 +24,8 @@ import (
 )
 
 const (
-	testScope      = "16a44d18-3387-44ce-9bfb-d77c4d27dbba"
-	testOtherScope = "618b2048-f6d8-4419-a870-a8fb99a0e46b"
-	testIdentity   = "/tinfoil/model-router"
-	testName       = testIdentity + "/v0.0.155"
+	testIdentity = "/tinfoil/model-router"
+	testName     = testIdentity + "/v0.0.155"
 )
 
 var testConfig = []byte("# Approved config bytes\nname: gpt-oss-120b\n")
@@ -49,7 +47,7 @@ func (f *fixture) verifier(t *testing.T) *endorsement.ConfigVerifier {
 
 func (f *fixture) statement(t *testing.T, at time.Time) []byte {
 	t.Helper()
-	s, err := configendorsement.NewStatement(testName, testScope, testConfig)
+	s, err := configendorsement.NewStatement(testName, testConfig)
 	require.NoError(t, err)
 	input, err := s.TimestampInput()
 	require.NoError(t, err)
@@ -65,7 +63,6 @@ func TestVerifyConfigApproval(t *testing.T) {
 	got, err := f.verifier(t).Verify(testConfig, sigstoretest.MarshalBundle(t, b), f.policy())
 	require.NoError(t, err)
 	require.Equal(t, testName, got.Name)
-	require.Equal(t, testScope, got.AuditScope)
 	require.Equal(t, f.Now.Add(-time.Minute), got.ApprovalTime)
 	require.Nil(t, b.GetVerificationMaterial().GetTimestampVerificationData())
 	wantRef := sha256.Sum256(dsse.PAE(configendorsement.PayloadType, payload))
@@ -94,23 +91,6 @@ func TestPolicyValidatePins(t *testing.T) {
 			mutate(&invalid)
 			require.Error(t, invalid.ValidatePins())
 		})
-	}
-}
-
-func TestSigningKeyDefinesAuditScope(t *testing.T) {
-	f := newFixture(t)
-	v := f.verifier(t)
-	for _, scope := range []string{testScope, testOtherScope} {
-		s, err := configendorsement.NewStatement(testName, scope, testConfig)
-		require.NoError(t, err)
-		input, err := s.TimestampInput()
-		require.NoError(t, err)
-		payload, err := s.Complete(f.Timestamp(t, input, f.Now))
-		require.NoError(t, err)
-		b := f.Bundle(t, payload)
-		got, err := v.Verify(testConfig, sigstoretest.MarshalBundle(t, b), f.policy())
-		require.NoError(t, err)
-		require.Equal(t, b.GetVerificationMaterial().GetPublicKey().GetHint(), got.SigningKeyHint)
 	}
 }
 
@@ -190,7 +170,6 @@ func TestInnerTimestampBindsCompleteCore(t *testing.T) {
 		mutate func(*configendorsement.Statement)
 	}{
 		{"name", func(s *configendorsement.Statement) { s.Subject[0].Name = testIdentity + "/changed" }},
-		{"scope metadata", func(s *configendorsement.Statement) { s.Predicate.AuditScope = testOtherScope }},
 		{"timestamp on other input", func(s *configendorsement.Statement) {
 			s.Predicate.Freshness.RFC3161Timestamp = f.Timestamp(t, []byte("other"), f.Now)
 		}},
@@ -251,7 +230,7 @@ func TestIgnoreFreshnessSkipsOnlyTheAgeCheck(t *testing.T) {
 
 func TestUntrustedInnerTSAAndWrongPolicy(t *testing.T) {
 	f := newFixture(t)
-	s, err := configendorsement.NewStatement(testName, testScope, testConfig)
+	s, err := configendorsement.NewStatement(testName, testConfig)
 	require.NoError(t, err)
 	input, err := s.TimestampInput()
 	require.NoError(t, err)
