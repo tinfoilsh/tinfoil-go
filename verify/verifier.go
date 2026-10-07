@@ -255,7 +255,7 @@ func (v *Verifier) authenticateFreshness(doc *document.Document, id string, arti
 		return time.Time{}, err
 	}
 	if freshness.Format != collateral.SigstoreFreshnessV1Format {
-		return time.Time{}, fmt.Errorf("legacy verification requires GitHub freshness witnesses")
+		return time.Time{}, fmt.Errorf("legacy verification requires freshness collateral format %q", collateral.SigstoreFreshnessV1Format)
 	}
 	return v.endorsements.AuthenticateFreshness(freshness.Bundle, artifact, now, v.freshnessMaxAge)
 }
