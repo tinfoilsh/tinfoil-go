@@ -251,7 +251,7 @@ func assemble(refs ReferenceValues, pins *measurement.Measurement, reportData [6
 				return nil, err
 			}
 		}
-		assembled.sev, err = sev.Assemble(p, q.sev, registers[0], reportData, refs.Config != nil)
+		assembled.sev, err = sev.Assemble(p, q.sev, registers[0], reportData)
 	case policy.PlatformTDX:
 		var configID *[tdxabi.MrConfigIDSize]byte
 		if refs.Config != nil {

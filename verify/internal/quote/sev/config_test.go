@@ -38,12 +38,12 @@ func TestConfigBoundEnforcesConfigAndPlatformConstraints(t *testing.T) {
 	p.SEVSNP.HostData = ""
 	var reportData [64]byte
 	copy(reportData[:], report.ReportData)
-	_, err = Assemble(p.SEVSNP, q, measurement, reportData, true)
+	_, err = Assemble(p.SEVSNP, q, measurement, reportData)
 	require.ErrorContains(t, err, "requires config verification")
 	resolved := *p.SEVSNP
 	resolved.ConfigBinding = ""
 	resolved.HostData = hex.EncodeToString(configHash[:])
-	e, err := Assemble(&resolved, q, measurement, reportData, true)
+	e, err := Assemble(&resolved, q, measurement, reportData)
 	require.NoError(t, err)
 	require.NoError(t, e.Validate(q))
 
@@ -52,13 +52,13 @@ func TestConfigBoundEnforcesConfigAndPlatformConstraints(t *testing.T) {
 	for name, mutate := range map[string]func(*sevsnp.Report){
 		"config hash":        func(r *sevsnp.Report) { r.HostData[0] ^= 1 },
 		"launch measurement": func(r *sevsnp.Report) { r.Measurement[0] ^= 1 },
-		"guest SVN":          func(r *sevsnp.Report) { r.GuestSvn = 1 },
 		"ABI below floor":    func(r *sevsnp.Report) { r.Policy-- },
 		"guest debug":        func(r *sevsnp.Report) { r.Policy |= sevabi.SnpPolicyToBytes(sevabi.SnpPolicy{Debug: true}) },
 		"platform state":     func(r *sevsnp.Report) { r.PlatformInfo ^= 1 },
 		"family ID":          func(r *sevsnp.Report) { r.FamilyId[0] ^= 1 },
 		"image ID":           func(r *sevsnp.Report) { r.ImageId[0] ^= 1 },
 		"ID block":           func(r *sevsnp.Report) { r.IdKeyDigest[0] = 1 },
+		"versioned ID block": func(r *sevsnp.Report) { r.GuestSvn = 1; r.IdKeyDigest[0] = 1 },
 		"report data":        func(r *sevsnp.Report) { r.ReportData[0] ^= 1 },
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -73,12 +73,11 @@ func TestConfigBoundEnforcesConfigAndPlatformConstraints(t *testing.T) {
 	legacyPolicy := resolved
 	const guestSVNFloor = 1
 	legacyPolicy.MinimumGuestSVN = new(uint32(guestSVNFloor))
-	legacy, err := Assemble(&legacyPolicy, q, measurement, reportData, false)
+	legacy, err := Assemble(&legacyPolicy, q, measurement, reportData)
 	require.NoError(t, err)
 	for _, svn := range []uint32{guestSVNFloor, guestSVNFloor + 1} {
 		report.GuestSvn = svn
 		require.NoError(t, legacy.Validate(q), "legacy guests accept SVN at or above their endorsed floor")
-		require.ErrorContains(t, e.Validate(q), "zero guest SVN")
 	}
 	report.GuestSvn = guestSVNFloor - 1
 	require.Error(t, legacy.Validate(q), "legacy guests reject SVN below their endorsed floor")

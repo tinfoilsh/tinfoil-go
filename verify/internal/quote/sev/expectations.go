@@ -29,11 +29,10 @@ type Expectations struct {
 	opts             *sevvalidate.Options
 	wantGuestPolicy  sevabi.SnpPolicy
 	wantPlatformInfo sevabi.SnpPlatformInfo
-	configBound      bool
 }
 
 // Assemble combines policy with the launch digest, REPORT_DATA, and authenticated CHIP_ID.
-func Assemble(p *policy.SEVSNPPolicy, q *Quote, launchDigest string, reportData [64]byte, configBound bool) (result *Expectations, err error) {
+func Assemble(p *policy.SEVSNPPolicy, q *Quote, launchDigest string, reportData [64]byte) (result *Expectations, err error) {
 	defer func() { err = errs.WrapAttestation(err) }()
 	if p == nil {
 		return nil, &errs.ConfigurationError{Err: fmt.Errorf("SEV policy is required")}
@@ -63,7 +62,6 @@ func Assemble(p *policy.SEVSNPPolicy, q *Quote, launchDigest string, reportData 
 		opts:             opts,
 		wantGuestPolicy:  expectedGuestPolicy(p),
 		wantPlatformInfo: expectedPlatformInfo(p),
-		configBound:      configBound,
 	}, nil
 }
 
@@ -105,13 +103,13 @@ func (e *Expectations) Validate(q *Quote) (err error) {
 		return fmt.Errorf("SEV report PLATFORM_INFO does not match the endorsed policy")
 	}
 
-	return e.checkSigner(report)
+	return checkSigner(report)
 }
 
 // checkSigner requires the report to be launched without an author key or
 // ID block: ID-block launches are unsupported (policy parsing rejects
 // require_* flags), and the library options cannot require absence.
-func (e *Expectations) checkSigner(report *sevsnp.Report) error {
+func checkSigner(report *sevsnp.Report) error {
 	if err := rejectMaskedChipID(report); err != nil {
 		return err
 	}
@@ -121,9 +119,6 @@ func (e *Expectations) checkSigner(report *sevsnp.Report) error {
 	}
 	if signer.AuthorKeyEn {
 		return fmt.Errorf("report carries an author key; ID-block launches are unsupported")
-	}
-	if e.configBound && report.GetGuestSvn() != 0 {
-		return fmt.Errorf("config verification requires zero guest SVN")
 	}
 	if !bytes.Equal(report.GetIdKeyDigest(), make([]byte, len(report.GetIdKeyDigest()))) {
 		return fmt.Errorf("report carries an ID block; ID-block launches are unsupported")

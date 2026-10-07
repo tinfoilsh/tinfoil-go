@@ -183,7 +183,7 @@ func TestValidateBox2TurinAttestation(t *testing.T) {
 	a := loadFixture(t)
 	_, p, err := a.PolicyFor(identity, policy.PlatformSEVSNP)
 	require.NoError(t, err)
-	expectations, err := Assemble(p.SEVSNP, q, hex.EncodeToString(report.GetMeasurement()), reportData, false)
+	expectations, err := Assemble(p.SEVSNP, q, hex.EncodeToString(report.GetMeasurement()), reportData)
 	require.NoError(t, err)
 	require.NoError(t, expectations.Validate(q))
 	reportData[0] ^= 0xff
@@ -208,7 +208,7 @@ func TestCheckSignerRejectsMaskedChipID(t *testing.T) {
 			MaskChipKey: true,
 		}),
 	}
-	err := new(Expectations).checkSigner(report)
+	err := checkSigner(report)
 	assert.ErrorContains(t, err, "masks CHIP_ID")
 }
 
