@@ -245,14 +245,13 @@ func assemble(refs ReferenceValues, pins *measurement.Measurement, reportData [6
 	switch q.platform {
 	case policy.PlatformSEVSNP:
 		p := machinePolicy.SEVSNP
-		var runtimePolicy *uint64
 		if refs.Config != nil {
-			p, runtimePolicy, err = refs.Config.resolveSEV(p)
+			p, err = refs.Config.resolveSEV(p)
 			if err != nil {
 				return nil, err
 			}
 		}
-		assembled.sev, err = sev.Assemble(p, q.sev, registers[0], reportData, runtimePolicy)
+		assembled.sev, err = sev.Assemble(p, q.sev, registers[0], reportData)
 	case policy.PlatformTDX:
 		var configID *[tdxabi.MrConfigIDSize]byte
 		if refs.Config != nil {
@@ -332,23 +331,15 @@ func runtimeMeasurement(runtime *igvm.Measurements, platform string) (*measureme
 	}
 }
 
-func (c *ConfigReferenceValues) resolveSEV(p *policy.SEVSNPPolicy) (*policy.SEVSNPPolicy, *uint64, error) {
+func (c *ConfigReferenceValues) resolveSEV(p *policy.SEVSNPPolicy) (*policy.SEVSNPPolicy, error) {
 	if p == nil || p.ConfigBinding != policy.ConfigBindingSHA256 {
-		return nil, nil, fmt.Errorf("IGVM requires a config-binding platform policy")
+		return nil, fmt.Errorf("IGVM requires a config-binding platform policy")
 	}
 	if err := p.Validate(); err != nil {
-		return nil, nil, err
-	}
-	runtime := c.Runtime.SNPLaunch
-	guestPolicy, err := runtime.PolicyValue()
-	if err != nil {
-		return nil, nil, err
-	}
-	if runtime.GuestSVN == nil || *runtime.GuestSVN != 0 {
-		return nil, nil, fmt.Errorf("IGVM v1 requires zero guest SVN")
+		return nil, err
 	}
 	resolved := *p
 	resolved.ConfigBinding = ""
 	resolved.HostData = hex.EncodeToString(c.Hash[:])
-	return &resolved, &guestPolicy, nil
+	return &resolved, nil
 }

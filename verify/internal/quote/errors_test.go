@@ -19,7 +19,7 @@ func TestMissingInputsAreConfigurationErrors(t *testing.T) {
 	require.ErrorAs(t, err, &config)
 	_, err = assemble(ReferenceValues{Endorsements: &policy.Artifact{}}, nil, [64]byte{}, &Authenticated{})
 	require.ErrorAs(t, err, &config)
-	_, err = sev.Assemble(&policy.SEVSNPPolicy{}, &sev.Quote{}, "", [64]byte{}, nil)
+	_, err = sev.Assemble(&policy.SEVSNPPolicy{}, &sev.Quote{}, "", [64]byte{})
 	require.ErrorAs(t, err, &config)
 	_, _, err = tdx.Assemble(&policy.Artifact{}, &policy.TDXPolicy{}, &policy.Shape{}, &tdx.Quote{}, [5]string{}, [64]byte{}, nil)
 	require.ErrorAs(t, err, &config)

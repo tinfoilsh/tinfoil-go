@@ -39,26 +39,16 @@ func TestConfigResolutionPreservesItsSources(t *testing.T) {
 	p := loadEndorsementArtifact(t).Policies["amd-turin-prod"].SEVSNP
 	p.ConfigBinding, p.HostData = policy.ConfigBindingSHA256, ""
 	hash := sha256.Sum256([]byte("approved config"))
-	runtime := &igvm.SNPLaunch{Policy: "0x30133", GuestSVN: new(uint32)}
-	config := ConfigReferenceValues{Runtime: &igvm.Measurements{SNPLaunch: runtime}, Hash: hash}
-	resolved, guestPolicy, err := config.resolveSEV(p)
+	config := ConfigReferenceValues{Hash: hash}
+	resolved, err := config.resolveSEV(p)
 	require.NoError(t, err)
 	require.Empty(t, resolved.ConfigBinding)
 	require.Equal(t, hex.EncodeToString(hash[:]), resolved.HostData)
-	require.Equal(t, uint64(0x30133), *guestPolicy)
 	require.Equal(t, policy.ConfigBindingSHA256, p.ConfigBinding)
 	require.Empty(t, p.HostData)
 	config.Hash[0] ^= 1
-	runtime.Policy = "0x30132"
 	require.Equal(t, hex.EncodeToString(hash[:]), resolved.HostData)
-	require.Equal(t, uint64(0x30133), *guestPolicy)
-
-	for _, svn := range []*uint32{nil, new(uint32(1))} {
-		runtime.GuestSVN = svn
-		_, _, err := config.resolveSEV(p)
-		require.ErrorContains(t, err, "zero guest SVN")
-	}
 	p.ConfigBinding = ""
-	_, _, err = config.resolveSEV(p)
+	_, err = config.resolveSEV(p)
 	require.ErrorContains(t, err, "config-binding")
 }

@@ -26,14 +26,13 @@ const (
 // want* fields are compared by strict equality — the library options only
 // bound them.
 type Expectations struct {
-	opts               *sevvalidate.Options
-	wantGuestPolicy    sevabi.SnpPolicy
-	wantPlatformInfo   sevabi.SnpPlatformInfo
-	runtimeGuestPolicy *uint64
+	opts             *sevvalidate.Options
+	wantGuestPolicy  sevabi.SnpPolicy
+	wantPlatformInfo sevabi.SnpPlatformInfo
 }
 
 // Assemble combines policy with the launch digest, REPORT_DATA, and authenticated CHIP_ID.
-func Assemble(p *policy.SEVSNPPolicy, q *Quote, launchDigest string, reportData [64]byte, runtimePolicy *uint64) (result *Expectations, err error) {
+func Assemble(p *policy.SEVSNPPolicy, q *Quote, launchDigest string, reportData [64]byte) (result *Expectations, err error) {
 	defer func() { err = errs.WrapAttestation(err) }()
 	if p == nil {
 		return nil, &errs.ConfigurationError{Err: fmt.Errorf("SEV policy is required")}
@@ -59,14 +58,10 @@ func Assemble(p *policy.SEVSNPPolicy, q *Quote, launchDigest string, reportData 
 	opts.Measurement = digest
 	opts.ReportData = reportData[:]
 	opts.ChipID = chipID
-	if runtimePolicy != nil {
-		runtimePolicy = new(*runtimePolicy)
-	}
 	return &Expectations{
-		opts:               opts,
-		wantGuestPolicy:    expectedGuestPolicy(p),
-		wantPlatformInfo:   expectedPlatformInfo(p),
-		runtimeGuestPolicy: runtimePolicy,
+		opts:             opts,
+		wantGuestPolicy:  expectedGuestPolicy(p),
+		wantPlatformInfo: expectedPlatformInfo(p),
 	}, nil
 }
 
@@ -87,9 +82,6 @@ func (e *Expectations) Validate(q *Quote) (err error) {
 	}
 
 	report := q.attestation.GetReport()
-	if e.runtimeGuestPolicy != nil && (report.GetPolicy() != *e.runtimeGuestPolicy || report.GetGuestSvn() != 0) {
-		return fmt.Errorf("SEV launch policy or guest SVN does not match the runtime manifest")
-	}
 	gotPolicy, err := sevabi.ParseSnpPolicy(report.GetPolicy())
 	if err != nil {
 		return fmt.Errorf("parsing report guest policy: %w", err)
@@ -127,6 +119,9 @@ func (e *Expectations) checkSigner(report *sevsnp.Report) error {
 	}
 	if signer.AuthorKeyEn {
 		return fmt.Errorf("report carries an author key; ID-block launches are unsupported")
+	}
+	if report.GetGuestSvn() != 0 {
+		return fmt.Errorf("report carries a guest SVN; ID-block launches are unsupported")
 	}
 	if !bytes.Equal(report.GetIdKeyDigest(), make([]byte, len(report.GetIdKeyDigest()))) {
 		return fmt.Errorf("report carries an ID block; ID-block launches are unsupported")

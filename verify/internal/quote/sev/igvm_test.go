@@ -15,6 +15,7 @@ import (
 )
 
 func TestIGVMEnforcesConfigAndPlatformConstraints(t *testing.T) {
+	const guestPolicy = 0x30133
 	raw, err := sevtestdata.Box2TurinReport()
 	require.NoError(t, err)
 	report, err := sevabi.ReportToProto(raw)
@@ -31,17 +32,18 @@ func TestIGVMEnforcesConfigAndPlatformConstraints(t *testing.T) {
 	configHash := sha256.Sum256([]byte("approved YAML bytes"))
 	report.HostData = append([]byte(nil), configHash[:]...)
 	measurement := hex.EncodeToString(report.Measurement)
-	runtimePolicy := report.Policy
+	report.Policy = guestPolicy
+	p.SEVSNP.MinimumABIVersion = "1.51"
 	p.SEVSNP.ConfigBinding = policy.ConfigBindingSHA256
 	p.SEVSNP.HostData = ""
 	var reportData [64]byte
 	copy(reportData[:], report.ReportData)
-	_, err = Assemble(p.SEVSNP, q, measurement, reportData, nil)
+	_, err = Assemble(p.SEVSNP, q, measurement, reportData)
 	require.ErrorContains(t, err, "requires IGVM")
 	resolved := *p.SEVSNP
 	resolved.ConfigBinding = ""
 	resolved.HostData = hex.EncodeToString(configHash[:])
-	e, err := Assemble(&resolved, q, measurement, reportData, &runtimePolicy)
+	e, err := Assemble(&resolved, q, measurement, reportData)
 	require.NoError(t, err)
 	require.NoError(t, e.Validate(q))
 
@@ -51,7 +53,8 @@ func TestIGVMEnforcesConfigAndPlatformConstraints(t *testing.T) {
 		"config hash":        func(r *sevsnp.Report) { r.HostData[0] ^= 1 },
 		"launch measurement": func(r *sevsnp.Report) { r.Measurement[0] ^= 1 },
 		"guest SVN":          func(r *sevsnp.Report) { r.GuestSvn = 1 },
-		"guest policy":       func(r *sevsnp.Report) { r.Policy ^= 1 },
+		"ABI below floor":    func(r *sevsnp.Report) { r.Policy-- },
+		"guest debug":        func(r *sevsnp.Report) { r.Policy |= sevabi.SnpPolicyToBytes(sevabi.SnpPolicy{Debug: true}) },
 		"platform state":     func(r *sevsnp.Report) { r.PlatformInfo ^= 1 },
 		"family ID":          func(r *sevsnp.Report) { r.FamilyId[0] ^= 1 },
 		"image ID":           func(r *sevsnp.Report) { r.ImageId[0] ^= 1 },
@@ -65,9 +68,8 @@ func TestIGVMEnforcesConfigAndPlatformConstraints(t *testing.T) {
 			require.Error(t, e.Validate(&bad))
 		})
 	}
-	runtimePolicy ^= 1
-	require.NoError(t, e.Validate(q), "assembled expectations must not alias the runtime policy")
-	e, err = Assemble(&resolved, q, measurement, reportData, &runtimePolicy)
-	require.NoError(t, err)
-	require.Error(t, e.Validate(q))
+	report.Policy++
+	require.NoError(t, e.Validate(q), "the platform policy defines an ABI floor")
+	resolved.GuestPolicy.Debug = true
+	require.NoError(t, e.Validate(q), "assembled expectations must not alias the platform policy")
 }
