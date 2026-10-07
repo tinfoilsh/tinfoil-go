@@ -31,15 +31,13 @@ const (
 // enclave does no report parsing.
 type Request struct {
 	// Profile is FormatV3 for registry configs, or empty for legacy releases.
-	Profile string                       `json:"profile,omitempty"`
-	Runtime *collateral.RuntimeReference `json:"runtime,omitempty"`
-	// Repo is the code repository whose Sigstore bundle is returned.
-	// The config registry flow requires Runtime and Config instead of Repo and Tag.
+	Profile string `json:"profile,omitempty"`
+	// Repo is a GitHub repository or, for FormatV3, a registry org/project.
 	Repo string `json:"repo,omitempty"`
-	// Tag optionally pins a code release; latest when empty.
+	// Tag is a required config revision for FormatV3; otherwise an optional release tag.
 	Tag string `json:"tag,omitempty"`
-	// Config pins a versioned registry config and its exact-byte digest.
-	Config *collateral.ConfigReference `json:"config,omitempty"`
+	// Digest pins the exact config bytes for FormatV3 and is empty for legacy releases.
+	Digest string `json:"digest,omitempty"`
 	// Platform is attestation's platform label: "sev-snp" or "tdx".
 	Platform string `json:"platform"`
 	// QuoteBase64 is the raw hardware report (SEV-SNP, 1184 bytes) or quote
