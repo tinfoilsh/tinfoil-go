@@ -7,7 +7,6 @@
     "nonce_hex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
     "config": {
       "identity": "/tinfoil/igvm-test",
-      "audit_scope": "16a44d18-3387-44ce-9bfb-d77c4d27dbba",
       "revision": "v1.0.0",
       "digest": "8174e4be494b50f811884a0b8299d63f769ab2ca7ff5b9a306fda25c3575cf39",
       "public_key_pem": "-----BEGIN PUBLIC KEY-----\nMFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEL9AINmvSi899oAezvZtzA80zWIqx\nqNIUTg/sXR+utXOKGxVlMEN+bozfqXyooOdCaLglX46ELyUsLWGgsfEZGQ==\n-----END PUBLIC KEY-----\n"

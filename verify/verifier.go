@@ -51,7 +51,7 @@ type Verifier struct {
 	// trusted root. NewVerifier builds one from the embedded root; only the
 	// conformance build can replace it.
 	endorsements      *endorsement.Client
-	configKeys        []ConfigSigningKey
+	configKeys        []crypto.PublicKey
 	configVerifier    *endorsement.ConfigVerifier
 	freshnessKeys     []crypto.PublicKey
 	freshnessVerifier *endorsement.FreshnessVerifier
@@ -61,8 +61,8 @@ type Verifier struct {
 	overrides overrides
 }
 
-// NewVerifier builds a Verifier from opts. With no options it appraises against
-// the release measurements alone, with the seven-day freshness bound.
+// NewVerifier builds a Verifier from opts. Defaults use embedded production trust,
+// Tinfoil's public config and artifact signing keys, and a seven-day freshness bound.
 func NewVerifier(opts ...Option) (*Verifier, error) {
 	// Build default endorsement.Client with embedded roots
 	endorsementClient, err := endorsement.NewDefaultClient()
@@ -73,6 +73,18 @@ func NewVerifier(opts ...Option) (*Verifier, error) {
 		freshnessMaxAge: endorsement.MaxFreshnessAge,
 		now:             time.Now,
 		endorsements:    endorsementClient,
+	}
+	publicKeys, err := endorsement.PublicSigningKeys()
+	if err != nil {
+		return nil, configurationError(err)
+	}
+	v.configVerifier, err = endorsementClient.ConfigVerifier(publicKeys)
+	if err != nil {
+		return nil, configurationError(err)
+	}
+	v.freshnessVerifier, err = endorsementClient.FreshnessVerifier(publicKeys)
+	if err != nil {
+		return nil, configurationError(err)
 	}
 	for _, opt := range opts {
 		if opt == nil {

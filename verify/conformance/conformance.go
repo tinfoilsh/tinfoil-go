@@ -79,10 +79,9 @@ type Input struct {
 
 type ConfigInput struct {
 	Identity     string `json:"identity"`
-	AuditScope   string `json:"audit_scope"`
 	Revision     string `json:"revision,omitempty"`
 	Digest       string `json:"digest,omitempty"`
-	PublicKeyPEM string `json:"public_key_pem"`
+	PublicKeyPEM string `json:"public_key_pem,omitempty"`
 }
 
 // Output is the stdout JSON. Rejection is present iff Accepted is false;
@@ -170,12 +169,12 @@ func Run(stage string, in Input) (Output, int) {
 		verify.DangerousTestOnlyWithSigstoreRoot(rts.sigstore),
 		verify.DangerousTestOnlyWithVendorRoots(rts.amd, rts.intel),
 	}
-	if in.Config != nil {
+	if in.Config != nil && in.Config.PublicKeyPEM != "" {
 		key, err := parsePublicKey(in.Config.PublicKeyPEM)
 		if err != nil {
 			return malformed(stage)
 		}
-		opts = append(opts, verify.WithConfigSigningKeys([]verify.ConfigSigningKey{{PublicKey: key, AuditScope: in.Config.AuditScope}}))
+		opts = append(opts, verify.WithConfigSigningKeys([]crypto.PublicKey{key}))
 	}
 	if in.FreshnessSigningKeyPEM != "" {
 		key, err := parsePublicKey(in.FreshnessSigningKeyPEM)
@@ -260,7 +259,7 @@ func verifyFull(doc, nonce []byte, in Input, verifier *verify.Verifier) (Output,
 	var err error
 	if in.Config != nil {
 		verified, layer, err = verifier.VerifyIGVMWithLayer(doc, nonce, verify.ConfigPolicy{
-			Identity: in.Config.Identity, AuditScope: in.Config.AuditScope, Revision: in.Config.Revision, Digest: in.Config.Digest,
+			Identity: in.Config.Identity, Revision: in.Config.Revision, Digest: in.Config.Digest,
 		})
 	} else {
 		verified, layer, err = verifier.VerifyV3WithLayer(doc, nonce, in.Repo)

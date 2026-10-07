@@ -52,8 +52,13 @@ func TestIGVMRequiresIndependentFreshness(t *testing.T) {
 				return entries
 			})
 		},
-		"no artifact signing trust": func(in *Input) {
+		"public defaults reject private artifact signatures": func(in *Input) {
 			in.FreshnessSigningKeyPEM = ""
+		},
+		"public defaults reject private config signatures": func(in *Input) {
+			config := *in.Config
+			config.PublicKeyPEM = ""
+			in.Config = &config
 		},
 		"config authority cannot approve artifacts": func(in *Input) {
 			in.FreshnessSigningKeyPEM = in.Config.PublicKeyPEM

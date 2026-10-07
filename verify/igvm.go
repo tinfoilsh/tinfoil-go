@@ -14,30 +14,27 @@ import (
 	"github.com/tinfoilsh/tinfoil-go/verify/internal/quote"
 )
 
-// ConfigSigningKey authorizes a config signer for its audit scope.
-type ConfigSigningKey = endorsement.ConfigSigningKey
-
 // ConfigPolicy contains caller expectations; none may be learned from collateral.
 type ConfigPolicy struct {
-	Identity   string
-	AuditScope string
-	Revision   string
-	Digest     string
+	Identity string
+	Revision string
+	Digest   string
 }
 
 func (p ConfigPolicy) Validate() error {
 	return (endorsement.ConfigPolicy{
-		Identity: p.Identity, AuditScope: p.AuditScope, Revision: p.Revision, Digest: p.Digest,
+		Identity: p.Identity, Revision: p.Revision, Digest: p.Digest,
 	}).ValidatePins()
 }
 
-// WithConfigSigningKeys pins the keys and scopes allowed to approve configs.
-func WithConfigSigningKeys(keys []ConfigSigningKey) Option {
+// WithConfigSigningKeys replaces public config trust with the supplied keys.
+// These keys define the accepted audit scope and do not authorize artifact freshness.
+func WithConfigSigningKeys(keys []crypto.PublicKey) Option {
 	return func(v *Verifier) error {
 		if len(keys) == 0 {
 			return fmt.Errorf("config signing keys must not be empty")
 		}
-		v.configKeys = append([]ConfigSigningKey(nil), keys...)
+		v.configKeys = append([]crypto.PublicKey(nil), keys...)
 		return nil
 	}
 }
@@ -63,7 +60,7 @@ func (v *Verifier) VerifyIGVM(docBytes, nonce []byte, policy ConfigPolicy) (*Ver
 
 func (v *Verifier) verifyIGVM(docBytes, nonce []byte, policy ConfigPolicy) (*Verification, layer, error) {
 	if v == nil || v.configVerifier == nil || v.freshnessVerifier == nil || v.endorsements == nil || v.now == nil {
-		return nil, layerNone, configurationError(fmt.Errorf("config verification requires independently pinned signing keys for configs and freshness"))
+		return nil, layerNone, configurationError(fmt.Errorf("uninitialized config verifier"))
 	}
 	if v.ignoreFreshness {
 		return nil, layerNone, configurationError(fmt.Errorf("IGVM verification requires config, platform, and runtime freshness"))
@@ -82,7 +79,7 @@ func (v *Verifier) configReferences(doc *document.Document, policy ConfigPolicy,
 		return nil, err
 	}
 	approved, err := v.configVerifier.Verify(config.Config, config.Bundle, endorsement.ConfigPolicy{
-		Identity: policy.Identity, AuditScope: policy.AuditScope, Revision: policy.Revision, Digest: policy.Digest,
+		Identity: policy.Identity, Revision: policy.Revision, Digest: policy.Digest,
 		Now: now, MaxAge: v.freshnessMaxAge,
 	})
 	if err != nil {

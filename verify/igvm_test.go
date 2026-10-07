@@ -15,23 +15,15 @@ import (
 )
 
 func TestIGVMRequiresIndependentTrustAndFreshness(t *testing.T) {
-	policy := ConfigPolicy{Identity: "/org/project", AuditScope: "16a44d18-3387-44ce-9bfb-d77c4d27dbba"}
+	policy := ConfigPolicy{Identity: "/org/project"}
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	require.NoError(t, err)
-	keys := []ConfigSigningKey{{PublicKey: key.Public(), AuditScope: policy.AuditScope}}
-	v, err := NewVerifier()
-	require.NoError(t, err)
-	_, err = v.VerifyIGVM(nil, nil, policy)
-	require.ErrorContains(t, err, "pinned signing keys")
-	v, err = NewVerifier(WithConfigSigningKeys(keys))
-	require.NoError(t, err)
-	_, err = v.VerifyIGVM(nil, nil, policy)
-	require.ErrorContains(t, err, "signing keys for configs and freshness")
+	keys := []crypto.PublicKey{key.Public()}
 	_, err = NewVerifier(WithFreshnessSigningKeys(nil))
 	require.ErrorContains(t, err, "must not be empty")
 	_, err = NewVerifier(WithConfigSigningKeys(nil))
 	require.ErrorContains(t, err, "must not be empty")
-	v, err = NewVerifier(WithConfigSigningKeys(keys), WithFreshnessSigningKeys([]crypto.PublicKey{key.Public()}), WithIgnoreFreshness())
+	v, err := NewVerifier(WithConfigSigningKeys(keys), WithFreshnessSigningKeys([]crypto.PublicKey{key.Public()}), WithIgnoreFreshness())
 	require.NoError(t, err)
 	_, err = v.VerifyIGVM(nil, nil, policy)
 	require.ErrorContains(t, err, "requires config, platform, and runtime freshness")
@@ -44,10 +36,9 @@ func TestIGVMRequiresIndependentTrustAndFreshness(t *testing.T) {
 	_, err = v.VerifyIGVM(raw, nonce, policy)
 	require.ErrorContains(t, err, collateral.ConfigID)
 	for name, bad := range map[string]ConfigPolicy{
-		"identity": {Identity: "/org/project/extra", AuditScope: policy.AuditScope},
-		"scope":    {Identity: policy.Identity, AuditScope: "untrusted"},
-		"revision": {Identity: policy.Identity, AuditScope: policy.AuditScope, Revision: "../v1"},
-		"digest":   {Identity: policy.Identity, AuditScope: policy.AuditScope, Digest: strings.Repeat("AB", 32)},
+		"identity": {Identity: "/org/project/extra"},
+		"revision": {Identity: policy.Identity, Revision: "../v1"},
+		"digest":   {Identity: policy.Identity, Digest: strings.Repeat("AB", 32)},
 	} {
 		t.Run(name, func(t *testing.T) {
 			_, err := v.VerifyIGVM(raw, nonce, bad)

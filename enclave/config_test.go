@@ -40,12 +40,18 @@ func TestConfigHandlesRetainExplicitProfile(t *testing.T) {
 	t.Cleanup(func() { http.DefaultClient = original })
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	require.NoError(t, err)
-	policy := verify.ConfigPolicy{Identity: "/org/project", AuditScope: "16a44d18-3387-44ce-9bfb-d77c4d27dbba"}
-	keys := []verify.ConfigSigningKey{{PublicKey: key.Public(), AuditScope: policy.AuditScope}}
+	policy := verify.ConfigPolicy{Identity: "/org/project"}
+	keys := []crypto.PublicKey{key.Public()}
 	host := strings.TrimPrefix(server.URL, "https://")
 	const maxAge = time.Hour
-	client, err := NewConfigHandle(host, policy, keys, []crypto.PublicKey{key.Public()}, &Options{FreshnessMaxAge: maxAge})
+	client, err := NewConfigHandle(host, policy, keys, &Options{FreshnessMaxAge: maxAge})
 	require.NoError(t, err)
+	public, err := NewConfigHandle(host, policy, nil, nil)
+	require.NoError(t, err)
+	_, err = public.fetchVerification()
+	require.ErrorContains(t, err, collateral.ConfigID)
+	_, err = NewConfigHandle(host, policy, []crypto.PublicKey{}, nil)
+	require.ErrorContains(t, err, "must not be empty")
 	policy.Identity = "/other/project"
 	for _, derived := range []*Handle{client, client.ForEnclave(host), client.ViaRelay(host)} {
 		require.Equal(t, "/org/project", derived.configPolicy.Identity)
