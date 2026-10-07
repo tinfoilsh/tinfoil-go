@@ -15,15 +15,17 @@ import (
 	"regexp"
 )
 
-// ArtifactFormat is the required format URI of the artifact.
-const ArtifactFormat = "https://tinfoil.sh/predicate/platform-endorsements/v1"
+const (
+	ArtifactFormat = "https://tinfoil.sh/predicate/platform-endorsements/v1"
+	// ArtifactFormatV2 contains machine policy without workload measurements.
+	ArtifactFormatV2 = "https://tinfoil.sh/predicate/platform-endorsements/v2"
+)
 
 const (
 	// PlatformSEVSNP labels AMD SEV-SNP policies.
 	PlatformSEVSNP = "sev-snp"
 	// PlatformTDX labels Intel TDX policies.
-	PlatformTDX         = "tdx"
-	ConfigBindingSHA256 = "sha256"
+	PlatformTDX = "tdx"
 
 	sevIdentifierHexLen = 128
 	tdxIdentifierHexLen = 32
@@ -70,7 +72,7 @@ func Parse(data []byte) (*Artifact, error) {
 	if err := json.Unmarshal(data, &a, json.RejectUnknownMembers(true)); err != nil {
 		return nil, fmt.Errorf("parsing policy artifact: %w", err)
 	}
-	if a.Format != ArtifactFormat {
+	if a.Format != ArtifactFormat && a.Format != ArtifactFormatV2 {
 		return nil, fmt.Errorf("unsupported artifact format %q", a.Format)
 	}
 	if err := a.validate(); err != nil {
@@ -80,11 +82,17 @@ func Parse(data []byte) (*Artifact, error) {
 }
 
 func (a *Artifact) validate() error {
+	if a.Format == ArtifactFormatV2 && len(a.Measurements) != 0 {
+		return fmt.Errorf("platform endorsement v2 excludes workload measurements")
+	}
 	for name, p := range a.Policies {
 		switch p.Platform {
 		case PlatformSEVSNP:
 			if p.SEVSNP == nil || p.TDX != nil {
 				return fmt.Errorf("policy %q: platform sev-snp requires exactly the sev_snp block", name)
+			}
+			if (a.Format == ArtifactFormat) != (p.SEVSNP.HostData != "") {
+				return fmt.Errorf("policy %q: host_data is required in v1 and excluded in v2", name)
 			}
 			if err := p.SEVSNP.Validate(); err != nil {
 				return fmt.Errorf("policy %q: %w", name, err)
@@ -92,6 +100,9 @@ func (a *Artifact) validate() error {
 		case PlatformTDX:
 			if p.TDX == nil || p.SEVSNP != nil {
 				return fmt.Errorf("policy %q: platform tdx requires exactly the tdx block", name)
+			}
+			if (a.Format == ArtifactFormat) != (len(p.TDX.PlatformMeasurements) != 0) {
+				return fmt.Errorf("policy %q: platform_measurements are required in v1 and excluded in v2", name)
 			}
 			if err := p.TDX.Validate(); err != nil {
 				return fmt.Errorf("policy %q: %w", name, err)

@@ -37,9 +37,6 @@ func Assemble(p *policy.SEVSNPPolicy, q *Quote, launchDigest string, reportData 
 	if p == nil {
 		return nil, &errs.ConfigurationError{Err: fmt.Errorf("SEV policy is required")}
 	}
-	if p.ConfigBinding != "" {
-		return nil, fmt.Errorf("config-binding policy requires config verification")
-	}
 	if q == nil || q.attestation == nil {
 		return nil, &errs.ConfigurationError{Err: fmt.Errorf("authenticated SEV quote is required")}
 	}

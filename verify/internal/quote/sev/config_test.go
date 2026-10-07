@@ -34,14 +34,12 @@ func TestConfigBoundEnforcesConfigAndPlatformConstraints(t *testing.T) {
 	measurement := hex.EncodeToString(report.Measurement)
 	report.Policy = guestPolicy
 	p.SEVSNP.MinimumABIVersion = "1.51"
-	p.SEVSNP.ConfigBinding = policy.ConfigBindingSHA256
 	p.SEVSNP.HostData = ""
 	var reportData [64]byte
 	copy(reportData[:], report.ReportData)
 	_, err = Assemble(p.SEVSNP, q, measurement, reportData)
-	require.ErrorContains(t, err, "requires config verification")
+	require.ErrorContains(t, err, "host_data")
 	resolved := *p.SEVSNP
-	resolved.ConfigBinding = ""
 	resolved.HostData = hex.EncodeToString(configHash[:])
 	e, err := Assemble(&resolved, q, measurement, reportData)
 	require.NoError(t, err)

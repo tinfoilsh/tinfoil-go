@@ -1,13 +1,12 @@
 package quote
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
 	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 	"github.com/tinfoilsh/tinfoil-go/verify/internal/policy"
+	"github.com/tinfoilsh/tinfoil-go/verify/internal/quote/sev"
 	"github.com/tinfoilsh/tinfoil-go/verify/internal/runtime"
 	"github.com/tinfoilsh/tinfoil-go/verify/measurement"
 )
@@ -35,20 +34,20 @@ func TestConfigBoundAssemblyRequiresMatchingAuthenticatedEvidence(t *testing.T) 
 	require.ErrorContains(t, err, "not this document's CPU evidence")
 }
 
-func TestConfigResolutionPreservesItsSources(t *testing.T) {
-	p := loadEndorsementArtifact(t).Policies["amd-turin-prod"].SEVSNP
-	p.ConfigBinding, p.HostData = policy.ConfigBindingSHA256, ""
-	hash := sha256.Sum256([]byte("approved config"))
-	config := ConfigReferenceValues{Hash: hash}
-	resolved, err := config.resolveSEV(p)
-	require.NoError(t, err)
-	require.Empty(t, resolved.ConfigBinding)
-	require.Equal(t, hex.EncodeToString(hash[:]), resolved.HostData)
-	require.Equal(t, policy.ConfigBindingSHA256, p.ConfigBinding)
-	require.Empty(t, p.HostData)
-	config.Hash[0] ^= 1
-	require.Equal(t, hex.EncodeToString(hash[:]), resolved.HostData)
-	p.ConfigBinding = ""
-	_, err = config.resolveSEV(p)
-	require.ErrorContains(t, err, "config-binding")
+func TestConfigAssemblyRejectsPlatformHostData(t *testing.T) {
+	artifact := loadEndorsementArtifact(t)
+	for identity, name := range artifact.Machines {
+		if artifact.Policies[name].SEVSNP == nil {
+			continue
+		}
+		q := &Authenticated{platform: policy.PlatformSEVSNP, identity: identity, sev: &sev.Quote{}}
+		refs := ReferenceValues{Endorsements: artifact, Config: &ConfigReferenceValues{Runtime: &runtime.Measurements{
+			SNPLaunch: &runtime.SNPLaunch{Measurement: strings.Repeat("ab", runtime.MeasurementSize)},
+			TDXLaunch: &runtime.TDXLaunch{},
+		}}}
+		_, err := assemble(refs, nil, [64]byte{}, q)
+		require.ErrorContains(t, err, "cannot be combined with platform host_data")
+		return
+	}
+	t.Fatal("fixture contains no SEV-SNP machine")
 }

@@ -29,11 +29,8 @@ func Assemble(a *policy.Artifact, p *policy.TDXPolicy, required *policy.Shape, q
 	if a == nil || p == nil {
 		return nil, "", &errs.ConfigurationError{Err: fmt.Errorf("endorsements and TDX policy are required")}
 	}
-	if configID == nil && p.ConfigBinding != "" {
-		return nil, "", fmt.Errorf("config-binding policy requires config verification")
-	}
-	if configID != nil && p.ConfigBinding != policy.ConfigBindingSHA256 {
-		return nil, "", fmt.Errorf("config verification requires a config-binding platform policy")
+	if configID != nil && len(p.PlatformMeasurements) != 0 {
+		return nil, "", fmt.Errorf("config runtime cannot be combined with platform_measurements")
 	}
 	if configID == nil && required == nil {
 		return nil, "", &errs.ConfigurationError{Err: fmt.Errorf("VM shape is required")}

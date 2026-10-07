@@ -35,7 +35,7 @@ func TestConfigBoundEnforcesConfigPaddingAndEveryRuntimeRegister(t *testing.T) {
 	p := &policy.TDXPolicy{
 		QEVendorID: hex.EncodeToString(q.quote.Header.QeVendorId), MinimumTEETCBSVN: hex.EncodeToString(body.TeeTcbSvn),
 		MRSeam: hex.EncodeToString(body.MrSeam), TDAttributes: hex.EncodeToString(body.TdAttributes), XFAM: hex.EncodeToString(body.Xfam),
-		MinimumTCBEvaluationDataNumber: &minimum, ConfigBinding: policy.ConfigBindingSHA256,
+		MinimumTCBEvaluationDataNumber: &minimum,
 	}
 	var reportData [64]byte
 	copy(reportData[:], body.ReportData)
@@ -44,10 +44,9 @@ func TestConfigBoundEnforcesConfigPaddingAndEveryRuntimeRegister(t *testing.T) {
 	e, _, err := Assemble(&policy.Artifact{}, p, nil, q, runtime.Registers(), reportData, &configID)
 	require.NoError(t, err)
 	require.NoError(t, e.Validate(q))
-	require.Equal(t, policy.ConfigBindingSHA256, p.ConfigBinding)
 	require.Empty(t, p.PlatformMeasurements)
 	_, _, err = Assemble(&policy.Artifact{}, p, &policy.Shape{}, q, runtime.Registers(), reportData, nil)
-	require.ErrorContains(t, err, "requires config verification")
+	require.ErrorContains(t, err, "no endorsed platform measurement")
 	for name, mutate := range map[string]func(*tdxpb.TDQuoteBody){
 		"config hash":    func(b *tdxpb.TDQuoteBody) { b.MrConfigId[0] ^= 1 },
 		"config padding": func(b *tdxpb.TDQuoteBody) { b.MrConfigId[sha256.Size] = 1 },
@@ -73,7 +72,7 @@ func TestConfigBoundEnforcesConfigPaddingAndEveryRuntimeRegister(t *testing.T) {
 	configID[0] ^= 1
 	runtime.MRTD = zero
 	require.NoError(t, e.Validate(q), "assembled expectations must not alias the config binding")
-	p.ConfigBinding = ""
+	p.PlatformMeasurements = []string{"legacy"}
 	_, _, err = Assemble(&policy.Artifact{}, p, nil, q, runtime.Registers(), reportData, &configID)
-	require.ErrorContains(t, err, "config-binding")
+	require.ErrorContains(t, err, "cannot be combined with platform_measurements")
 }

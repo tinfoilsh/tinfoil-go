@@ -245,11 +245,13 @@ func assemble(refs ReferenceValues, pins *measurement.Measurement, reportData [6
 	switch q.platform {
 	case policy.PlatformSEVSNP:
 		p := machinePolicy.SEVSNP
-		if refs.Config != nil {
-			p, err = refs.Config.resolveSEV(p)
-			if err != nil {
-				return nil, err
+		if refs.Config != nil && p != nil {
+			if p.HostData != "" {
+				return nil, fmt.Errorf("config runtime cannot be combined with platform host_data")
 			}
+			resolved := *p
+			resolved.HostData = hex.EncodeToString(refs.Config.Hash[:])
+			p = &resolved
 		}
 		assembled.sev, err = sev.Assemble(p, q.sev, registers[0], reportData)
 	case policy.PlatformTDX:
@@ -329,17 +331,4 @@ func runtimeMeasurement(runtime *runtime.Measurements, platform string) (*measur
 	default:
 		return nil, fmt.Errorf("unsupported platform %q", platform)
 	}
-}
-
-func (c *ConfigReferenceValues) resolveSEV(p *policy.SEVSNPPolicy) (*policy.SEVSNPPolicy, error) {
-	if p == nil || p.ConfigBinding != policy.ConfigBindingSHA256 {
-		return nil, fmt.Errorf("config verification requires a config-binding platform policy")
-	}
-	if err := p.Validate(); err != nil {
-		return nil, err
-	}
-	resolved := *p
-	resolved.ConfigBinding = ""
-	resolved.HostData = hex.EncodeToString(c.Hash[:])
-	return &resolved, nil
 }

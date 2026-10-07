@@ -7,7 +7,8 @@ import (
 
 // TDXPolicy is the standard Intel TDX policy block. PlatformMeasurements
 // names the measurements-map entries the machine is endorsed to run; the
-// quote's own MRTD/RTMR0 select exactly one of them at policy assembly.
+// quote's own MRTD/RTMR0 select exactly one of them at legacy policy assembly.
+// Runtime endorsements supply these measurements for config verification.
 // Numeric members are pointers so parsing can tell an absent member from a
 // meaningful zero — Validate rejects any absent member.
 type TDXPolicy struct {
@@ -18,7 +19,6 @@ type TDXPolicy struct {
 	XFAM                           string   `json:"xfam"`
 	MinimumTCBEvaluationDataNumber *int     `json:"minimum_tcb_evaluation_data_number"`
 	PlatformMeasurements           []string `json:"platform_measurements,omitempty"`
-	ConfigBinding                  string   `json:"config_binding,omitempty"`
 }
 
 // Validate rejects a block with any absent or malformed required member.
@@ -40,10 +40,6 @@ func (p *TDXPolicy) Validate() error {
 		// A negative minimum would pass for any collateral, silently
 		// disabling the freshness floor.
 		return fmt.Errorf("minimum_tcb_evaluation_data_number must not be negative")
-	case len(p.PlatformMeasurements) == 0 && p.ConfigBinding == "":
-		return fmt.Errorf("platform_measurements must not be empty")
-	case p.ConfigBinding != "" && (p.ConfigBinding != ConfigBindingSHA256 || len(p.PlatformMeasurements) != 0):
-		return fmt.Errorf("config_binding must be sha256 and excludes platform_measurements")
 	}
 	for name, field := range map[string]struct {
 		value   string
