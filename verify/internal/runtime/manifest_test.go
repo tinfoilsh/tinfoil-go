@@ -1,4 +1,4 @@
-package igvm
+package runtime
 
 import (
 	"crypto/sha256"
@@ -14,7 +14,7 @@ import (
 func validManifest() Manifest {
 	measurement := strings.Repeat("cd", MeasurementSize)
 	zeroRegister := strings.Repeat("0", MeasurementSize*2)
-	return Manifest{Version: "v0.15.0", IGVM: &Measurements{
+	return Manifest{Version: "v0.15.0", Measurements: &Measurements{
 		FormatVersion: FormatVersion,
 		SNPLaunch:     &SNPLaunch{Measurement: measurement},
 		TDXLaunch:     &TDXLaunch{MRTD: measurement, RTMR0: zeroRegister, RTMR1: zeroRegister, RTMR2: zeroRegister, RTMR3: zeroRegister},
@@ -37,15 +37,17 @@ func TestManifestRequiresCompleteSupportedMeasurements(t *testing.T) {
 	_, err = ParseManifest(append(data, '\n'), ref)
 	require.ErrorContains(t, err, "digest pin")
 	for name, mutate := range map[string]func(*Manifest){
-		"old manifest":    func(m *Manifest) { m.IGVM = nil },
-		"unknown version": func(m *Manifest) { m.IGVM.FormatVersion++ },
+		"old manifest":    func(m *Manifest) { m.Measurements = nil },
+		"unknown version": func(m *Manifest) { m.Measurements.FormatVersion++ },
 		"wrong release":   func(m *Manifest) { m.Version = "v0.15.1" },
-		"missing SNP":     func(m *Manifest) { m.IGVM.SNPLaunch = nil },
-		"missing TDX":     func(m *Manifest) { m.IGVM.TDXLaunch = nil },
-		"nonzero RTMR":    func(m *Manifest) { m.IGVM.TDXLaunch.RTMR2 = strings.Repeat("ab", MeasurementSize) },
-		"missing RTMR":    func(m *Manifest) { m.IGVM.TDXLaunch.RTMR3 = "" },
-		"bad MRTD":        func(m *Manifest) { m.IGVM.TDXLaunch.MRTD = "bad" },
-		"uppercase SNP":   func(m *Manifest) { m.IGVM.SNPLaunch.Measurement = strings.ToUpper(m.IGVM.SNPLaunch.Measurement) },
+		"missing SNP":     func(m *Manifest) { m.Measurements.SNPLaunch = nil },
+		"missing TDX":     func(m *Manifest) { m.Measurements.TDXLaunch = nil },
+		"nonzero RTMR":    func(m *Manifest) { m.Measurements.TDXLaunch.RTMR2 = strings.Repeat("ab", MeasurementSize) },
+		"missing RTMR":    func(m *Manifest) { m.Measurements.TDXLaunch.RTMR3 = "" },
+		"bad MRTD":        func(m *Manifest) { m.Measurements.TDXLaunch.MRTD = "bad" },
+		"uppercase SNP": func(m *Manifest) {
+			m.Measurements.SNPLaunch.Measurement = strings.ToUpper(m.Measurements.SNPLaunch.Measurement)
+		},
 	} {
 		t.Run(name, func(t *testing.T) {
 			m := validManifest()

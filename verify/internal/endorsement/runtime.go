@@ -7,21 +7,21 @@ import (
 
 	"github.com/sigstore/sigstore-go/pkg/verify"
 	"github.com/tinfoilsh/tinfoil-go/document/collateral"
-	"github.com/tinfoilsh/tinfoil-go/verify/internal/igvm"
+	"github.com/tinfoilsh/tinfoil-go/verify/internal/runtime"
 )
 
 const slsaProvenanceV1 = "https://slsa.dev/provenance/v1"
 
 type Runtime struct {
 	AuthenticatedArtifact
-	Manifest *igvm.Manifest
+	Manifest *runtime.Manifest
 }
 
-func (c *Client) AuthenticateRuntime(material collateral.IGVMRuntime, expected collateral.RuntimeReference) (*Runtime, error) {
+func (c *Client) AuthenticateRuntime(material collateral.Runtime, expected collateral.RuntimeReference) (*Runtime, error) {
 	if material.RuntimeReference != expected {
 		return nil, fmt.Errorf("runtime collateral does not match the endorsed config's runtime pin")
 	}
-	manifest, err := igvm.ParseManifest(material.Manifest, expected)
+	manifest, err := runtime.ParseManifest(material.Manifest, expected)
 	if err != nil {
 		return nil, err
 	}

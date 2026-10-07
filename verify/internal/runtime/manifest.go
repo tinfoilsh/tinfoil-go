@@ -1,4 +1,4 @@
-package igvm
+package runtime
 
 import (
 	"crypto/sha256"
@@ -19,8 +19,8 @@ const (
 )
 
 type Manifest struct {
-	Version string        `json:"version"`
-	IGVM    *Measurements `json:"igvm"`
+	Version      string        `json:"version"`
+	Measurements *Measurements `json:"igvm"`
 }
 
 type Measurements struct {
@@ -57,10 +57,10 @@ func ParseManifest(data []byte, expected collateral.RuntimeReference) (*Manifest
 	if err := json.Unmarshal(data, &m); err != nil {
 		return nil, fmt.Errorf("parsing runtime manifest: %w", err)
 	}
-	if m.Version != expected.Tag || m.IGVM == nil || m.IGVM.FormatVersion != FormatVersion {
-		return nil, fmt.Errorf("runtime manifest version or IGVM format is unsupported")
+	if m.Version != expected.Tag || m.Measurements == nil || m.Measurements.FormatVersion != FormatVersion {
+		return nil, fmt.Errorf("runtime manifest version or runtime format is unsupported")
 	}
-	g := m.IGVM
+	g := m.Measurements
 	if g.SNPLaunch == nil || g.TDXLaunch == nil {
 		return nil, fmt.Errorf("runtime manifest requires complete launch measurements")
 	}
@@ -73,7 +73,7 @@ func ParseManifest(data []byte, expected collateral.RuntimeReference) (*Manifest
 	registers := g.TDXLaunch.Registers()
 	for _, value := range registers[1:] {
 		if value != strings.Repeat("0", MeasurementSize*2) {
-			return nil, fmt.Errorf("IGVM v1 requires zero TDX RTMRs")
+			return nil, fmt.Errorf("runtime format v1 requires zero TDX RTMRs")
 		}
 	}
 	return &m, nil

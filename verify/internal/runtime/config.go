@@ -1,4 +1,4 @@
-package igvm
+package runtime
 
 import (
 	"bytes"
@@ -32,7 +32,7 @@ func ConfigRuntime(data []byte) (collateral.RuntimeReference, error) {
 		return collateral.RuntimeReference{}, fmt.Errorf("config must contain exactly one YAML document")
 	}
 	if fields.Source != nil && (fields.Source.Repo != collateral.RuntimeRepo || fields.Source.Artifacts != runtimeArtifactsURL) {
-		return collateral.RuntimeReference{}, fmt.Errorf("IGVM v1 requires the Tinfoil runtime source")
+		return collateral.RuntimeReference{}, fmt.Errorf("runtime format v1 requires the Tinfoil runtime source")
 	}
 	version, digest, found := strings.Cut(fields.Version, "@sha256:")
 	if !found {
