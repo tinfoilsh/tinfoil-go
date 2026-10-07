@@ -37,7 +37,7 @@ func (s *Handle) fetchVerification() (*verify.Verification, error) {
 
 	var verified *verify.Verification
 	if s.configPolicy != nil {
-		verified, err = s.verifier.VerifyIGVM(docBytes, nonce, *s.configPolicy)
+		verified, err = s.verifier.VerifyConfig(docBytes, nonce, *s.configPolicy)
 	} else {
 		verified, err = s.verifier.VerifyV3(docBytes, nonce, s.repo)
 	}

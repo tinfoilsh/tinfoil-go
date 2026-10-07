@@ -5,7 +5,7 @@
 // language-neutral wire contract below. Every SDK implements the same
 // Input/Output shapes and exit codes so the suite drives them identically.
 //
-// The full-verify stage calls Verifier.VerifyV3WithLayer or VerifyIGVMWithLayer
+// The full-verify stage calls Verifier.VerifyV3WithLayer or VerifyConfigWithLayer
 // according to the fixture's profile, so shared fixtures appraise exactly the
 // code production runs; the reported layer names the rejection. The block stages
 // isolate a single layer through the document, endorsement and quote packages.
@@ -257,7 +257,7 @@ func verifyFull(doc, nonce []byte, in Input, verifier *verify.Verifier) (Output,
 	var layer string
 	var err error
 	if in.Config != nil {
-		verified, layer, err = verifier.VerifyIGVMWithLayer(doc, nonce, verify.ConfigPolicy{
+		verified, layer, err = verifier.VerifyConfigWithLayer(doc, nonce, verify.ConfigPolicy{
 			Identity: in.Config.Identity, Revision: in.Config.Revision, Digest: in.Config.Digest,
 		})
 	} else {

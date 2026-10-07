@@ -115,7 +115,7 @@ func NewHandle(enclave, repo string, opts *Options) (*Handle, error) {
 	return &Handle{enclave: enclave, repo: repo, verifier: verifier}, nil
 }
 
-// NewConfigHandle requires the IGVM config-binding profile. Nil keys select
+// NewConfigHandle requires config-bound verification. Nil keys select
 // Tinfoil's public config signer; explicit keys replace that trust for private configs.
 func NewConfigHandle(enclave string, policy verify.ConfigPolicy, keys []crypto.PublicKey, opts *Options) (*Handle, error) {
 	if err := policy.Validate(); err != nil {

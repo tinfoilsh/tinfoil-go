@@ -10,8 +10,8 @@ import (
 	"github.com/tinfoilsh/tinfoil-go/document/collateral"
 	"github.com/tinfoilsh/tinfoil-go/endorsement/freshness"
 	"github.com/tinfoilsh/tinfoil-go/verify/internal/endorsement"
-	"github.com/tinfoilsh/tinfoil-go/verify/internal/igvm"
 	"github.com/tinfoilsh/tinfoil-go/verify/internal/quote"
+	"github.com/tinfoilsh/tinfoil-go/verify/internal/runtime"
 )
 
 // ConfigPolicy contains caller expectations; none may be learned from collateral.
@@ -51,19 +51,19 @@ func WithFreshnessSigningKeys(keys []crypto.PublicKey) Option {
 	}
 }
 
-// VerifyIGVM verifies the config-binding profile without falling back to legacy
+// VerifyConfig verifies the config-binding profile without falling back to legacy
 // repository verification. Config, platform, and runtime approvals must be fresh.
-func (v *Verifier) VerifyIGVM(docBytes, nonce []byte, policy ConfigPolicy) (*Verification, error) {
-	verified, _, err := v.verifyIGVM(docBytes, nonce, policy)
+func (v *Verifier) VerifyConfig(docBytes, nonce []byte, policy ConfigPolicy) (*Verification, error) {
+	verified, _, err := v.verifyConfig(docBytes, nonce, policy)
 	return verified, err
 }
 
-func (v *Verifier) verifyIGVM(docBytes, nonce []byte, policy ConfigPolicy) (*Verification, layer, error) {
+func (v *Verifier) verifyConfig(docBytes, nonce []byte, policy ConfigPolicy) (*Verification, layer, error) {
 	if v == nil || v.configVerifier == nil || v.freshnessVerifier == nil || v.endorsements == nil || v.now == nil {
 		return nil, layerNone, configurationError(fmt.Errorf("uninitialized config verifier"))
 	}
 	if v.ignoreFreshness {
-		return nil, layerNone, configurationError(fmt.Errorf("IGVM verification requires config, platform, and runtime freshness"))
+		return nil, layerNone, configurationError(fmt.Errorf("config verification requires config, platform, and runtime freshness"))
 	}
 	if err := policy.Validate(); err != nil {
 		return nil, layerProvenance, configurationError(err)
@@ -88,19 +88,19 @@ func (v *Verifier) configReferences(doc *document.Document, policy ConfigPolicy,
 	if config.Reference != approved.Reference {
 		return nil, fmt.Errorf("config endorsement reference does not match the verified approval")
 	}
-	expectedRuntime, err := igvm.ConfigRuntime(config.Config)
+	expectedRuntime, err := runtime.ConfigRuntime(config.Config)
 	if err != nil {
 		return nil, err
 	}
-	runtimeCollateral, err := doc.IGVMRuntime()
+	runtimeCollateral, err := doc.Runtime()
 	if err != nil {
 		return nil, err
 	}
-	runtime, err := v.endorsements.AuthenticateRuntime(runtimeCollateral, expectedRuntime)
+	authenticatedRuntime, err := v.endorsements.AuthenticateRuntime(runtimeCollateral, expectedRuntime)
 	if err != nil {
 		return nil, err
 	}
-	platformCollateral, err := doc.IGVMPlatform()
+	platformCollateral, err := doc.ConfigPlatform()
 	if err != nil {
 		return nil, err
 	}
@@ -108,23 +108,23 @@ func (v *Verifier) configReferences(doc *document.Document, policy ConfigPolicy,
 	if err != nil {
 		return nil, err
 	}
-	if platform.SubjectName != igvm.PlatformSubject {
-		return nil, fmt.Errorf("IGVM requires its dedicated platform endorsement artifact")
+	if platform.SubjectName != runtime.PlatformSubject {
+		return nil, fmt.Errorf("config verification requires its dedicated platform endorsement artifact")
 	}
 	platformApprovedAt, err := v.authenticateArtifactFreshness(doc, collateral.FreshnessIDPlatform, freshness.KindPlatform, &platform.AuthenticatedArtifact, now)
 	if err != nil {
 		return nil, fmt.Errorf("verifying platform freshness: %w", err)
 	}
-	runtimeApprovedAt, err := v.authenticateArtifactFreshness(doc, collateral.FreshnessIDRuntime, freshness.KindRuntime, &runtime.AuthenticatedArtifact, now)
+	runtimeApprovedAt, err := v.authenticateArtifactFreshness(doc, collateral.FreshnessIDRuntime, freshness.KindRuntime, &authenticatedRuntime.AuthenticatedArtifact, now)
 	if err != nil {
 		return nil, fmt.Errorf("verifying runtime freshness: %w", err)
 	}
 	return &referenceValues{
 		quote: quote.ReferenceValues{
 			Endorsements: platform.Artifact,
-			Config:       &quote.ConfigReferenceValues{Runtime: runtime.Manifest.IGVM, Hash: sha256.Sum256(config.Config)},
+			Config:       &quote.ConfigReferenceValues{Runtime: authenticatedRuntime.Manifest.Measurements, Hash: sha256.Sum256(config.Config)},
 		},
-		artifact:           runtime.AuthenticatedArtifact,
+		artifact:           authenticatedRuntime.AuthenticatedArtifact,
 		config:             approved,
 		freshnessExpiresAt: freshnessExpiration(v.freshnessMaxAge, approved.ApprovalTime, platformApprovedAt, runtimeApprovedAt),
 	}, nil
@@ -136,7 +136,7 @@ func (v *Verifier) authenticateArtifactFreshness(doc *document.Document, id, kin
 		return time.Time{}, err
 	}
 	if material.Format != collateral.ArtifactFreshnessV1Format {
-		return time.Time{}, fmt.Errorf("IGVM requires Tinfoil artifact freshness approvals")
+		return time.Time{}, fmt.Errorf("config verification requires Tinfoil artifact freshness approvals")
 	}
 	approved, err := v.freshnessVerifier.Verify(material.Bundle, endorsement.FreshnessPolicy{
 		Artifact: freshness.Artifact{Kind: kind, Repo: artifact.Repo, Tag: artifact.Tag, Name: artifact.SubjectName, Digest: artifact.Digest},

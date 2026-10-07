@@ -11,8 +11,8 @@ import (
 	"github.com/tinfoilsh/tinfoil-go/document/collateral"
 	"github.com/tinfoilsh/tinfoil-go/endorsement/freshness"
 	"github.com/tinfoilsh/tinfoil-go/verify/internal/endorsement"
-	"github.com/tinfoilsh/tinfoil-go/verify/internal/igvm"
 	"github.com/tinfoilsh/tinfoil-go/verify/internal/policy"
+	"github.com/tinfoilsh/tinfoil-go/verify/internal/runtime"
 )
 
 const (
@@ -37,7 +37,7 @@ func TestCapturedPlatformProvenance(t *testing.T) {
 	bundle := capturedFixture(t, "igvm", "platform-bundle.json")
 	platform, err := client.AuthenticatePlatformEndorsements(bundle, freshness.PlatformRepo, capturedPlatformTag, capturedPlatformDigest)
 	require.NoError(t, err)
-	require.Equal(t, igvm.PlatformSubject, platform.SubjectName)
+	require.Equal(t, runtime.PlatformSubject, platform.SubjectName)
 	require.Empty(t, platform.Artifact.Measurements)
 	require.NotEmpty(t, platform.Artifact.Policies)
 	for name, p := range platform.Artifact.Policies {
@@ -53,12 +53,12 @@ func TestCapturedPlatformProvenance(t *testing.T) {
 func TestCapturedRuntimeMatchesReportMeasurement(t *testing.T) {
 	data := capturedFixture(t, "igvm", freshness.RuntimeName(capturedRuntimeTag))
 	ref := collateral.RuntimeReference{Repo: collateral.RuntimeRepo, Tag: capturedRuntimeTag, Digest: capturedRuntimeDigest}
-	manifest, err := igvm.ParseManifest(data, ref)
+	manifest, err := runtime.ParseManifest(data, ref)
 	require.NoError(t, err)
 	// This fixture has no AMD certificate chain. This checks captured fields,
 	// not hardware authentication or runtime build provenance.
 	report, err := sevabi.ReportToProto(capturedFixture(t, "igvm", "sev-snp-report.bin"))
 	require.NoError(t, err)
-	launch := manifest.IGVM.SNPLaunch
+	launch := manifest.Measurements.SNPLaunch
 	require.Equal(t, launch.Measurement, hex.EncodeToString(report.GetMeasurement()))
 }

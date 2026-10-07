@@ -12,7 +12,7 @@ import (
 	"github.com/tinfoilsh/tinfoil-go/document/collateral"
 )
 
-func TestIGVMRequiresIndependentFreshness(t *testing.T) {
+func TestConfigBoundRequiresIndependentFreshness(t *testing.T) {
 	data, err := os.ReadFile("testdata/igvm-snp.json")
 	require.NoError(t, err)
 	var f fixture

@@ -14,7 +14,7 @@ import (
 	"github.com/tinfoilsh/tinfoil-go/document/collateral"
 )
 
-func TestIGVMRequiresIndependentTrustAndFreshness(t *testing.T) {
+func TestConfigBoundRequiresIndependentTrustAndFreshness(t *testing.T) {
 	policy := ConfigPolicy{Identity: "/org/project"}
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	require.NoError(t, err)
@@ -25,7 +25,7 @@ func TestIGVMRequiresIndependentTrustAndFreshness(t *testing.T) {
 	require.ErrorContains(t, err, "must not be empty")
 	v, err := NewVerifier(WithConfigSigningKeys(keys), WithFreshnessSigningKeys([]crypto.PublicKey{key.Public()}), WithIgnoreFreshness())
 	require.NoError(t, err)
-	_, err = v.VerifyIGVM(nil, nil, policy)
+	_, err = v.VerifyConfig(nil, nil, policy)
 	require.ErrorContains(t, err, "requires config, platform, and runtime freshness")
 
 	v, err = NewVerifier(WithConfigSigningKeys(keys), WithFreshnessSigningKeys([]crypto.PublicKey{key.Public()}))
@@ -33,7 +33,7 @@ func TestIGVMRequiresIndependentTrustAndFreshness(t *testing.T) {
 	nonce := make([]byte, document.NonceSize)
 	raw, err := document.Build(document.BuildInput{Nonce: nonce}, func([64]byte) (string, []byte, error) { return document.SEVSNPReportV1Format, []byte("quote"), nil })
 	require.NoError(t, err)
-	_, err = v.VerifyIGVM(raw, nonce, policy)
+	_, err = v.VerifyConfig(raw, nonce, policy)
 	require.ErrorContains(t, err, collateral.ConfigID)
 	for name, bad := range map[string]ConfigPolicy{
 		"identity": {Identity: "/org/project/extra"},
@@ -41,14 +41,14 @@ func TestIGVMRequiresIndependentTrustAndFreshness(t *testing.T) {
 		"digest":   {Identity: policy.Identity, Digest: strings.Repeat("AB", 32)},
 	} {
 		t.Run(name, func(t *testing.T) {
-			_, err := v.VerifyIGVM(raw, nonce, bad)
+			_, err := v.VerifyConfig(raw, nonce, bad)
 			var e *ConfigurationError
 			require.ErrorAs(t, err, &e)
 		})
 	}
 }
 
-func TestIGVMFreshnessExpirationIncludesEveryApproval(t *testing.T) {
+func TestConfigBoundFreshnessExpirationIncludesEveryApproval(t *testing.T) {
 	now := time.Now()
 	older := now.Add(-time.Hour)
 	for _, times := range [][3]time.Time{{older, now, now}, {now, older, now}, {now, now, older}} {
