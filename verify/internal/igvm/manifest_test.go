@@ -12,12 +12,11 @@ import (
 )
 
 func validManifest() Manifest {
-	zero := uint32(0)
 	measurement := strings.Repeat("cd", MeasurementSize)
 	zeroRegister := strings.Repeat("0", MeasurementSize*2)
 	return Manifest{Version: "v0.15.0", IGVM: &Measurements{
 		FormatVersion: FormatVersion,
-		SNPLaunch:     &SNPLaunch{Measurement: measurement, Policy: "0x30133", GuestSVN: &zero, IDKeyDigest: zeroRegister},
+		SNPLaunch:     &SNPLaunch{Measurement: measurement},
 		TDXLaunch:     &TDXLaunch{MRTD: measurement, RTMR0: zeroRegister, RTMR1: zeroRegister, RTMR2: zeroRegister, RTMR3: zeroRegister},
 	}}
 }
@@ -38,20 +37,15 @@ func TestManifestRequiresCompleteSupportedMeasurements(t *testing.T) {
 	_, err = ParseManifest(append(data, '\n'), ref)
 	require.ErrorContains(t, err, "digest pin")
 	for name, mutate := range map[string]func(*Manifest){
-		"old manifest":        func(m *Manifest) { m.IGVM = nil },
-		"unknown version":     func(m *Manifest) { m.IGVM.FormatVersion++ },
-		"wrong release":       func(m *Manifest) { m.Version = "v0.15.1" },
-		"missing SNP":         func(m *Manifest) { m.IGVM.SNPLaunch = nil },
-		"missing TDX":         func(m *Manifest) { m.IGVM.TDXLaunch = nil },
-		"missing SVN":         func(m *Manifest) { m.IGVM.SNPLaunch.GuestSVN = nil },
-		"nonzero SVN":         func(m *Manifest) { *m.IGVM.SNPLaunch.GuestSVN = 1 },
-		"ID block":            func(m *Manifest) { m.IGVM.SNPLaunch.IDKeyDigest = strings.Repeat("ab", MeasurementSize) },
-		"nonzero RTMR":        func(m *Manifest) { m.IGVM.TDXLaunch.RTMR2 = strings.Repeat("ab", MeasurementSize) },
-		"missing RTMR":        func(m *Manifest) { m.IGVM.TDXLaunch.RTMR3 = "" },
-		"bad MRTD":            func(m *Manifest) { m.IGVM.TDXLaunch.MRTD = "bad" },
-		"uppercase SNP":       func(m *Manifest) { m.IGVM.SNPLaunch.Measurement = strings.ToUpper(m.IGVM.SNPLaunch.Measurement) },
-		"decimal policy":      func(m *Manifest) { m.IGVM.SNPLaunch.Policy = "196915" },
-		"noncanonical policy": func(m *Manifest) { m.IGVM.SNPLaunch.Policy = "0x030133" },
+		"old manifest":    func(m *Manifest) { m.IGVM = nil },
+		"unknown version": func(m *Manifest) { m.IGVM.FormatVersion++ },
+		"wrong release":   func(m *Manifest) { m.Version = "v0.15.1" },
+		"missing SNP":     func(m *Manifest) { m.IGVM.SNPLaunch = nil },
+		"missing TDX":     func(m *Manifest) { m.IGVM.TDXLaunch = nil },
+		"nonzero RTMR":    func(m *Manifest) { m.IGVM.TDXLaunch.RTMR2 = strings.Repeat("ab", MeasurementSize) },
+		"missing RTMR":    func(m *Manifest) { m.IGVM.TDXLaunch.RTMR3 = "" },
+		"bad MRTD":        func(m *Manifest) { m.IGVM.TDXLaunch.MRTD = "bad" },
+		"uppercase SNP":   func(m *Manifest) { m.IGVM.SNPLaunch.Measurement = strings.ToUpper(m.IGVM.SNPLaunch.Measurement) },
 	} {
 		t.Run(name, func(t *testing.T) {
 			m := validManifest()
