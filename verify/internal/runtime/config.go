@@ -11,17 +11,11 @@ import (
 	"github.com/tinfoilsh/tinfoil-go/document/collateral"
 )
 
-const runtimeArtifactsURL = "https://images.tinfoil.sh/cvm"
-
 // ConfigRuntime extracts the immutable runtime pin without changing config bytes.
 // The publisher and guest own validation of the workload's other fields.
 func ConfigRuntime(data []byte) (collateral.RuntimeReference, error) {
 	var fields struct {
 		Version string `yaml:"cvm-version"`
-		Source  *struct {
-			Repo      string `yaml:"repo"`
-			Artifacts string `yaml:"artifacts"`
-		} `yaml:"cvm-source"`
 	}
 	decoder := yaml.NewDecoder(bytes.NewReader(data))
 	if err := decoder.Decode(&fields); err != nil {
@@ -30,9 +24,6 @@ func ConfigRuntime(data []byte) (collateral.RuntimeReference, error) {
 	var extra yaml.Node
 	if err := decoder.Decode(&extra); err != io.EOF {
 		return collateral.RuntimeReference{}, fmt.Errorf("config must contain exactly one YAML document")
-	}
-	if fields.Source != nil && (fields.Source.Repo != collateral.RuntimeRepo || fields.Source.Artifacts != runtimeArtifactsURL) {
-		return collateral.RuntimeReference{}, fmt.Errorf("runtime format v1 requires the Tinfoil runtime source")
 	}
 	version, digest, found := strings.Cut(fields.Version, "@sha256:")
 	if !found {

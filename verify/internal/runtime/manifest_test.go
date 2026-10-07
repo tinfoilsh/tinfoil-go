@@ -93,14 +93,12 @@ func TestConfigRuntimePin(t *testing.T) {
 	}
 	good := "cvm-version: 0.15.0@sha256:" + digest + "\n"
 	for name, config := range map[string]string{
-		"unpinned":         "cvm-version: 0.15.0\n",
-		"duplicate":        good + good,
-		"two documents":    good + "---\n" + good,
-		"alternate repo":   good + "cvm-source: {repo: other/runtime, artifacts: https://images.tinfoil.sh/cvm}\n",
-		"alternate source": good + "cvm-source: {repo: tinfoilsh/cvmimage, artifacts: https://other.example}\n",
-		"bad digest":       strings.ReplaceAll(good, digest, strings.ToUpper(digest)),
-		"build suffix":     strings.ReplaceAll(good, "0.15.0", "0.15.0+build"),
-		"missing version":  "containers: []\n",
+		"unpinned":        "cvm-version: 0.15.0\n",
+		"duplicate":       good + good,
+		"two documents":   good + "---\n" + good,
+		"bad digest":      strings.ReplaceAll(good, digest, strings.ToUpper(digest)),
+		"build suffix":    strings.ReplaceAll(good, "0.15.0", "0.15.0+build"),
+		"missing version": "containers: []\n",
 	} {
 		t.Run(name, func(t *testing.T) { _, err := ConfigRuntime([]byte(config)); require.Error(t, err) })
 	}
