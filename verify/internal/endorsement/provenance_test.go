@@ -5,8 +5,12 @@ import (
 	"strings"
 	"testing"
 
+	in_toto "github.com/in-toto/attestation/go/v1"
+	"github.com/sigstore/sigstore-go/pkg/fulcio/certificate"
+	"github.com/sigstore/sigstore-go/pkg/verify"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/tinfoilsh/tinfoil-go/document/collateral"
 	"github.com/tinfoilsh/tinfoil-go/internal/testutil"
 	"github.com/tinfoilsh/tinfoil-go/verify/measurement"
 )
@@ -107,6 +111,50 @@ func TestAuthenticateCodeRejectsInvalidReference(t *testing.T) {
 	for _, ref := range []string{"", "org/repo@", "org/repo@sha256:bad", "org/repo@v1@v2", "org/repo/extra", "org/(repo|other)"} {
 		_, err := client.AuthenticateCode(nil, ref, "", "")
 		require.ErrorContains(t, err, "invalid release reference")
+	}
+}
+
+func TestAuthenticatedArtifactPinsRepositoryIdentity(t *testing.T) {
+	const otherOrganizationID = "1"
+	for _, repository := range []struct {
+		name, id, otherID string
+	}{
+		{collateral.RuntimeRepo, runtimeRepoID, platformEndorsementsRepoID},
+		{platformEndorsementsRepo, platformEndorsementsRepoID, runtimeRepoID},
+	} {
+		t.Run(repository.name, func(t *testing.T) {
+			for _, tt := range []struct {
+				name, repositoryID, ownerID, wantError string
+			}{
+				{"matching IDs", repository.id, tinfoilOrganizationID, ""},
+				{"different repository", repository.otherID, tinfoilOrganizationID, "source repository ID"},
+				{"missing repository", "", tinfoilOrganizationID, "source repository ID"},
+				{"different organization", repository.id, otherOrganizationID, "source repository owner ID"},
+				{"missing organization", repository.id, "", "source repository owner ID"},
+			} {
+				t.Run(tt.name, func(t *testing.T) {
+					expected := testAuthenticatedArtifact()
+					expected.Repo = repository.name
+					result := &verify.VerificationResult{
+						Signature: &verify.SignatureVerificationResult{Certificate: &certificate.Summary{Extensions: certificate.Extensions{
+							SourceRepositoryIdentifier:      tt.repositoryID,
+							SourceRepositoryOwnerIdentifier: tt.ownerID,
+							SourceRepositoryRef:             "refs/tags/" + expected.Tag,
+							SourceRepositoryDigest:          expected.Commit,
+						}}},
+						Statement: &in_toto.Statement{Subject: []*in_toto.ResourceDescriptor{{Name: expected.SubjectName}}},
+					}
+					got, err := authenticatedArtifact(result, expected.Repo, expected.Tag, expected.Digest, "artifact")
+					if tt.wantError != "" {
+						require.ErrorContains(t, err, tt.wantError)
+						require.Equal(t, AuthenticatedArtifact{}, got)
+						return
+					}
+					require.NoError(t, err)
+					require.Equal(t, *expected, got)
+				})
+			}
+		})
 	}
 }
 
