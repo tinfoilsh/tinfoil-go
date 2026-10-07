@@ -38,12 +38,12 @@ func TestIGVMEnforcesConfigAndPlatformConstraints(t *testing.T) {
 	p.SEVSNP.HostData = ""
 	var reportData [64]byte
 	copy(reportData[:], report.ReportData)
-	_, err = Assemble(p.SEVSNP, q, measurement, reportData)
+	_, err = Assemble(p.SEVSNP, q, measurement, reportData, true)
 	require.ErrorContains(t, err, "requires IGVM")
 	resolved := *p.SEVSNP
 	resolved.ConfigBinding = ""
 	resolved.HostData = hex.EncodeToString(configHash[:])
-	e, err := Assemble(&resolved, q, measurement, reportData)
+	e, err := Assemble(&resolved, q, measurement, reportData, true)
 	require.NoError(t, err)
 	require.NoError(t, e.Validate(q))
 
@@ -70,6 +70,18 @@ func TestIGVMEnforcesConfigAndPlatformConstraints(t *testing.T) {
 	}
 	report.Policy++
 	require.NoError(t, e.Validate(q), "the platform policy defines an ABI floor")
+	legacyPolicy := resolved
+	const guestSVNFloor = 1
+	legacyPolicy.MinimumGuestSVN = new(uint32(guestSVNFloor))
+	legacy, err := Assemble(&legacyPolicy, q, measurement, reportData, false)
+	require.NoError(t, err)
+	for _, svn := range []uint32{guestSVNFloor, guestSVNFloor + 1} {
+		report.GuestSvn = svn
+		require.NoError(t, legacy.Validate(q), "legacy guests accept SVN at or above their endorsed floor")
+		require.ErrorContains(t, e.Validate(q), "zero guest SVN")
+	}
+	report.GuestSvn = guestSVNFloor - 1
+	require.Error(t, legacy.Validate(q), "legacy guests reject SVN below their endorsed floor")
 	resolved.GuestPolicy.Debug = true
 	require.NoError(t, e.Validate(q), "assembled expectations must not alias the platform policy")
 }

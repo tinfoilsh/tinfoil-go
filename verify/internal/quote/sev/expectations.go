@@ -29,10 +29,11 @@ type Expectations struct {
 	opts             *sevvalidate.Options
 	wantGuestPolicy  sevabi.SnpPolicy
 	wantPlatformInfo sevabi.SnpPlatformInfo
+	configBound      bool
 }
 
 // Assemble combines policy with the launch digest, REPORT_DATA, and authenticated CHIP_ID.
-func Assemble(p *policy.SEVSNPPolicy, q *Quote, launchDigest string, reportData [64]byte) (result *Expectations, err error) {
+func Assemble(p *policy.SEVSNPPolicy, q *Quote, launchDigest string, reportData [64]byte, configBound bool) (result *Expectations, err error) {
 	defer func() { err = errs.WrapAttestation(err) }()
 	if p == nil {
 		return nil, &errs.ConfigurationError{Err: fmt.Errorf("SEV policy is required")}
@@ -62,6 +63,7 @@ func Assemble(p *policy.SEVSNPPolicy, q *Quote, launchDigest string, reportData 
 		opts:             opts,
 		wantGuestPolicy:  expectedGuestPolicy(p),
 		wantPlatformInfo: expectedPlatformInfo(p),
+		configBound:      configBound,
 	}, nil
 }
 
@@ -120,8 +122,8 @@ func (e *Expectations) checkSigner(report *sevsnp.Report) error {
 	if signer.AuthorKeyEn {
 		return fmt.Errorf("report carries an author key; ID-block launches are unsupported")
 	}
-	if report.GetGuestSvn() != 0 {
-		return fmt.Errorf("report carries a guest SVN; ID-block launches are unsupported")
+	if e.configBound && report.GetGuestSvn() != 0 {
+		return fmt.Errorf("IGVM v1 requires zero guest SVN")
 	}
 	if !bytes.Equal(report.GetIdKeyDigest(), make([]byte, len(report.GetIdKeyDigest()))) {
 		return fmt.Errorf("report carries an ID block; ID-block launches are unsupported")
