@@ -25,10 +25,10 @@ import (
 	"github.com/tinfoilsh/tinfoil-go/document"
 	"github.com/tinfoilsh/tinfoil-go/document/collateral"
 	"github.com/tinfoilsh/tinfoil-go/internal/errs"
-	"github.com/tinfoilsh/tinfoil-go/verify/internal/igvm"
 	"github.com/tinfoilsh/tinfoil-go/verify/internal/policy"
 	"github.com/tinfoilsh/tinfoil-go/verify/internal/quote/sev"
 	"github.com/tinfoilsh/tinfoil-go/verify/internal/quote/tdx"
+	"github.com/tinfoilsh/tinfoil-go/verify/internal/runtime"
 	"github.com/tinfoilsh/tinfoil-go/verify/measurement"
 )
 
@@ -80,7 +80,7 @@ type ReferenceValues struct {
 }
 
 type ConfigReferenceValues struct {
-	Runtime *igvm.Measurements
+	Runtime *runtime.Measurements
 	Hash    [sha256.Size]byte
 }
 
@@ -319,7 +319,7 @@ func applyPins(registers []string, enclaveType measurement.PredicateType, pins *
 	return registers, nil
 }
 
-func runtimeMeasurement(runtime *igvm.Measurements, platform string) (*measurement.Measurement, error) {
+func runtimeMeasurement(runtime *runtime.Measurements, platform string) (*measurement.Measurement, error) {
 	switch platform {
 	case policy.PlatformSEVSNP:
 		return &measurement.Measurement{Type: measurement.SevGuestV2, Registers: []string{runtime.SNPLaunch.Measurement}}, nil
@@ -333,7 +333,7 @@ func runtimeMeasurement(runtime *igvm.Measurements, platform string) (*measureme
 
 func (c *ConfigReferenceValues) resolveSEV(p *policy.SEVSNPPolicy) (*policy.SEVSNPPolicy, error) {
 	if p == nil || p.ConfigBinding != policy.ConfigBindingSHA256 {
-		return nil, fmt.Errorf("IGVM requires a config-binding platform policy")
+		return nil, fmt.Errorf("config verification requires a config-binding platform policy")
 	}
 	if err := p.Validate(); err != nil {
 		return nil, err

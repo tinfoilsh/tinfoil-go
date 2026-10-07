@@ -12,11 +12,11 @@ import (
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/tinfoilsh/tinfoil-go/verify/internal/igvm"
 	"github.com/tinfoilsh/tinfoil-go/verify/internal/policy"
+	"github.com/tinfoilsh/tinfoil-go/verify/internal/runtime"
 )
 
-func TestIGVMEnforcesConfigPaddingAndEveryRuntimeRegister(t *testing.T) {
+func TestConfigBoundEnforcesConfigPaddingAndEveryRuntimeRegister(t *testing.T) {
 	parsed, err := tdxabi.QuoteToProto(tdxtestdata.RawQuote)
 	require.NoError(t, err)
 	quote, ok := parsed.(*tdxpb.QuoteV4)
@@ -30,7 +30,7 @@ func TestIGVMEnforcesConfigPaddingAndEveryRuntimeRegister(t *testing.T) {
 		body.Rtmrs[i] = make([]byte, tdxabi.RtmrSize)
 	}
 	zero := strings.Repeat("0", tdxabi.RtmrSize*2)
-	runtime := &igvm.TDXLaunch{MRTD: hex.EncodeToString(body.MrTd), RTMR0: zero, RTMR1: zero, RTMR2: zero, RTMR3: zero}
+	runtime := &runtime.TDXLaunch{MRTD: hex.EncodeToString(body.MrTd), RTMR0: zero, RTMR1: zero, RTMR2: zero, RTMR3: zero}
 	minimum := 5
 	p := &policy.TDXPolicy{
 		QEVendorID: hex.EncodeToString(q.quote.Header.QeVendorId), MinimumTEETCBSVN: hex.EncodeToString(body.TeeTcbSvn),
@@ -47,7 +47,7 @@ func TestIGVMEnforcesConfigPaddingAndEveryRuntimeRegister(t *testing.T) {
 	require.Equal(t, policy.ConfigBindingSHA256, p.ConfigBinding)
 	require.Empty(t, p.PlatformMeasurements)
 	_, _, err = Assemble(&policy.Artifact{}, p, &policy.Shape{}, q, runtime.Registers(), reportData, nil)
-	require.ErrorContains(t, err, "requires IGVM")
+	require.ErrorContains(t, err, "requires config verification")
 	for name, mutate := range map[string]func(*tdxpb.TDQuoteBody){
 		"config hash":    func(b *tdxpb.TDQuoteBody) { b.MrConfigId[0] ^= 1 },
 		"config padding": func(b *tdxpb.TDQuoteBody) { b.MrConfigId[sha256.Size] = 1 },

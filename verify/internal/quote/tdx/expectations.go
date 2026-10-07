@@ -30,10 +30,10 @@ func Assemble(a *policy.Artifact, p *policy.TDXPolicy, required *policy.Shape, q
 		return nil, "", &errs.ConfigurationError{Err: fmt.Errorf("endorsements and TDX policy are required")}
 	}
 	if configID == nil && p.ConfigBinding != "" {
-		return nil, "", fmt.Errorf("config-binding policy requires IGVM verification")
+		return nil, "", fmt.Errorf("config-binding policy requires config verification")
 	}
 	if configID != nil && p.ConfigBinding != policy.ConfigBindingSHA256 {
-		return nil, "", fmt.Errorf("IGVM requires a config-binding platform policy")
+		return nil, "", fmt.Errorf("config verification requires a config-binding platform policy")
 	}
 	if configID == nil && required == nil {
 		return nil, "", &errs.ConfigurationError{Err: fmt.Errorf("VM shape is required")}

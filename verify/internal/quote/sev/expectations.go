@@ -39,7 +39,7 @@ func Assemble(p *policy.SEVSNPPolicy, q *Quote, launchDigest string, reportData 
 		return nil, &errs.ConfigurationError{Err: fmt.Errorf("SEV policy is required")}
 	}
 	if p.ConfigBinding != "" {
-		return nil, fmt.Errorf("config-binding policy requires IGVM verification")
+		return nil, fmt.Errorf("config-binding policy requires config verification")
 	}
 	if q == nil || q.attestation == nil {
 		return nil, &errs.ConfigurationError{Err: fmt.Errorf("authenticated SEV quote is required")}
@@ -123,7 +123,7 @@ func (e *Expectations) checkSigner(report *sevsnp.Report) error {
 		return fmt.Errorf("report carries an author key; ID-block launches are unsupported")
 	}
 	if e.configBound && report.GetGuestSvn() != 0 {
-		return fmt.Errorf("IGVM v1 requires zero guest SVN")
+		return fmt.Errorf("config verification requires zero guest SVN")
 	}
 	if !bytes.Equal(report.GetIdKeyDigest(), make([]byte, len(report.GetIdKeyDigest()))) {
 		return fmt.Errorf("report carries an ID block; ID-block launches are unsupported")

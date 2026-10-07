@@ -14,7 +14,7 @@ import (
 	sevtestdata "github.com/tinfoilsh/tinfoil-go/verify/internal/testdata"
 )
 
-func TestIGVMEnforcesConfigAndPlatformConstraints(t *testing.T) {
+func TestConfigBoundEnforcesConfigAndPlatformConstraints(t *testing.T) {
 	const guestPolicy = 0x30133
 	raw, err := sevtestdata.Box2TurinReport()
 	require.NoError(t, err)
@@ -39,7 +39,7 @@ func TestIGVMEnforcesConfigAndPlatformConstraints(t *testing.T) {
 	var reportData [64]byte
 	copy(reportData[:], report.ReportData)
 	_, err = Assemble(p.SEVSNP, q, measurement, reportData, true)
-	require.ErrorContains(t, err, "requires IGVM")
+	require.ErrorContains(t, err, "requires config verification")
 	resolved := *p.SEVSNP
 	resolved.ConfigBinding = ""
 	resolved.HostData = hex.EncodeToString(configHash[:])
