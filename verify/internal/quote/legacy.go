@@ -9,14 +9,14 @@ import (
 	"github.com/tinfoilsh/tinfoil-go/verify/measurement"
 )
 
-// CodeReferenceValues prepares the legacy repository-release contract.
-type CodeReferenceValues struct {
+// LegacyReferenceValues prepares the legacy repository-release contract.
+type LegacyReferenceValues struct {
 	Endorsements *policy.Artifact
 	Code         *measurement.Measurement
 	Shape        *policy.Shape
 }
 
-func (r CodeReferenceValues) resolve(q *Authenticated, pins *measurement.Measurement) (*resolvedValues, error) {
+func (r LegacyReferenceValues) resolve(q *Authenticated, pins *measurement.Measurement) (*resolvedValues, error) {
 	if r.Code == nil {
 		return nil, &errs.ConfigurationError{Err: fmt.Errorf("assembling policy: expected code measurement is required")}
 	}

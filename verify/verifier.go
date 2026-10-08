@@ -144,7 +144,7 @@ func (v *Verifier) verifyV3(docBytes, nonce []byte, repo string) (*Verification,
 	if err != nil {
 		return nil, layerQuote, err
 	}
-	assembled, err := quote.Assemble(doc, quote.CodeReferenceValues{
+	assembled, err := quote.Assemble(doc, quote.LegacyReferenceValues{
 		Endorsements: endorsements.Artifact, Code: code.Measurement, Shape: code.Shape,
 	}, v.pinnedRegisters, authenticated)
 	if err != nil {

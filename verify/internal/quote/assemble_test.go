@@ -29,7 +29,7 @@ func boundDocument(t *testing.T, report []byte) *document.Document {
 func TestAssembleRequiresParsedDocument(t *testing.T) {
 	var config *errs.ConfigurationError
 	for _, doc := range []*document.Document{nil, {}} {
-		_, err := Assemble(doc, CodeReferenceValues{Endorsements: &policy.Artifact{}, Code: &measurement.Measurement{}, Shape: testShape}, nil, &Authenticated{})
+		_, err := Assemble(doc, LegacyReferenceValues{Endorsements: &policy.Artifact{}, Code: &measurement.Measurement{}, Shape: testShape}, nil, &Authenticated{})
 		require.ErrorAs(t, err, &config)
 		assert.ErrorContains(t, err, "checked by document.Parse")
 	}
@@ -46,14 +46,14 @@ func TestAssembleRejectsQuoteFromAnotherDocument(t *testing.T) {
 		"other report": authenticated(document.SEVSNPReportV1Format, "report b"),
 		"other format": authenticated(document.TDXQuoteV1Format, "report a"),
 	} {
-		_, err := Assemble(doc, CodeReferenceValues{Endorsements: &policy.Artifact{}, Code: &measurement.Measurement{}, Shape: testShape}, nil, q)
+		_, err := Assemble(doc, LegacyReferenceValues{Endorsements: &policy.Artifact{}, Code: &measurement.Measurement{}, Shape: testShape}, nil, q)
 		require.ErrorAs(t, err, &config, name)
 		assert.ErrorContains(t, err, "not this document's CPU evidence", name)
 	}
 
 	// The quote authenticated from this document's own evidence passes the
 	// origin check and reaches the policy inputs.
-	_, err := Assemble(doc, CodeReferenceValues{Endorsements: &policy.Artifact{}, Code: &measurement.Measurement{}, Shape: testShape}, nil, authenticated(document.SEVSNPReportV1Format, "report a"))
+	_, err := Assemble(doc, LegacyReferenceValues{Endorsements: &policy.Artifact{}, Code: &measurement.Measurement{}, Shape: testShape}, nil, authenticated(document.SEVSNPReportV1Format, "report a"))
 	require.Error(t, err)
 	assert.NotContains(t, err.Error(), "not this document's CPU evidence")
 	assert.ErrorContains(t, err, "authenticated quote is required")

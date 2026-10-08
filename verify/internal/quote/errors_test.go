@@ -14,11 +14,11 @@ import (
 
 func TestMissingInputsAreConfigurationErrors(t *testing.T) {
 	var config *errs.ConfigurationError
-	_, err := Assemble(nil, CodeReferenceValues{}, nil, nil)
+	_, err := Assemble(nil, LegacyReferenceValues{}, nil, nil)
 	require.ErrorAs(t, err, &config)
 	_, err = assemble(nil, nil, [64]byte{}, nil)
 	require.ErrorAs(t, err, &config)
-	_, err = assemble(CodeReferenceValues{Endorsements: &policy.Artifact{}}, nil, [64]byte{}, &Authenticated{})
+	_, err = assemble(LegacyReferenceValues{Endorsements: &policy.Artifact{}}, nil, [64]byte{}, &Authenticated{})
 	require.ErrorAs(t, err, &config)
 	_, err = sev.Assemble(&policy.SEVSNPPolicy{}, &sev.Quote{}, "", [64]byte{})
 	require.ErrorAs(t, err, &config)
