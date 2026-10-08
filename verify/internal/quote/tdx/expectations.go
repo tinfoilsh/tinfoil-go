@@ -1,8 +1,6 @@
 package tdx
 
 import (
-	"cmp"
-	"encoding/hex"
 	"fmt"
 
 	tdxabi "github.com/google/go-tdx-guest/abi"
@@ -10,7 +8,6 @@ import (
 
 	"github.com/tinfoilsh/tinfoil-go/internal/errs"
 	"github.com/tinfoilsh/tinfoil-go/verify/internal/policy"
-	"github.com/tinfoilsh/tinfoil-go/verify/measurement"
 )
 
 // Expectations is the fully translated TDX expected state, resolved at
@@ -21,47 +18,25 @@ type Expectations struct {
 	minimumTCBEvaluationDataNumber int
 }
 
-// Assemble resolves legacy MRTD/RTMR0 by VM shape. A config-bound runtime
-// supplies all five registers and the complete MRCONFIGID instead.
-// It returns the matching measurements-map entry's name for legacy releases.
-func Assemble(a *policy.Artifact, p *policy.TDXPolicy, required *policy.Shape, q *Quote, registers [5]string, reportData [64]byte, configID *[tdxabi.MrConfigIDSize]byte) (result *Expectations, name string, err error) {
+// Assemble translates complete reference values into vendor validation options.
+func Assemble(p *policy.TDXPolicy, q *Quote, registers [5]string, reportData [64]byte, configID [tdxabi.MrConfigIDSize]byte) (result *Expectations, err error) {
 	defer func() { err = errs.WrapAttestation(err) }()
-	if a == nil || p == nil {
-		return nil, "", &errs.ConfigurationError{Err: fmt.Errorf("endorsements and TDX policy are required")}
-	}
-	if configID != nil && len(p.PlatformMeasurements) != 0 {
-		return nil, "", fmt.Errorf("config runtime cannot be combined with platform_measurements")
-	}
-	if configID == nil && required == nil {
-		return nil, "", &errs.ConfigurationError{Err: fmt.Errorf("VM shape is required")}
+	if p == nil {
+		return nil, &errs.ConfigurationError{Err: fmt.Errorf("TDX policy is required")}
 	}
 	if q == nil || q.quote == nil {
-		return nil, "", &errs.ConfigurationError{Err: fmt.Errorf("authenticated TDX quote is required")}
+		return nil, &errs.ConfigurationError{Err: fmt.Errorf("authenticated TDX quote is required")}
 	}
 	opts, err := options(p)
 	if err != nil {
-		return nil, "", err
+		return nil, err
 	}
-	if configID == nil {
-		body := q.quote.GetTdQuoteBody()
-		var m *policy.PlatformMeasurement
-		name, m, err = a.ResolvePlatformMeasurement(p, required,
-			hex.EncodeToString(body.GetMrTd()),
-			hex.EncodeToString(body.GetRtmrs()[0]))
-		if err != nil {
-			return nil, "", err
-		}
-		registers[0] = cmp.Or(registers[0], m.MRTD)
-		registers[1] = cmp.Or(registers[1], m.RTMR0)
-		registers[4] = cmp.Or(registers[4], measurement.RTMR3_ZERO)
-	} else {
-		copy(opts.TdQuoteBodyOptions.MrConfigID, configID[:])
-	}
+	copy(opts.TdQuoteBodyOptions.MrConfigID, configID[:])
 	var decoded [5][]byte
 	registerSizes := [5]int{tdxabi.MrTdSize, tdxabi.RtmrSize, tdxabi.RtmrSize, tdxabi.RtmrSize, tdxabi.RtmrSize}
 	for i, label := range [5]string{"mrtd", "rtmr0", "rtmr1", "rtmr2", "rtmr3"} {
 		if decoded[i], err = policy.DecodeHex(label, registers[i], registerSizes[i]); err != nil {
-			return nil, "", err
+			return nil, err
 		}
 	}
 	opts.TdQuoteBodyOptions.MrTd = decoded[0]
@@ -71,7 +46,7 @@ func Assemble(a *policy.Artifact, p *policy.TDXPolicy, required *policy.Shape, q
 	return &Expectations{
 		opts:                           opts,
 		minimumTCBEvaluationDataNumber: *p.MinimumTCBEvaluationDataNumber,
-	}, name, nil
+	}, nil
 }
 
 // Validate compares a quote against the assembled expected state: the

@@ -41,12 +41,10 @@ func TestConfigBoundEnforcesConfigPaddingAndEveryRuntimeRegister(t *testing.T) {
 	copy(reportData[:], body.ReportData)
 	var configID [tdxabi.MrConfigIDSize]byte
 	copy(configID[:], configHash[:])
-	e, _, err := Assemble(&policy.Artifact{}, p, nil, q, runtime.Registers(), reportData, &configID)
+	e, err := Assemble(p, q, runtime.Registers(), reportData, configID)
 	require.NoError(t, err)
 	require.NoError(t, e.Validate(q))
 	require.Empty(t, p.PlatformMeasurements)
-	_, _, err = Assemble(&policy.Artifact{}, p, &policy.Shape{}, q, runtime.Registers(), reportData, nil)
-	require.ErrorContains(t, err, "no endorsed platform measurement")
 	for name, mutate := range map[string]func(*tdxpb.TDQuoteBody){
 		"config hash":    func(b *tdxpb.TDQuoteBody) { b.MrConfigId[0] ^= 1 },
 		"config padding": func(b *tdxpb.TDQuoteBody) { b.MrConfigId[sha256.Size] = 1 },
@@ -72,7 +70,4 @@ func TestConfigBoundEnforcesConfigPaddingAndEveryRuntimeRegister(t *testing.T) {
 	configID[0] ^= 1
 	runtime.MRTD = zero
 	require.NoError(t, e.Validate(q), "assembled expectations must not alias the config binding")
-	p.PlatformMeasurements = []string{"legacy"}
-	_, _, err = Assemble(&policy.Artifact{}, p, nil, q, runtime.Registers(), reportData, &configID)
-	require.ErrorContains(t, err, "cannot be combined with platform_measurements")
 }

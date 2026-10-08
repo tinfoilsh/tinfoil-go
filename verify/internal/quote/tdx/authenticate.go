@@ -44,6 +44,16 @@ type Quote struct {
 // Identity is the authenticated machines-map lookup key (PPID, lowercase hex).
 func (q *Quote) Identity() string { return q.identity }
 
+// PlatformMeasurements reads the authenticated evidence, independently of the
+// caller-visible Measurement summary.
+func (q *Quote) PlatformMeasurements() (mrtd, rtmr0 string, err error) {
+	if q == nil || q.quote == nil {
+		return "", "", &errs.ConfigurationError{Err: fmt.Errorf("authenticated TDX quote is required")}
+	}
+	body := q.quote.GetTdQuoteBody()
+	return hex.EncodeToString(body.GetMrTd()), hex.EncodeToString(body.GetRtmrs()[0]), nil
+}
+
 // Evidence is a TDX quote with the Intel PCS responses captured to
 // authenticate it.
 type Evidence struct {

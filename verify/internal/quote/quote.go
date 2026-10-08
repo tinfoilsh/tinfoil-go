@@ -15,8 +15,6 @@ package quote
 import (
 	"bytes"
 	"cmp"
-	"crypto/sha256"
-	"encoding/hex"
 	"fmt"
 	"strings"
 
@@ -28,7 +26,6 @@ import (
 	"github.com/tinfoilsh/tinfoil-go/verify/internal/policy"
 	"github.com/tinfoilsh/tinfoil-go/verify/internal/quote/sev"
 	"github.com/tinfoilsh/tinfoil-go/verify/internal/quote/tdx"
-	"github.com/tinfoilsh/tinfoil-go/verify/internal/runtime"
 	"github.com/tinfoilsh/tinfoil-go/verify/measurement"
 )
 
@@ -69,19 +66,20 @@ type AssembledPolicy struct {
 	tdx   *tdx.Expectations
 }
 
-// ReferenceValues contains authenticated release and platform expectations.
-// Config selects config-bound runtime verification; Code and Shape select the
-// repository release flow.
-type ReferenceValues struct {
-	Endorsements *policy.Artifact
-	Code         *measurement.Measurement
-	Shape        *policy.Shape
-	Config       *ConfigReferenceValues
+// ReferenceValues prepares authenticated inputs for a specific verification contract.
+// Implementations resolve all workload expectations before shared assembly.
+type ReferenceValues interface {
+	resolve(*Authenticated, *measurement.Measurement) (*resolvedValues, error)
 }
 
-type ConfigReferenceValues struct {
-	Runtime *runtime.Measurements
-	Hash    [sha256.Size]byte
+type resolvedValues struct {
+	policy                  *policy.Policy
+	policyName              string
+	platformMeasurementName string
+	code                    *measurement.Measurement
+	registers               []string
+	hostData                string
+	configID                [tdxabi.MrConfigIDSize]byte
 }
 
 // Options carries per-authentication overrides. A nil *Options, and the zero
@@ -196,72 +194,30 @@ func (q *Authenticated) reportData(doc *document.Document) ([64]byte, error) {
 
 // assemble is Assemble against an explicit REPORT_DATA.
 func assemble(refs ReferenceValues, pins *measurement.Measurement, reportData [64]byte, q *Authenticated) (*AssembledPolicy, error) {
-	if refs.Endorsements == nil {
-		return nil, &errs.ConfigurationError{Err: fmt.Errorf("endorsements are required")}
+	if refs == nil {
+		return nil, &errs.ConfigurationError{Err: fmt.Errorf("reference values are required")}
 	}
 	if q == nil || q.sev == nil && q.tdx == nil {
 		return nil, &errs.ConfigurationError{Err: fmt.Errorf("authenticated quote is required")}
 	}
-	code := refs.Code
-	if refs.Config != nil {
-		if code != nil || refs.Shape != nil {
-			return nil, &errs.ConfigurationError{Err: fmt.Errorf("config runtime and repository code expectations cannot be combined")}
-		}
-		runtime := refs.Config.Runtime
-		if runtime == nil || runtime.SNPLaunch == nil || runtime.TDXLaunch == nil {
-			return nil, fmt.Errorf("complete runtime endorsements are required")
-		}
-		var err error
-		code, err = runtimeMeasurement(runtime, q.platform)
-		if err != nil {
-			return nil, err
-		}
-	} else {
-		if code == nil {
-			return nil, &errs.ConfigurationError{Err: fmt.Errorf("assembling policy: expected code measurement is required")}
-		}
-		if q.platform == policy.PlatformTDX && refs.Shape == nil {
-			return nil, &errs.ConfigurationError{Err: fmt.Errorf("assembling policy: the code artifact's VM shape is required")}
-		}
-	}
-	name, machinePolicy, err := refs.Endorsements.PolicyFor(q.identity, q.platform)
+	resolved, err := refs.resolve(q, pins)
 	if err != nil {
 		return nil, err
 	}
+	registers := resolved.registers
 	assembled := &AssembledPolicy{
-		CodeMeasurement: code,
-		PolicyName:      name,
-		quote:           *q,
-	}
-	var registers []string
-	if refs.Config != nil {
-		registers, err = applyPins(code.Registers, code.Type, pins)
-	} else {
-		registers, err = layout(code, pins, q)
-	}
-	if err != nil {
-		return nil, err
+		CodeMeasurement:         resolved.code,
+		PolicyName:              resolved.policyName,
+		PlatformMeasurementName: resolved.platformMeasurementName,
+		quote:                   *q,
 	}
 	switch q.platform {
 	case policy.PlatformSEVSNP:
-		p := machinePolicy.SEVSNP
-		if refs.Config != nil && p != nil {
-			if p.HostData != "" {
-				return nil, fmt.Errorf("config runtime cannot be combined with platform host_data")
-			}
-			resolved := *p
-			resolved.HostData = hex.EncodeToString(refs.Config.Hash[:])
-			p = &resolved
-		}
-		assembled.sev, err = sev.Assemble(p, q.sev, registers[0], reportData)
+		p := *resolved.policy.SEVSNP
+		p.HostData = resolved.hostData
+		assembled.sev, err = sev.Assemble(&p, q.sev, registers[0], reportData)
 	case policy.PlatformTDX:
-		var configID *[tdxabi.MrConfigIDSize]byte
-		if refs.Config != nil {
-			configID = new([tdxabi.MrConfigIDSize]byte)
-			copy(configID[:], refs.Config.Hash[:])
-		}
-		assembled.tdx, assembled.PlatformMeasurementName, err = tdx.Assemble(
-			refs.Endorsements, machinePolicy.TDX, refs.Shape, q.tdx, [5]string(registers), reportData, configID)
+		assembled.tdx, err = tdx.Assemble(resolved.policy.TDX, q.tdx, [5]string(registers), reportData, resolved.configID)
 	default:
 		return nil, fmt.Errorf("unsupported platform %q", q.platform)
 	}
@@ -288,18 +244,15 @@ func (p *AssembledPolicy) Validate() (err error) {
 	}
 }
 
-// layout maps code and pins to enclave registers, leaving platform defaults empty.
-func layout(code, pins *measurement.Measurement, q *Authenticated) ([]string, error) {
-	if code.Type != measurement.SnpTdxMultiPlatformV1 || len(code.Registers) != 3 {
-		return nil, fmt.Errorf("code measurement is %s with %d registers, want %s with 3", code.Type, len(code.Registers), measurement.SnpTdxMultiPlatformV1)
+func resolvePolicy(endorsements *policy.Artifact, q *Authenticated) (*resolvedValues, error) {
+	if endorsements == nil {
+		return nil, &errs.ConfigurationError{Err: fmt.Errorf("endorsements are required")}
 	}
-	registers := []string{code.Registers[0]}
-	enclaveType := measurement.SevGuestV2
-	if q.platform == policy.PlatformTDX {
-		registers = []string{"", "", code.Registers[1], code.Registers[2], ""}
-		enclaveType = measurement.TdxGuestV2
+	name, p, err := endorsements.PolicyFor(q.identity, q.platform)
+	if err != nil {
+		return nil, err
 	}
-	return applyPins(registers, enclaveType, pins)
+	return &resolvedValues{policy: p, policyName: name}, nil
 }
 
 func applyPins(registers []string, enclaveType measurement.PredicateType, pins *measurement.Measurement) ([]string, error) {
@@ -319,16 +272,4 @@ func applyPins(registers []string, enclaveType measurement.PredicateType, pins *
 		registers[i] = cmp.Or(registers[i], pin)
 	}
 	return registers, nil
-}
-
-func runtimeMeasurement(runtime *runtime.Measurements, platform string) (*measurement.Measurement, error) {
-	switch platform {
-	case policy.PlatformSEVSNP:
-		return &measurement.Measurement{Type: measurement.SevGuestV2, Registers: []string{runtime.SNPLaunch.Measurement}}, nil
-	case policy.PlatformTDX:
-		registers := runtime.TDXLaunch.Registers()
-		return &measurement.Measurement{Type: measurement.TdxGuestV2, Registers: registers[:]}, nil
-	default:
-		return nil, fmt.Errorf("unsupported platform %q", platform)
-	}
 }
