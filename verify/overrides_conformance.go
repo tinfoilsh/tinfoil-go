@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/tinfoilsh/tinfoil-go/verify/internal/provenance"
+	"github.com/tinfoilsh/tinfoil-go/verify/internal/endorsement"
 	"github.com/tinfoilsh/tinfoil-go/verify/internal/quote"
 )
 
@@ -52,11 +52,11 @@ func DangerousTestOnlyWithSigstoreRoot(rootJSON []byte) Option {
 		if rootJSON == nil {
 			return nil
 		}
-		client, err := provenance.NewClientFromJSON(rootJSON)
+		client, err := endorsement.NewClientFromJSON(rootJSON)
 		if err != nil {
 			return err
 		}
-		v.provenance = client
+		v.endorsements = client
 		return nil
 	}
 }

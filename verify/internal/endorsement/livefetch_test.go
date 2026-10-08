@@ -1,4 +1,4 @@
-package provenance
+package endorsement
 
 // Test-only helpers for the live canary tests: they fetch published release
 // artifacts through the Tinfoil GitHub proxy. Production verification never

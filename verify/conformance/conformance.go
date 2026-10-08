@@ -8,7 +8,7 @@
 // The full-verify stage is one Verifier.VerifyV3WithLayer call, so the shared
 // fixtures appraise exactly the code production runs; the layer it reports
 // names the rejection. The block stages isolate a single layer by calling into
-// the document, provenance and quote packages the verifier uses.
+// the document, endorsement and quote packages the verifier uses.
 //
 // Synthetic roots and the appraisal clock travel as ordinary per-call options,
 // so the adapter mutates no production state.
@@ -23,7 +23,7 @@ import (
 
 	"github.com/tinfoilsh/tinfoil-go/document"
 	"github.com/tinfoilsh/tinfoil-go/verify"
-	"github.com/tinfoilsh/tinfoil-go/verify/internal/provenance"
+	"github.com/tinfoilsh/tinfoil-go/verify/internal/endorsement"
 	"github.com/tinfoilsh/tinfoil-go/verify/internal/quote"
 	"github.com/tinfoilsh/tinfoil-go/verify/measurement"
 )
@@ -263,15 +263,15 @@ func (in Input) roots() (roots, error) {
 	return r, nil
 }
 
-// newProvClient returns a provenance.Client that authenticates provenance
+// newProvClient returns an endorsement.Client that authenticates provenance
 // against an injected Sigstore root, or the embedded root when none was
 // supplied. The block stages drive provenance one layer at a time, so they
 // hold a provenance client rather than a whole verify.
-func newProvClient(sigstoreRootJSON []byte) (*provenance.Client, error) {
+func newProvClient(sigstoreRootJSON []byte) (*endorsement.Client, error) {
 	if sigstoreRootJSON == nil {
-		return provenance.NewDefaultClient()
+		return endorsement.NewDefaultClient()
 	}
-	client, err := provenance.NewClientFromJSON(sigstoreRootJSON)
+	client, err := endorsement.NewClientFromJSON(sigstoreRootJSON)
 	if err != nil {
 		return nil, fmt.Errorf("sigstore_trusted_root_json_b64: %w", err)
 	}

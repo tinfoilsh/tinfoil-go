@@ -1,37 +1,28 @@
-// Package endorsement verifies registry config approvals. It does not establish
-// that an enclave runs the approved config; hardware and runtime binding remain
-// a separate verification step.
-package endorsement
+// Package config defines and constructs registry config endorsement statements.
+package config
 
 import (
 	"bytes"
 	"crypto"
-	"crypto/ecdsa"
-	"crypto/elliptic"
 	"crypto/sha256"
-	"crypto/x509"
-	"encoding/base64"
 	"encoding/hex"
-	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"fmt"
 	"regexp"
 	"strings"
-	"uuid"
 
-	"github.com/digitorus/timestamp"
-	"github.com/secure-systems-lab/go-securesystemslib/dsse"
+	"github.com/tinfoilsh/tinfoil-go/internal/statement"
 )
 
 const (
-	StatementType    = "https://in-toto.io/Statement/v1"
+	StatementType    = statement.StatementType
 	PredicateType    = "https://tinfoil.sh/predicate/config-endorsement/v1"
-	PayloadType      = "application/vnd.in-toto+json"
-	BundleType       = "application/vnd.dev.sigstore.bundle.v0.3+json"
+	PayloadType      = statement.PayloadType
+	BundleType       = statement.BundleType
 	MaxConfigSize    = 1 << 20
-	MaxBundleSize    = 4 << 20
-	MaxStatementSize = 128 << 10
-	MaxTimestampSize = 64 << 10
+	MaxBundleSize    = statement.MaxBundleSize
+	MaxStatementSize = statement.MaxStatementSize
+	MaxTimestampSize = statement.MaxTimestampSize
 
 	identityComponentCount = 2
 	maxSlugLength          = 63
@@ -58,8 +49,7 @@ type Subject struct {
 }
 
 type Predicate struct {
-	AuditScope string     `json:"auditScope"`
-	Freshness  *Freshness `json:"freshness,omitempty"`
+	Freshness *Freshness `json:"freshness,omitempty"`
 }
 
 type Freshness struct {
@@ -68,16 +58,15 @@ type Freshness struct {
 
 // NewStatement prepares an unsigned approval of exact config bytes.
 // Config schema validation and publication authorization belong to the caller.
-func NewStatement(name, auditScope string, config []byte) (*Statement, error) {
+func NewStatement(name string, config []byte) (*Statement, error) {
 	if len(config) == 0 || len(config) > MaxConfigSize {
 		return nil, fmt.Errorf("config size must be between 1 and %d bytes", MaxConfigSize)
 	}
 	digest := sha256.Sum256(config)
 	s := &Statement{
 		Type:          StatementType,
-		Subject:       []Subject{{Name: name, Digest: map[string]string{"sha256": hex.EncodeToString(digest[:])}}},
+		Subject:       []Subject{{Name: name, Digest: map[string]string{statement.DigestAlgorithm: hex.EncodeToString(digest[:])}}},
 		PredicateType: PredicateType,
-		Predicate:     Predicate{AuditScope: auditScope},
 	}
 	if err := s.validate(false); err != nil {
 		return nil, err
@@ -118,14 +107,6 @@ func ParseName(name string) (identity, revision string, err error) {
 	return identity, revision, nil
 }
 
-func ValidateAuditScope(scope string) error {
-	id, err := uuid.Parse(scope)
-	if err != nil || id == uuid.Nil() || id.String() != scope {
-		return fmt.Errorf("audit scope must be a canonical nonzero UUID")
-	}
-	return nil
-}
-
 func (s *Statement) validate(requireTimestamp bool) error {
 	if s == nil || s.Type != StatementType || s.PredicateType != PredicateType {
 		return fmt.Errorf("unsupported config endorsement statement type")
@@ -136,11 +117,8 @@ func (s *Statement) validate(requireTimestamp bool) error {
 	if _, _, err := ParseName(s.Subject[0].Name); err != nil {
 		return err
 	}
-	if len(s.Subject[0].Digest) != 1 || !digestPattern.MatchString(s.Subject[0].Digest["sha256"]) {
+	if len(s.Subject[0].Digest) != 1 || !digestPattern.MatchString(s.Subject[0].Digest[statement.DigestAlgorithm]) {
 		return fmt.Errorf("subject requires one lowercase SHA-256 digest")
-	}
-	if err := ValidateAuditScope(s.Predicate.AuditScope); err != nil {
-		return err
 	}
 	if requireTimestamp && (s.Predicate.Freshness == nil || len(s.Predicate.Freshness.RFC3161Timestamp) == 0) {
 		return fmt.Errorf("config endorsement requires an inner timestamp")
@@ -159,15 +137,7 @@ func (s *Statement) TimestampInput() ([]byte, error) {
 	}
 	core := *s
 	core.Predicate.Freshness = nil
-	encoded, err := json.Marshal(core)
-	if err != nil {
-		return nil, err
-	}
-	canonical := jsontext.Value(encoded)
-	if err := canonical.Canonicalize(); err != nil {
-		return nil, fmt.Errorf("canonicalizing endorsement core: %w", err)
-	}
-	return append([]byte(freshnessDomain), canonical...), nil
+	return statement.TimestampInput(freshnessDomain, core)
 }
 
 func (s *Statement) TimestampImprint() ([sha256.Size]byte, error) {
@@ -179,21 +149,14 @@ func (s *Statement) TimestampImprint() ([sha256.Size]byte, error) {
 }
 
 // Complete embeds a response over the prepared core. This checks its imprint,
-// not TSA trust; a completed bundle must still pass Verifier.Verify.
+// not TSA trust; the completed publication still requires verification.
 func (s *Statement) Complete(response []byte) ([]byte, error) {
-	if len(response) == 0 || len(response) > MaxTimestampSize {
-		return nil, fmt.Errorf("timestamp response size is outside allowed bounds")
-	}
-	imprint, err := s.TimestampImprint()
+	input, err := s.TimestampInput()
 	if err != nil {
 		return nil, err
 	}
-	ts, err := timestamp.ParseResponse(response)
-	if err != nil {
-		return nil, fmt.Errorf("parsing timestamp response: %w", err)
-	}
-	if ts.HashAlgorithm != crypto.SHA256 || !bytes.Equal(ts.HashedMessage, imprint[:]) {
-		return nil, fmt.Errorf("timestamp response does not match endorsement core")
+	if _, err := statement.ParseTimestamp(response, input); err != nil {
+		return nil, err
 	}
 	complete := *s
 	complete.Predicate.Freshness = &Freshness{RFC3161Timestamp: bytes.Clone(response)}
@@ -221,19 +184,9 @@ func EndorsementReference(payload []byte) (string, error) {
 	if _, err := ParseStatement(payload); err != nil {
 		return "", err
 	}
-	digest := sha256.Sum256(dsse.PAE(PayloadType, payload))
-	return "sha256:" + hex.EncodeToString(digest[:]), nil
+	return statement.EndorsementReference(payload), nil
 }
 
 func KeyHint(publicKey crypto.PublicKey) (string, error) {
-	key, ok := publicKey.(*ecdsa.PublicKey)
-	if !ok || key == nil || key.Curve != elliptic.P256() || key.X == nil || key.Y == nil || !key.Curve.IsOnCurve(key.X, key.Y) {
-		return "", fmt.Errorf("config endorsement requires an ECDSA P-256 key")
-	}
-	der, err := x509.MarshalPKIXPublicKey(key)
-	if err != nil {
-		return "", fmt.Errorf("encoding signing key: %w", err)
-	}
-	digest := sha256.Sum256(der)
-	return base64.StdEncoding.EncodeToString(digest[:]), nil
+	return statement.KeyHint(publicKey)
 }

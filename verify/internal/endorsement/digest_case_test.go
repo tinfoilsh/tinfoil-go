@@ -1,4 +1,4 @@
-package provenance
+package endorsement
 
 import (
 	in_toto "github.com/in-toto/attestation/go/v1"

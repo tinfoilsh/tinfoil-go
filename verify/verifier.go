@@ -20,7 +20,7 @@ import (
 	"github.com/tinfoilsh/tinfoil-go/document/collateral"
 	"github.com/tinfoilsh/tinfoil-go/internal/errs"
 	"github.com/tinfoilsh/tinfoil-go/internal/sdkinfo"
-	"github.com/tinfoilsh/tinfoil-go/verify/internal/provenance"
+	"github.com/tinfoilsh/tinfoil-go/verify/internal/endorsement"
 	"github.com/tinfoilsh/tinfoil-go/verify/internal/quote"
 	"github.com/tinfoilsh/tinfoil-go/verify/measurement"
 )
@@ -46,10 +46,10 @@ type Verifier struct {
 	ignoreFreshness bool
 	now             func() time.Time
 
-	// provenance authenticates reference values against its own copy of the
+	// endorsements authenticates reference values against its own copy of the
 	// trusted root. NewVerifier builds one from the embedded root; only the
 	// conformance build can replace it.
-	provenance *provenance.Client
+	endorsements *endorsement.Client
 
 	// overrides is empty in a production build; the conformance build uses it
 	// to carry synthetic vendor roots down to the CPU evidence layer.
@@ -59,15 +59,15 @@ type Verifier struct {
 // NewVerifier builds a Verifier from opts. With no options it appraises against
 // the release measurements alone, with the seven-day freshness bound.
 func NewVerifier(opts ...Option) (*Verifier, error) {
-	// Build default provenance.Client with embedded roots
-	provenanceClient, err := provenance.NewDefaultClient()
+	// Build default endorsement.Client with embedded roots
+	endorsementClient, err := endorsement.NewDefaultClient()
 	if err != nil {
 		return nil, configurationError(err)
 	}
 	v := &Verifier{
-		freshnessMaxAge: provenance.MaxFreshnessAge,
+		freshnessMaxAge: endorsement.MaxFreshnessAge,
 		now:             time.Now,
-		provenance:      provenanceClient,
+		endorsements:    endorsementClient,
 	}
 	for _, opt := range opts {
 		if opt == nil {
@@ -82,7 +82,7 @@ func NewVerifier(opts ...Option) (*Verifier, error) {
 
 // ParseReference validates owner/name[@tag][@sha256:digest] and returns its parts.
 func ParseReference(ref string) (repo, tag, digest string, err error) {
-	return provenance.ParseReference(ref)
+	return endorsement.ParseReference(ref)
 }
 
 // FreshnessMaxAge reports the configured witness age bound.
@@ -119,10 +119,10 @@ const (
 
 // verifyV3 is VerifyV3, also reporting which layer rejected the document.
 func (v *Verifier) verifyV3(docBytes, nonce []byte, repo string) (*Verification, layer, error) {
-	if v == nil || v.now == nil || v.provenance == nil {
+	if v == nil || v.now == nil || v.endorsements == nil {
 		return nil, layerNone, &errs.ConfigurationError{Err: fmt.Errorf("verifier must be built with NewVerifier")}
 	}
-	configRepo, _, _, err := provenance.ParseReference(repo)
+	configRepo, _, _, err := endorsement.ParseReference(repo)
 	if err != nil {
 		return nil, layerProvenance, &errs.ConfigurationError{Err: err}
 	}
@@ -167,12 +167,12 @@ func (v *Verifier) verifyV3(docBytes, nonce []byte, repo string) (*Verification,
 	}, layerNone, nil
 }
 
-func (v *Verifier) authenticateReferenceValues(doc *document.Document, repo string, appraisalTime time.Time) (*provenance.Code, *provenance.PlatformEndorsements, time.Time, error) {
+func (v *Verifier) authenticateReferenceValues(doc *document.Document, repo string, appraisalTime time.Time) (*endorsement.Code, *endorsement.PlatformEndorsements, time.Time, error) {
 	codeRef, err := doc.SigstoreCode()
 	if err != nil {
 		return nil, nil, time.Time{}, err
 	}
-	code, err := v.provenance.AuthenticateCode(codeRef.Bundle, repo, codeRef.Tag, codeRef.Digest)
+	code, err := v.endorsements.AuthenticateCode(codeRef.Bundle, repo, codeRef.Tag, codeRef.Digest)
 	if err != nil {
 		return nil, nil, time.Time{}, fmt.Errorf("verifying code measurement: %w", err)
 	}
@@ -180,7 +180,7 @@ func (v *Verifier) authenticateReferenceValues(doc *document.Document, repo stri
 	if err != nil {
 		return nil, nil, time.Time{}, err
 	}
-	endorsements, err := v.provenance.AuthenticatePlatformEndorsements(platformRef.Bundle, platformRef.Repo, platformRef.Tag, platformRef.Digest)
+	endorsements, err := v.endorsements.AuthenticatePlatformEndorsements(platformRef.Bundle, platformRef.Repo, platformRef.Tag, platformRef.Digest)
 	if err != nil {
 		return nil, nil, time.Time{}, fmt.Errorf("verifying platform endorsements: %w", err)
 	}
@@ -192,7 +192,7 @@ func (v *Verifier) authenticateReferenceValues(doc *document.Document, repo stri
 	if err != nil {
 		return nil, nil, time.Time{}, err
 	}
-	codeWitnessedAt, err := v.provenance.AuthenticateFreshness(codeFreshness.Bundle, &code.AuthenticatedArtifact, appraisalTime, v.freshnessMaxAge)
+	codeWitnessedAt, err := v.endorsements.AuthenticateFreshness(codeFreshness.Bundle, &code.AuthenticatedArtifact, appraisalTime, v.freshnessMaxAge)
 	if err != nil {
 		return nil, nil, time.Time{}, fmt.Errorf("verifying code freshness: %w", err)
 	}
@@ -200,7 +200,7 @@ func (v *Verifier) authenticateReferenceValues(doc *document.Document, repo stri
 	if err != nil {
 		return nil, nil, time.Time{}, err
 	}
-	platformWitnessedAt, err := v.provenance.AuthenticateFreshness(platformFreshness.Bundle, &endorsements.AuthenticatedArtifact, appraisalTime, v.freshnessMaxAge)
+	platformWitnessedAt, err := v.endorsements.AuthenticateFreshness(platformFreshness.Bundle, &endorsements.AuthenticatedArtifact, appraisalTime, v.freshnessMaxAge)
 	if err != nil {
 		return nil, nil, time.Time{}, fmt.Errorf("verifying platform freshness: %w", err)
 	}
