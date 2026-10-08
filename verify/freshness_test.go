@@ -28,6 +28,8 @@ func TestFreshnessExpiration(t *testing.T) {
 		{"code expires first", issuedAt, later},
 		{"platform expires first", later, issuedAt},
 		{"same issuance time", issuedAt, issuedAt},
+		{"first component embedded", time.Time{}, issuedAt},
+		{"second component embedded", issuedAt, time.Time{}},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			for _, maxAge := range []time.Duration{24 * time.Hour, endorsement.MaxFreshnessAge, 30 * 24 * time.Hour} {

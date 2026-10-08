@@ -61,6 +61,9 @@ func TestClientVerificationJSON(t *testing.T) {
 		CryptoMaterial:     testState(time.Time{}, "key").CryptoMaterial,
 		CodeMeasurement:    codeMeasurement,
 		EnclaveMeasurement: enclaveMeasurement,
+		Config:             &verify.ConfigVerification{Source: verify.SourceEndorsement, Name: "/org/project/v1"},
+		Runtime:            &verify.ArtifactVerification{Source: verify.SourceEndorsement, Digest: "runtime digest"},
+		Platform:           &verify.ArtifactVerification{Source: verify.SourceEndorsement, Digest: "platform digest"},
 	}
 	client := &Handle{
 		state: &enclaveState{Verification: verified},
@@ -76,6 +79,9 @@ func TestClientVerificationJSON(t *testing.T) {
 	view.CodeMeasurement.Registers[0] = "changed"
 	view.CryptoMaterial[0].Data = "changed"
 	view.EnclaveMeasurement.Registers[0] = "changed"
+	view.Config.Source = verify.SourceEmbedded
+	view.Runtime.Digest = "changed"
+	view.Platform.Digest = "changed"
 	assert.Equal(t, &decoded, client.Verification(), "returned measurements must not alias cached verification")
 }
 

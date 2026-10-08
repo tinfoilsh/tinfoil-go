@@ -42,6 +42,7 @@ import (
 // freshness is explicitly ignored, the same document is accepted today and
 // rejected once its witnesses go stale.
 type Verifier struct {
+	embedded        EmbeddedReferences
 	pinnedRegisters *measurement.Measurement
 	freshnessMaxAge time.Duration
 	ignoreFreshness bool
@@ -82,25 +83,31 @@ func NewVerifier(opts ...Option) (*Verifier, error) {
 			return nil, configurationError(err)
 		}
 	}
+	if v.embedded.Config != nil && v.configKeys != nil {
+		return nil, configurationError(fmt.Errorf("embedded config and config signing keys select conflicting trust sources"))
+	}
+	if v.embedded.Runtime != nil && v.embedded.Platform != nil && v.freshnessKeys != nil {
+		return nil, configurationError(fmt.Errorf("freshness signing keys have no endorsed artifact to verify"))
+	}
 	publicKeys, err := endorsement.PublicSigningKeys()
 	if err != nil {
 		return nil, configurationError(err)
 	}
-	if v.configKeys == nil {
-		v.configKeys = publicKeys
+	configKeys, freshnessKeys := v.configKeys, v.freshnessKeys
+	if configKeys == nil {
+		configKeys = publicKeys
 	}
-	if v.freshnessKeys == nil {
-		v.freshnessKeys = publicKeys
+	if freshnessKeys == nil {
+		freshnessKeys = publicKeys
 	}
-	v.configVerifier, err = v.endorsements.ConfigVerifier(v.configKeys)
+	v.configVerifier, err = v.endorsements.ConfigVerifier(configKeys)
 	if err != nil {
 		return nil, configurationError(err)
 	}
-	v.freshnessVerifier, err = v.endorsements.FreshnessVerifier(v.freshnessKeys)
+	v.freshnessVerifier, err = v.endorsements.FreshnessVerifier(freshnessKeys)
 	if err != nil {
 		return nil, configurationError(err)
 	}
-	v.configKeys, v.freshnessKeys = nil, nil
 	return v, nil
 }
 
@@ -119,11 +126,14 @@ func (v *Verifier) PinnedRegisters() *measurement.Measurement {
 
 // VerifyV3 appraises a nonce-bound v3 attestation document using its collateral
 // version. repo pins the expected repository or registry project as
-// org/project[@revision][@sha256:digest].
+// org/project[@revision][@sha256:digest]. An embedded config permits an empty
+// repo; its exact caller-supplied bytes then provide the workload constraint.
 //
 // The caller owns both expectations that cannot come from the document: the
-// nonce it generated, and repo. On success it must bind its traffic to the
-// returned keys and stop authorizing new requests at FreshnessExpiresAt.
+// nonce it generated, and its workload constraint (repo or embedded bytes).
+// On success it must bind traffic to the returned keys and enforce any nonzero
+// FreshnessExpiresAt. With all references embedded, the caller owns renewal
+// and cache lifetime; zero is not a guarantee of unlimited evidence validity.
 func (v *Verifier) VerifyV3(docBytes, nonce []byte, repo string) (*Verification, error) {
 	verified, _, err := v.verifyV3(docBytes, nonce, repo)
 	return verified, err
@@ -144,7 +154,8 @@ const (
 
 type endorsementResult struct {
 	quote              quote.ReferenceValues
-	artifact           endorsement.AuthenticatedArtifact
+	artifact           ArtifactVerification
+	platform           *ArtifactVerification
 	config             *ConfigVerification
 	freshnessExpiresAt time.Time
 }
@@ -187,12 +198,13 @@ func (v *Verifier) verifyV3(docBytes, nonce []byte, repo string) (*Verification,
 		return nil, layerPolicy, err
 	}
 
-	return &Verification{
+	result := &Verification{
 		ConfigRepo:         refs.artifact.Repo,
 		CodeDigest:         refs.artifact.Digest,
 		CodeTag:            refs.artifact.Tag,
 		CodeMeasurement:    assembled.CodeMeasurement,
 		Config:             refs.config,
+		Platform:           refs.platform,
 		EnclaveMeasurement: authenticated.Measurement,
 		CryptoMaterial:     doc.CryptoMaterialItems(),
 		FreshnessExpiresAt: refs.freshnessExpiresAt,
@@ -200,10 +212,17 @@ func (v *Verifier) verifyV3(docBytes, nonce []byte, repo string) (*Verification,
 			Verifier:   SoftwareIdentity{Name: sdkinfo.Name, Version: sdkinfo.Version()},
 			VerifiedAt: now.UTC(),
 		},
-	}, layerNone, nil
+	}
+	if refs.config != nil {
+		result.Runtime = &refs.artifact
+	}
+	return result, layerNone, nil
 }
 
 func (v *Verifier) codeReferences(doc *document.Document, repo string, appraisalTime time.Time) (*endorsementResult, error) {
+	if v.requiresConfigCollateral() {
+		return nil, fmt.Errorf("configured trust requires %s", collateral.FormatV3)
+	}
 	codeRef, err := doc.SigstoreCode()
 	if err != nil {
 		return nil, err
@@ -224,7 +243,7 @@ func (v *Verifier) codeReferences(doc *document.Document, repo string, appraisal
 		quote: quote.LegacyReferenceValues{
 			Endorsements: endorsements.Artifact, Code: code.Measurement, Shape: code.Shape,
 		},
-		artifact: code.AuthenticatedArtifact,
+		artifact: artifactVerification(code.AuthenticatedArtifact, time.Time{}),
 	}
 	if v.ignoreFreshness {
 		return refs, nil
@@ -256,9 +275,12 @@ func (v *Verifier) authenticateFreshness(doc *document.Document, id string, arti
 // freshnessExpiration uses authenticated witness times, never local verification time.
 func freshnessExpiration(maxAge time.Duration, first time.Time, rest ...time.Time) time.Time {
 	for _, issuedAt := range rest {
-		if issuedAt.Before(first) {
+		if !issuedAt.IsZero() && (first.IsZero() || issuedAt.Before(first)) {
 			first = issuedAt
 		}
+	}
+	if first.IsZero() {
+		return time.Time{}
 	}
 	return first.Add(maxAge)
 }
