@@ -15,21 +15,29 @@ import (
 	"github.com/tinfoilsh/tinfoil-go/document/collateral"
 )
 
-// FormatV2 identifies the collaterals response carrying v3 collateral entries.
-const FormatV2 = "https://tinfoil.sh/predicate/attestation-collaterals/v2"
+// FormatV2 identifies the legacy GitHub workload-release collateral response.
+const FormatV2 = collateral.FormatV2
+
+const (
+	// FormatV3 identifies the request profile and response carrying config
+	// endorsement, runtime/platform provenance, and Tinfoil-signed freshness.
+	FormatV3    = collateral.FormatV3
+	RuntimeRepo = collateral.RuntimeRepo
+)
 
 // Request asks the collaterals service for everything a v3 document must
 // carry. The raw quote is the only platform input: the service derives the
 // AMD KDS parameters (SEV-SNP) or the Intel PCS URLs (TDX) from it, so the
 // enclave does no report parsing.
 type Request struct {
-	// Repo is the code repository whose Sigstore bundle is returned.
-	// Exactly one of Repo or Config selects the config source.
+	// Profile is FormatV3 for registry configs, or empty for legacy releases.
+	Profile string `json:"profile,omitempty"`
+	// Repo is a GitHub repository or, for FormatV3, a registry org/project.
 	Repo string `json:"repo,omitempty"`
-	// Tag optionally pins a code release; latest when empty.
+	// Tag is a required config revision for FormatV3; otherwise an optional release tag.
 	Tag string `json:"tag,omitempty"`
-	// Config pins a versioned registry config and its exact-byte digest.
-	Config *collateral.ConfigReference `json:"config,omitempty"`
+	// Digest pins the exact config bytes for FormatV3 and is empty for legacy releases.
+	Digest string `json:"digest,omitempty"`
 	// Platform is attestation's platform label: "sev-snp" or "tdx".
 	Platform string `json:"platform"`
 	// QuoteBase64 is the raw hardware report (SEV-SNP, 1184 bytes) or quote
@@ -37,9 +45,9 @@ type Request struct {
 	QuoteBase64 string `json:"quote_base64"`
 }
 
-// Response carries the complete collateral array for a v3 attestation
-// document: the platform endorsement entry (amd-vcek or intel-pcs) and the
-// two reference-values entries (sigstore-code, sigstore-platform).
+// Response carries the collateral array for a v3 attestation document.
+// Format must match the requested profile: FormatV2 for an empty profile,
+// or FormatV3 for a FormatV3 request.
 type Response struct {
 	Format    string    `json:"format"`
 	ExpiresAt time.Time `json:"expires_at"`

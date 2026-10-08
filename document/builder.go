@@ -23,6 +23,8 @@ type BuildInput struct {
 	// Collateral lets verifiers authenticate the evidence offline. It is not
 	// endorsed: every entry is checked against its own signature chain.
 	Collateral []collateral.Entry
+	// CollateralFormat selects the verification policy; empty means legacy.
+	CollateralFormat string
 }
 
 // QuoteGenerator obtains a hardware quote whose REPORT_DATA is reportData,
@@ -53,7 +55,7 @@ func Build(in BuildInput, generateQuote QuoteGenerator) ([]byte, error) {
 	}
 	// Parse decodes every entry of a known role and format; decoding them
 	// here rejects one Parse would refuse before it costs a hardware quote.
-	if _, err := collateral.Decode(in.Collateral); err != nil {
+	if _, err := decodeCollateral(in.CollateralFormat, in.Collateral); err != nil {
 		return nil, &errs.ConfigurationError{Err: err}
 	}
 	// Serializing rejects what Decode does not check, such as invalid UTF-8
@@ -71,7 +73,7 @@ func Build(in BuildInput, generateQuote QuoteGenerator) ([]byte, error) {
 	if len(report) == 0 {
 		return nil, fmt.Errorf("quote generator returned an empty report")
 	}
-	docBytes, err := sections.assemble(nonce, format, report, in.Collateral)
+	docBytes, err := sections.assemble(nonce, format, report, in.Collateral, in.CollateralFormat)
 	if err != nil {
 		return nil, &errs.ConfigurationError{Err: err}
 	}
@@ -123,7 +125,11 @@ func endorse(nonce []byte, cryptoMaterial []CryptoMaterialItem, deviceEvidence [
 }
 
 // assemble serializes the complete document.
-func (e *endorsed) assemble(nonce []byte, format string, report []byte, entries []collateral.Entry) ([]byte, error) {
+func (e *endorsed) assemble(nonce []byte, format string, report []byte, entries []collateral.Entry, collateralFormat string) ([]byte, error) {
+	// Preserve the wire shape accepted by legacy v3 verifiers.
+	if collateralFormat == collateral.FormatV2 {
+		collateralFormat = ""
+	}
 	docBytes, err := json.Marshal(rawDocument{
 		Format: AttestationV3Format,
 		Challenge: challenge{
@@ -139,9 +145,10 @@ func (e *endorsed) assemble(nonce []byte, format string, report []byte, entries 
 				DeviceEvidenceHash: hex.EncodeToString(e.deviceHash[:]),
 			},
 		},
-		CryptoMaterial: e.cryptoMaterial,
-		DeviceEvidence: e.deviceEvidence,
-		Collateral:     entries,
+		CryptoMaterial:   e.cryptoMaterial,
+		DeviceEvidence:   e.deviceEvidence,
+		Collateral:       entries,
+		CollateralFormat: collateralFormat,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("serializing attestation document: %w", err)
