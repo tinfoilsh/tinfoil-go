@@ -7,6 +7,7 @@ import (
 	"crypto/sha256"
 	"encoding/json/v2"
 	"fmt"
+	"strings"
 
 	"github.com/tinfoilsh/tinfoil-go/internal/canonical"
 	"github.com/tinfoilsh/tinfoil-go/internal/statement"
@@ -14,16 +15,17 @@ import (
 )
 
 const (
-	StatementType   = statement.StatementType
-	PredicateType   = "https://tinfoil.sh/predicate/artifact-freshness/v1"
-	PayloadType     = statement.PayloadType
-	BundleType      = statement.BundleType
-	KindPlatform    = "platform"
-	KindRuntime     = "runtime"
-	PlatformRepo    = "tinfoilsh/platform-endorsements"
-	RuntimeRepo     = "tinfoilsh/cvmimage"
-	PlatformName    = "platform-endorsements-igvm.json"
-	freshnessDomain = "tinfoil-artifact-freshness/v1\x00"
+	StatementType     = statement.StatementType
+	PredicateType     = "https://tinfoil.sh/predicate/artifact-freshness/v1"
+	PayloadType       = statement.PayloadType
+	BundleType        = statement.BundleType
+	KindPlatform      = "platform"
+	KindRuntime       = "runtime"
+	PlatformRepo      = RuntimeRepo
+	RuntimeRepo       = "tinfoilsh/cvmimage"
+	PlatformName      = "platform-endorsements.json"
+	PlatformTagPrefix = "platform-"
+	freshnessDomain   = "tinfoil-artifact-freshness/v1\x00"
 )
 
 // Artifact identifies exact release bytes, independently authenticated by the caller.
@@ -36,13 +38,21 @@ type Artifact struct {
 }
 
 func (a Artifact) Validate() error {
-	if !semver.IsValid(a.Tag) || semver.Canonical(a.Tag) != a.Tag {
+	version := a.Tag
+	if a.Kind == KindPlatform {
+		var ok bool
+		version, ok = strings.CutPrefix(a.Tag, PlatformTagPrefix)
+		if !ok {
+			return fmt.Errorf("platform tag must start with %q", PlatformTagPrefix)
+		}
+	}
+	if !semver.IsValid(version) || semver.Canonical(version) != version {
 		return fmt.Errorf("artifact tag must be a canonical semantic version")
 	}
 	switch a.Kind {
 	case KindPlatform:
 		if a.Repo != PlatformRepo || a.Name != PlatformName {
-			return fmt.Errorf("platform freshness requires the IGVM platform artifact")
+			return fmt.Errorf("platform freshness requires the cvmimage platform artifact")
 		}
 	case KindRuntime:
 		if a.Repo != RuntimeRepo || a.Name != RuntimeName(a.Tag) {

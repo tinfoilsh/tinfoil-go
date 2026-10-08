@@ -11,6 +11,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/tinfoilsh/tinfoil-go/document/collateral"
+	"github.com/tinfoilsh/tinfoil-go/endorsement/freshness"
 	"github.com/tinfoilsh/tinfoil-go/internal/testutil"
 	"github.com/tinfoilsh/tinfoil-go/verify/measurement"
 )
@@ -163,4 +164,32 @@ func testClient(t *testing.T) *Client {
 	client, err := NewDefaultClient()
 	require.NoError(t, err)
 	return client
+}
+
+func TestConfigPlatformPublisher(t *testing.T) {
+	identity := regexp.MustCompile(configPlatformIdentity)
+	const prefix = "https://github.com/tinfoilsh/cvmimage/.github/workflows/"
+	require.True(t, identity.MatchString(prefix+"platform-release.yml@refs/tags/platform-v1.2.3"))
+	for _, san := range []string{
+		prefix + "release.yml@refs/tags/platform-v1.2.3",
+		prefix + "platform-release.yml@refs/tags/v1.2.3",
+		prefix + "platform-release.yml@refs/heads/platform-v1.2.3",
+		prefix + "platform-release.yml@refs/tags/platform-v1.2.3@extra",
+		"https://github.com/tinfoilsh/platform-endorsements/.github/workflows/build.yml@refs/tags/v1.2.3",
+	} {
+		require.False(t, identity.MatchString(san), san)
+	}
+
+	client := testClient(t)
+	for _, tt := range []struct{ repo, tag string }{
+		{"tinfoilsh/platform-endorsements", "platform-v1.2.3"},
+		{freshness.PlatformRepo, "v1.2.3"},
+		{freshness.PlatformRepo, "platform-v1.2"},
+	} {
+		_, err := client.AuthenticateConfigPlatform(nil, tt.repo, tt.tag, strings.Repeat("a", 64))
+		require.Error(t, err)
+		require.NotContains(t, err.Error(), "parsing bundle")
+	}
+	_, err := client.AuthenticatePlatformEndorsements(nil, freshness.PlatformRepo, "platform-v1.2.3", strings.Repeat("a", 64))
+	require.ErrorContains(t, err, "platform endorsements repo")
 }

@@ -23,6 +23,7 @@ import (
 	"google.golang.org/protobuf/types/known/structpb"
 
 	"github.com/tinfoilsh/tinfoil-go/document/collateral"
+	"github.com/tinfoilsh/tinfoil-go/endorsement/freshness"
 	"github.com/tinfoilsh/tinfoil-go/internal/errs"
 	"github.com/tinfoilsh/tinfoil-go/verify/internal/policy"
 	"github.com/tinfoilsh/tinfoil-go/verify/measurement"
@@ -48,6 +49,7 @@ const (
 
 var (
 	platformEndorsementsIdentity = githubWorkflowIdentityPattern(platformEndorsementsRepo, `build\.yml`, `refs/tags/v[0-9][^@]*`)
+	configPlatformIdentity       = githubWorkflowIdentityPattern(freshness.PlatformRepo, `platform-release\.yml`, `refs/tags/platform-v[0-9][^@]*`)
 	freshnessWitnessIdentity     = githubWorkflowIdentityPattern(freshnessWitnessRepo, `freshness\.yml`, `refs/heads/main`)
 )
 
@@ -371,7 +373,29 @@ func measurementFromStatement(statement *in_toto.Statement) (*measurement.Measur
 }
 
 func (c *Client) AuthenticatePlatformEndorsements(bundleJSON []byte, repo, tag, hexDigest string) (*PlatformEndorsements, error) {
-	result, _, err := c.verifyBundleWithIdentity(bundleJSON, platformEndorsementsIdentity, hexDigest)
+	if repo != platformEndorsementsRepo {
+		return nil, fmt.Errorf("platform endorsements repo %q does not equal %q", repo, platformEndorsementsRepo)
+	}
+	return c.authenticatePlatform(bundleJSON, repo, tag, hexDigest, platformEndorsementsIdentity, policy.ArtifactFormat)
+}
+
+func (c *Client) AuthenticateConfigPlatform(bundleJSON []byte, repo, tag, hexDigest string) (*PlatformEndorsements, error) {
+	expected := freshness.Artifact{Kind: freshness.KindPlatform, Repo: repo, Tag: tag, Name: freshness.PlatformName, Digest: hexDigest}
+	if err := expected.Validate(); err != nil {
+		return nil, err
+	}
+	platform, err := c.authenticatePlatform(bundleJSON, repo, tag, hexDigest, configPlatformIdentity, policy.ArtifactFormatV2)
+	if err != nil {
+		return nil, err
+	}
+	if platform.SubjectName != freshness.PlatformName {
+		return nil, fmt.Errorf("config verification requires its dedicated platform endorsement artifact")
+	}
+	return platform, nil
+}
+
+func (c *Client) authenticatePlatform(bundleJSON []byte, repo, tag, hexDigest, identity, format string) (*PlatformEndorsements, error) {
+	result, _, err := c.verifyBundleWithIdentity(bundleJSON, identity, hexDigest)
 	if err != nil {
 		return nil, fmt.Errorf("verifying platform endorsements bundle: %w", err)
 	}
