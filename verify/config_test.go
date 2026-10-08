@@ -24,51 +24,50 @@ func TestConfigBoundRequiresIndependentTrustAndFreshness(t *testing.T) {
 	require.ErrorContains(t, err, "must not be empty")
 	_, err = NewVerifier(WithConfigSigningKeys(nil))
 	require.ErrorContains(t, err, "must not be empty")
-	v, err := NewVerifier(WithConfigSigningKeys(keys), WithFreshnessSigningKeys([]crypto.PublicKey{key.Public()}), WithIgnoreFreshness())
-	require.NoError(t, err)
-	_, err = v.VerifyConfig(nil, nil, ref)
-	require.ErrorContains(t, err, "requires config, platform, and runtime freshness")
-
-	v, err = NewVerifier(WithConfigSigningKeys(keys), WithFreshnessSigningKeys([]crypto.PublicKey{key.Public()}))
+	v, err := NewVerifier(WithConfigSigningKeys(keys), WithFreshnessSigningKeys(keys), WithIgnoreFreshness())
 	require.NoError(t, err)
 	nonce := make([]byte, document.NonceSize)
-	raw, err := document.Build(document.BuildInput{Nonce: nonce}, func([64]byte) (string, []byte, error) { return document.SEVSNPReportV1Format, []byte("quote"), nil })
+	raw, err := document.Build(document.BuildInput{Nonce: nonce, CollateralFormat: collateral.FormatV3}, func([64]byte) (string, []byte, error) { return document.SEVSNPReportV1Format, []byte("quote"), nil })
 	require.NoError(t, err)
-	_, err = v.VerifyConfig(raw, nonce, ref)
-	require.ErrorContains(t, err, collateral.ConfigID)
-	for name, bad := range map[string]string{
-		"identity": "org/project/extra",
-		"revision": ref + "@../v1",
-		"digest":   ref + "@sha256:" + strings.Repeat("AB", sha256.Size),
+	_, err = v.VerifyV3(raw, nonce, ref)
+	require.ErrorContains(t, err, "requires config, platform, and runtime freshness")
+}
+
+func TestCollateralVersionSelectsVerification(t *testing.T) {
+	v, err := NewVerifier()
+	require.NoError(t, err)
+	nonce := make([]byte, document.NonceSize)
+	for _, tc := range []struct{ format, want string }{
+		{"", collateral.SigstoreCodeV1Format},
+		{collateral.FormatV2, collateral.SigstoreCodeV1Format},
+		{collateral.FormatV3, collateral.ConfigID},
 	} {
-		t.Run(name, func(t *testing.T) {
-			_, err := v.VerifyConfig(raw, nonce, bad)
-			var e *ConfigurationError
-			require.ErrorAs(t, err, &e)
+		t.Run(tc.format, func(t *testing.T) {
+			raw, err := document.Build(document.BuildInput{Nonce: nonce, CollateralFormat: tc.format}, func([64]byte) (string, []byte, error) { return document.SEVSNPReportV1Format, []byte("quote"), nil })
+			require.NoError(t, err)
+			_, rejectedAt, err := v.verifyV3(raw, nonce, "org/project")
+			require.ErrorContains(t, err, tc.want)
+			require.Equal(t, layerProvenance, rejectedAt)
 		})
 	}
 }
 
-func TestParseConfigReference(t *testing.T) {
+func TestConfigReferencePins(t *testing.T) {
+	v, err := NewVerifier()
+	require.NoError(t, err)
+	nonce := make([]byte, document.NonceSize)
+	raw, err := document.Build(document.BuildInput{Nonce: nonce, CollateralFormat: collateral.FormatV3}, func([64]byte) (string, []byte, error) { return document.SEVSNPReportV1Format, []byte("quote"), nil })
+	require.NoError(t, err)
 	const repo = "org/project"
 	digest := strings.Repeat("ab", sha256.Size)
-	for _, pins := range [][2]string{{}, {"v1", ""}, {"", digest}, {"v1", digest}} {
-		ref := repo
-		if pins[0] != "" {
-			ref += "@" + pins[0]
-		}
-		if pins[1] != "" {
-			ref += "@sha256:" + pins[1]
-		}
-		identity, revision, hash, err := ParseConfigReference(ref)
-		require.NoError(t, err)
-		require.Equal(t, "/"+repo, identity)
-		require.Equal(t, pins[0], revision)
-		require.Equal(t, pins[1], hash)
+	for _, ref := range []string{repo, repo + "@v1", repo + "@sha256:" + digest, repo + "@v1@sha256:" + digest} {
+		_, err := v.VerifyV3(raw, nonce, ref)
+		require.ErrorIs(t, err, collateral.ErrNotFound, "valid pins must reach endorsement verification")
 	}
 	for _, ref := range []string{"", "/org/project", "Org/project", "org/project_name", "org/project@v1/path", "org/project@sha256:bad", "org/project@v1@v2"} {
-		_, _, _, err := ParseConfigReference(ref)
-		require.Error(t, err, ref)
+		_, err := v.VerifyV3(raw, nonce, ref)
+		var configErr *ConfigurationError
+		require.ErrorAs(t, err, &configErr, ref)
 	}
 }
 

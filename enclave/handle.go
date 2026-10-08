@@ -6,7 +6,6 @@ package enclave
 import (
 	"bytes"
 	"context"
-	"crypto"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -27,8 +26,7 @@ type Handle struct {
 	enclave, repo, relay string
 	// verifier is the immutable verification policy, shared by every handle
 	// derived from this one.
-	verifier           *verify.Verifier
-	configVerification bool
+	verifier *verify.Verifier
 
 	stateMu      sync.RWMutex
 	state        *enclaveState
@@ -91,19 +89,19 @@ type Options struct {
 
 // verifier builds the immutable policy these options describe, validating
 // them once. A nil receiver selects the defaults.
-func (input *Options) verifier(extra ...verify.Option) (*verify.Verifier, error) {
+func (input *Options) verifier() (*verify.Verifier, error) {
 	if input == nil {
-		return verify.NewVerifier(extra...)
+		return verify.NewVerifier()
 	}
 	opts := []verify.Option{
 		verify.WithPinnedRegisters(input.PinnedRegisters),
 		verify.WithFreshnessMaxAge(input.FreshnessMaxAge),
 	}
-	return verify.NewVerifier(append(opts, extra...)...)
+	return verify.NewVerifier(opts...)
 }
 
-// NewHandle creates a handle for an enclave and repository
-// reference, owner/name[@tag][@sha256:digest]. Verification happens on first use.
+// NewHandle pins a repository or registry project, org/project[@revision][@sha256:digest].
+// The document's collateral version selects verification on first use.
 func NewHandle(enclave, repo string, opts *Options) (*Handle, error) {
 	if _, _, _, err := verify.ParseReference(repo); err != nil {
 		return nil, &ConfigurationError{Err: err}
@@ -113,23 +111,6 @@ func NewHandle(enclave, repo string, opts *Options) (*Handle, error) {
 		return nil, err
 	}
 	return &Handle{enclave: enclave, repo: repo, verifier: verifier}, nil
-}
-
-// NewConfigHandle requires config verification for org/project[@revision][@sha256:digest].
-// Nil keys select Tinfoil's public config signer; explicit keys replace that trust for private configs.
-func NewConfigHandle(enclave, ref string, keys []crypto.PublicKey, opts *Options) (*Handle, error) {
-	if _, _, _, err := verify.ParseConfigReference(ref); err != nil {
-		return nil, &ConfigurationError{Err: err}
-	}
-	var trust []verify.Option
-	if keys != nil {
-		trust = append(trust, verify.WithConfigSigningKeys(keys))
-	}
-	verifier, err := opts.verifier(trust...)
-	if err != nil {
-		return nil, err
-	}
-	return &Handle{enclave: enclave, repo: ref, verifier: verifier, configVerification: true}, nil
 }
 
 // NewDefaultHandle applies opts to every discovered router and fallback.
@@ -152,12 +133,12 @@ func NewDefaultHandle(opts *Options) (*Handle, error) {
 
 // ForEnclave keeps the repository reference and verification options.
 func (s *Handle) ForEnclave(enclave string) *Handle {
-	return &Handle{enclave: enclave, repo: s.repo, verifier: s.verifier, configVerification: s.configVerification}
+	return &Handle{enclave: enclave, repo: s.repo, verifier: s.verifier}
 }
 
 // ViaRelay fetches attestation through relay, which forwards it to the enclave.
 func (s *Handle) ViaRelay(relay string) *Handle {
-	return &Handle{enclave: s.enclave, repo: s.repo, relay: relay, verifier: s.verifier, configVerification: s.configVerification}
+	return &Handle{enclave: s.enclave, repo: s.repo, relay: relay, verifier: s.verifier}
 }
 
 // Enclave returns the enclave URL

@@ -124,8 +124,9 @@ func (v *Verifier) PinnedRegisters() *measurement.Measurement {
 	return cloneMeasurement(v.pinnedRegisters)
 }
 
-// VerifyV3 appraises a nonce-bound v3 attestation document. repo is the
-// trusted owner/name[@tag][@sha256:digest] the code provenance must match.
+// VerifyV3 appraises a nonce-bound v3 attestation document using its collateral
+// version. repo pins the expected repository or registry project as
+// org/project[@revision][@sha256:digest].
 //
 // The caller owns both expectations that cannot come from the document: the
 // nonce it generated, and repo. On success it must bind its traffic to the
@@ -148,19 +149,6 @@ const (
 	layerPolicy     layer = "policy"
 )
 
-// verifyV3 is VerifyV3, also reporting which layer rejected the document.
-func (v *Verifier) verifyV3(docBytes, nonce []byte, repo string) (*Verification, layer, error) {
-	if v == nil || v.now == nil || v.endorsements == nil {
-		return nil, layerNone, &errs.ConfigurationError{Err: fmt.Errorf("verifier must be built with NewVerifier")}
-	}
-	if _, _, _, err := endorsement.ParseReference(repo); err != nil {
-		return nil, layerProvenance, &errs.ConfigurationError{Err: err}
-	}
-	return v.verify(docBytes, nonce, func(doc *document.Document, now time.Time) (*referenceValues, error) {
-		return v.codeReferences(doc, repo, now)
-	})
-}
-
 type referenceValues struct {
 	quote              quote.ReferenceValues
 	artifact           endorsement.AuthenticatedArtifact
@@ -168,7 +156,15 @@ type referenceValues struct {
 	freshnessExpiresAt time.Time
 }
 
-func (v *Verifier) verify(docBytes, nonce []byte, references func(*document.Document, time.Time) (*referenceValues, error)) (*Verification, layer, error) {
+// verifyV3 is VerifyV3, also reporting which layer rejected the document.
+func (v *Verifier) verifyV3(docBytes, nonce []byte, repo string) (*Verification, layer, error) {
+	if v == nil || v.now == nil || v.endorsements == nil || v.configVerifier == nil || v.freshnessVerifier == nil {
+		return nil, layerNone, &errs.ConfigurationError{Err: fmt.Errorf("verifier must be built with NewVerifier")}
+	}
+	name, revision, digest, err := endorsement.ParseReference(repo)
+	if err != nil {
+		return nil, layerProvenance, &errs.ConfigurationError{Err: err}
+	}
 	doc, err := document.Parse(docBytes, nonce)
 	if err != nil {
 		return nil, layerEnvelope, err
@@ -177,7 +173,25 @@ func (v *Verifier) verify(docBytes, nonce []byte, references func(*document.Docu
 	// All reference values are appraised against the same instant.
 	now := v.now()
 
-	refs, err := references(doc, now)
+	var refs *referenceValues
+	switch doc.CollateralFormat() {
+	case collateral.FormatV3:
+		if v.ignoreFreshness {
+			return nil, layerProvenance, configurationError(fmt.Errorf("config verification requires config, platform, and runtime freshness"))
+		}
+		policy := endorsement.ConfigPolicy{
+			Identity: "/" + name, Revision: revision, Digest: digest,
+			Now: now, MaxAge: v.freshnessMaxAge,
+		}
+		if err := policy.ValidatePins(); err != nil {
+			return nil, layerProvenance, configurationError(err)
+		}
+		refs, err = v.configReferences(doc, policy)
+	case collateral.FormatV2:
+		refs, err = v.codeReferences(doc, repo, now)
+	default:
+		return nil, layerProvenance, errs.WrapAttestation(fmt.Errorf("unsupported collateral format %q", doc.CollateralFormat()))
+	}
 	if err != nil {
 		return nil, layerProvenance, errs.WrapAttestation(fmt.Errorf("reference values: %w", err))
 	}
