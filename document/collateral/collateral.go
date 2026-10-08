@@ -14,6 +14,11 @@ import (
 
 // Collateral format registry (v3).
 const (
+	// FormatV2 identifies legacy GitHub workload-release collateral.
+	FormatV2 = "https://tinfoil.sh/predicate/attestation-collaterals/v2"
+	// FormatV3 identifies config, runtime, and platform collateral.
+	FormatV3 = "https://tinfoil.sh/predicate/attestation-collaterals/v3"
+
 	// AMDVCEKV1Format carries {vcek_der_base64, cert_chain_pem}.
 	AMDVCEKV1Format = "https://tinfoil.sh/collateral/amd-vcek/v1"
 	// AMDCRLV1Format carries {crl_der_base64}: the AMD KDS CRL for the product

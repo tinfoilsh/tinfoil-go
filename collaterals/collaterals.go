@@ -16,12 +16,12 @@ import (
 )
 
 // FormatV2 identifies the legacy GitHub workload-release collateral response.
-const FormatV2 = "https://tinfoil.sh/predicate/attestation-collaterals/v2"
+const FormatV2 = collateral.FormatV2
 
 const (
 	// FormatV3 identifies the request profile and response carrying config
 	// endorsement, runtime/platform provenance, and Tinfoil-signed freshness.
-	FormatV3    = "https://tinfoil.sh/predicate/attestation-collaterals/v3"
+	FormatV3    = collateral.FormatV3
 	RuntimeRepo = collateral.RuntimeRepo
 )
 

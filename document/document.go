@@ -82,12 +82,13 @@ const NonceSize = 32
 // canonicalization, no raw-span extraction (the same envelope discipline as
 // DSSE and JWS).
 type rawDocument struct {
-	Format         string             `json:"format"`
-	Challenge      challenge          `json:"challenge"`
-	CPUEvidence    rawCPUEvidence     `json:"cpu_evidence"`
-	CryptoMaterial string             `json:"crypto_material"`
-	DeviceEvidence string             `json:"device_evidence"`
-	Collateral     []collateral.Entry `json:"collateral"`
+	Format           string             `json:"format"`
+	Challenge        challenge          `json:"challenge"`
+	CPUEvidence      rawCPUEvidence     `json:"cpu_evidence"`
+	CryptoMaterial   string             `json:"crypto_material"`
+	DeviceEvidence   string             `json:"device_evidence"`
+	CollateralFormat string             `json:"collateral_format,omitempty"`
+	Collateral       []collateral.Entry `json:"collateral"`
 }
 
 // Document is a parsed v3 attestation document. Obtain one from Parse, which
@@ -95,10 +96,11 @@ type rawDocument struct {
 // its accessors return decoded copies. Methods require a document returned by
 // Parse: only ExpectedReportData accepts a nil or zero-value Document.
 type Document struct {
-	challenge  challenge
-	endorsed   endorsedHashes
-	evidence   CPUEvidence
-	collateral collateral.Set
+	challenge        challenge
+	endorsed         endorsedHashes
+	evidence         CPUEvidence
+	collateral       collateral.Set
+	collateralFormat string
 
 	cryptoMaterialBytes []byte
 	deviceEvidenceBytes []byte
@@ -374,7 +376,7 @@ func decode(docBytes []byte) (*Document, error) {
 		return nil, err
 	}
 
-	set, err := collateral.Decode(raw.Collateral)
+	set, err := decodeCollateral(raw.CollateralFormat, raw.Collateral)
 	if err != nil {
 		return nil, err
 	}
@@ -384,6 +386,7 @@ func decode(docBytes []byte) (*Document, error) {
 		endorsed:            raw.CPUEvidence.Endorsed,
 		evidence:            CPUEvidence{Format: raw.CPUEvidence.Format, Report: report},
 		collateral:          set,
+		collateralFormat:    raw.CollateralFormat,
 		cryptoMaterialBytes: cryptoBytes,
 		deviceEvidenceBytes: deviceBytes,
 		cryptoMaterial:      cm,
