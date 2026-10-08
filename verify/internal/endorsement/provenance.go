@@ -411,8 +411,8 @@ func (c *Client) authenticatePlatform(bundleJSON []byte, repo, tag, hexDigest, i
 	if result.Statement.PredicateType != artifact.Format {
 		return nil, fmt.Errorf("platform predicate type %q does not match artifact format %q", result.Statement.PredicateType, artifact.Format)
 	}
-	if repo != platformEndorsementsRepo {
-		return nil, fmt.Errorf("platform endorsements repo %q does not equal %q", repo, platformEndorsementsRepo)
+	if artifact.Format != format {
+		return nil, fmt.Errorf("platform artifact format %q does not equal %q", artifact.Format, format)
 	}
 	authenticated, err := authenticatedArtifact(result, repo, tag, hexDigest, "platform endorsements")
 	if err != nil {
