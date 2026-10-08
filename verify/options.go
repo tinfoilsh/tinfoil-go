@@ -41,9 +41,10 @@ func WithFreshnessMaxAge(maxAge time.Duration) Option {
 	}
 }
 
-// WithIgnoreFreshness skips code and platform freshness witnesses for archived
-// documents. FreshnessExpiresAt is zero; certificate validity and all other
-// attestation checks still apply.
+// WithIgnoreFreshness permits archived attestations. Legacy documents skip their
+// code/platform witnesses; config documents still require and authenticate every
+// freshness proof, but skip approval age checks. FreshnessExpiresAt is zero;
+// signatures, timestamps, inclusion, pins, and hardware checks still apply.
 func WithIgnoreFreshness() Option {
 	return func(v *Verifier) error {
 		v.ignoreFreshness = true

@@ -93,14 +93,15 @@ func (input *Options) verifier() (*verify.Verifier, error) {
 	if input == nil {
 		return verify.NewVerifier()
 	}
-	return verify.NewVerifier(
+	opts := []verify.Option{
 		verify.WithPinnedRegisters(input.PinnedRegisters),
 		verify.WithFreshnessMaxAge(input.FreshnessMaxAge),
-	)
+	}
+	return verify.NewVerifier(opts...)
 }
 
-// NewHandle creates a handle for an enclave and repository
-// reference, owner/name[@tag][@sha256:digest]. Verification happens on first use.
+// NewHandle pins a repository or registry project, org/project[@revision][@sha256:digest].
+// The document's collateral version selects verification on first use.
 func NewHandle(enclave, repo string, opts *Options) (*Handle, error) {
 	if _, _, _, err := verify.ParseReference(repo); err != nil {
 		return nil, &ConfigurationError{Err: err}
@@ -145,7 +146,7 @@ func (s *Handle) Enclave() string {
 	return s.enclave
 }
 
-// Repo returns the trusted repository reference, including any tag or digest pins.
+// Repo returns the trusted repository or registry reference, including version and digest pins.
 func (s *Handle) Repo() string {
 	return s.repo
 }

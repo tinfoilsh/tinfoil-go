@@ -122,8 +122,10 @@ func TestVerifyRequiresSignatureTimestampAndInclusion(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			b := f.Bundle(t, payload)
 			mutate(b)
-			_, err := verifier(t, f).Verify(sigstoretest.MarshalBundle(t, b), endorsement.FreshnessPolicy{Artifact: a, Now: f.Now})
-			require.Error(t, err)
+			for _, ignore := range []bool{false, true} {
+				_, err := verifier(t, f).Verify(sigstoretest.MarshalBundle(t, b), endorsement.FreshnessPolicy{Artifact: a, Now: f.Now, IgnoreFreshness: ignore})
+				require.Error(t, err)
+			}
 		})
 	}
 	for _, untrusted := range []bool{false, true} {
@@ -138,8 +140,10 @@ func TestVerifyRequiresSignatureTimestampAndInclusion(t *testing.T) {
 		}
 		altered, err := json.Marshal(s)
 		require.NoError(t, err)
-		_, err = verifier(t, f).Verify(sigstoretest.MarshalBundle(t, f.Bundle(t, altered)), endorsement.FreshnessPolicy{Artifact: a, Now: f.Now})
-		require.ErrorContains(t, err, "inner timestamp")
+		for _, ignore := range []bool{false, true} {
+			_, err = verifier(t, f).Verify(sigstoretest.MarshalBundle(t, f.Bundle(t, altered)), endorsement.FreshnessPolicy{Artifact: a, Now: f.Now, IgnoreFreshness: ignore})
+			require.ErrorContains(t, err, "inner timestamp")
+		}
 	}
 }
 
@@ -165,6 +169,9 @@ func TestApprovalAgeUsesInnerTime(t *testing.T) {
 			} else {
 				require.Error(t, err)
 			}
+			got, err := verifier(t, f).Verify(b, endorsement.FreshnessPolicy{Artifact: a, Now: tc.now, IgnoreFreshness: true})
+			require.NoError(t, err)
+			require.Equal(t, f.Now, got.ApprovalTime)
 		})
 	}
 	for _, policy := range []endorsement.FreshnessPolicy{

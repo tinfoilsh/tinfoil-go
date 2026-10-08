@@ -12,6 +12,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/tinfoilsh/tinfoil-go/document"
+	"github.com/tinfoilsh/tinfoil-go/document/collateral"
 	"github.com/tinfoilsh/tinfoil-go/internal/testutil"
 	"github.com/tinfoilsh/tinfoil-go/verify"
 	"github.com/tinfoilsh/tinfoil-go/verify/measurement"
@@ -37,6 +38,10 @@ func TestErrorsLeadWithCategory(t *testing.T) {
 	nonce := NewNonce()
 	verifier, err := NewVerifier("")
 	require.NoError(t, err)
+	doc, err := document.Build(document.BuildInput{Nonce: nonce, CollateralFormat: collateral.FormatV3}, func([64]byte) (string, []byte, error) {
+		return document.SEVSNPReportV1Format, []byte("quote"), nil
+	})
+	require.NoError(t, err)
 	for _, tt := range []struct {
 		name   string
 		prefix string
@@ -45,7 +50,7 @@ func TestErrorsLeadWithCategory(t *testing.T) {
 		{"invalid options", ConfigurationErrorPrefix, func() error { _, err := NewVerifier(`{"freshness_max_age_ns":-1}`); return err }},
 		{"unknown option", ConfigurationErrorPrefix, func() error { _, err := NewVerifier(`{"enclave":"x"}`); return err }},
 		{"URL as host", ConfigurationErrorPrefix, func() error { _, err := AttestationURL("https://enclave.example", "", nonce); return err }},
-		{"invalid repo", ConfigurationErrorPrefix, func() error { _, err := verifier.Verify([]byte("{}"), nonce, "owner"); return err }},
+		{"invalid repo", ConfigurationErrorPrefix, func() error { _, err := verifier.Verify(doc, nonce, "owner"); return err }},
 		{"short nonce", ConfigurationErrorPrefix, func() error { _, err := verifier.Verify([]byte("{}"), nonce[1:], routerRepo); return err }},
 		{"malformed document", AttestationErrorPrefix, func() error { _, err := verifier.Verify([]byte("{}"), nonce, routerRepo); return err }},
 	} {

@@ -31,7 +31,7 @@ func TestFreshnessExpiration(t *testing.T) {
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			for _, maxAge := range []time.Duration{24 * time.Hour, endorsement.MaxFreshnessAge, 30 * 24 * time.Hour} {
-				require.Equal(t, issuedAt.Add(maxAge), freshnessExpiration(tt.codeWitnessedAt, tt.platformWitnessedAt, maxAge))
+				require.Equal(t, issuedAt.Add(maxAge), freshnessExpiration(maxAge, tt.codeWitnessedAt, tt.platformWitnessedAt))
 			}
 		})
 	}
@@ -84,7 +84,7 @@ func TestLiveIgnoreFreshness(t *testing.T) {
 		{"expired witnesses", nil, expiredMaxAge, "stale", true},
 		{"missing witnesses", changeCollateral(collateral.SigstoreFreshnessV1Format, true), 0, "code-freshness", true},
 		{"invalid witnesses", changeCollateral(collateral.SigstoreFreshnessV1Format, false), 0, "verifying code freshness", true},
-		{"invalid code provenance", changeCollateral(collateral.SigstoreCodeV1Format, false), 0, "verifying code measurement", false},
+		{"invalid code provenance", changeCollateral(collateral.SigstoreCodeV1Format, false), 0, "parsing bundle", false},
 		{"invalid platform provenance", changeCollateral(collateral.SigstorePlatformV1Format, false), 0, "verifying platform endorsements", false},
 	} {
 		t.Run(tt.name, func(t *testing.T) {

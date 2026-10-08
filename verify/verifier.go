@@ -13,6 +13,7 @@
 package verify
 
 import (
+	"crypto"
 	"fmt"
 	"time"
 
@@ -49,15 +50,19 @@ type Verifier struct {
 	// endorsements authenticates reference values against its own copy of the
 	// trusted root. NewVerifier builds one from the embedded root; only the
 	// conformance build can replace it.
-	endorsements *endorsement.Client
+	endorsements      *endorsement.Client
+	configKeys        []crypto.PublicKey
+	configVerifier    *endorsement.ConfigVerifier
+	freshnessKeys     []crypto.PublicKey
+	freshnessVerifier *endorsement.FreshnessVerifier
 
 	// overrides is empty in a production build; the conformance build uses it
 	// to carry synthetic vendor roots down to the CPU evidence layer.
 	overrides overrides
 }
 
-// NewVerifier builds a Verifier from opts. With no options it appraises against
-// the release measurements alone, with the seven-day freshness bound.
+// NewVerifier builds a Verifier from opts. Defaults use embedded production trust,
+// Tinfoil's public config and artifact signing keys, and a seven-day freshness bound.
 func NewVerifier(opts ...Option) (*Verifier, error) {
 	// Build default endorsement.Client with embedded roots
 	endorsementClient, err := endorsement.NewDefaultClient()
@@ -77,6 +82,25 @@ func NewVerifier(opts ...Option) (*Verifier, error) {
 			return nil, configurationError(err)
 		}
 	}
+	publicKeys, err := endorsement.PublicSigningKeys()
+	if err != nil {
+		return nil, configurationError(err)
+	}
+	if v.configKeys == nil {
+		v.configKeys = publicKeys
+	}
+	if v.freshnessKeys == nil {
+		v.freshnessKeys = publicKeys
+	}
+	v.configVerifier, err = v.endorsements.ConfigVerifier(v.configKeys)
+	if err != nil {
+		return nil, configurationError(err)
+	}
+	v.freshnessVerifier, err = v.endorsements.FreshnessVerifier(v.freshnessKeys)
+	if err != nil {
+		return nil, configurationError(err)
+	}
+	v.configKeys, v.freshnessKeys = nil, nil
 	return v, nil
 }
 
@@ -93,8 +117,9 @@ func (v *Verifier) PinnedRegisters() *measurement.Measurement {
 	return cloneMeasurement(v.pinnedRegisters)
 }
 
-// VerifyV3 appraises a nonce-bound v3 attestation document. repo is the
-// trusted owner/name[@tag][@sha256:digest] the code provenance must match.
+// VerifyV3 appraises a nonce-bound v3 attestation document using its collateral
+// version. repo pins the expected repository or registry project as
+// org/project[@revision][@sha256:digest].
 //
 // The caller owns both expectations that cannot come from the document: the
 // nonce it generated, and repo. On success it must bind its traffic to the
@@ -117,36 +142,44 @@ const (
 	layerPolicy     layer = "policy"
 )
 
+type endorsementResult struct {
+	quote              quote.ReferenceValues
+	artifact           endorsement.AuthenticatedArtifact
+	config             *ConfigVerification
+	freshnessExpiresAt time.Time
+}
+
 // verifyV3 is VerifyV3, also reporting which layer rejected the document.
 func (v *Verifier) verifyV3(docBytes, nonce []byte, repo string) (*Verification, layer, error) {
-	if v == nil || v.now == nil || v.endorsements == nil {
+	if v == nil || v.now == nil || v.endorsements == nil || v.configVerifier == nil || v.freshnessVerifier == nil {
 		return nil, layerNone, &errs.ConfigurationError{Err: fmt.Errorf("verifier must be built with NewVerifier")}
-	}
-	configRepo, _, _, err := endorsement.ParseReference(repo)
-	if err != nil {
-		return nil, layerProvenance, &errs.ConfigurationError{Err: err}
 	}
 	doc, err := document.Parse(docBytes, nonce)
 	if err != nil {
 		return nil, layerEnvelope, err
 	}
 
-	// Sampled once, so freshness appraisal and the CPU evidence windows judge
-	// this document against the same instant.
+	// All reference values are appraised against the same instant.
 	now := v.now()
 
-	code, endorsements, freshnessExpiresAt, err := v.authenticateReferenceValues(doc, repo, now)
+	var refs *endorsementResult
+	switch doc.CollateralFormat() {
+	case collateral.FormatV3:
+		refs, err = v.configReferences(doc, repo, now)
+	case collateral.FormatV2:
+		refs, err = v.codeReferences(doc, repo, now)
+	default:
+		return nil, layerProvenance, errs.WrapAttestation(fmt.Errorf("unsupported collateral format %q", doc.CollateralFormat()))
+	}
 	if err != nil {
-		return nil, layerProvenance, errs.WrapAttestation(fmt.Errorf("reference values: %w", err))
+		return nil, layerProvenance, errs.WrapAttestation(err)
 	}
 
 	authenticated, err := quote.Authenticate(doc.CPUEvidence(), doc.CPUEndorsements(), v.quoteOptions(now))
 	if err != nil {
 		return nil, layerQuote, err
 	}
-	assembled, err := quote.Assemble(doc, quote.LegacyReferenceValues{
-		Endorsements: endorsements.Artifact, Code: code.Measurement, Shape: code.Shape,
-	}, v.pinnedRegisters, authenticated)
+	assembled, err := quote.Assemble(doc, refs.quote, v.pinnedRegisters, authenticated)
 	if err != nil {
 		return nil, layerPolicy, err
 	}
@@ -155,13 +188,14 @@ func (v *Verifier) verifyV3(docBytes, nonce []byte, repo string) (*Verification,
 	}
 
 	return &Verification{
-		ConfigRepo:         configRepo,
-		CodeDigest:         code.Digest,
-		CodeTag:            code.Tag,
-		CodeMeasurement:    code.Measurement,
+		ConfigRepo:         refs.artifact.Repo,
+		CodeDigest:         refs.artifact.Digest,
+		CodeTag:            refs.artifact.Tag,
+		CodeMeasurement:    assembled.CodeMeasurement,
+		Config:             refs.config,
 		EnclaveMeasurement: authenticated.Measurement,
 		CryptoMaterial:     doc.CryptoMaterialItems(),
-		FreshnessExpiresAt: freshnessExpiresAt,
+		FreshnessExpiresAt: refs.freshnessExpiresAt,
 		Metadata: VerificationMetadata{
 			Verifier:   SoftwareIdentity{Name: sdkinfo.Name, Version: sdkinfo.Version()},
 			VerifiedAt: now.UTC(),
@@ -169,53 +203,62 @@ func (v *Verifier) verifyV3(docBytes, nonce []byte, repo string) (*Verification,
 	}, layerNone, nil
 }
 
-func (v *Verifier) authenticateReferenceValues(doc *document.Document, repo string, appraisalTime time.Time) (*endorsement.Code, *endorsement.PlatformEndorsements, time.Time, error) {
+func (v *Verifier) codeReferences(doc *document.Document, repo string, appraisalTime time.Time) (*endorsementResult, error) {
 	codeRef, err := doc.SigstoreCode()
 	if err != nil {
-		return nil, nil, time.Time{}, err
+		return nil, err
 	}
 	code, err := v.endorsements.AuthenticateCode(codeRef.Bundle, repo, codeRef.Tag, codeRef.Digest)
 	if err != nil {
-		return nil, nil, time.Time{}, fmt.Errorf("verifying code measurement: %w", err)
+		return nil, err
 	}
 	platformRef, err := doc.SigstorePlatform()
 	if err != nil {
-		return nil, nil, time.Time{}, err
+		return nil, err
 	}
 	endorsements, err := v.endorsements.AuthenticatePlatformEndorsements(platformRef.Bundle, platformRef.Repo, platformRef.Tag, platformRef.Digest)
 	if err != nil {
-		return nil, nil, time.Time{}, fmt.Errorf("verifying platform endorsements: %w", err)
+		return nil, fmt.Errorf("verifying platform endorsements: %w", err)
+	}
+	refs := &endorsementResult{
+		quote: quote.LegacyReferenceValues{
+			Endorsements: endorsements.Artifact, Code: code.Measurement, Shape: code.Shape,
+		},
+		artifact: code.AuthenticatedArtifact,
 	}
 	if v.ignoreFreshness {
-		return code, endorsements, time.Time{}, nil
+		return refs, nil
 	}
 
-	codeFreshness, err := doc.Freshness(collateral.FreshnessIDCode)
+	codeWitnessedAt, err := v.authenticateFreshness(doc, collateral.FreshnessIDCode, &code.AuthenticatedArtifact, appraisalTime)
 	if err != nil {
-		return nil, nil, time.Time{}, err
+		return nil, fmt.Errorf("verifying code freshness: %w", err)
 	}
-	codeWitnessedAt, err := v.endorsements.AuthenticateFreshness(codeFreshness.Bundle, &code.AuthenticatedArtifact, appraisalTime, v.freshnessMaxAge)
+	platformWitnessedAt, err := v.authenticateFreshness(doc, collateral.FreshnessIDPlatform, &endorsements.AuthenticatedArtifact, appraisalTime)
 	if err != nil {
-		return nil, nil, time.Time{}, fmt.Errorf("verifying code freshness: %w", err)
+		return nil, fmt.Errorf("verifying platform freshness: %w", err)
 	}
-	platformFreshness, err := doc.Freshness(collateral.FreshnessIDPlatform)
-	if err != nil {
-		return nil, nil, time.Time{}, err
-	}
-	platformWitnessedAt, err := v.endorsements.AuthenticateFreshness(platformFreshness.Bundle, &endorsements.AuthenticatedArtifact, appraisalTime, v.freshnessMaxAge)
-	if err != nil {
-		return nil, nil, time.Time{}, fmt.Errorf("verifying platform freshness: %w", err)
-	}
+	refs.freshnessExpiresAt = freshnessExpiration(v.freshnessMaxAge, codeWitnessedAt, platformWitnessedAt)
+	return refs, nil
+}
 
-	return code, endorsements, freshnessExpiration(codeWitnessedAt, platformWitnessedAt, v.freshnessMaxAge), nil
+func (v *Verifier) authenticateFreshness(doc *document.Document, id string, artifact *endorsement.AuthenticatedArtifact, now time.Time) (time.Time, error) {
+	freshness, err := doc.Freshness(id)
+	if err != nil {
+		return time.Time{}, err
+	}
+	if freshness.Format != collateral.SigstoreFreshnessV1Format {
+		return time.Time{}, fmt.Errorf("legacy verification requires freshness collateral format %q", collateral.SigstoreFreshnessV1Format)
+	}
+	return v.endorsements.AuthenticateFreshness(freshness.Bundle, artifact, now, v.freshnessMaxAge)
 }
 
 // freshnessExpiration uses authenticated witness times, never local verification time.
-func freshnessExpiration(codeWitnessedAt, platformWitnessedAt time.Time, maxAge time.Duration) time.Time {
-	expiresAt := codeWitnessedAt.Add(maxAge)
-	platformExpiresAt := platformWitnessedAt.Add(maxAge)
-	if platformExpiresAt.Before(expiresAt) {
-		expiresAt = platformExpiresAt
+func freshnessExpiration(maxAge time.Duration, first time.Time, rest ...time.Time) time.Time {
+	for _, issuedAt := range rest {
+		if issuedAt.Before(first) {
+			first = issuedAt
+		}
 	}
-	return expiresAt
+	return first.Add(maxAge)
 }
