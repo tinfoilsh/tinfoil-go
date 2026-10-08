@@ -9,12 +9,12 @@ import (
 	"github.com/tinfoilsh/tinfoil-go/verify/internal/policy"
 )
 
-// TestLiveLatestPlatformEndorsements is a live test against the published
+// TestLivePublishedPlatformEndorsements is a live test against the published
 // artifact (GitHub proxy + Sigstore TUF/Rekor). Run with -short to exclude
 // it offline.
-func TestLiveLatestPlatformEndorsements(t *testing.T) {
+func TestLivePublishedPlatformEndorsements(t *testing.T) {
 	testutil.RequireLive(t)
-	digest, err := fetchLatestDigest(platformEndorsementsRepo)
+	digest, err := fetchPlatformDigest()
 	require.NoError(t, err)
 
 	client := testClient(t)

@@ -44,7 +44,7 @@ func TestSigningIdentity(t *testing.T) {
 
 func TestPinnedWorkflowIdentitiesAreAnchored(t *testing.T) {
 	assert.Equal(t,
-		`^https://github\.com/tinfoilsh/platform-endorsements/\.github/workflows/build\.yml@refs/tags/v[0-9][^@]*$`,
+		`^https://github\.com/tinfoilsh/cvmimage/\.github/workflows/platform-release\.yml@refs/tags/platform-v[0-9][^@]*$`,
 		platformEndorsementsIdentity,
 	)
 	assert.Equal(t,
@@ -121,8 +121,7 @@ func TestAuthenticatedArtifactPinsRepositoryIdentity(t *testing.T) {
 	for _, repository := range []struct {
 		name, id, otherID string
 	}{
-		{collateral.RuntimeRepo, runtimeRepoID, platformEndorsementsRepoID},
-		{platformEndorsementsRepo, platformEndorsementsRepoID, runtimeRepoID},
+		{collateral.RuntimeRepo, runtimeRepoID, "1"},
 	} {
 		t.Run(repository.name, func(t *testing.T) {
 			for _, tt := range []struct {
@@ -167,8 +166,8 @@ func testClient(t *testing.T) *Client {
 	return client
 }
 
-func TestConfigPlatformPublisher(t *testing.T) {
-	identity := regexp.MustCompile(configPlatformIdentity)
+func TestPlatformPublisher(t *testing.T) {
+	identity := regexp.MustCompile(platformEndorsementsIdentity)
 	const prefix = "https://github.com/tinfoilsh/cvmimage/.github/workflows/"
 	require.True(t, identity.MatchString(prefix+"platform-release.yml@refs/tags/platform-v1.2.3"))
 	for _, san := range []string{
@@ -183,8 +182,8 @@ func TestConfigPlatformPublisher(t *testing.T) {
 
 	client := testClient(t)
 	for _, tt := range []struct{ repo, format string }{
-		{platformEndorsementsRepo, policy.ArtifactFormatV2},
-		{freshness.PlatformRepo, policy.ArtifactFormat},
+		{"tinfoilsh/platform-endorsements", policy.ArtifactFormatV2},
+		{"tinfoilsh/platform-endorsements", policy.ArtifactFormat},
 		{freshness.PlatformRepo, "unsupported"},
 	} {
 		_, err := client.AuthenticatePlatformEndorsements(nil, tt.repo, "platform-v1.2.3", strings.Repeat("a", 64), tt.format)
