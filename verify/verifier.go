@@ -228,7 +228,7 @@ func (v *Verifier) codeReferences(doc *document.Document, repo string, appraisal
 		return nil, fmt.Errorf("verifying platform endorsements: %w", err)
 	}
 	refs := &referenceValues{
-		quote: quote.CodeReferenceValues{
+		quote: quote.LegacyReferenceValues{
 			Endorsements: endorsements.Artifact, Code: code.Measurement, Shape: code.Shape,
 		},
 		artifact: code.AuthenticatedArtifact,

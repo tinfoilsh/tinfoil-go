@@ -120,9 +120,10 @@ func (v *Verifier) configReferences(doc *document.Document, policy ConfigPolicy,
 		return nil, fmt.Errorf("verifying runtime freshness: %w", err)
 	}
 	return &referenceValues{
-		quote: quote.ReferenceValues{
+		quote: quote.ConfigReferenceValues{
 			Endorsements: platform.Artifact,
-			Config:       &quote.ConfigReferenceValues{Runtime: authenticatedRuntime.Manifest.Measurements, Hash: sha256.Sum256(config.Config)},
+			Runtime:      authenticatedRuntime.Manifest.Measurements,
+			Hash:         sha256.Sum256(config.Config),
 		},
 		artifact:           authenticatedRuntime.AuthenticatedArtifact,
 		config:             approved,
