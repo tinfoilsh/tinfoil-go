@@ -1,6 +1,7 @@
 package policy
 
 import (
+	"crypto/sha256"
 	"encoding/json/v2"
 	"strings"
 	"testing"
@@ -24,23 +25,49 @@ func TestPlatformPolicyWithoutWorkloadMeasurements(t *testing.T) {
 	parsed, err := Parse(data)
 	require.NoError(t, err)
 	require.Equal(t, artifact, parsed)
-	for name, changed := range map[string]string{
-		"v1 requires workload measurements": strings.Replace(string(data), ArtifactFormatV2, ArtifactFormat, 1),
-		"v2 excludes host_data":             strings.Replace(string(data), `"sev_snp":{`, `"sev_snp":{"host_data":"`+strings.Repeat("00", 32)+`",`, 1),
-		"v2 excludes platform_measurements": strings.Replace(string(data), `"tdx":{`, `"tdx":{"platform_measurements":["legacy"],`, 1),
-		"v2 excludes measurement map":       strings.Replace(string(data), `"measurements":{}`, `"measurements":{"legacy":{}}`, 1),
+	for name, mutate := range map[string]func(*Artifact){
+		"v1 requires workload measurements": func(a *Artifact) { a.Format = ArtifactFormat },
+		"v2 excludes host_data": func(a *Artifact) {
+			for _, p := range a.Policies {
+				if p.SEVSNP != nil {
+					p.SEVSNP.HostData = strings.Repeat("00", sha256.Size)
+				}
+			}
+		},
+		"v2 excludes platform_measurements": func(a *Artifact) {
+			for _, p := range a.Policies {
+				if p.TDX != nil {
+					p.TDX.PlatformMeasurements = []string{"legacy"}
+				}
+			}
+		},
+		"v2 excludes measurement map": func(a *Artifact) {
+			a.Measurements["legacy"] = PlatformMeasurement{}
+		},
 	} {
 		t.Run(name, func(t *testing.T) {
-			require.NotEqual(t, string(data), changed)
-			_, err := Parse([]byte(changed))
+			var changed Artifact
+			require.NoError(t, json.Unmarshal(data, &changed))
+			mutate(&changed)
+			require.NotEqual(t, artifact, &changed)
+			encoded, err := json.Marshal(changed)
+			require.NoError(t, err)
+			_, err = Parse(encoded)
 			require.Error(t, err)
 		})
 	}
 
 	for _, block := range []string{"sev_snp", "tdx"} {
-		marked := strings.Replace(string(data), `"`+block+`":{`, `"`+block+`":{"config_binding":"sha256",`, 1)
-		require.NotEqual(t, string(data), marked)
-		_, err := Parse([]byte(marked))
+		var marked map[string]any
+		require.NoError(t, json.Unmarshal(data, &marked))
+		for _, p := range marked["policies"].(map[string]any) {
+			if fields, ok := p.(map[string]any)[block].(map[string]any); ok {
+				fields["config_binding"] = "sha256"
+			}
+		}
+		encoded, err := json.Marshal(marked)
+		require.NoError(t, err)
+		_, err = Parse(encoded)
 		require.ErrorContains(t, err, "config_binding")
 	}
 }
