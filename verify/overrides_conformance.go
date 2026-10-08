@@ -82,8 +82,3 @@ func (v *Verifier) VerifyV3WithLayer(docBytes, nonce []byte, repo string) (*Veri
 	verified, layer, err := v.verifyV3(docBytes, nonce, repo)
 	return verified, string(layer), err
 }
-
-func (v *Verifier) VerifyConfigWithLayer(docBytes, nonce []byte, ref string) (*Verification, string, error) {
-	verified, layer, err := v.verifyConfig(docBytes, nonce, ref)
-	return verified, string(layer), err
-}

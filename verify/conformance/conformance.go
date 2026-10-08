@@ -5,21 +5,18 @@
 // language-neutral wire contract below. Every SDK implements the same
 // Input/Output shapes and exit codes so the suite drives them identically.
 //
-// The full-verify stage calls Verifier.VerifyV3WithLayer or VerifyConfigWithLayer
-// according to the fixture's profile, so shared fixtures appraise exactly the
-// code production runs; the reported layer names the rejection. The block stages
-// isolate a single layer through the document, endorsement and quote packages.
+// The full-verify stage is one Verifier.VerifyV3WithLayer call, so the shared
+// fixtures appraise exactly the code production runs; the layer it reports
+// names the rejection. The block stages isolate a single layer by calling into
+// the document, endorsement and quote packages the verifier uses.
 //
 // Synthetic roots and the appraisal clock travel as ordinary per-call options,
 // so the adapter mutates no production state.
 package conformance
 
 import (
-	"crypto"
-	"crypto/x509"
 	"encoding/base64"
 	"encoding/hex"
-	"encoding/pem"
 	"fmt"
 	"strings"
 	"time"
@@ -55,13 +52,10 @@ const (
 // pinned repo, and the synthetic roots it was produced under. Empty root fields
 // select the embedded production roots (so real-frozen fixtures need none).
 type Input struct {
-	SchemaVersion string       `json:"schema_version"`
-	DocumentB64   string       `json:"document_b64"`
-	NonceHex      string       `json:"nonce_hex"`
-	Repo          string       `json:"repo"`
-	Config        *ConfigInput `json:"config,omitempty"`
-
-	FreshnessSigningKeyPEM string `json:"freshness_signing_key_pem,omitempty"`
+	SchemaVersion string `json:"schema_version"`
+	DocumentB64   string `json:"document_b64"`
+	NonceHex      string `json:"nonce_hex"`
+	Repo          string `json:"repo"`
 
 	// AMD SEV-SNP anchor, supplied as the ARK plus its ASK (KDS convention).
 	AMDRootCAPEM string `json:"amd_root_ca_pem,omitempty"`
@@ -75,10 +69,6 @@ type Input struct {
 	// clock so a frozen document replays at its capture time; 0 uses the
 	// current time.
 	VerificationTimeUnix int64 `json:"verification_time_unix,omitempty"`
-}
-
-type ConfigInput struct {
-	PublicKeyPEM string `json:"public_key_pem,omitempty"`
 }
 
 // Output is the stdout JSON. Rejection is present iff Accepted is false;
@@ -104,15 +94,7 @@ type AcceptOutputs struct {
 	HPKEPublicKey  string `json:"hpke_public_key,omitempty"`
 	// ChannelBinding is set by the live-verify integration lane after the
 	// live transport key was matched against the endorsed one.
-	ChannelBinding string         `json:"channel_binding,omitempty"`
-	Config         *ConfigOutputs `json:"config,omitempty"`
-}
-
-type ConfigOutputs struct {
-	Name                   string `json:"name"`
-	Digest                 string `json:"digest"`
-	ApprovalTimeUnix       int64  `json:"approval_time_unix"`
-	FreshnessExpiresAtUnix int64  `json:"freshness_expires_at_unix"`
+	ChannelBinding string `json:"channel_binding,omitempty"`
 }
 
 // Measurement mirrors verify/measurement.Measurement as plain JSON.
@@ -160,33 +142,18 @@ func Run(stage string, in Input) (Output, int) {
 	quoteOpts := &quote.Options{}
 	quoteOpts.DangerousTestOnlySetClock(appraisal)
 	quoteOpts.DangerousTestOnlySetRoots(rts.amd, rts.intel)
-	opts := []verify.Option{
+	verifier, err := verify.NewVerifier(
 		verify.DangerousTestOnlyWithClock(func() time.Time { return appraisal }),
 		verify.DangerousTestOnlyWithSigstoreRoot(rts.sigstore),
 		verify.DangerousTestOnlyWithVendorRoots(rts.amd, rts.intel),
-	}
-	if in.Config != nil && in.Config.PublicKeyPEM != "" {
-		key, err := parsePublicKey(in.Config.PublicKeyPEM)
-		if err != nil {
-			return malformed(stage)
-		}
-		opts = append(opts, verify.WithConfigSigningKeys([]crypto.PublicKey{key}))
-	}
-	if in.FreshnessSigningKeyPEM != "" {
-		key, err := parsePublicKey(in.FreshnessSigningKeyPEM)
-		if err != nil {
-			return malformed(stage)
-		}
-		opts = append(opts, verify.WithFreshnessSigningKeys([]crypto.PublicKey{key}))
-	}
-	verifier, err := verify.NewVerifier(opts...)
+	)
 	if err != nil {
 		return malformed(stage)
 	}
 
 	switch stage {
 	case StageVerify:
-		return verifyFull(doc, nonce, in, verifier)
+		return verifyFull(doc, nonce, in.Repo, verifier)
 	case StageCheckEnvelope:
 		if _, err := document.Parse(doc, nonce); err != nil {
 			return reject(stage, "ENVELOPE_REJECTED")
@@ -239,25 +206,10 @@ func Run(stage string, in Input) (Output, int) {
 	}
 }
 
-func parsePublicKey(encoded string) (crypto.PublicKey, error) {
-	block, rest := pem.Decode([]byte(encoded))
-	if block == nil || len(rest) != 0 {
-		return nil, fmt.Errorf("expected one PEM-encoded public key")
-	}
-	return x509.ParsePKIXPublicKey(block.Bytes)
-}
-
 // verifyFull runs the whole flow through the verifier; the layer it reports
 // names the rejection.
-func verifyFull(doc, nonce []byte, in Input, verifier *verify.Verifier) (Output, int) {
-	var verified *verify.Verification
-	var layer string
-	var err error
-	if in.Config != nil {
-		verified, layer, err = verifier.VerifyConfigWithLayer(doc, nonce, in.Repo)
-	} else {
-		verified, layer, err = verifier.VerifyV3WithLayer(doc, nonce, in.Repo)
-	}
+func verifyFull(doc, nonce []byte, repo string, verifier *verify.Verifier) (Output, int) {
+	verified, layer, err := verifier.VerifyV3WithLayer(doc, nonce, repo)
 	if err != nil {
 		return reject(StageVerify, RejectionCode(layer))
 	}
@@ -272,20 +224,13 @@ func verifyFull(doc, nonce []byte, in Input, verifier *verify.Verifier) (Output,
 	if err != nil {
 		return reject(StageVerify, "ENVELOPE_REJECTED")
 	}
-	outputs := &AcceptOutputs{
+	return Output{Stage: StageVerify, Accepted: true, Outputs: &AcceptOutputs{
 		CodeDigest:         verified.CodeDigest,
 		CodeMeasurement:    toMeasurement(verified.CodeMeasurement),
 		EnclaveMeasurement: toMeasurement(verified.EnclaveMeasurement),
 		TLSPublicKeyFP:     tlsFP,
 		HPKEPublicKey:      hpke,
-	}
-	if verified.Config != nil {
-		outputs.Config = &ConfigOutputs{
-			Name: verified.Config.Name, Digest: verified.Config.Digest,
-			ApprovalTimeUnix: verified.Config.ApprovalTime.Unix(), FreshnessExpiresAtUnix: verified.FreshnessExpiresAt.Unix(),
-		}
-	}
-	return Output{Stage: StageVerify, Accepted: true, Outputs: outputs}, ExitAccepted
+	}}, ExitAccepted
 }
 
 // roots are the injected synthetic anchors; a nil field selects the embedded

@@ -53,27 +53,23 @@ func WithFreshnessSigningKeys(keys []crypto.PublicKey) Option {
 // repository verification. Config, platform, and runtime approvals must be fresh.
 // ref is the caller's expected org/project[@revision][@sha256:digest].
 func (v *Verifier) VerifyConfig(docBytes, nonce []byte, ref string) (*Verification, error) {
-	verified, _, err := v.verifyConfig(docBytes, nonce, ref)
-	return verified, err
-}
-
-func (v *Verifier) verifyConfig(docBytes, nonce []byte, ref string) (*Verification, layer, error) {
 	if v == nil || v.configVerifier == nil || v.freshnessVerifier == nil || v.endorsements == nil || v.now == nil {
-		return nil, layerNone, configurationError(fmt.Errorf("uninitialized config verifier"))
+		return nil, configurationError(fmt.Errorf("uninitialized config verifier"))
 	}
 	if v.ignoreFreshness {
-		return nil, layerNone, configurationError(fmt.Errorf("config verification requires config, platform, and runtime freshness"))
+		return nil, configurationError(fmt.Errorf("config verification requires config, platform, and runtime freshness"))
 	}
 	identity, revision, digest, err := ParseConfigReference(ref)
 	if err != nil {
-		return nil, layerProvenance, configurationError(err)
+		return nil, configurationError(err)
 	}
-	return v.verify(docBytes, nonce, func(doc *document.Document, now time.Time) (*referenceValues, error) {
+	verified, _, err := v.verify(docBytes, nonce, func(doc *document.Document, now time.Time) (*referenceValues, error) {
 		return v.configReferences(doc, endorsement.ConfigPolicy{
 			Identity: identity, Revision: revision, Digest: digest,
 			Now: now, MaxAge: v.freshnessMaxAge,
 		})
 	})
+	return verified, err
 }
 
 func (v *Verifier) configReferences(doc *document.Document, policy endorsement.ConfigPolicy) (*referenceValues, error) {

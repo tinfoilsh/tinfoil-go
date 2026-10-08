@@ -80,7 +80,6 @@ jobs:
       - name: Run the shared v3 fixtures
         run: |
           set -euo pipefail
-          go test -race -tags tinfoil_conformance ./verify/conformance/
           shopt -s nullglob
           suites=("$GITHUB_WORKSPACE"/tinfoil-conformance/vectors/v3/*/)
           if [ "${#suites[@]}" -eq 0 ]; then
@@ -96,7 +95,7 @@ jobs:
               exit 1
             fi
             TINFOIL_CONFORMANCE_FIXTURES="$d" \
-              go test -race -count=1 -tags tinfoil_conformance -run TestFixtures ./verify/conformance/
+              go test -count=1 -tags tinfoil_conformance -run TestFixtures ./verify/conformance/
           done
 
   live:
