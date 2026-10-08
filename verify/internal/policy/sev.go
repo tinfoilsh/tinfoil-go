@@ -6,8 +6,8 @@ import (
 	"strings"
 )
 
-// SEVSNPPolicy is the standard SEV-SNP policy block. Every field is
-// required and checked; there are no unchecked report fields. Numeric
+// SEVSNPPolicy is the standard SEV-SNP policy block. HostData is supplied by
+// the platform for legacy releases, or derived from the endorsed config. Numeric
 // members are pointers so parsing can tell an absent member from a
 // meaningful zero — Validate rejects any absent member.
 type SEVSNPPolicy struct {
@@ -23,7 +23,7 @@ type SEVSNPPolicy struct {
 	PlatformInfo                   SNPPlatform `json:"platform_info"`
 	PermitProvisionalFirmware      bool        `json:"permit_provisional_firmware"`
 	VMPL                           *int        `json:"vmpl"`
-	HostData                       string      `json:"host_data"`
+	HostData                       string      `json:"host_data,omitempty"`
 	ImageID                        string      `json:"image_id"`
 	FamilyID                       string      `json:"family_id"`
 	RequireAuthorKey               bool        `json:"require_author_key,omitempty"`
@@ -48,8 +48,6 @@ func (p *SEVSNPPolicy) Validate() error {
 		return fmt.Errorf("vmpl is required")
 	case *p.VMPL < 0 || *p.VMPL > 3:
 		return fmt.Errorf("vmpl must be between 0 and 3")
-	case p.HostData == "":
-		return fmt.Errorf("host_data is required")
 	case p.ImageID == "":
 		return fmt.Errorf("image_id is required")
 	case p.FamilyID == "":
@@ -81,6 +79,9 @@ func (p *SEVSNPPolicy) Validate() error {
 		"image_id":  {p.ImageID, 16},
 		"family_id": {p.FamilyID, 16},
 	} {
+		if name == "host_data" && field.value == "" {
+			continue
+		}
 		if err := validatePolicyHex(name, field.value, field.byteLen); err != nil {
 			return err
 		}

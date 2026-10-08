@@ -14,6 +14,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/tinfoilsh/tinfoil-go/verify/internal/policy"
+	"github.com/tinfoilsh/tinfoil-go/verify/measurement"
 )
 
 // Real production identifier (public by design in the endorsement artifact).
@@ -66,9 +67,8 @@ func TestValidate(t *testing.T) {
 	var reportData [64]byte
 	copy(reportData[:], body.GetReportData())
 	rtmrs := body.GetRtmrs()
-	code := [5]string{"", "", hex.EncodeToString(rtmrs[1]), hex.EncodeToString(rtmrs[2]), hex.EncodeToString(rtmrs[3])}
+	code := [5]string{hex.EncodeToString(body.GetMrTd()), hex.EncodeToString(rtmrs[0]), hex.EncodeToString(rtmrs[1]), hex.EncodeToString(rtmrs[2]), hex.EncodeToString(rtmrs[3])}
 	quote := &Quote{quote: proto, tcbEvaluationDataNumber: 5}
-	shape := &policy.Shape{CPUs: 8, MemoryMB: 65536, Disks: 4}
 
 	minTCBEval := 5
 	matching := &policy.TDXPolicy{
@@ -80,24 +80,13 @@ func TestValidate(t *testing.T) {
 		MinimumTCBEvaluationDataNumber: &minTCBEval,
 		PlatformMeasurements:           []string{"sample"},
 	}
-	a := &policy.Artifact{
-		Measurements: map[string]policy.PlatformMeasurement{
-			"sample": {
-				MRTD:  hex.EncodeToString(body.GetMrTd()),
-				RTMR0: hex.EncodeToString(body.GetRtmrs()[0]),
-				Shape: shape,
-			},
-		},
-	}
-
-	assemble := func(a *policy.Artifact, p *policy.TDXPolicy) *Expectations {
-		e, name, err := Assemble(a, p, shape, quote, code, reportData)
+	assemble := func(p *policy.TDXPolicy) *Expectations {
+		e, err := Assemble(p, quote, code, reportData, [tdxabi.MrConfigIDSize]byte{})
 		require.NoError(t, err)
-		assert.Equal(t, "sample", name)
 		return e
 	}
 
-	require.NoError(t, assemble(a, matching).Validate(quote))
+	require.NoError(t, assemble(matching).Validate(quote))
 
 	for _, field := range []string{"mr_seam", "qe_vendor_id", "xfam", "td_attributes"} {
 		t.Run(field, func(t *testing.T) {
@@ -111,7 +100,7 @@ func TestValidate(t *testing.T) {
 			changed := mustHex(t, *target)
 			changed[0] ^= 1
 			*target = hex.EncodeToString(changed)
-			e, _, err := Assemble(a, &bad, shape, quote, code, reportData)
+			e, err := Assemble(&bad, quote, code, reportData, [tdxabi.MrConfigIDSize]byte{})
 			require.NoError(t, err)
 			assert.ErrorContains(t, e.Validate(quote), strings.ToUpper(field))
 		})
@@ -120,39 +109,51 @@ func TestValidate(t *testing.T) {
 	// A collateral floor above the observed number must reject.
 	stale := *quote
 	stale.tcbEvaluationDataNumber = 4
-	assert.ErrorContains(t, assemble(a, matching).Validate(&stale), "below the policy minimum")
+	assert.ErrorContains(t, assemble(matching).Validate(&stale), "below the policy minimum")
 
-	// A quote whose MRTD/RTMR0 resolve no endorsed measurement fails at
-	// assembly, before any validation runs.
-	badMRTD := mustHex(t, a.Measurements["sample"].MRTD)
+	// A platform register differing from the resolved reference value rejects.
+	badCode := code
+	badMRTD := mustHex(t, code[0])
 	badMRTD[0] ^= 1
-	badMeasurements := &policy.Artifact{
-		Measurements: map[string]policy.PlatformMeasurement{
-			"sample": {MRTD: hex.EncodeToString(badMRTD), RTMR0: a.Measurements["sample"].RTMR0, Shape: shape},
-		},
-	}
-	_, _, err = Assemble(badMeasurements, matching, shape, quote, code, reportData)
-	assert.ErrorContains(t, err, "do not match any allowed configuration")
+	badCode[0] = hex.EncodeToString(badMRTD)
+	e, err := Assemble(matching, quote, badCode, reportData, [tdxabi.MrConfigIDSize]byte{})
+	require.NoError(t, err)
+	assert.Error(t, e.Validate(quote))
 
 	// A workload register differing from code provenance must reject.
-	badCode := code
+	badCode = code
 	badRTMR1 := mustHex(t, code[2])
 	badRTMR1[0] ^= 1
 	badCode[2] = hex.EncodeToString(badRTMR1)
-	e, _, err := Assemble(a, matching, shape, quote, badCode, reportData)
+	e, err = Assemble(matching, quote, badCode, reportData, [tdxabi.MrConfigIDSize]byte{})
 	require.NoError(t, err)
 	assert.Error(t, e.Validate(quote))
 
 	// A REPORT_DATA differing from the document's expectation must reject.
 	badReportData := reportData
 	badReportData[0] ^= 1
-	e, _, err = Assemble(a, matching, shape, quote, code, badReportData)
+	e, err = Assemble(matching, quote, code, badReportData, [tdxabi.MrConfigIDSize]byte{})
 	require.NoError(t, err)
 	assert.Error(t, e.Validate(quote))
 
-	e = assemble(a, matching)
+	e = assemble(matching)
 	for i := range code {
 		code[i] = strings.Repeat("ff", 48)
 	}
 	require.NoError(t, e.Validate(quote), "caller mutation must not change assembled expectations")
+}
+
+func TestPlatformMeasurementsUseAuthenticatedEvidence(t *testing.T) {
+	parsed, err := tdxabi.QuoteToProto(tdxtestdata.RawQuote)
+	require.NoError(t, err)
+	raw := parsed.(*tdxpb.QuoteV4)
+	q := &Quote{quote: raw, Measurement: &measurement.Measurement{Registers: []string{"substituted", "summary"}}}
+	mrtd, rtmr0, err := q.PlatformMeasurements()
+	require.NoError(t, err)
+	require.Equal(t, hex.EncodeToString(raw.TdQuoteBody.MrTd), mrtd)
+	require.Equal(t, hex.EncodeToString(raw.TdQuoteBody.Rtmrs[0]), rtmr0)
+	for _, invalid := range []*Quote{nil, {}} {
+		_, _, err := invalid.PlatformMeasurements()
+		require.ErrorContains(t, err, "authenticated TDX quote is required")
+	}
 }

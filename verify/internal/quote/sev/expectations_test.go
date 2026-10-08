@@ -208,7 +208,7 @@ func TestCheckSignerRejectsMaskedChipID(t *testing.T) {
 			MaskChipKey: true,
 		}),
 	}
-	err := new(Expectations).checkSigner(report)
+	err := checkSigner(report)
 	assert.ErrorContains(t, err, "masks CHIP_ID")
 }
 

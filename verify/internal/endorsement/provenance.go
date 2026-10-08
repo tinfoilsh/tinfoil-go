@@ -375,10 +375,6 @@ func (c *Client) AuthenticatePlatformEndorsements(bundleJSON []byte, repo, tag, 
 		return nil, fmt.Errorf("verifying platform endorsements bundle: %w", err)
 	}
 
-	if result.Statement.PredicateType != policy.ArtifactFormat {
-		return nil, fmt.Errorf("unexpected predicate type: %s", result.Statement.PredicateType)
-	}
-
 	predicateJSON, err := protojson.Marshal(result.Statement.Predicate)
 	if err != nil {
 		return nil, fmt.Errorf("encoding platform endorsements predicate: %w", err)
@@ -386,6 +382,9 @@ func (c *Client) AuthenticatePlatformEndorsements(bundleJSON []byte, repo, tag, 
 	artifact, err := policy.Parse(predicateJSON)
 	if err != nil {
 		return nil, err
+	}
+	if result.Statement.PredicateType != artifact.Format {
+		return nil, fmt.Errorf("platform predicate type %q does not match artifact format %q", result.Statement.PredicateType, artifact.Format)
 	}
 	if repo != platformEndorsementsRepo {
 		return nil, fmt.Errorf("platform endorsements repo %q does not equal %q", repo, platformEndorsementsRepo)

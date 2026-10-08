@@ -100,13 +100,13 @@ func (e *Expectations) Validate(q *Quote) (err error) {
 		return fmt.Errorf("SEV report PLATFORM_INFO does not match the endorsed policy")
 	}
 
-	return e.checkSigner(report)
+	return checkSigner(report)
 }
 
 // checkSigner requires the report to be launched without an author key or
 // ID block: ID-block launches are unsupported (policy parsing rejects
 // require_* flags), and the library options cannot require absence.
-func (e *Expectations) checkSigner(report *sevsnp.Report) error {
+func checkSigner(report *sevsnp.Report) error {
 	if err := rejectMaskedChipID(report); err != nil {
 		return err
 	}
