@@ -6,24 +6,53 @@ import (
 
 	"github.com/tinfoilsh/tinfoil-go/document"
 	"github.com/tinfoilsh/tinfoil-go/internal/errs"
-	"github.com/tinfoilsh/tinfoil-go/verify/internal/endorsement"
 	"github.com/tinfoilsh/tinfoil-go/verify/measurement"
 )
 
-// ConfigVerification holds the authenticated config identity, digest, and approval time.
-type ConfigVerification = endorsement.ConfigVerified
+// ReferenceSource identifies why reference values were accepted.
+type ReferenceSource string
+
+const (
+	SourceEndorsement ReferenceSource = "endorsement"
+	SourceEmbedded    ReferenceSource = "embedded"
+)
+
+// ConfigVerification describes the config bound to hardware. Embedded configs
+// have no endorsement reference, signing key hint, or approval time.
+type ConfigVerification struct {
+	Source         ReferenceSource
+	Name           string
+	Digest         string
+	Reference      string
+	SigningKeyHint string
+	ApprovalTime   time.Time
+}
+
+// ArtifactVerification describes accepted reference values and their authority.
+// Embedded artifacts have no authenticated commit or approval time.
+type ArtifactVerification struct {
+	Source       ReferenceSource
+	Repo         string
+	Tag          string
+	Digest       string
+	Name         string
+	Commit       string
+	ApprovalTime time.Time
+}
 
 // Verification holds the facts proven during the verification of an
 // attestation document. It also contains metadata of the verification process
 // injected by the verifier
 type Verification struct {
-	// ConfigRepo is the repository the code provenance was authenticated
-	// against, without a tag or digest.
+	// ConfigRepo identifies the selected code or runtime, without version pins.
+	// Runtime reports its source of trust for config-based verification.
 	ConfigRepo      string
 	CodeDigest      string
 	CodeTag         string
 	CodeMeasurement *measurement.Measurement
-	Config          *ConfigVerification `json:",omitempty"`
+	Config          *ConfigVerification   `json:",omitempty"`
+	Runtime         *ArtifactVerification `json:",omitempty"`
+	Platform        *ArtifactVerification `json:",omitempty"`
 	// EnclaveMeasurement carries the quote's authenticated registers,
 	// proven to match the expectations.
 	EnclaveMeasurement *measurement.Measurement
@@ -33,7 +62,8 @@ type Verification struct {
 	// deadline. Cached verification must not authorize new requests at or
 	// after this time; re-verifying the same witness does not extend it.
 	// It is zero when WithIgnoreFreshness skips witness verification.
-	// Config verification uses the earliest config, platform, or runtime approval deadline.
+	// Config verification uses the earliest nonzero config, platform, or runtime approval deadline.
+	// Embedded components add no deadline; all-embedded verification returns zero.
 	FreshnessExpiresAt time.Time
 	// Metadata describes the verification rather than the document.
 	Metadata VerificationMetadata

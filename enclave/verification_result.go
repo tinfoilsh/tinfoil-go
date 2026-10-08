@@ -27,5 +27,13 @@ func cloneVerification(verified *verify.Verification) *verify.Verification {
 		config := *verified.Config
 		cloned.Config = &config
 	}
+	if verified.Runtime != nil {
+		runtime := *verified.Runtime
+		cloned.Runtime = &runtime
+	}
+	if verified.Platform != nil {
+		platform := *verified.Platform
+		cloned.Platform = &platform
+	}
 	return &cloned
 }
