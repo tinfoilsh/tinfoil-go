@@ -17,8 +17,10 @@ import (
 	"github.com/secure-systems-lab/go-securesystemslib/dsse"
 	protobundle "github.com/sigstore/protobuf-specs/gen/pb-go/bundle/v1"
 	common "github.com/sigstore/protobuf-specs/gen/pb-go/common/v1"
+	"github.com/sigstore/sigstore-go/pkg/root"
 	"github.com/stretchr/testify/require"
 	configendorsement "github.com/tinfoilsh/tinfoil-go/endorsement/config"
+	"github.com/tinfoilsh/tinfoil-go/endorsement/freshness"
 	"github.com/tinfoilsh/tinfoil-go/internal/sigstoretest"
 	"github.com/tinfoilsh/tinfoil-go/verify/internal/endorsement"
 )
@@ -91,6 +93,28 @@ func TestPolicyValidatePins(t *testing.T) {
 			mutate(&invalid)
 			require.Error(t, invalid.ValidatePins())
 		})
+	}
+}
+
+func TestApprovalVerificationRequiresTSATrustEvenWhenIgnoringAge(t *testing.T) {
+	f := newFixture(t)
+	trust, err := root.NewTrustedRoot(root.TrustedRootMediaType01, nil, nil, nil, f.Trust.RekorLogs())
+	require.NoError(t, err)
+	keys := []crypto.PublicKey{f.Key.Public()}
+	configs, err := endorsement.NewConfigVerifier(trust, keys)
+	require.NoError(t, err)
+	approvals, err := endorsement.NewFreshnessVerifier(trust, keys)
+	require.NoError(t, err)
+	configBundle := sigstoretest.MarshalBundle(t, f.Bundle(t, f.statement(t, f.Now)))
+	a := artifact(freshness.KindRuntime)
+	approvalBundle := sigstoretest.MarshalBundle(t, f.Bundle(t, statement(t, f.Fixture, a, f.Now)))
+	for _, ignore := range []bool{false, true} {
+		policy := f.policy()
+		policy.IgnoreFreshness = ignore
+		_, err := configs.Verify(testConfig, configBundle, policy)
+		require.ErrorContains(t, err, "no trusted timestamp authority")
+		_, err = approvals.Verify(approvalBundle, endorsement.FreshnessPolicy{Artifact: a, Now: f.Now, IgnoreFreshness: ignore})
+		require.ErrorContains(t, err, "no trusted timestamp authority")
 	}
 }
 

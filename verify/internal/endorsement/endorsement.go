@@ -25,8 +25,8 @@ type endorsementVerifier struct {
 }
 
 func newEndorsementVerifier(trust root.TrustedMaterial, keys []crypto.PublicKey) (*endorsementVerifier, error) {
-	if trust == nil || len(trust.RekorLogs()) == 0 || len(trust.TimestampingAuthorities()) == 0 {
-		return nil, fmt.Errorf("Rekor and timestamp authority trust are required")
+	if trust == nil || len(trust.RekorLogs()) == 0 {
+		return nil, fmt.Errorf("Rekor trust is required")
 	}
 	if len(keys) == 0 {
 		return nil, fmt.Errorf("at least one independently trusted signing key is required")
