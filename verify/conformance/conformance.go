@@ -24,6 +24,7 @@ import (
 	"github.com/tinfoilsh/tinfoil-go/document"
 	"github.com/tinfoilsh/tinfoil-go/verify"
 	"github.com/tinfoilsh/tinfoil-go/verify/internal/endorsement"
+	"github.com/tinfoilsh/tinfoil-go/verify/internal/policy"
 	"github.com/tinfoilsh/tinfoil-go/verify/internal/quote"
 	"github.com/tinfoilsh/tinfoil-go/verify/measurement"
 )
@@ -185,7 +186,7 @@ func Run(stage string, in Input) (Output, int) {
 		if err != nil {
 			return reject(stage, "PROVENANCE_REJECTED")
 		}
-		if _, err := prov.AuthenticatePlatformEndorsements(platRef.Bundle, platRef.Repo, platRef.Tag, platRef.Digest); err != nil {
+		if _, err := prov.AuthenticatePlatformEndorsements(platRef.Bundle, platRef.Repo, platRef.Tag, platRef.Digest, policy.ArtifactFormat); err != nil {
 			return reject(stage, "PROVENANCE_REJECTED")
 		}
 		return Output{Stage: stage, Accepted: true}, ExitAccepted

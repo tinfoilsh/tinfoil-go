@@ -13,6 +13,7 @@ import (
 	"github.com/tinfoilsh/tinfoil-go/document/collateral"
 	"github.com/tinfoilsh/tinfoil-go/endorsement/freshness"
 	"github.com/tinfoilsh/tinfoil-go/internal/testutil"
+	"github.com/tinfoilsh/tinfoil-go/verify/internal/policy"
 	"github.com/tinfoilsh/tinfoil-go/verify/measurement"
 )
 
@@ -181,15 +182,13 @@ func TestConfigPlatformPublisher(t *testing.T) {
 	}
 
 	client := testClient(t)
-	for _, tt := range []struct{ repo, tag string }{
-		{"tinfoilsh/platform-endorsements", "platform-v1.2.3"},
-		{freshness.PlatformRepo, "v1.2.3"},
-		{freshness.PlatformRepo, "platform-v1.2"},
+	for _, tt := range []struct{ repo, format string }{
+		{platformEndorsementsRepo, policy.ArtifactFormatV2},
+		{freshness.PlatformRepo, policy.ArtifactFormat},
+		{freshness.PlatformRepo, "unsupported"},
 	} {
-		_, err := client.AuthenticateConfigPlatform(nil, tt.repo, tt.tag, strings.Repeat("a", 64))
+		_, err := client.AuthenticatePlatformEndorsements(nil, tt.repo, "platform-v1.2.3", strings.Repeat("a", 64), tt.format)
 		require.Error(t, err)
 		require.NotContains(t, err.Error(), "parsing bundle")
 	}
-	_, err := client.AuthenticatePlatformEndorsements(nil, freshness.PlatformRepo, "platform-v1.2.3", strings.Repeat("a", 64))
-	require.ErrorContains(t, err, "platform endorsements repo")
 }

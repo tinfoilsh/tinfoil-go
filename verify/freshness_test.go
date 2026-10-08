@@ -15,6 +15,7 @@ import (
 	"github.com/tinfoilsh/tinfoil-go/internal/fetch"
 	"github.com/tinfoilsh/tinfoil-go/internal/testutil"
 	"github.com/tinfoilsh/tinfoil-go/verify/internal/endorsement"
+	"github.com/tinfoilsh/tinfoil-go/verify/internal/policy"
 )
 
 func TestFreshnessExpiration(t *testing.T) {
@@ -161,7 +162,7 @@ func TestLiveFreshnessWitnessExpiration(t *testing.T) {
 	require.NoError(t, err)
 	platformRef, err := doc.SigstorePlatform()
 	require.NoError(t, err)
-	platform, err := provClient.AuthenticatePlatformEndorsements(platformRef.Bundle, platformRef.Repo, platformRef.Tag, platformRef.Digest)
+	platform, err := provClient.AuthenticatePlatformEndorsements(platformRef.Bundle, platformRef.Repo, platformRef.Tag, platformRef.Digest, policy.ArtifactFormat)
 	require.NoError(t, err)
 	matched := false
 	for id, artifact := range map[string]*endorsement.AuthenticatedArtifact{

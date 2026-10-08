@@ -372,29 +372,19 @@ func measurementFromStatement(statement *in_toto.Statement) (*measurement.Measur
 	}
 }
 
-func (c *Client) AuthenticatePlatformEndorsements(bundleJSON []byte, repo, tag, hexDigest string) (*PlatformEndorsements, error) {
-	if repo != platformEndorsementsRepo {
-		return nil, fmt.Errorf("platform endorsements repo %q does not equal %q", repo, platformEndorsementsRepo)
+// format is selected by the verification flow, independently of collateral metadata.
+func (c *Client) AuthenticatePlatformEndorsements(bundleJSON []byte, repo, tag, hexDigest, format string) (*PlatformEndorsements, error) {
+	expectedRepo, identity := platformEndorsementsRepo, platformEndorsementsIdentity
+	switch format {
+	case policy.ArtifactFormat:
+	case policy.ArtifactFormatV2:
+		expectedRepo, identity = freshness.PlatformRepo, configPlatformIdentity
+	default:
+		return nil, fmt.Errorf("unsupported platform artifact format %q", format)
 	}
-	return c.authenticatePlatform(bundleJSON, repo, tag, hexDigest, platformEndorsementsIdentity, policy.ArtifactFormat)
-}
-
-func (c *Client) AuthenticateConfigPlatform(bundleJSON []byte, repo, tag, hexDigest string) (*PlatformEndorsements, error) {
-	expected := freshness.Artifact{Kind: freshness.KindPlatform, Repo: repo, Tag: tag, Name: freshness.PlatformName, Digest: hexDigest}
-	if err := expected.Validate(); err != nil {
-		return nil, err
+	if repo != expectedRepo {
+		return nil, fmt.Errorf("platform endorsements repo %q does not equal %q", repo, expectedRepo)
 	}
-	platform, err := c.authenticatePlatform(bundleJSON, repo, tag, hexDigest, configPlatformIdentity, policy.ArtifactFormatV2)
-	if err != nil {
-		return nil, err
-	}
-	if platform.SubjectName != freshness.PlatformName {
-		return nil, fmt.Errorf("config verification requires its dedicated platform endorsement artifact")
-	}
-	return platform, nil
-}
-
-func (c *Client) authenticatePlatform(bundleJSON []byte, repo, tag, hexDigest, identity, format string) (*PlatformEndorsements, error) {
 	result, _, err := c.verifyBundleWithIdentity(bundleJSON, identity, hexDigest)
 	if err != nil {
 		return nil, fmt.Errorf("verifying platform endorsements bundle: %w", err)
@@ -408,11 +398,8 @@ func (c *Client) authenticatePlatform(bundleJSON []byte, repo, tag, hexDigest, i
 	if err != nil {
 		return nil, err
 	}
-	if result.Statement.PredicateType != artifact.Format {
-		return nil, fmt.Errorf("platform predicate type %q does not match artifact format %q", result.Statement.PredicateType, artifact.Format)
-	}
-	if artifact.Format != format {
-		return nil, fmt.Errorf("platform artifact format %q does not equal %q", artifact.Format, format)
+	if result.Statement.PredicateType != format || artifact.Format != format {
+		return nil, fmt.Errorf("platform predicate and artifact must use %q", format)
 	}
 	authenticated, err := authenticatedArtifact(result, repo, tag, hexDigest, "platform endorsements")
 	if err != nil {

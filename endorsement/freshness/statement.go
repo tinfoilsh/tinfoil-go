@@ -15,18 +15,19 @@ import (
 )
 
 const (
-	StatementType     = statement.StatementType
-	PredicateType     = "https://tinfoil.sh/predicate/artifact-freshness/v1"
-	PayloadType       = statement.PayloadType
-	BundleType        = statement.BundleType
-	KindPlatform      = "platform"
-	KindRuntime       = "runtime"
-	PlatformRepo      = RuntimeRepo
-	RuntimeRepo       = "tinfoilsh/cvmimage"
-	PlatformName      = "platform-endorsements.json"
-	PlatformTagPrefix = "platform-"
-	freshnessDomain   = "tinfoil-artifact-freshness/v1\x00"
+	StatementType   = statement.StatementType
+	PredicateType   = "https://tinfoil.sh/predicate/artifact-freshness/v1"
+	PayloadType     = statement.PayloadType
+	BundleType      = statement.BundleType
+	KindPlatform    = "platform"
+	KindRuntime     = "runtime"
+	PlatformRepo    = RuntimeRepo
+	RuntimeRepo     = "tinfoilsh/cvmimage"
+	PlatformName    = "platform-endorsements.json"
+	freshnessDomain = "tinfoil-artifact-freshness/v1\x00"
 )
+
+const PlatformTagPrefix = "platform-"
 
 // Artifact identifies exact release bytes, independently authenticated by the caller.
 type Artifact struct {
@@ -39,19 +40,10 @@ type Artifact struct {
 
 func (a Artifact) Validate() error {
 	version := a.Tag
-	if a.Kind == KindPlatform {
-		var ok bool
-		version, ok = strings.CutPrefix(a.Tag, PlatformTagPrefix)
-		if !ok {
-			return fmt.Errorf("platform tag must start with %q", PlatformTagPrefix)
-		}
-	}
-	if !semver.IsValid(version) || semver.Canonical(version) != version {
-		return fmt.Errorf("artifact tag must be a canonical semantic version")
-	}
 	switch a.Kind {
 	case KindPlatform:
-		if a.Repo != PlatformRepo || a.Name != PlatformName {
+		version = strings.TrimPrefix(a.Tag, PlatformTagPrefix)
+		if version == a.Tag || a.Repo != PlatformRepo || a.Name != PlatformName {
 			return fmt.Errorf("platform freshness requires the cvmimage platform artifact")
 		}
 	case KindRuntime:
@@ -60,6 +52,9 @@ func (a Artifact) Validate() error {
 		}
 	default:
 		return fmt.Errorf("unsupported freshness artifact kind %q", a.Kind)
+	}
+	if !semver.IsValid(version) || semver.Canonical(version) != version {
+		return fmt.Errorf("artifact tag must be a canonical semantic version")
 	}
 	_, err := canonical.DecodeLowerHex("artifact digest", a.Digest, sha256.Size)
 	return err

@@ -6,6 +6,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/tinfoilsh/tinfoil-go/internal/testutil"
+	"github.com/tinfoilsh/tinfoil-go/verify/internal/policy"
 )
 
 // TestLiveLatestPlatformEndorsements is a live test against the published
@@ -21,7 +22,7 @@ func TestLiveLatestPlatformEndorsements(t *testing.T) {
 	bundleJSON, err := fetchAttestationBundle(platformEndorsementsRepo, digest)
 	require.NoError(t, err)
 
-	endorsements, err := client.AuthenticatePlatformEndorsements(bundleJSON, platformEndorsementsRepo, "", digest)
+	endorsements, err := client.AuthenticatePlatformEndorsements(bundleJSON, platformEndorsementsRepo, "", digest, policy.ArtifactFormat)
 	require.NoError(t, err)
 	artifact := endorsements.Artifact
 
