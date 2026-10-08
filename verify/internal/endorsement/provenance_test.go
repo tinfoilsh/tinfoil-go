@@ -1,12 +1,14 @@
 package endorsement
 
 import (
+	"encoding/hex"
 	"regexp"
 	"strings"
 	"testing"
 
 	in_toto "github.com/in-toto/attestation/go/v1"
 	"github.com/sigstore/sigstore-go/pkg/fulcio/certificate"
+	"github.com/sigstore/sigstore-go/pkg/testing/data"
 	"github.com/sigstore/sigstore-go/pkg/verify"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -189,5 +191,30 @@ func TestPlatformPublisher(t *testing.T) {
 		_, err := client.AuthenticatePlatformEndorsements(nil, tt.repo, "platform-v1.2.3", strings.Repeat("a", 64), tt.format)
 		require.Error(t, err)
 		require.NotContains(t, err.Error(), "parsing bundle")
+	}
+}
+
+func TestPlatformRejectsOtherSigningIdentity(t *testing.T) {
+	client := testClient(t)
+	client.trustRoot = data.TrustedRoot(t, "scaffolding.json")
+	b := data.Bundle(t, "othername.sigstore.json")
+	bundleJSON, err := b.MarshalJSON()
+	require.NoError(t, err)
+	digest := b.GetMessageSignature().GetMessageDigest().GetDigest()
+
+	verifier, err := verify.NewSignedEntityVerifier(client.trustRoot, client.verifierOptions...)
+	require.NoError(t, err)
+	identity, err := verify.NewShortCertificateIdentity("http://oidc.local:8080", "", "foo!oidc.local", "")
+	require.NoError(t, err)
+	_, err = verifier.Verify(b, verify.NewPolicy(verify.WithArtifactDigest("sha256", digest), verify.WithCertificateIdentity(identity)))
+	require.NoError(t, err)
+	for _, format := range []string{policy.ArtifactFormat, policy.ArtifactFormatV2} {
+		t.Run(format, func(t *testing.T) {
+			got, err := client.AuthenticatePlatformEndorsements(bundleJSON, freshness.PlatformRepo, "platform-v1.2.3", hex.EncodeToString(digest), format)
+			var identityError *verify.ErrNoMatchingCertificateIdentity
+			require.ErrorAs(t, err, &identityError)
+			require.ErrorContains(t, err, "expected SAN value to match regex")
+			require.Nil(t, got)
+		})
 	}
 }

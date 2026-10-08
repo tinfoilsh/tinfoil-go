@@ -18,6 +18,7 @@ const githubProxy = "https://github-proxy.tinfoil.sh"
 func fetchPlatformDigest() (string, error) {
 	const pageSize = 100
 	const artifactName = "platform-endorsements-classic.json"
+	const tagPrefix = freshness.PlatformTagPrefix + "v"
 	for page := 1; ; page++ {
 		body, err := testutil.Get(fmt.Sprintf("%s/repos/%s/releases?per_page=%d&page=%d", githubProxy, platformEndorsementsRepo, pageSize, page))
 		if err != nil {
@@ -39,12 +40,16 @@ func fetchPlatformDigest() (string, error) {
 			return "", fmt.Errorf("no published classic platform artifact")
 		}
 		for _, release := range releases {
-			if release.Draft || release.Prerelease || !strings.HasPrefix(release.Tag, freshness.PlatformTagPrefix) {
+			if release.Draft || release.Prerelease || !strings.HasPrefix(release.Tag, tagPrefix) {
 				continue
 			}
 			for _, asset := range release.Assets {
 				if asset.Name == artifactName {
-					return strings.TrimPrefix(asset.Digest, "sha256:"), nil
+					digest := strings.TrimPrefix(asset.Digest, "sha256:")
+					if !sha256DigestRE.MatchString(digest) {
+						return "", fmt.Errorf("platform release %q asset %q has invalid SHA-256 digest %q", release.Tag, asset.Name, asset.Digest)
+					}
+					return digest, nil
 				}
 			}
 		}
