@@ -22,6 +22,7 @@ import (
 	in_toto "github.com/in-toto/attestation/go/v1"
 	"google.golang.org/protobuf/types/known/structpb"
 
+	"github.com/tinfoilsh/tinfoil-go/document/collateral"
 	"github.com/tinfoilsh/tinfoil-go/verify/internal/policy"
 	"github.com/tinfoilsh/tinfoil-go/verify/measurement"
 )
@@ -32,6 +33,10 @@ const (
 	// platformEndorsementsRepo publishes the platform-endorsements artifact.
 	platformEndorsementsRepo = "tinfoilsh/platform-endorsements"
 	freshnessWitnessRepo     = "tinfoilsh/freshness-witness"
+
+	tinfoilOrganizationID      = "168487856"
+	runtimeRepoID              = "902195777"
+	platformEndorsementsRepoID = "1289572272"
 
 	// platformEndorsementsIdentity is the only signing certificate identity
 	// accepted for the platform-endorsements artifact: the tag-triggered
@@ -140,6 +145,10 @@ func (c *Client) verifyBundle(bundleJSON []byte, repo, hexDigest string) (*verif
 // verifyBundleWithIdentity verifies a Sigstore bundle against an explicit
 // signing certificate SAN regex and returns the original signed payload.
 func (c *Client) verifyBundleWithIdentity(bundleJSON []byte, sanRegex, hexDigest string) (*verify.VerificationResult, []byte, error) {
+	return c.verifyBundleForSubject(bundleJSON, sanRegex, hexDigest, "")
+}
+
+func (c *Client) verifyBundleForSubject(bundleJSON []byte, sanRegex, hexDigest, subjectName string) (*verify.VerificationResult, []byte, error) {
 	if c.trustRoot == nil {
 		return nil, nil, fmt.Errorf("trust root is not set")
 	}
@@ -213,7 +222,7 @@ func (c *Client) verifyBundleWithIdentity(bundleJSON []byte, sanRegex, hexDigest
 		return nil, nil, err
 	}
 
-	if err := enforceSubject0Digest(result, hexDigest); err != nil {
+	if err := enforceArtifactSubject(result, subjectName, hexDigest); err != nil {
 		return nil, nil, err
 	}
 
@@ -396,6 +405,21 @@ func authenticatedArtifact(result *verify.VerificationResult, repo, tag, hexDige
 		return AuthenticatedArtifact{}, fmt.Errorf("%s bundle has no signing certificate", label)
 	}
 	certificate := result.Signature.Certificate
+	var repositoryID string
+	switch repo {
+	case collateral.RuntimeRepo:
+		repositoryID = runtimeRepoID
+	case platformEndorsementsRepo:
+		repositoryID = platformEndorsementsRepoID
+	}
+	if repositoryID != "" {
+		if certificate.SourceRepositoryIdentifier != repositoryID {
+			return AuthenticatedArtifact{}, fmt.Errorf("%s source repository ID does not match the pinned repository", label)
+		}
+		if certificate.SourceRepositoryOwnerIdentifier != tinfoilOrganizationID {
+			return AuthenticatedArtifact{}, fmt.Errorf("%s source repository owner ID does not match the pinned organization", label)
+		}
+	}
 	const tagRefPrefix = "refs/tags/"
 	if !strings.HasPrefix(certificate.SourceRepositoryRef, tagRefPrefix) {
 		return AuthenticatedArtifact{}, fmt.Errorf("%s source ref %q is not a tag", label, certificate.SourceRepositoryRef)

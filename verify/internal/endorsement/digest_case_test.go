@@ -14,6 +14,7 @@ func TestAuthenticatedDigestIsCanonicalForFreshness(t *testing.T) {
 	result := &verify.VerificationResult{
 		Signature: &verify.SignatureVerificationResult{Certificate: &certificate.Summary{Extensions: certificate.Extensions{
 			SourceRepositoryRef: "refs/tags/" + expected.Tag, SourceRepositoryDigest: expected.Commit,
+			SourceRepositoryIdentifier: platformEndorsementsRepoID, SourceRepositoryOwnerIdentifier: tinfoilOrganizationID,
 		}}},
 		Statement: &in_toto.Statement{Subject: []*in_toto.ResourceDescriptor{{Name: expected.SubjectName, Digest: map[string]string{"sha256": expected.Digest}}}},
 	}
