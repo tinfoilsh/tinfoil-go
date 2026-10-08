@@ -5,6 +5,7 @@ import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
+	"crypto/sha256"
 	"strings"
 	"testing"
 	"time"
@@ -15,7 +16,7 @@ import (
 )
 
 func TestConfigBoundRequiresIndependentTrustAndFreshness(t *testing.T) {
-	policy := ConfigPolicy{Identity: "/org/project"}
+	const ref = "org/project"
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	require.NoError(t, err)
 	keys := []crypto.PublicKey{key.Public()}
@@ -25,7 +26,7 @@ func TestConfigBoundRequiresIndependentTrustAndFreshness(t *testing.T) {
 	require.ErrorContains(t, err, "must not be empty")
 	v, err := NewVerifier(WithConfigSigningKeys(keys), WithFreshnessSigningKeys([]crypto.PublicKey{key.Public()}), WithIgnoreFreshness())
 	require.NoError(t, err)
-	_, err = v.VerifyConfig(nil, nil, policy)
+	_, err = v.VerifyConfig(nil, nil, ref)
 	require.ErrorContains(t, err, "requires config, platform, and runtime freshness")
 
 	v, err = NewVerifier(WithConfigSigningKeys(keys), WithFreshnessSigningKeys([]crypto.PublicKey{key.Public()}))
@@ -33,18 +34,41 @@ func TestConfigBoundRequiresIndependentTrustAndFreshness(t *testing.T) {
 	nonce := make([]byte, document.NonceSize)
 	raw, err := document.Build(document.BuildInput{Nonce: nonce}, func([64]byte) (string, []byte, error) { return document.SEVSNPReportV1Format, []byte("quote"), nil })
 	require.NoError(t, err)
-	_, err = v.VerifyConfig(raw, nonce, policy)
+	_, err = v.VerifyConfig(raw, nonce, ref)
 	require.ErrorContains(t, err, collateral.ConfigID)
-	for name, bad := range map[string]ConfigPolicy{
-		"identity": {Identity: "/org/project/extra"},
-		"revision": {Identity: policy.Identity, Revision: "../v1"},
-		"digest":   {Identity: policy.Identity, Digest: strings.Repeat("AB", 32)},
+	for name, bad := range map[string]string{
+		"identity": "org/project/extra",
+		"revision": ref + "@../v1",
+		"digest":   ref + "@sha256:" + strings.Repeat("AB", sha256.Size),
 	} {
 		t.Run(name, func(t *testing.T) {
 			_, err := v.VerifyConfig(raw, nonce, bad)
 			var e *ConfigurationError
 			require.ErrorAs(t, err, &e)
 		})
+	}
+}
+
+func TestParseConfigReference(t *testing.T) {
+	const repo = "org/project"
+	digest := strings.Repeat("ab", sha256.Size)
+	for _, pins := range [][2]string{{}, {"v1", ""}, {"", digest}, {"v1", digest}} {
+		ref := repo
+		if pins[0] != "" {
+			ref += "@" + pins[0]
+		}
+		if pins[1] != "" {
+			ref += "@sha256:" + pins[1]
+		}
+		identity, revision, hash, err := ParseConfigReference(ref)
+		require.NoError(t, err)
+		require.Equal(t, "/"+repo, identity)
+		require.Equal(t, pins[0], revision)
+		require.Equal(t, pins[1], hash)
+	}
+	for _, ref := range []string{"", "/org/project", "Org/project", "org/project_name", "org/project@v1/path", "org/project@sha256:bad", "org/project@v1@v2"} {
+		_, _, _, err := ParseConfigReference(ref)
+		require.Error(t, err, ref)
 	}
 }
 

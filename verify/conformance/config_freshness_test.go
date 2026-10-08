@@ -3,14 +3,53 @@
 package conformance
 
 import (
+	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 	"github.com/tinfoilsh/tinfoil-go/document/collateral"
+	"github.com/tinfoilsh/tinfoil-go/verify"
 )
+
+func TestConfigReferencePins(t *testing.T) {
+	data, err := os.ReadFile("testdata/igvm-snp.json")
+	require.NoError(t, err)
+	var f fixture
+	require.NoError(t, json.Unmarshal(data, &f))
+	repo, revision, digest, err := verify.ParseReference(f.Input.Repo)
+	require.NoError(t, err)
+	for name, tc := range map[string]struct {
+		ref      string
+		accepted bool
+	}{
+		"identity only":  {repo, true},
+		"revision":       {repo + "@" + revision, true},
+		"digest":         {repo + "@sha256:" + digest, true},
+		"all pins":       {f.Input.Repo, true},
+		"other org":      {"other/igvm-test", false},
+		"other project":  {"tinfoil/other", false},
+		"other revision": {repo + "@v2", false},
+		"other digest":   {repo + "@sha256:" + strings.Repeat("ab", sha256.Size), false},
+	} {
+		t.Run(name, func(t *testing.T) {
+			in := f.Input
+			in.Repo = tc.ref
+			out, code := Run(f.Stage, in)
+			require.Equal(t, tc.accepted, out.Accepted)
+			if tc.accepted {
+				require.Equal(t, ExitAccepted, code)
+				require.Equal(t, f.Expected.Config, out.Outputs.Config)
+			} else {
+				require.Equal(t, ExitRejected, code)
+				require.Equal(t, "PROVENANCE_REJECTED", out.Rejection.Code)
+			}
+		})
+	}
+}
 
 func TestConfigBoundRequiresIndependentFreshness(t *testing.T) {
 	data, err := os.ReadFile("testdata/igvm-snp.json")

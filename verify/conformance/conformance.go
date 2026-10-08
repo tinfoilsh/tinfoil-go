@@ -78,9 +78,6 @@ type Input struct {
 }
 
 type ConfigInput struct {
-	Identity     string `json:"identity"`
-	Revision     string `json:"revision,omitempty"`
-	Digest       string `json:"digest,omitempty"`
 	PublicKeyPEM string `json:"public_key_pem,omitempty"`
 }
 
@@ -257,9 +254,7 @@ func verifyFull(doc, nonce []byte, in Input, verifier *verify.Verifier) (Output,
 	var layer string
 	var err error
 	if in.Config != nil {
-		verified, layer, err = verifier.VerifyConfigWithLayer(doc, nonce, verify.ConfigPolicy{
-			Identity: in.Config.Identity, Revision: in.Config.Revision, Digest: in.Config.Digest,
-		})
+		verified, layer, err = verifier.VerifyConfigWithLayer(doc, nonce, in.Repo)
 	} else {
 		verified, layer, err = verifier.VerifyV3WithLayer(doc, nonce, in.Repo)
 	}

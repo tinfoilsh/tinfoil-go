@@ -27,8 +27,8 @@ type Handle struct {
 	enclave, repo, relay string
 	// verifier is the immutable verification policy, shared by every handle
 	// derived from this one.
-	verifier     *verify.Verifier
-	configPolicy *verify.ConfigPolicy
+	verifier           *verify.Verifier
+	configVerification bool
 
 	stateMu      sync.RWMutex
 	state        *enclaveState
@@ -115,10 +115,10 @@ func NewHandle(enclave, repo string, opts *Options) (*Handle, error) {
 	return &Handle{enclave: enclave, repo: repo, verifier: verifier}, nil
 }
 
-// NewConfigHandle requires config-bound verification. Nil keys select
-// Tinfoil's public config signer; explicit keys replace that trust for private configs.
-func NewConfigHandle(enclave string, policy verify.ConfigPolicy, keys []crypto.PublicKey, opts *Options) (*Handle, error) {
-	if err := policy.Validate(); err != nil {
+// NewConfigHandle requires config verification for org/project[@revision][@sha256:digest].
+// Nil keys select Tinfoil's public config signer; explicit keys replace that trust for private configs.
+func NewConfigHandle(enclave, ref string, keys []crypto.PublicKey, opts *Options) (*Handle, error) {
+	if _, _, _, err := verify.ParseConfigReference(ref); err != nil {
 		return nil, &ConfigurationError{Err: err}
 	}
 	var trust []verify.Option
@@ -129,7 +129,7 @@ func NewConfigHandle(enclave string, policy verify.ConfigPolicy, keys []crypto.P
 	if err != nil {
 		return nil, err
 	}
-	return &Handle{enclave: enclave, verifier: verifier, configPolicy: &policy}, nil
+	return &Handle{enclave: enclave, repo: ref, verifier: verifier, configVerification: true}, nil
 }
 
 // NewDefaultHandle applies opts to every discovered router and fallback.
@@ -152,12 +152,12 @@ func NewDefaultHandle(opts *Options) (*Handle, error) {
 
 // ForEnclave keeps the repository reference and verification options.
 func (s *Handle) ForEnclave(enclave string) *Handle {
-	return &Handle{enclave: enclave, repo: s.repo, verifier: s.verifier, configPolicy: s.configPolicy}
+	return &Handle{enclave: enclave, repo: s.repo, verifier: s.verifier, configVerification: s.configVerification}
 }
 
 // ViaRelay fetches attestation through relay, which forwards it to the enclave.
 func (s *Handle) ViaRelay(relay string) *Handle {
-	return &Handle{enclave: s.enclave, repo: s.repo, relay: relay, verifier: s.verifier, configPolicy: s.configPolicy}
+	return &Handle{enclave: s.enclave, repo: s.repo, relay: relay, verifier: s.verifier, configVerification: s.configVerification}
 }
 
 // Enclave returns the enclave URL
@@ -165,7 +165,7 @@ func (s *Handle) Enclave() string {
 	return s.enclave
 }
 
-// Repo returns the trusted repository reference, including any tag or digest pins.
+// Repo returns the trusted repository or registry reference, including version and digest pins.
 func (s *Handle) Repo() string {
 	return s.repo
 }

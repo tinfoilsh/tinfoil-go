@@ -5,6 +5,7 @@ import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
 	"net/http"
 	"net/http/httptest"
@@ -40,26 +41,30 @@ func TestConfigHandlesRetainExplicitProfile(t *testing.T) {
 	t.Cleanup(func() { http.DefaultClient = original })
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	require.NoError(t, err)
-	policy := verify.ConfigPolicy{Identity: "/org/project"}
+	ref := "org/project@v1@sha256:" + strings.Repeat("ab", sha256.Size)
 	keys := []crypto.PublicKey{key.Public()}
 	host := strings.TrimPrefix(server.URL, "https://")
 	const maxAge = time.Hour
-	client, err := NewConfigHandle(host, policy, keys, &Options{FreshnessMaxAge: maxAge})
+	client, err := NewConfigHandle(host, ref, keys, &Options{FreshnessMaxAge: maxAge})
 	require.NoError(t, err)
-	public, err := NewConfigHandle(host, policy, nil, nil)
+	public, err := NewConfigHandle(host, ref, nil, nil)
 	require.NoError(t, err)
 	_, err = public.fetchVerification()
 	require.ErrorContains(t, err, collateral.ConfigID)
-	_, err = NewConfigHandle(host, policy, []crypto.PublicKey{}, nil)
+	_, err = NewConfigHandle(host, ref, []crypto.PublicKey{}, nil)
 	require.ErrorContains(t, err, "must not be empty")
-	policy.Identity = "/other/project"
 	for _, derived := range []*Handle{client, client.ForEnclave(host), client.ViaRelay(host)} {
-		require.Equal(t, "/org/project", derived.configPolicy.Identity)
+		require.Equal(t, ref, derived.Repo())
 		require.Equal(t, maxAge, derived.verifier.FreshnessMaxAge())
 		_, err := derived.fetchVerification()
 		require.ErrorContains(t, err, collateral.ConfigID)
 	}
-	legacy, err := NewHandle(host, "org/repo", nil)
+	for _, invalid := range []string{"/org/project", "Org/project", "org/project@../v1"} {
+		_, err := NewConfigHandle(host, invalid, nil, nil)
+		var configuration *ConfigurationError
+		require.ErrorAs(t, err, &configuration)
+	}
+	legacy, err := NewHandle(host, ref, nil)
 	require.NoError(t, err)
 	_, err = legacy.fetchVerification()
 	require.ErrorContains(t, err, collateral.SigstoreCodeV1Format)

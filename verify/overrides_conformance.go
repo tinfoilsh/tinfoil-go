@@ -83,7 +83,7 @@ func (v *Verifier) VerifyV3WithLayer(docBytes, nonce []byte, repo string) (*Veri
 	return verified, string(layer), err
 }
 
-func (v *Verifier) VerifyConfigWithLayer(docBytes, nonce []byte, policy ConfigPolicy) (*Verification, string, error) {
-	verified, layer, err := v.verifyConfig(docBytes, nonce, policy)
+func (v *Verifier) VerifyConfigWithLayer(docBytes, nonce []byte, ref string) (*Verification, string, error) {
+	verified, layer, err := v.verifyConfig(docBytes, nonce, ref)
 	return verified, string(layer), err
 }
