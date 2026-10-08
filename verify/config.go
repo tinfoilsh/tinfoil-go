@@ -38,7 +38,18 @@ func WithFreshnessSigningKeys(keys []crypto.PublicKey) Option {
 	}
 }
 
-func (v *Verifier) configReferences(doc *document.Document, policy endorsement.ConfigPolicy) (*referenceValues, error) {
+func (v *Verifier) configReferences(doc *document.Document, ref string, now time.Time) (*endorsementResult, error) {
+	name, revision, digest, err := endorsement.ParseReference(ref)
+	if err != nil {
+		return nil, configurationError(err)
+	}
+	policy := endorsement.ConfigPolicy{
+		Identity: "/" + name, Revision: revision, Digest: digest,
+		Now: now, MaxAge: v.freshnessMaxAge, IgnoreFreshness: v.ignoreFreshness,
+	}
+	if err := policy.ValidatePins(); err != nil {
+		return nil, configurationError(err)
+	}
 	config, err := doc.ConfigEndorsement()
 	if err != nil {
 		return nil, err
@@ -73,24 +84,27 @@ func (v *Verifier) configReferences(doc *document.Document, policy endorsement.C
 	if platform.SubjectName != runtime.PlatformSubject {
 		return nil, fmt.Errorf("config verification requires its dedicated platform endorsement artifact")
 	}
-	platformApprovedAt, err := v.authenticateArtifactFreshness(doc, collateral.FreshnessIDPlatform, freshness.KindPlatform, &platform.AuthenticatedArtifact, policy.Now)
+	platformApprovedAt, err := v.authenticateArtifactFreshness(doc, collateral.FreshnessIDPlatform, freshness.KindPlatform, &platform.AuthenticatedArtifact, now)
 	if err != nil {
 		return nil, fmt.Errorf("verifying platform freshness: %w", err)
 	}
-	runtimeApprovedAt, err := v.authenticateArtifactFreshness(doc, collateral.FreshnessIDRuntime, freshness.KindRuntime, &authenticatedRuntime.AuthenticatedArtifact, policy.Now)
+	runtimeApprovedAt, err := v.authenticateArtifactFreshness(doc, collateral.FreshnessIDRuntime, freshness.KindRuntime, &authenticatedRuntime.AuthenticatedArtifact, now)
 	if err != nil {
 		return nil, fmt.Errorf("verifying runtime freshness: %w", err)
 	}
-	return &referenceValues{
+	result := &endorsementResult{
 		quote: quote.ConfigReferenceValues{
 			Endorsements: platform.Artifact,
 			Runtime:      authenticatedRuntime.Manifest.Measurements,
 			Hash:         sha256.Sum256(config.Config),
 		},
-		artifact:           authenticatedRuntime.AuthenticatedArtifact,
-		config:             approved,
-		freshnessExpiresAt: freshnessExpiration(v.freshnessMaxAge, approved.ApprovalTime, platformApprovedAt, runtimeApprovedAt),
-	}, nil
+		artifact: authenticatedRuntime.AuthenticatedArtifact,
+		config:   approved,
+	}
+	if !v.ignoreFreshness {
+		result.freshnessExpiresAt = freshnessExpiration(v.freshnessMaxAge, approved.ApprovalTime, platformApprovedAt, runtimeApprovedAt)
+	}
+	return result, nil
 }
 
 func (v *Verifier) authenticateArtifactFreshness(doc *document.Document, id, kind string, artifact *endorsement.AuthenticatedArtifact, now time.Time) (time.Time, error) {
@@ -103,7 +117,7 @@ func (v *Verifier) authenticateArtifactFreshness(doc *document.Document, id, kin
 	}
 	approved, err := v.freshnessVerifier.Verify(material.Bundle, endorsement.FreshnessPolicy{
 		Artifact: freshness.Artifact{Kind: kind, Repo: artifact.Repo, Tag: artifact.Tag, Name: artifact.SubjectName, Digest: artifact.Digest},
-		Now:      now, MaxAge: v.freshnessMaxAge,
+		Now:      now, MaxAge: v.freshnessMaxAge, IgnoreFreshness: v.ignoreFreshness,
 	})
 	if err != nil {
 		return time.Time{}, err

@@ -23,6 +23,7 @@ import (
 	"google.golang.org/protobuf/types/known/structpb"
 
 	"github.com/tinfoilsh/tinfoil-go/document/collateral"
+	"github.com/tinfoilsh/tinfoil-go/internal/errs"
 	"github.com/tinfoilsh/tinfoil-go/verify/internal/policy"
 	"github.com/tinfoilsh/tinfoil-go/verify/measurement"
 )
@@ -267,7 +268,7 @@ type Code struct {
 func (c *Client) AuthenticateCode(bundleJSON []byte, ref, tag, hexDigest string) (*Code, error) {
 	repo, pinnedTag, pinnedDigest, err := ParseReference(ref)
 	if err != nil {
-		return nil, err
+		return nil, &errs.ConfigurationError{Err: err}
 	}
 	tag = cmp.Or(pinnedTag, tag)
 	hexDigest = cmp.Or(pinnedDigest, hexDigest)

@@ -8,6 +8,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/tinfoilsh/tinfoil-go/document"
+	"github.com/tinfoilsh/tinfoil-go/document/collateral"
 	"github.com/tinfoilsh/tinfoil-go/internal/errs"
 	"github.com/tinfoilsh/tinfoil-go/verify/internal/endorsement"
 	"github.com/tinfoilsh/tinfoil-go/verify/measurement"
@@ -77,7 +79,13 @@ func TestWithPinnedRegistersRejectsInvalid(t *testing.T) {
 func TestVerifyV3RejectsBadRepo(t *testing.T) {
 	v, err := NewVerifier()
 	require.NoError(t, err)
-	verified, err := v.VerifyV3([]byte("{}"), make([]byte, 32), "not a repo reference")
+	nonce := make([]byte, document.NonceSize)
+	raw, err := document.Build(document.BuildInput{Nonce: nonce, Collateral: []collateral.Entry{{
+		ID: "code", Role: collateral.RoleReferenceValues, Format: collateral.SigstoreCodeV1Format,
+		Data: []byte(`{"digest":"digest","sigstore_bundle":{}}`),
+	}}}, func([64]byte) (string, []byte, error) { return document.SEVSNPReportV1Format, []byte("quote"), nil })
+	require.NoError(t, err)
+	verified, err := v.VerifyV3(raw, nonce, "not a repo reference")
 	require.Nil(t, verified)
 	var configuration *errs.ConfigurationError
 	require.ErrorAs(t, err, &configuration)

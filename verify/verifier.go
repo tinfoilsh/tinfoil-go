@@ -74,18 +74,6 @@ func NewVerifier(opts ...Option) (*Verifier, error) {
 		now:             time.Now,
 		endorsements:    endorsementClient,
 	}
-	publicKeys, err := endorsement.PublicSigningKeys()
-	if err != nil {
-		return nil, configurationError(err)
-	}
-	v.configVerifier, err = endorsementClient.ConfigVerifier(publicKeys)
-	if err != nil {
-		return nil, configurationError(err)
-	}
-	v.freshnessVerifier, err = endorsementClient.FreshnessVerifier(publicKeys)
-	if err != nil {
-		return nil, configurationError(err)
-	}
 	for _, opt := range opts {
 		if opt == nil {
 			continue
@@ -94,20 +82,25 @@ func NewVerifier(opts ...Option) (*Verifier, error) {
 			return nil, configurationError(err)
 		}
 	}
-	if v.configKeys != nil {
-		v.configVerifier, err = v.endorsements.ConfigVerifier(v.configKeys)
-		if err != nil {
-			return nil, configurationError(err)
-		}
-		v.configKeys = nil
+	publicKeys, err := endorsement.PublicSigningKeys()
+	if err != nil {
+		return nil, configurationError(err)
 	}
-	if v.freshnessKeys != nil {
-		v.freshnessVerifier, err = v.endorsements.FreshnessVerifier(v.freshnessKeys)
-		if err != nil {
-			return nil, configurationError(err)
-		}
-		v.freshnessKeys = nil
+	if v.configKeys == nil {
+		v.configKeys = publicKeys
 	}
+	if v.freshnessKeys == nil {
+		v.freshnessKeys = publicKeys
+	}
+	v.configVerifier, err = v.endorsements.ConfigVerifier(v.configKeys)
+	if err != nil {
+		return nil, configurationError(err)
+	}
+	v.freshnessVerifier, err = v.endorsements.FreshnessVerifier(v.freshnessKeys)
+	if err != nil {
+		return nil, configurationError(err)
+	}
+	v.configKeys, v.freshnessKeys = nil, nil
 	return v, nil
 }
 
@@ -149,7 +142,7 @@ const (
 	layerPolicy     layer = "policy"
 )
 
-type referenceValues struct {
+type endorsementResult struct {
 	quote              quote.ReferenceValues
 	artifact           endorsement.AuthenticatedArtifact
 	config             *ConfigVerification
@@ -161,10 +154,6 @@ func (v *Verifier) verifyV3(docBytes, nonce []byte, repo string) (*Verification,
 	if v == nil || v.now == nil || v.endorsements == nil || v.configVerifier == nil || v.freshnessVerifier == nil {
 		return nil, layerNone, &errs.ConfigurationError{Err: fmt.Errorf("verifier must be built with NewVerifier")}
 	}
-	name, revision, digest, err := endorsement.ParseReference(repo)
-	if err != nil {
-		return nil, layerProvenance, &errs.ConfigurationError{Err: err}
-	}
 	doc, err := document.Parse(docBytes, nonce)
 	if err != nil {
 		return nil, layerEnvelope, err
@@ -173,27 +162,17 @@ func (v *Verifier) verifyV3(docBytes, nonce []byte, repo string) (*Verification,
 	// All reference values are appraised against the same instant.
 	now := v.now()
 
-	var refs *referenceValues
+	var refs *endorsementResult
 	switch doc.CollateralFormat() {
 	case collateral.FormatV3:
-		if v.ignoreFreshness {
-			return nil, layerProvenance, configurationError(fmt.Errorf("config verification requires config, platform, and runtime freshness"))
-		}
-		policy := endorsement.ConfigPolicy{
-			Identity: "/" + name, Revision: revision, Digest: digest,
-			Now: now, MaxAge: v.freshnessMaxAge,
-		}
-		if err := policy.ValidatePins(); err != nil {
-			return nil, layerProvenance, configurationError(err)
-		}
-		refs, err = v.configReferences(doc, policy)
+		refs, err = v.configReferences(doc, repo, now)
 	case collateral.FormatV2:
 		refs, err = v.codeReferences(doc, repo, now)
 	default:
 		return nil, layerProvenance, errs.WrapAttestation(fmt.Errorf("unsupported collateral format %q", doc.CollateralFormat()))
 	}
 	if err != nil {
-		return nil, layerProvenance, errs.WrapAttestation(fmt.Errorf("reference values: %w", err))
+		return nil, layerProvenance, errs.WrapAttestation(err)
 	}
 
 	authenticated, err := quote.Authenticate(doc.CPUEvidence(), doc.CPUEndorsements(), v.quoteOptions(now))
@@ -224,14 +203,14 @@ func (v *Verifier) verifyV3(docBytes, nonce []byte, repo string) (*Verification,
 	}, layerNone, nil
 }
 
-func (v *Verifier) codeReferences(doc *document.Document, repo string, appraisalTime time.Time) (*referenceValues, error) {
+func (v *Verifier) codeReferences(doc *document.Document, repo string, appraisalTime time.Time) (*endorsementResult, error) {
 	codeRef, err := doc.SigstoreCode()
 	if err != nil {
 		return nil, err
 	}
 	code, err := v.endorsements.AuthenticateCode(codeRef.Bundle, repo, codeRef.Tag, codeRef.Digest)
 	if err != nil {
-		return nil, fmt.Errorf("verifying code measurement: %w", err)
+		return nil, err
 	}
 	platformRef, err := doc.SigstorePlatform()
 	if err != nil {
@@ -241,7 +220,7 @@ func (v *Verifier) codeReferences(doc *document.Document, repo string, appraisal
 	if err != nil {
 		return nil, fmt.Errorf("verifying platform endorsements: %w", err)
 	}
-	refs := &referenceValues{
+	refs := &endorsementResult{
 		quote: quote.LegacyReferenceValues{
 			Endorsements: endorsements.Artifact, Code: code.Measurement, Shape: code.Shape,
 		},
