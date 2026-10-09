@@ -10,7 +10,7 @@ For complete documentation, see the [Go SDK documentation](https://docs.tinfoil.
 
 ## Installation
 
-Requires Go 1.27.1 or later.
+Requires Go 1.27.2 or later.
 
 ```bash
 go get github.com/tinfoilsh/tinfoil-go
