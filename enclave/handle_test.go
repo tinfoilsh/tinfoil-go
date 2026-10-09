@@ -20,6 +20,10 @@ import (
 func TestClientEmbeddedConfigRetainsOtherEndorsements(t *testing.T) {
 	config := []byte("cvm-version: 0.15.0@sha256:" + strings.Repeat("ab", sha256.Size) + "\n")
 	opts := &Options{EmbeddedConfig: &verify.EmbeddedConfig{Bytes: config}}
+	_, err := NewHandle("", "", opts)
+	require.ErrorContains(t, err, "embedded config requires an enclave")
+	_, err = NewDefaultHandle(opts)
+	require.ErrorContains(t, err, "embedded config requires an explicit enclave")
 	client, err := NewHandle("enclave.example", "", opts)
 	require.NoError(t, err)
 	config[0] = '!'
@@ -44,8 +48,10 @@ func TestClientEmbeddedConfigRetainsOtherEndorsements(t *testing.T) {
 	require.Error(t, err)
 	_, err = NewHandle("enclave.example", "", &Options{EmbeddedConfig: &verify.EmbeddedConfig{}})
 	require.Error(t, err)
+	config[0] = 'c'
 	_, err = NewHandle("enclave.example", "invalid", &Options{EmbeddedConfig: &verify.EmbeddedConfig{Bytes: config}})
-	require.Error(t, err)
+	var configError *ConfigurationError
+	require.ErrorAs(t, err, &configError)
 }
 
 func TestClientOptionsCopyPinnedRegisters(t *testing.T) {

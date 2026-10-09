@@ -109,6 +109,9 @@ func (input *Options) verifier() (*verify.Verifier, error) {
 // The document's collateral version selects verification on first use.
 // An embedded config permits an empty repo and authorizes only its exact bytes.
 func NewHandle(enclave, repo string, opts *Options) (*Handle, error) {
+	if enclave == "" && opts != nil && opts.EmbeddedConfig != nil {
+		return nil, &ConfigurationError{Err: fmt.Errorf("embedded config requires an enclave")}
+	}
 	if repo != "" || opts == nil || opts.EmbeddedConfig == nil {
 		if _, _, _, err := verify.ParseReference(repo); err != nil {
 			return nil, &ConfigurationError{Err: err}
@@ -123,6 +126,9 @@ func NewHandle(enclave, repo string, opts *Options) (*Handle, error) {
 
 // NewDefaultHandle applies opts to every discovered router and fallback.
 func NewDefaultHandle(opts *Options) (*Handle, error) {
+	if opts != nil && opts.EmbeddedConfig != nil {
+		return nil, &ConfigurationError{Err: fmt.Errorf("embedded config requires an explicit enclave")}
+	}
 	fallback, err := NewHandle("inference.tinfoil.sh", defaultRouterRepo, opts)
 	if err != nil {
 		return nil, err
