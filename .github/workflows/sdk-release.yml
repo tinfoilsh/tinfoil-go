@@ -44,4 +44,9 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG_NAME: ${{ github.ref_name }}
-        run: gh release create "$TAG_NAME" --generate-notes Tinfoil.xcframework.zip Tinfoil.xcframework.zip.sha256
+        run: |
+          release_flags=()
+          if [[ "$TAG_NAME" == *-* ]]; then
+            release_flags+=(--prerelease --latest=false)
+          fi
+          gh release create "$TAG_NAME" --generate-notes "${release_flags[@]}" Tinfoil.xcframework.zip Tinfoil.xcframework.zip.sha256
