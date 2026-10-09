@@ -1,12 +1,28 @@
 package tinfoil
 
 import (
+	"crypto/sha256"
 	"strings"
 	"testing"
 
 	"github.com/openai/openai-go/v3/option"
 	"github.com/stretchr/testify/require"
+	"github.com/tinfoilsh/tinfoil-go/enclave"
+	"github.com/tinfoilsh/tinfoil-go/verify"
 )
+
+func TestLocalConfigRequiresAnExplicitEnclave(t *testing.T) {
+	config := []byte("cvm-version: 0.15.0@sha256:" + strings.Repeat("ab", sha256.Size) + "\n")
+	opts := WithVerificationOptions(enclave.Options{EmbeddedConfig: &verify.EmbeddedConfig{Bytes: config}})
+	_, err := NewClientWithOptions(opts)
+	require.ErrorContains(t, err, "embedded config requires an enclave")
+	_, err = NewGateway("https://gateway.example", nil, GatewayOptions{ClientOptions: []ClientOption{opts}})
+	require.ErrorContains(t, err, "embedded config requires a direct enclave client")
+	_, err = NewGateway("https://gateway.example", nil, GatewayOptions{ModelPins: map[string]ModelPin{
+		"gpt-oss-120b": {Repo: "tinfoilsh/app", Verification: &enclave.Options{EmbeddedConfig: &verify.EmbeddedConfig{Bytes: config}}},
+	}})
+	require.ErrorContains(t, err, "embedded config requires an enclave")
+}
 
 func TestClientOptionsDefaults(t *testing.T) {
 	cfg := &clientConfig{

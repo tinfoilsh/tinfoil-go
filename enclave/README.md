@@ -102,6 +102,16 @@ opts := enclave.Options{
 handle, err := enclave.NewHandle("enclave.example.com", "org/repo", &opts)
 ```
 
+To trust a local config instead of a registry endorsement, supply its exact bytes:
+
+```go
+opts := enclave.Options{EmbeddedConfig: &verify.EmbeddedConfig{Bytes: configBytes}}
+handle, err := enclave.NewHandle("enclave.example.com", "", &opts)
+```
+
+Runtime and platform endorsements and freshness remain required. Config bytes
+must come from trusted caller configuration.
+
 ## Auditing the Handle Code
 
 - Fetching, caching and freshness enforcement: this package.

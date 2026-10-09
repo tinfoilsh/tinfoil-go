@@ -30,14 +30,17 @@ const (
 // AMD KDS parameters (SEV-SNP) or the Intel PCS URLs (TDX) from it, so the
 // enclave does no report parsing.
 type Request struct {
-	// Profile is FormatV3 for registry configs, or empty for legacy releases.
+	// Profile is FormatV3 for registry or local configs, or empty for legacy releases.
 	Profile string `json:"profile,omitempty"`
 	// Repo is a GitHub repository or, for FormatV3, a registry org/project.
 	Repo string `json:"repo,omitempty"`
-	// Tag is a required config revision for FormatV3; otherwise an optional release tag.
+	// Tag is the registry config revision for FormatV3; otherwise an optional release tag.
 	Tag string `json:"tag,omitempty"`
 	// Digest pins the exact config bytes for FormatV3 and is empty for legacy releases.
 	Digest string `json:"digest,omitempty"`
+	// Runtime pins a cvm version and manifest digest for a local config.
+	// It requires FormatV3 and excludes Repo, Tag, and Digest.
+	Runtime string `json:"runtime,omitempty"`
 	// Platform is attestation's platform label: "sev-snp" or "tdx".
 	Platform string `json:"platform"`
 	// QuoteBase64 is the raw hardware report (SEV-SNP, 1184 bytes) or quote
