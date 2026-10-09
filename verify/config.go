@@ -151,11 +151,11 @@ func (v *Verifier) resolvePlatform(doc *document.Document, now time.Time) (*plat
 	if err != nil {
 		return nil, ArtifactVerification{}, err
 	}
-	platform, err := v.endorsements.AuthenticatePlatformEndorsements(material.Bundle, material.Repo, material.Tag, material.Digest)
+	platform, err := v.endorsements.AuthenticatePlatformEndorsements(material.Bundle, material.Repo, material.Tag, material.Digest, platformpolicy.ArtifactFormatV2)
 	if err != nil {
 		return nil, ArtifactVerification{}, err
 	}
-	if platform.SubjectName != runtime.PlatformSubject {
+	if platform.SubjectName != freshness.PlatformName {
 		return nil, ArtifactVerification{}, fmt.Errorf("config verification requires its dedicated platform endorsement artifact")
 	}
 	approvedAt, err := v.authenticateArtifactFreshness(doc, collateral.FreshnessIDPlatform, freshness.KindPlatform, &platform.AuthenticatedArtifact, now)

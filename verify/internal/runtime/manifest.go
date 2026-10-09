@@ -14,7 +14,6 @@ import (
 const (
 	FormatVersion   = 1
 	MeasurementSize = 48
-	PlatformSubject = "platform-endorsements-igvm.json"
 	MaxManifestSize = 1 << 20
 )
 

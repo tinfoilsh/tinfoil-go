@@ -44,12 +44,12 @@ func TestRuntime(t *testing.T) {
 
 func TestConfigPlatform(t *testing.T) {
 	entry := Entry{ID: PlatformID, Role: RoleReferenceValues, Format: SigstorePlatformV1Format,
-		Data: []byte(`{"repo":"tinfoilsh/platform-endorsements","tag":"v1.0.0","digest":"ab","sigstore_bundle":{}}`)}
+		Data: []byte(`{"repo":"tinfoilsh/cvmimage","tag":"platform-v1.0.0","digest":"ab","sigstore_bundle":{}}`)}
 	set, err := Decode([]Entry{entry})
 	require.NoError(t, err)
 	platform, err := set.ConfigPlatform()
 	require.NoError(t, err)
-	require.Equal(t, "tinfoilsh/platform-endorsements", platform.Repo)
+	require.Equal(t, "tinfoilsh/cvmimage", platform.Repo)
 	platform.Bundle[0] = '!'
 	again, err := set.ConfigPlatform()
 	require.NoError(t, err)

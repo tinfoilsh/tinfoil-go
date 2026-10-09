@@ -37,7 +37,7 @@ var lowerHexRE = regexp.MustCompile(`^[0-9a-f]+$`)
 // named policies, and the machines map keying both by hardware identity.
 type Artifact struct {
 	Format       string                         `json:"format"`
-	Measurements map[string]PlatformMeasurement `json:"measurements"`
+	Measurements map[string]PlatformMeasurement `json:"measurements,omitempty"`
 	// Machines maps a machine's hardware identifier to its policy name.
 	// SEV-SNP machines are keyed by the 64-byte CHIP_ID (128 lowercase hex
 	// chars), TDX machines by the 16-byte PPID (32 lowercase hex chars).

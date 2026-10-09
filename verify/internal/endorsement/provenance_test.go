@@ -1,17 +1,21 @@
 package endorsement
 
 import (
+	"encoding/hex"
 	"regexp"
 	"strings"
 	"testing"
 
 	in_toto "github.com/in-toto/attestation/go/v1"
 	"github.com/sigstore/sigstore-go/pkg/fulcio/certificate"
+	"github.com/sigstore/sigstore-go/pkg/testing/data"
 	"github.com/sigstore/sigstore-go/pkg/verify"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/tinfoilsh/tinfoil-go/document/collateral"
+	"github.com/tinfoilsh/tinfoil-go/endorsement/freshness"
 	"github.com/tinfoilsh/tinfoil-go/internal/testutil"
+	"github.com/tinfoilsh/tinfoil-go/verify/internal/policy"
 	"github.com/tinfoilsh/tinfoil-go/verify/measurement"
 )
 
@@ -42,7 +46,7 @@ func TestSigningIdentity(t *testing.T) {
 
 func TestPinnedWorkflowIdentitiesAreAnchored(t *testing.T) {
 	assert.Equal(t,
-		`^https://github\.com/tinfoilsh/platform-endorsements/\.github/workflows/build\.yml@refs/tags/v[0-9][^@]*$`,
+		`^https://github\.com/tinfoilsh/cvmimage/\.github/workflows/platform-release\.yml@refs/tags/platform-v[0-9][^@]*$`,
 		platformEndorsementsIdentity,
 	)
 	assert.Equal(t,
@@ -119,8 +123,7 @@ func TestAuthenticatedArtifactPinsRepositoryIdentity(t *testing.T) {
 	for _, repository := range []struct {
 		name, id, otherID string
 	}{
-		{collateral.RuntimeRepo, runtimeRepoID, platformEndorsementsRepoID},
-		{platformEndorsementsRepo, platformEndorsementsRepoID, runtimeRepoID},
+		{collateral.RuntimeRepo, runtimeRepoID, "1"},
 	} {
 		t.Run(repository.name, func(t *testing.T) {
 			for _, tt := range []struct {
@@ -163,4 +166,55 @@ func testClient(t *testing.T) *Client {
 	client, err := NewDefaultClient()
 	require.NoError(t, err)
 	return client
+}
+
+func TestPlatformPublisher(t *testing.T) {
+	identity := regexp.MustCompile(platformEndorsementsIdentity)
+	const prefix = "https://github.com/tinfoilsh/cvmimage/.github/workflows/"
+	require.True(t, identity.MatchString(prefix+"platform-release.yml@refs/tags/platform-v1.2.3"))
+	for _, san := range []string{
+		prefix + "release.yml@refs/tags/platform-v1.2.3",
+		prefix + "platform-release.yml@refs/tags/v1.2.3",
+		prefix + "platform-release.yml@refs/heads/platform-v1.2.3",
+		prefix + "platform-release.yml@refs/tags/platform-v1.2.3@extra",
+		"https://github.com/tinfoilsh/platform-endorsements/.github/workflows/build.yml@refs/tags/v1.2.3",
+	} {
+		require.False(t, identity.MatchString(san), san)
+	}
+
+	client := testClient(t)
+	for _, tt := range []struct{ repo, format string }{
+		{"tinfoilsh/platform-endorsements", policy.ArtifactFormatV2},
+		{"tinfoilsh/platform-endorsements", policy.ArtifactFormat},
+		{freshness.PlatformRepo, "unsupported"},
+	} {
+		_, err := client.AuthenticatePlatformEndorsements(nil, tt.repo, "platform-v1.2.3", strings.Repeat("a", 64), tt.format)
+		require.Error(t, err)
+		require.NotContains(t, err.Error(), "parsing bundle")
+	}
+}
+
+func TestPlatformRejectsOtherSigningIdentity(t *testing.T) {
+	client := testClient(t)
+	client.trustRoot = data.TrustedRoot(t, "scaffolding.json")
+	b := data.Bundle(t, "othername.sigstore.json")
+	bundleJSON, err := b.MarshalJSON()
+	require.NoError(t, err)
+	digest := b.GetMessageSignature().GetMessageDigest().GetDigest()
+
+	verifier, err := verify.NewSignedEntityVerifier(client.trustRoot, client.verifierOptions...)
+	require.NoError(t, err)
+	identity, err := verify.NewShortCertificateIdentity("http://oidc.local:8080", "", "foo!oidc.local", "")
+	require.NoError(t, err)
+	_, err = verifier.Verify(b, verify.NewPolicy(verify.WithArtifactDigest("sha256", digest), verify.WithCertificateIdentity(identity)))
+	require.NoError(t, err)
+	for _, format := range []string{policy.ArtifactFormat, policy.ArtifactFormatV2} {
+		t.Run(format, func(t *testing.T) {
+			got, err := client.AuthenticatePlatformEndorsements(bundleJSON, freshness.PlatformRepo, "platform-v1.2.3", hex.EncodeToString(digest), format)
+			var identityError *verify.ErrNoMatchingCertificateIdentity
+			require.ErrorAs(t, err, &identityError)
+			require.ErrorContains(t, err, "expected SAN value to match regex")
+			require.Nil(t, got)
+		})
+	}
 }

@@ -6,14 +6,15 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/tinfoilsh/tinfoil-go/internal/testutil"
+	"github.com/tinfoilsh/tinfoil-go/verify/internal/policy"
 )
 
-// TestLiveLatestPlatformEndorsements is a live test against the published
+// TestLivePublishedPlatformEndorsements is a live test against the published
 // artifact (GitHub proxy + Sigstore TUF/Rekor). Run with -short to exclude
 // it offline.
-func TestLiveLatestPlatformEndorsements(t *testing.T) {
+func TestLivePublishedPlatformEndorsements(t *testing.T) {
 	testutil.RequireLive(t)
-	digest, err := fetchLatestDigest(platformEndorsementsRepo)
+	digest, err := fetchPlatformDigest()
 	require.NoError(t, err)
 
 	client := testClient(t)
@@ -21,7 +22,7 @@ func TestLiveLatestPlatformEndorsements(t *testing.T) {
 	bundleJSON, err := fetchAttestationBundle(platformEndorsementsRepo, digest)
 	require.NoError(t, err)
 
-	endorsements, err := client.AuthenticatePlatformEndorsements(bundleJSON, platformEndorsementsRepo, "", digest)
+	endorsements, err := client.AuthenticatePlatformEndorsements(bundleJSON, platformEndorsementsRepo, "", digest, policy.ArtifactFormat)
 	require.NoError(t, err)
 	artifact := endorsements.Artifact
 

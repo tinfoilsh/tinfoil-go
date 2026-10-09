@@ -22,6 +22,7 @@ import (
 	"github.com/tinfoilsh/tinfoil-go/internal/errs"
 	"github.com/tinfoilsh/tinfoil-go/internal/sdkinfo"
 	"github.com/tinfoilsh/tinfoil-go/verify/internal/endorsement"
+	"github.com/tinfoilsh/tinfoil-go/verify/internal/policy"
 	"github.com/tinfoilsh/tinfoil-go/verify/internal/quote"
 	"github.com/tinfoilsh/tinfoil-go/verify/measurement"
 )
@@ -235,7 +236,7 @@ func (v *Verifier) codeReferences(doc *document.Document, repo string, appraisal
 	if err != nil {
 		return nil, err
 	}
-	endorsements, err := v.endorsements.AuthenticatePlatformEndorsements(platformRef.Bundle, platformRef.Repo, platformRef.Tag, platformRef.Digest)
+	endorsements, err := v.endorsements.AuthenticatePlatformEndorsements(platformRef.Bundle, platformRef.Repo, platformRef.Tag, platformRef.Digest, policy.ArtifactFormat)
 	if err != nil {
 		return nil, fmt.Errorf("verifying platform endorsements: %w", err)
 	}

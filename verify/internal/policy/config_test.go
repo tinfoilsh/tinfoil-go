@@ -12,7 +12,7 @@ import (
 func TestPlatformPolicyWithoutWorkloadMeasurements(t *testing.T) {
 	artifact := loadFixture(t)
 	artifact.Format = ArtifactFormatV2
-	artifact.Measurements = map[string]PlatformMeasurement{}
+	artifact.Measurements = nil
 	for _, p := range artifact.Policies {
 		if p.SEVSNP != nil {
 			p.SEVSNP.HostData = ""
@@ -22,6 +22,7 @@ func TestPlatformPolicyWithoutWorkloadMeasurements(t *testing.T) {
 	}
 	data, err := json.Marshal(artifact)
 	require.NoError(t, err)
+	require.NotContains(t, string(data), `"measurements"`)
 	parsed, err := Parse(data)
 	require.NoError(t, err)
 	require.Equal(t, artifact, parsed)
@@ -42,7 +43,7 @@ func TestPlatformPolicyWithoutWorkloadMeasurements(t *testing.T) {
 			}
 		},
 		"v2 excludes measurement map": func(a *Artifact) {
-			a.Measurements["legacy"] = PlatformMeasurement{}
+			a.Measurements = map[string]PlatformMeasurement{"legacy": {}}
 		},
 	} {
 		t.Run(name, func(t *testing.T) {

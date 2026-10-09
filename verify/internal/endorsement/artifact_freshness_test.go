@@ -19,6 +19,7 @@ func artifact(kind string) freshness.Artifact {
 	a := freshness.Artifact{Kind: kind, Tag: "v1.2.3", Digest: strings.Repeat("ab", 32)}
 	if kind == freshness.KindPlatform {
 		a.Repo, a.Name = freshness.PlatformRepo, freshness.PlatformName
+		a.Tag = freshness.PlatformTagPrefix + a.Tag
 	} else {
 		a.Repo, a.Name = freshness.RuntimeRepo, freshness.RuntimeName(a.Tag)
 	}

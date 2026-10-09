@@ -7,6 +7,7 @@ import (
 	"crypto/sha256"
 	"encoding/json/v2"
 	"fmt"
+	"strings"
 
 	"github.com/tinfoilsh/tinfoil-go/internal/canonical"
 	"github.com/tinfoilsh/tinfoil-go/internal/statement"
@@ -20,11 +21,13 @@ const (
 	BundleType      = statement.BundleType
 	KindPlatform    = "platform"
 	KindRuntime     = "runtime"
-	PlatformRepo    = "tinfoilsh/platform-endorsements"
+	PlatformRepo    = RuntimeRepo
 	RuntimeRepo     = "tinfoilsh/cvmimage"
-	PlatformName    = "platform-endorsements-igvm.json"
+	PlatformName    = "platform-endorsements.json"
 	freshnessDomain = "tinfoil-artifact-freshness/v1\x00"
 )
+
+const PlatformTagPrefix = "platform-"
 
 // Artifact identifies exact release bytes, independently authenticated by the caller.
 type Artifact struct {
@@ -36,13 +39,12 @@ type Artifact struct {
 }
 
 func (a Artifact) Validate() error {
-	if !semver.IsValid(a.Tag) || semver.Canonical(a.Tag) != a.Tag {
-		return fmt.Errorf("artifact tag must be a canonical semantic version")
-	}
+	version := a.Tag
 	switch a.Kind {
 	case KindPlatform:
-		if a.Repo != PlatformRepo || a.Name != PlatformName {
-			return fmt.Errorf("platform freshness requires the IGVM platform artifact")
+		version = strings.TrimPrefix(a.Tag, PlatformTagPrefix)
+		if version == a.Tag || a.Repo != PlatformRepo || a.Name != PlatformName {
+			return fmt.Errorf("platform freshness requires the cvmimage platform artifact")
 		}
 	case KindRuntime:
 		if a.Repo != RuntimeRepo || a.Name != RuntimeName(a.Tag) {
@@ -50,6 +52,9 @@ func (a Artifact) Validate() error {
 		}
 	default:
 		return fmt.Errorf("unsupported freshness artifact kind %q", a.Kind)
+	}
+	if !semver.IsValid(version) || semver.Canonical(version) != version {
+		return fmt.Errorf("artifact tag must be a canonical semantic version")
 	}
 	_, err := canonical.DecodeLowerHex("artifact digest", a.Digest, sha256.Size)
 	return err
