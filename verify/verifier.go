@@ -29,8 +29,8 @@ import (
 
 // Verifier appraises attestation documents against a fixed policy.
 //
-// A Verifier is immutable once built and safe for concurrent use. It performs
-// no I/O: the document arrives as an argument, and every trust anchor it needs
+// A Verifier is immutable once built and safe for concurrent use. Its built-in
+// verification performs no I/O: the document arrives as an argument, and every trust anchor it needs
 // is embedded in this module or carried by the document itself. It holds no
 // cache, so it never decides that an earlier answer is still good enough —
 // that judgement belongs to whatever fetches documents.
@@ -48,6 +48,8 @@ type Verifier struct {
 	freshnessMaxAge time.Duration
 	ignoreFreshness bool
 	now             func() time.Time
+
+	configAuthorizer func(collateral.ConfigEndorsement) error
 
 	// endorsements authenticates reference values against its own copy of the
 	// trusted root. NewVerifier builds one from the embedded root; only the
@@ -86,6 +88,9 @@ func NewVerifier(opts ...Option) (*Verifier, error) {
 	}
 	if v.embedded.Config != nil && v.configKeys != nil {
 		return nil, configurationError(fmt.Errorf("embedded config and config signing keys select conflicting trust sources"))
+	}
+	if v.configAuthorizer != nil && (v.embedded.Config != nil || v.configKeys != nil) {
+		return nil, configurationError(fmt.Errorf("config authorizer conflicts with embedded config or config signing keys"))
 	}
 	if v.embedded.Runtime != nil && v.embedded.Platform != nil && v.freshnessKeys != nil {
 		return nil, configurationError(fmt.Errorf("freshness signing keys have no endorsed artifact to verify"))
@@ -129,6 +134,7 @@ func (v *Verifier) PinnedRegisters() *measurement.Measurement {
 // version. repo pins the expected repository or registry project as
 // org/project[@revision][@sha256:digest]. An embedded config permits an empty
 // repo; its exact caller-supplied bytes then provide the workload constraint.
+// A config authorizer requires an empty repo and owns config authorization.
 //
 // The caller owns both expectations that cannot come from the document: the
 // nonce it generated, and its workload constraint (repo or embedded bytes).

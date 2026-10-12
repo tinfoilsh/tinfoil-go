@@ -9,6 +9,24 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestPlainConfigCollateral(t *testing.T) {
+	entry := Entry{ID: ConfigID, Role: RoleReferenceValues, Format: ConfigV1Format, Data: []byte(`{"config_base64":"Y29uZmln"}`)}
+	set, err := Decode([]Entry{entry})
+	require.NoError(t, err)
+	require.Equal(t, []byte("config"), set.Config.Config)
+	require.Empty(t, set.Config.Reference)
+	require.Empty(t, set.Config.Bundle)
+	_, err = Decode([]Entry{entry, entry})
+	require.Error(t, err)
+	entry.Format = ConfigEndorsementV1Format
+	_, err = Decode([]Entry{entry})
+	require.ErrorContains(t, err, "endorsement_ref")
+	entry.Format = ConfigV1Format
+	entry.Data = []byte(`{"config_base64":"Y29uZmln","sigstore_bundle":{}}`)
+	_, err = Decode([]Entry{entry})
+	require.ErrorContains(t, err, "cannot contain an endorsement")
+}
+
 func TestConfigEndorsement(t *testing.T) {
 	config := []byte("cvm-version: 1.0.0\n")
 	reference := "sha256:" + strings.Repeat("ab", 32)

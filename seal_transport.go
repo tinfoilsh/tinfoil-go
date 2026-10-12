@@ -45,8 +45,8 @@ type gatewayPolicy struct {
 }
 
 func newGatewayPolicy(opts GatewayOptions, defaults enclave.Options) (gatewayPolicy, error) {
-	if defaults.EmbeddedConfig != nil {
-		return gatewayPolicy{}, fmt.Errorf("embedded config requires a direct enclave client")
+	if defaults.EmbeddedConfig != nil || defaults.ConfigAuthorizer != nil {
+		return gatewayPolicy{}, fmt.Errorf("caller-authorized config requires a direct enclave client")
 	}
 	if opts.PinnedModelsOnly && len(opts.ModelPins) == 0 {
 		return gatewayPolicy{}, fmt.Errorf("pinned-only mode requires at least one model pin")

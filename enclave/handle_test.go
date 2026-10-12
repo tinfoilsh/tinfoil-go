@@ -3,6 +3,7 @@ package enclave
 import (
 	"crypto/sha256"
 	"encoding/json"
+	"errors"
 	"os"
 	"strings"
 	"testing"
@@ -17,13 +18,32 @@ import (
 	"github.com/tinfoilsh/tinfoil-go/verify/measurement"
 )
 
+func TestClientConfigAuthorizerSurvivesDerivedHandles(t *testing.T) {
+	rejected := errors.New("config rejected")
+	opts := &Options{ConfigAuthorizer: func(collateral.ConfigEndorsement) error { return rejected }}
+	_, err := NewHandle("", "", opts)
+	require.ErrorContains(t, err, "requires an enclave")
+	_, err = NewDefaultHandle(opts)
+	require.ErrorContains(t, err, "requires an explicit enclave")
+	client, err := NewHandle("enclave.example", "", opts)
+	require.NoError(t, err)
+	opts.ConfigAuthorizer = nil
+	nonce := make([]byte, document.NonceSize)
+	raw, err := document.Build(document.BuildInput{Nonce: nonce, CollateralFormat: collateral.FormatV3, Collateral: []collateral.Entry{{
+		ID: collateral.ConfigID, Role: collateral.RoleReferenceValues, Format: collateral.ConfigV1Format, Data: []byte(`{"config_base64":"Y29uZmln"}`),
+	}}}, func([64]byte) (string, []byte, error) { return document.SEVSNPReportV1Format, []byte("quote"), nil })
+	require.NoError(t, err)
+	_, err = client.ForEnclave("other.example").ViaRelay("relay.example").verifier.VerifyV3(raw, nonce, "")
+	require.ErrorIs(t, err, rejected)
+}
+
 func TestClientEmbeddedConfigRetainsOtherEndorsements(t *testing.T) {
 	config := []byte("cvm-version: 0.15.0@sha256:" + strings.Repeat("ab", sha256.Size) + "\n")
 	opts := &Options{EmbeddedConfig: &verify.EmbeddedConfig{Bytes: config}}
 	_, err := NewHandle("", "", opts)
-	require.ErrorContains(t, err, "embedded config requires an enclave")
+	require.ErrorContains(t, err, "caller-authorized config requires an enclave")
 	_, err = NewDefaultHandle(opts)
-	require.ErrorContains(t, err, "embedded config requires an explicit enclave")
+	require.ErrorContains(t, err, "caller-authorized config requires an explicit enclave")
 	client, err := NewHandle("enclave.example", "", opts)
 	require.NoError(t, err)
 	config[0] = '!'
