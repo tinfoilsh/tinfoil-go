@@ -8,7 +8,7 @@ import (
 
 const (
 	// Version is the Tinfoil Go SDK release version.
-	Version = "0.16.1"
+	Version = "0.16.2"
 )
 
 // SoftwareIdentity identifies software involved in verification.
