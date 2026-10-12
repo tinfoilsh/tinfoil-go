@@ -32,18 +32,18 @@ const (
 	oidcIssuer = "https://token.actions.githubusercontent.com"
 
 	// platformEndorsementsRepo publishes the platform-endorsements artifact.
-	platformEndorsementsRepo = "tinfoilsh/platform-endorsements"
+	platformEndorsementsRepo = "tinfoilsh/cvmimage"
 	freshnessWitnessRepo     = "tinfoilsh/freshness-witness"
 
 	// platformEndorsementsIdentity is the only signing certificate identity
 	// accepted for the platform-endorsements artifact: the tag-triggered
-	// build workflow of the publisher repo. Dots are escaped and the pattern
-	// is anchored at both ends so no other workflow path, ref type, or
-	// trailing SAN content can match.
+	// platform-release workflow of tinfoilsh/cvmimage. Dots are escaped and
+	// the pattern is anchored at both ends so no other workflow path, ref
+	// type, or trailing SAN content can match.
 )
 
 var (
-	platformEndorsementsIdentity = githubWorkflowIdentityPattern(platformEndorsementsRepo, `build\.yml`, `refs/tags/v[0-9][^@]*`)
+	platformEndorsementsIdentity = githubWorkflowIdentityPattern(platformEndorsementsRepo, `platform-release\.yml`, `refs/tags/platform-v[0-9][^@]*`)
 	freshnessWitnessIdentity     = githubWorkflowIdentityPattern(freshnessWitnessRepo, `freshness\.yml`, `refs/heads/main`)
 )
 

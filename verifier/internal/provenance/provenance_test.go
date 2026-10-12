@@ -38,7 +38,7 @@ func TestSigningIdentity(t *testing.T) {
 
 func TestPinnedWorkflowIdentitiesAreAnchored(t *testing.T) {
 	assert.Equal(t,
-		`^https://github\.com/tinfoilsh/platform-endorsements/\.github/workflows/build\.yml@refs/tags/v[0-9][^@]*$`,
+		`^https://github\.com/tinfoilsh/cvmimage/\.github/workflows/platform-release\.yml@refs/tags/platform-v[0-9][^@]*$`,
 		platformEndorsementsIdentity,
 	)
 	assert.Equal(t,
