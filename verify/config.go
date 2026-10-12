@@ -17,6 +17,20 @@ import (
 	"github.com/tinfoilsh/tinfoil-go/verify/internal/runtime"
 )
 
+// WithConfigAuthorizer replaces config endorsement verification with caller policy.
+// The callback receives detached, untrusted material and must reject unauthorized
+// config bytes. It may be called concurrently. Runtime, platform, and hardware
+// checks still apply; approval does not authenticate a registry name or timestamp.
+func WithConfigAuthorizer(authorize func(collateral.ConfigEndorsement) error) Option {
+	return func(v *Verifier) error {
+		if authorize == nil {
+			return fmt.Errorf("config authorizer must not be nil")
+		}
+		v.configAuthorizer = authorize
+		return nil
+	}
+}
+
 // WithConfigSigningKeys replaces public config trust with the supplied keys.
 // These keys define the accepted audit scope and do not authorize artifact freshness.
 // An explicit key set requires attestation-collaterals/v3.
@@ -44,8 +58,11 @@ func WithFreshnessSigningKeys(keys []crypto.PublicKey) Option {
 }
 
 func (v *Verifier) configReferences(doc *document.Document, ref string, now time.Time) (*endorsementResult, error) {
+	if v.configAuthorizer != nil && ref != "" {
+		return nil, configurationError(fmt.Errorf("config authorizer cannot authenticate repository or revision pins; enforce them in caller policy"))
+	}
 	pins := endorsement.ConfigPolicy{Now: now, MaxAge: v.freshnessMaxAge, IgnoreFreshness: v.ignoreFreshness}
-	if ref != "" || v.embedded.Config == nil {
+	if ref != "" || (v.embedded.Config == nil && v.configAuthorizer == nil) {
 		name, revision, digest, err := endorsement.ParseReference(ref)
 		if err != nil {
 			return nil, configurationError(err)
@@ -107,6 +124,19 @@ func (v *Verifier) resolveConfig(doc *document.Document, pins endorsement.Config
 	config, err := doc.ConfigEndorsement()
 	if err != nil {
 		return nil, nil, err
+	}
+	if v.configAuthorizer != nil {
+		if len(config.Config) == 0 || len(config.Config) > configendorsement.MaxConfigSize {
+			return nil, nil, fmt.Errorf("config size is outside allowed bounds")
+		}
+		if err := v.configAuthorizer(config.Clone()); err != nil {
+			return nil, nil, fmt.Errorf("authorizing config: %w", err)
+		}
+		digest := sha256.Sum256(config.Config)
+		return config.Config, &ConfigVerification{Source: SourcePolicy, Digest: hex.EncodeToString(digest[:])}, nil
+	}
+	if len(config.Bundle) == 0 {
+		return nil, nil, fmt.Errorf("unsigned config requires a config authorizer")
 	}
 	approved, err := v.configVerifier.Verify(config.Config, config.Bundle, pins)
 	if err != nil {

@@ -186,6 +186,11 @@ func TestEndorsedConfigWithEmbeddedArtifactsRetainsFreshnessAndAuthority(t *test
 	require.Equal(t, SourceEndorsement, refs.config.Source)
 	require.Equal(t, SourceEmbedded, refs.artifact.Source)
 	require.Equal(t, at.Add(v.freshnessMaxAge), refs.freshnessExpiresAt)
+	rejected := fmt.Errorf("config is not authorized")
+	require.NoError(t, WithConfigAuthorizer(func(collateral.ConfigEndorsement) error { return rejected })(v))
+	_, err = v.configReferences(doc, "", f.Now)
+	require.ErrorIs(t, err, rejected, "a valid endorsement must not bypass caller policy")
+	v.configAuthorizer = nil
 	expiredAt := refs.freshnessExpiresAt.Add(time.Second)
 	_, err = v.configReferences(doc, "org/project", expiredAt)
 	require.ErrorContains(t, err, "too old")

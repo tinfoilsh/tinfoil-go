@@ -17,7 +17,8 @@ type configCollateral struct {
 }
 
 // ConfigEndorsement is untrusted config material decoded from a document.
-// Its reference must match the independently verified endorsement.
+// Plain config collateral has no Reference or Bundle and requires caller authorization.
+// A signed reference must match the independently verified endorsement.
 type ConfigEndorsement struct {
 	Reference string
 	Config    []byte
@@ -29,12 +30,21 @@ func decodeConfigEndorsement(entry *Entry) (ConfigEndorsement, error) {
 	if err := unmarshalData(entry, entry.Format, &c); err != nil {
 		return ConfigEndorsement{}, err
 	}
-	digest, ok := strings.CutPrefix(c.Reference, "sha256:")
-	if !ok {
-		return ConfigEndorsement{}, fmt.Errorf("endorsement_ref must be a SHA-256 reference")
-	}
-	if _, err := canonical.DecodeLowerHex("endorsement_ref", digest, sha256.Size); err != nil {
-		return ConfigEndorsement{}, err
+	if entry.Format == ConfigV1Format {
+		if c.Reference != "" || len(c.Bundle) != 0 {
+			return ConfigEndorsement{}, fmt.Errorf("plain config collateral cannot contain an endorsement")
+		}
+	} else {
+		digest, ok := strings.CutPrefix(c.Reference, "sha256:")
+		if !ok {
+			return ConfigEndorsement{}, fmt.Errorf("endorsement_ref must be a SHA-256 reference")
+		}
+		if _, err := canonical.DecodeLowerHex("endorsement_ref", digest, sha256.Size); err != nil {
+			return ConfigEndorsement{}, err
+		}
+		if c.Bundle.Kind() != '{' {
+			return ConfigEndorsement{}, fmt.Errorf("sigstore_bundle must be an object")
+		}
 	}
 	config, err := canonical.DecodeBase64("config_base64", c.Config)
 	if err != nil {
@@ -42,9 +52,6 @@ func decodeConfigEndorsement(entry *Entry) (ConfigEndorsement, error) {
 	}
 	if len(config) == 0 {
 		return ConfigEndorsement{}, fmt.Errorf("config_base64 must not be empty")
-	}
-	if c.Bundle.Kind() != '{' {
-		return ConfigEndorsement{}, fmt.Errorf("sigstore_bundle must be an object")
 	}
 	return ConfigEndorsement{Reference: c.Reference, Config: config, Bundle: c.Bundle}, nil
 }

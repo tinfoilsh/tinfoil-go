@@ -33,7 +33,6 @@ func NewClient(openaiOpts ...option.RequestOption) (*Client, error) {
 // against the default config repository, and uses the EHBP transport.
 func NewClientWithOptions(opts ...ClientOption) (*Client, error) {
 	cfg := &clientConfig{
-		repo:      defaultConfigRepo,
 		transport: defaultTransportMode,
 	}
 	for _, opt := range opts {
@@ -44,8 +43,12 @@ func NewClientWithOptions(opts ...ClientOption) (*Client, error) {
 	if cfg.transport == "" {
 		cfg.transport = defaultTransportMode
 	}
-	if cfg.repo == "" {
+	customConfig := cfg.verification.EmbeddedConfig != nil || cfg.verification.ConfigAuthorizer != nil
+	if cfg.repo == "" && !customConfig {
 		cfg.repo = defaultConfigRepo
+	}
+	if cfg.enclave == "" && customConfig {
+		return nil, &ConfigurationError{Err: fmt.Errorf("caller-authorized config requires an enclave")}
 	}
 	if cfg.transport != TransportTLS && cfg.transport != TransportEHBP {
 		return nil, &ConfigurationError{Err: fmt.Errorf("unknown transport mode: %q", cfg.transport)}

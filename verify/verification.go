@@ -15,9 +15,10 @@ type ReferenceSource string
 const (
 	SourceEndorsement ReferenceSource = "endorsement"
 	SourceEmbedded    ReferenceSource = "embedded"
+	SourcePolicy      ReferenceSource = "policy"
 )
 
-// ConfigVerification describes the config bound to hardware. Embedded configs
+// ConfigVerification describes the config bound to hardware. Caller-authorized configs
 // have no endorsement reference, signing key hint, or approval time.
 type ConfigVerification struct {
 	Source         ReferenceSource

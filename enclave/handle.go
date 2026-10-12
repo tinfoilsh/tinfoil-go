@@ -13,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/tinfoilsh/tinfoil-go/document/collateral"
 	"github.com/tinfoilsh/tinfoil-go/verify"
 	"github.com/tinfoilsh/tinfoil-go/verify/measurement"
 )
@@ -81,6 +82,10 @@ func fetchRouters() ([]string, error) {
 
 // Options is copied at construction. Create a new client to change it.
 type Options struct {
+	// EmbeddedConfig trusts exact caller-supplied bytes instead of a config endorsement.
+	EmbeddedConfig *verify.EmbeddedConfig `json:"embedded_config,omitempty"`
+	// ConfigAuthorizer authorizes document-carried configs instead of their endorsement.
+	ConfigAuthorizer func(collateral.ConfigEndorsement) error `json:"-"`
 	// PinnedRegisters adds register checks; empty entries retain defaults.
 	PinnedRegisters *measurement.Measurement `json:"pinned_registers,omitempty"`
 	// FreshnessMaxAge defaults to seven days when zero. Negative ages are invalid.
@@ -97,14 +102,31 @@ func (input *Options) verifier() (*verify.Verifier, error) {
 		verify.WithPinnedRegisters(input.PinnedRegisters),
 		verify.WithFreshnessMaxAge(input.FreshnessMaxAge),
 	}
+	if input.EmbeddedConfig != nil {
+		opts = append(opts, verify.WithEmbeddedReferences(verify.EmbeddedReferences{Config: input.EmbeddedConfig}))
+	}
+	if input.ConfigAuthorizer != nil {
+		opts = append(opts, verify.WithConfigAuthorizer(input.ConfigAuthorizer))
+	}
 	return verify.NewVerifier(opts...)
 }
 
 // NewHandle pins a repository or registry project, org/project[@revision][@sha256:digest].
 // The document's collateral version selects verification on first use.
+// An embedded config permits an empty repo and authorizes only its exact bytes.
+// A ConfigAuthorizer requires an empty repo and owns config authorization.
 func NewHandle(enclave, repo string, opts *Options) (*Handle, error) {
-	if _, _, _, err := verify.ParseReference(repo); err != nil {
-		return nil, &ConfigurationError{Err: err}
+	customConfig := opts != nil && (opts.EmbeddedConfig != nil || opts.ConfigAuthorizer != nil)
+	if enclave == "" && customConfig {
+		return nil, &ConfigurationError{Err: fmt.Errorf("caller-authorized config requires an enclave")}
+	}
+	if repo != "" && opts != nil && opts.ConfigAuthorizer != nil {
+		return nil, &ConfigurationError{Err: fmt.Errorf("config authorizer requires an empty repository pin")}
+	}
+	if repo != "" || !customConfig {
+		if _, _, _, err := verify.ParseReference(repo); err != nil {
+			return nil, &ConfigurationError{Err: err}
+		}
 	}
 	verifier, err := opts.verifier()
 	if err != nil {
@@ -115,6 +137,9 @@ func NewHandle(enclave, repo string, opts *Options) (*Handle, error) {
 
 // NewDefaultHandle applies opts to every discovered router and fallback.
 func NewDefaultHandle(opts *Options) (*Handle, error) {
+	if opts != nil && (opts.EmbeddedConfig != nil || opts.ConfigAuthorizer != nil) {
+		return nil, &ConfigurationError{Err: fmt.Errorf("caller-authorized config requires an explicit enclave")}
+	}
 	fallback, err := NewHandle("inference.tinfoil.sh", defaultRouterRepo, opts)
 	if err != nil {
 		return nil, err
