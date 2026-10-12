@@ -13,7 +13,7 @@ import (
 // it offline.
 func TestLiveLatestPlatformEndorsements(t *testing.T) {
 	testutil.RequireLive(t)
-	digest, err := fetchLatestDigest(platformEndorsementsRepo)
+	tag, digest, err := fetchPlatformDigest()
 	require.NoError(t, err)
 
 	client := testClient(t)
@@ -21,7 +21,7 @@ func TestLiveLatestPlatformEndorsements(t *testing.T) {
 	bundleJSON, err := fetchAttestationBundle(platformEndorsementsRepo, digest)
 	require.NoError(t, err)
 
-	endorsements, err := client.AuthenticatePlatformEndorsements(bundleJSON, platformEndorsementsRepo, "", digest)
+	endorsements, err := client.AuthenticatePlatformEndorsements(bundleJSON, platformEndorsementsRepo, tag, digest)
 	require.NoError(t, err)
 	artifact := endorsements.Artifact
 
