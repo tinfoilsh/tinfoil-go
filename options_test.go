@@ -7,9 +7,16 @@ import (
 
 	"github.com/openai/openai-go/v3/option"
 	"github.com/stretchr/testify/require"
+	"github.com/tinfoilsh/tinfoil-go/document/collateral"
 	"github.com/tinfoilsh/tinfoil-go/enclave"
 	"github.com/tinfoilsh/tinfoil-go/verify"
 )
+
+func TestConfigAuthorizerRejectsRepositoryPin(t *testing.T) {
+	_, err := NewClientWithOptions(WithEnclave("enclave.example"), WithRepo("org/project"),
+		WithVerificationOptions(enclave.Options{ConfigAuthorizer: func(collateral.ConfigEndorsement) error { return nil }}))
+	require.ErrorContains(t, err, "requires an empty repository pin")
+}
 
 func TestLocalConfigRequiresAnExplicitEnclave(t *testing.T) {
 	config := []byte("cvm-version: 0.15.0@sha256:" + strings.Repeat("ab", sha256.Size) + "\n")

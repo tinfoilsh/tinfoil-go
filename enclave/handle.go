@@ -120,6 +120,9 @@ func NewHandle(enclave, repo string, opts *Options) (*Handle, error) {
 	if enclave == "" && customConfig {
 		return nil, &ConfigurationError{Err: fmt.Errorf("caller-authorized config requires an enclave")}
 	}
+	if repo != "" && opts != nil && opts.ConfigAuthorizer != nil {
+		return nil, &ConfigurationError{Err: fmt.Errorf("config authorizer requires an empty repository pin")}
+	}
 	if repo != "" || !customConfig {
 		if _, _, _, err := verify.ParseReference(repo); err != nil {
 			return nil, &ConfigurationError{Err: err}

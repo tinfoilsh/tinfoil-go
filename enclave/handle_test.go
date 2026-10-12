@@ -25,6 +25,8 @@ func TestClientConfigAuthorizerSurvivesDerivedHandles(t *testing.T) {
 	require.ErrorContains(t, err, "requires an enclave")
 	_, err = NewDefaultHandle(opts)
 	require.ErrorContains(t, err, "requires an explicit enclave")
+	_, err = NewHandle("enclave.example", "org/project", opts)
+	require.ErrorContains(t, err, "requires an empty repository pin")
 	client, err := NewHandle("enclave.example", "", opts)
 	require.NoError(t, err)
 	opts.ConfigAuthorizer = nil
