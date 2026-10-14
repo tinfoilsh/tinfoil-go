@@ -13,7 +13,7 @@ const (
 	verifierName                      = "tinfoil-go"
 	verifierModulePath                = "github.com/tinfoilsh/tinfoil-go"
 	// Version is the Tinfoil Go SDK release version.
-	Version = "0.15.0"
+	Version = "0.15.8"
 )
 
 var verificationTime = time.Now
