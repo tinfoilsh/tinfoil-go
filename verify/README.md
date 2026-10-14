@@ -56,24 +56,24 @@ holds no cache and is immutable, so it is safe for concurrent use — fetching
 the document, caching the result and enforcing its deadline stay with the
 caller.
 
-By default, `VerifyV3` samples the appraisal clock once and
-judges the freshness witnesses against that instant; the CPU evidence layer
-reads the clock separately for vendor certificate and CRL validity windows,
-because a production build cannot pass an instant down to it. So the same
-document is accepted today and rejected once its witnesses go stale. What a
-successful verification reports does not drift, though: `FreshnessExpiresAt` is
-derived from the authenticated witness timestamps, never from the local clock.
+By default, `VerifyV3` samples the current time once for freshness witnesses,
+vendor certificates, and collateral validity. `FreshnessExpiresAt` is derived
+from authenticated approval times, so re-verification does not extend it.
 
-For archived documents, `verify.WithIgnoreFreshness()` skips both freshness
-witness checks and leaves `FreshnessExpiresAt` zero. Code and platform
-provenance, CPU evidence, and certificate/collateral validity checks still apply.
-This option is only available on the core verifier; it does not authorize live
-SDK requests with expired evidence.
+For archived documents, use `verify.WithVerificationTime(trustedTime)` when
+building the verifier. The time must be nonzero and independently authenticated
+by the caller. Freshness proofs remain required and are checked at that same
+instant, along with hardware certificates and collateral. `Metadata.VerifiedAt`
+records the selected appraisal time; it does not prove when a receipt existed.
+Historical verification uses the SDK's current trust policy and the supplied
+collateral, so it cannot account for later revocations absent from that collateral.
+This option is only available on the core verifier; live clients use the current
+time. Replace `WithIgnoreFreshness()` with an authenticated verification time.
 
 ```go
 import "github.com/tinfoilsh/tinfoil-go/verify"
 
-verifier, err := verify.NewVerifier()
+verifier, err := verify.NewVerifier(verify.WithVerificationTime(trustedTime))
 if err != nil {
     return err
 }

@@ -61,7 +61,7 @@ func (v *Verifier) configReferences(doc *document.Document, ref string, now time
 	if v.configAuthorizer != nil && ref != "" {
 		return nil, configurationError(fmt.Errorf("config authorizer cannot authenticate repository or revision pins; enforce them in caller policy"))
 	}
-	pins := endorsement.ConfigPolicy{Now: now, MaxAge: v.freshnessMaxAge, IgnoreFreshness: v.ignoreFreshness}
+	pins := endorsement.ConfigPolicy{Now: now, MaxAge: v.freshnessMaxAge}
 	if ref != "" || (v.embedded.Config == nil && v.configAuthorizer == nil) {
 		name, revision, digest, err := endorsement.ParseReference(ref)
 		if err != nil {
@@ -98,9 +98,7 @@ func (v *Verifier) configReferences(doc *document.Document, ref string, now time
 		platform: &platformTrust,
 		config:   approved,
 	}
-	if !v.ignoreFreshness {
-		result.freshnessExpiresAt = freshnessExpiration(v.freshnessMaxAge, approved.ApprovalTime, platformTrust.ApprovalTime, runtimeTrust.ApprovalTime)
-	}
+	result.freshnessExpiresAt = freshnessExpiration(v.freshnessMaxAge, approved.ApprovalTime, platformTrust.ApprovalTime, runtimeTrust.ApprovalTime)
 	return result, nil
 }
 
@@ -212,7 +210,7 @@ func (v *Verifier) authenticateArtifactFreshness(doc *document.Document, id, kin
 	}
 	approved, err := v.freshnessVerifier.Verify(material.Bundle, endorsement.FreshnessPolicy{
 		Artifact: freshness.Artifact{Kind: kind, Repo: artifact.Repo, Tag: artifact.Tag, Name: artifact.SubjectName, Digest: artifact.Digest},
-		Now:      now, MaxAge: v.freshnessMaxAge, IgnoreFreshness: v.ignoreFreshness,
+		Now:      now, MaxAge: v.freshnessMaxAge,
 	})
 	if err != nil {
 		return time.Time{}, err

@@ -17,6 +17,7 @@ import (
 	"cmp"
 	"fmt"
 	"strings"
+	"time"
 
 	tdxabi "github.com/google/go-tdx-guest/abi"
 
@@ -86,25 +87,24 @@ type resolvedValues struct {
 // value, select the production defaults: the embedded vendor roots and the
 // current time. Only the anchor for the document's own platform is used.
 //
-// The overrides themselves exist only in the conformance build. A production
-// binary has no way to set them, so it cannot be made to trust a supplied
-// vendor root or to appraise collateral at anything but the current time.
+// Trust-anchor overrides exist only in the conformance build.
 type Options struct {
-	overrides overrides
+	VerificationTime time.Time
+	overrides        overrides
 }
 
 func (o *Options) sevOptions() *sev.Options {
 	if o == nil {
 		return nil
 	}
-	return o.overrides.sev()
+	return o.overrides.sev(o.VerificationTime)
 }
 
 func (o *Options) tdxOptions() *tdx.Options {
 	if o == nil {
 		return nil
 	}
-	return o.overrides.tdx()
+	return o.overrides.tdx(o.VerificationTime)
 }
 
 // Authenticate verifies the evidence's signature chain up to the pinned

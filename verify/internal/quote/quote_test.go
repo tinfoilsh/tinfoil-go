@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -25,6 +26,13 @@ import (
 // testShape is an arbitrary required shape for paths that do not consume it
 // (SEV assembly).
 var testShape = &policy.Shape{CPUs: 1, MemoryMB: 1, Disks: 1}
+
+func TestOptionsVerificationTime(t *testing.T) {
+	at := time.Date(2026, time.January, 15, 12, 0, 0, 0, time.UTC)
+	opts := &Options{VerificationTime: at}
+	require.Equal(t, at, opts.sevOptions().VerificationTime)
+	require.Equal(t, at, opts.tdxOptions().VerificationTime)
+}
 
 // loadSEVFixture builds CPU evidence from a live-captured production Genoa
 // report, its VCEK collateral, and a live-fetched AMD CRL (captured

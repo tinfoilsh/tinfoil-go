@@ -13,17 +13,15 @@ import (
 )
 
 // ConfigPolicy pins the identity and supplies the client's clock and freshness rules.
-// Zero MaxAge and FutureSkew select the defaults. IgnoreFreshness skips the
-// approval age check for archived material; Now is then optional and every
-// other check still applies. ConfigVerified.ApprovalTime reports the authenticated time.
+// Zero MaxAge and FutureSkew select the defaults. Now is required, including for
+// archived material. ConfigVerified.ApprovalTime reports the authenticated time.
 type ConfigPolicy struct {
-	Identity        string
-	Revision        string
-	Digest          string
-	Now             time.Time
-	MaxAge          time.Duration
-	FutureSkew      time.Duration
-	IgnoreFreshness bool
+	Identity   string
+	Revision   string
+	Digest     string
+	Now        time.Time
+	MaxAge     time.Duration
+	FutureSkew time.Duration
 }
 
 type ConfigVerified struct {
@@ -68,7 +66,7 @@ func (p ConfigPolicy) timePolicy() (timePolicy, error) {
 	if err := p.ValidatePins(); err != nil {
 		return timePolicy{}, err
 	}
-	return newTimePolicy(p.Now, p.MaxAge, p.FutureSkew, p.IgnoreFreshness)
+	return newTimePolicy(p.Now, p.MaxAge, p.FutureSkew)
 }
 
 // Verify authenticates exact config bytes, approval identity, signing authority,

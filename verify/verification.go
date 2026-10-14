@@ -62,7 +62,6 @@ type Verification struct {
 	// FreshnessExpiresAt is the earlier authenticated code/platform witness
 	// deadline. Cached verification must not authorize new requests at or
 	// after this time; re-verifying the same witness does not extend it.
-	// It is zero when WithIgnoreFreshness skips witness verification.
 	// Config verification uses the earliest nonzero config, platform, or runtime approval deadline.
 	// Embedded components add no deadline; all-embedded verification returns zero.
 	FreshnessExpiresAt time.Time
@@ -76,8 +75,9 @@ type Verification struct {
 type VerificationMetadata struct {
 	// Verifier identifies the SDK that performed the verification.
 	Verifier SoftwareIdentity
-	// VerifiedAt is the instant the document was appraised at, read once from
-	// the local clock. It is not a freshness guarantee.
+	// VerifiedAt is the instant the document was appraised at: the current time
+	// or the caller-supplied verification time. It is not a trusted timestamp
+	// proving when the receipt existed.
 	VerifiedAt time.Time
 }
 

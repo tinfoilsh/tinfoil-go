@@ -35,18 +35,13 @@ import (
 // cache, so it never decides that an earlier answer is still good enough —
 // that judgement belongs to whatever fetches documents.
 //
-// It does read the clock. VerifyV3 samples it once and judges the freshness
-// witnesses against that instant. The CPU evidence layer reads the clock
-// separately for vendor certificate and CRL validity windows, because a
-// production build has no way to pass an instant down to it (see
-// overrides.go); only the conformance build threads one through. Unless
-// freshness is explicitly ignored, the same document is accepted today and
-// rejected once its witnesses go stale.
+// VerifyV3 uses one instant for freshness and hardware certificate/collateral
+// validity: the current time by default, or the caller-authenticated instant
+// supplied through WithVerificationTime for archived evidence.
 type Verifier struct {
 	embedded        EmbeddedReferences
 	pinnedRegisters *measurement.Measurement
 	freshnessMaxAge time.Duration
-	ignoreFreshness bool
 	now             func() time.Time
 
 	configAuthorizer func(collateral.ConfigEndorsement) error
@@ -252,10 +247,6 @@ func (v *Verifier) codeReferences(doc *document.Document, repo string, appraisal
 		},
 		artifact: artifactVerification(code.AuthenticatedArtifact, time.Time{}),
 	}
-	if v.ignoreFreshness {
-		return refs, nil
-	}
-
 	codeWitnessedAt, err := v.authenticateFreshness(doc, collateral.FreshnessIDCode, &code.AuthenticatedArtifact, appraisalTime)
 	if err != nil {
 		return nil, fmt.Errorf("verifying code freshness: %w", err)
