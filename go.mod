@@ -9,7 +9,7 @@ require (
 	github.com/sigstore/protobuf-specs v0.5.1
 	github.com/sigstore/sigstore-go v1.2.2
 	github.com/stretchr/testify v1.11.1
-	github.com/tinfoilsh/encrypted-http-body-protocol v0.3.2
+	github.com/tinfoilsh/encrypted-http-body-protocol v0.4.1
 	github.com/tinfoilsh/go-sev-guest v0.0.0-20260818055935-bec7bdb637fd
 	google.golang.org/protobuf v1.36.11
 )
