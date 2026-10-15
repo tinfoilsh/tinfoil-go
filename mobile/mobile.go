@@ -40,7 +40,8 @@ func NewNonce() []byte {
 // from with nonce. When relay is not empty the request goes to relay, which
 // forwards it to host. Both are a host with an optional port, not a URL.
 func AttestationURL(host, relay string, nonce []byte) (string, error) {
-	return fetch.URL(host, relay, nonce)
+	url, err := fetch.URL(host, relay, nonce)
+	return url, toMobileError(err)
 }
 
 // Verifier appraises attestation documents under one immutable policy. It is
@@ -52,7 +53,8 @@ type Verifier struct {
 // NewVerifier builds a verifier from options, as the JSON object
 // enclave.Options describes: pinned registers and a freshness bound in integer
 // nanoseconds. An empty string selects the defaults.
-func NewVerifier(optionsJSON string) (*Verifier, error) {
+func NewVerifier(optionsJSON string) (_ *Verifier, err error) {
+	defer func() { err = toMobileError(err) }()
 	opts := &enclave.Options{}
 	if optionsJSON != "" {
 		var err error
@@ -74,7 +76,8 @@ func NewVerifier(optionsJSON string) (*Verifier, error) {
 // repo, a trusted owner/name[@tag][@sha256:digest] reference, and returns what
 // it proved as the JSON described in verification.go. A result that can no
 // longer authorize a request is an error, as in the Go SDK.
-func (v *Verifier) Verify(doc, nonce []byte, repo string) (string, error) {
+func (v *Verifier) Verify(doc, nonce []byte, repo string) (_ string, err error) {
+	defer func() { err = toMobileError(err) }()
 	verified, err := v.inner.VerifyV3(doc, nonce, repo)
 	if err != nil {
 		return "", err
