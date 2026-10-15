@@ -10,7 +10,7 @@ import (
 	"net/http"
 	"sync"
 
-	"github.com/tinfoilsh/tinfoil-go/verify"
+	"github.com/tinfoilsh/tinfoil-go/internal/errs"
 )
 
 var (
@@ -49,7 +49,7 @@ func (t *TLSBoundRoundTripper) getTransport() (*http.Transport, error) {
 		tlsConfig.VerifyConnection = func(state tls.ConnectionState) error {
 			if prevVerifyConnection != nil {
 				if err := prevVerifyConnection(state); err != nil {
-					return verify.WrapAttestation(err)
+					return errs.WrapAttestation(err)
 				}
 			}
 
@@ -84,7 +84,7 @@ func (t *TLSBoundRoundTripper) RoundTrip(r *http.Request) (*http.Response, error
 	}
 	resp, err := transport.RoundTrip(r)
 	if isCertificateError(err) {
-		err = verify.WrapAttestation(err)
+		err = errs.WrapAttestation(err)
 	}
 	return resp, err
 }

@@ -3,8 +3,9 @@
 //
 // The categories live in this leaf package so that the low-level verification
 // packages (document, quote, quote/sev, quote/tdx) can classify their errors
-// without importing verifier, which imports them in turn. Callers should use
-// the aliases re-exported from verifier.
+// without importing verify, which imports them in turn. Callers should use the
+// aliases re-exported from tinfoil and enclave; verify re-exports only the two
+// categories it returns.
 package errs
 
 import (

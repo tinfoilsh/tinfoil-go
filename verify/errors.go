@@ -8,14 +8,5 @@ type Error = errs.Error
 // ConfigurationError reports invalid caller arguments or client configuration.
 type ConfigurationError = errs.ConfigurationError
 
-// FetchError reports failure to fetch attestation material.
-type FetchError = errs.FetchError
-
 // AttestationError reports rejected evidence, policy, or channel binding.
 type AttestationError = errs.AttestationError
-
-// WrapFetch wraps err unless it is nil or already contains an SDK error.
-func WrapFetch(err error) error { return errs.WrapFetch(err) }
-
-// WrapAttestation wraps err unless it is nil or already contains an SDK error.
-func WrapAttestation(err error) error { return errs.WrapAttestation(err) }
