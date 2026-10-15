@@ -12,7 +12,7 @@ package collaterals
 import (
 	"time"
 
-	"github.com/tinfoilsh/tinfoil-go/document/collateral"
+	"github.com/tinfoilsh/tinfoil-go/verify/document/collateral"
 )
 
 // FormatV2 identifies the legacy GitHub workload-release collateral response.

@@ -7,8 +7,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/tinfoilsh/tinfoil-go/document/collateral"
 	"github.com/tinfoilsh/tinfoil-go/internal/canonical"
+	"github.com/tinfoilsh/tinfoil-go/verify/document/collateral"
 )
 
 const (

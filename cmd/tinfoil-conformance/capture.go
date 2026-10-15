@@ -12,9 +12,9 @@ import (
 	"os"
 	"time"
 
-	"github.com/tinfoilsh/tinfoil-go/document"
 	"github.com/tinfoilsh/tinfoil-go/internal/fetch"
 	"github.com/tinfoilsh/tinfoil-go/verify/conformance"
+	"github.com/tinfoilsh/tinfoil-go/verify/document"
 )
 
 // runCapture fetches a v3 attestation from a live enclave and, only if it

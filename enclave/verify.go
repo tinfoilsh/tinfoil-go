@@ -3,9 +3,9 @@ package enclave
 import (
 	"context"
 
-	"github.com/tinfoilsh/tinfoil-go/document"
 	"github.com/tinfoilsh/tinfoil-go/internal/fetch"
 	"github.com/tinfoilsh/tinfoil-go/verify"
+	"github.com/tinfoilsh/tinfoil-go/verify/document"
 )
 
 // validateTransportKeys requires the keys a Handle binds traffic to: the

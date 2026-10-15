@@ -12,9 +12,9 @@ import (
 	"net/url"
 	"time"
 
-	"github.com/tinfoilsh/tinfoil-go/document"
 	"github.com/tinfoilsh/tinfoil-go/internal/errs"
 	"github.com/tinfoilsh/tinfoil-go/internal/sdkinfo"
+	"github.com/tinfoilsh/tinfoil-go/verify/document"
 )
 
 // Document retrieves a v3 attestation document from an enclave host using a

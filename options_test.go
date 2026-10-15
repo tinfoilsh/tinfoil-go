@@ -7,9 +7,9 @@ import (
 
 	"github.com/openai/openai-go/v3/option"
 	"github.com/stretchr/testify/require"
-	"github.com/tinfoilsh/tinfoil-go/document/collateral"
 	"github.com/tinfoilsh/tinfoil-go/enclave"
 	"github.com/tinfoilsh/tinfoil-go/verify"
+	"github.com/tinfoilsh/tinfoil-go/verify/document/collateral"
 )
 
 func TestConfigAuthorizerRejectsRepositoryPin(t *testing.T) {
