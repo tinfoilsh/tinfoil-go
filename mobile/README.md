@@ -41,11 +41,11 @@ traffic, which may still reach a replica draining after a cutover.
 ## Errors
 
 Errors flatten to an `NSError` carrying only a message, so the category has to
-survive in the text. It does: the SDK's categories lead their messages with
-`configuration error:` or `attestation error:`, and fetching is the caller's, so
-no fetch error starts here. Nothing in this package adds a prefix of its own. The
-prefixes are exported as constants in `errors.go`, so a caller matches on them
-instead of on literals. `NewNonce` cannot fail: Go's random source crashes the
+survive in the text. This package writes it: every error it returns leads with
+`configuration error:` or `attestation error:`, chosen from the error's type
+rather than its text, and fetching is the caller's, so no fetch error starts
+here. The prefixes are exported as constants in `errors.go`, so a caller matches
+on them instead of on literals. `NewNonce` cannot fail: Go's random source crashes the
 program rather than return an error.
 
 ## Checking a change

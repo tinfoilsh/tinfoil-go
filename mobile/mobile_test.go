@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -20,16 +21,23 @@ import (
 
 const routerRepo = "tinfoilsh/confidential-model-router"
 
-// Swift tells error categories apart by prefix alone, so the exported prefixes
-// must be the ones the SDK's error types produce.
+// Swift tells error categories apart by prefix alone, so toMobileError must lead
+// each category's message with its exported prefix, exactly once, while Go
+// callers can still unwrap the category.
 func TestErrorPrefixesMatchCategories(t *testing.T) {
 	cause := errors.New("cause")
-	for prefix, err := range map[string]error{
+	for prefix, category := range map[string]error{
 		ConfigurationErrorPrefix: &verify.ConfigurationError{Err: cause},
 		AttestationErrorPrefix:   &verify.AttestationError{Err: cause},
 	} {
-		assert.Equal(t, prefix+"cause", err.Error())
+		assert.Equal(t, prefix+"cause", toMobileError(category).Error())
+		wrapped := toMobileError(fmt.Errorf("context: %w", category))
+		assert.Equal(t, prefix+"context: cause", wrapped.Error())
+		assert.ErrorIs(t, wrapped, category)
 	}
+	assert.NoError(t, toMobileError(nil))
+	uncategorized := errors.New("uncategorized")
+	assert.Same(t, uncategorized, toMobileError(uncategorized))
 }
 
 // Every error crossing the FFI reaches Swift as text, so each must lead with
