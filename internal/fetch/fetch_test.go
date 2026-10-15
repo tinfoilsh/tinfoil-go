@@ -14,9 +14,9 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
-	"github.com/tinfoilsh/tinfoil-go/document"
 	"github.com/tinfoilsh/tinfoil-go/internal/errs"
 	"github.com/tinfoilsh/tinfoil-go/internal/sdkinfo"
+	"github.com/tinfoilsh/tinfoil-go/verify/document"
 )
 
 func TestFetchReportsSDKIdentity(t *testing.T) {

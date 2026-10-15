@@ -21,10 +21,10 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/tinfoilsh/tinfoil-go/document"
 	"github.com/tinfoilsh/tinfoil-go/enclave"
 	"github.com/tinfoilsh/tinfoil-go/internal/fetch"
 	"github.com/tinfoilsh/tinfoil-go/verify"
+	"github.com/tinfoilsh/tinfoil-go/verify/document"
 )
 
 // NewNonce returns a fresh random challenge for one attestation fetch. Pass

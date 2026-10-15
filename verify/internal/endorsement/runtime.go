@@ -6,7 +6,7 @@ import (
 	"strings"
 
 	"github.com/sigstore/sigstore-go/pkg/verify"
-	"github.com/tinfoilsh/tinfoil-go/document/collateral"
+	"github.com/tinfoilsh/tinfoil-go/verify/document/collateral"
 	"github.com/tinfoilsh/tinfoil-go/verify/internal/runtime"
 )
 

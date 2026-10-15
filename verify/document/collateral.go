@@ -3,7 +3,7 @@ package document
 import (
 	"fmt"
 
-	"github.com/tinfoilsh/tinfoil-go/document/collateral"
+	"github.com/tinfoilsh/tinfoil-go/verify/document/collateral"
 )
 
 // CollateralFormat selects a verification policy, not a trust anchor.

@@ -7,10 +7,10 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/tinfoilsh/tinfoil-go/document"
-	"github.com/tinfoilsh/tinfoil-go/document/collateral"
 	configendorsement "github.com/tinfoilsh/tinfoil-go/endorsement/config"
 	"github.com/tinfoilsh/tinfoil-go/endorsement/freshness"
+	"github.com/tinfoilsh/tinfoil-go/verify/document"
+	"github.com/tinfoilsh/tinfoil-go/verify/document/collateral"
 	"github.com/tinfoilsh/tinfoil-go/verify/internal/endorsement"
 	platformpolicy "github.com/tinfoilsh/tinfoil-go/verify/internal/policy"
 	"github.com/tinfoilsh/tinfoil-go/verify/internal/quote"

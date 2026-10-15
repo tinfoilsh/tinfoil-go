@@ -9,10 +9,10 @@ import (
 	"io"
 	"os"
 
-	"github.com/tinfoilsh/tinfoil-go/document"
 	"github.com/tinfoilsh/tinfoil-go/internal/fetch"
 	"github.com/tinfoilsh/tinfoil-go/verify"
 	"github.com/tinfoilsh/tinfoil-go/verify/conformance"
+	"github.com/tinfoilsh/tinfoil-go/verify/document"
 )
 
 const stageLive = "live-verify"

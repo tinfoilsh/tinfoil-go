@@ -6,7 +6,6 @@ on:
       - 'mobile/**'
       - 'verify/**'
       - 'enclave/**'
-      - 'document/**'
       - 'internal/**'
       - 'go.mod'
       - 'go.sum'

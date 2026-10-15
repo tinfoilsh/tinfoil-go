@@ -161,7 +161,7 @@ See the [tinfoil-js documentation](https://github.com/tinfoilsh/tinfoil-js) for 
 
 ## Auditing the Verification Code
 
-- Document parsing and nonce/hash binding: `../document/document.go`.
+- Document parsing and nonce/hash binding: `document/document.go`.
 - Code, platform and freshness provenance: `internal/provenance/`.
 - Strict platform-policy parsing: `internal/policy/`.
 - CPU authentication and expectation enforcement: `internal/quote/sev/` and
