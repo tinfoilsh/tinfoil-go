@@ -9,6 +9,7 @@ import (
 
 	"github.com/tinfoilsh/tinfoil-go/internal/canonical"
 	"github.com/tinfoilsh/tinfoil-go/verify/document/collateral"
+	"golang.org/x/mod/semver"
 )
 
 const (
@@ -70,6 +71,11 @@ func DecodeManifest(data []byte) (*Manifest, error) {
 	var m Manifest
 	if err := json.Unmarshal(data, &m); err != nil {
 		return nil, fmt.Errorf("parsing runtime manifest: %w", err)
+	}
+	// Every config pins a canonical semantic version, so a manifest with any
+	// other version could never match one.
+	if !semver.IsValid(m.Version) || semver.Canonical(m.Version) != m.Version {
+		return nil, fmt.Errorf("runtime manifest version must be a canonical semantic version")
 	}
 	if m.Measurements == nil || m.Measurements.FormatVersion != FormatVersion {
 		return nil, fmt.Errorf("runtime manifest format is unsupported")

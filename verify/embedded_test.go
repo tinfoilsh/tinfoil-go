@@ -141,6 +141,15 @@ func TestEmbeddedTrustRejectsInvalidOrUnusedInputs(t *testing.T) {
 		_, err := NewVerifier(WithEmbeddedReferences(refs))
 		require.Error(t, err)
 	}
+	for _, version := range []string{"", "0.15.0", "v0.15"} {
+		var manifest runtime.Manifest
+		require.NoError(t, json.Unmarshal(inputs.Runtime, &manifest))
+		manifest.Version = version
+		data, err := json.Marshal(manifest)
+		require.NoError(t, err)
+		_, err = NewVerifier(WithEmbeddedReferences(EmbeddedReferences{Runtime: data}))
+		require.ErrorAs(t, err, new(*UsageError), "a manifest no config can pin, version %q", version)
+	}
 	for _, options := range [][]Option{
 		{WithEmbeddedReferences(inputs), WithConfigSigningKeys(keys)},
 		{WithConfigSigningKeys(keys), WithEmbeddedReferences(inputs)},
