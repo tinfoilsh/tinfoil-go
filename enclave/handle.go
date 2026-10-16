@@ -130,7 +130,7 @@ func NewHandle(enclave, repo string, opts *Options) (*Handle, error) {
 	}
 	verifier, err := opts.verifier()
 	if err != nil {
-		return nil, err
+		return nil, fromVerify(err)
 	}
 	return &Handle{enclave: enclave, repo: repo, verifier: verifier}, nil
 }
@@ -202,7 +202,7 @@ func (s *Handle) HTTPClient() (*http.Client, error) {
 		s.tlsTransport = &clientTransport{client: s, build: func(verified *verify.Verification) (http.RoundTripper, error) {
 			key, err := verified.TLSPublicKeyFP()
 			if err != nil {
-				return nil, err
+				return nil, fromVerify(err)
 			}
 			return &TLSBoundRoundTripper{ExpectedPublicKey: key}, nil
 		}, isKeyError: isCertificateError}

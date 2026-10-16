@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/tinfoilsh/tinfoil-go/internal/errs"
 	"github.com/tinfoilsh/tinfoil-go/verify/document"
+	"github.com/tinfoilsh/tinfoil-go/verify/internal/errs"
 	"github.com/tinfoilsh/tinfoil-go/verify/measurement"
 )
 
@@ -103,7 +103,7 @@ func (v *Verification) HPKEPublicKey() (string, error) {
 // format. Lookup does not refresh evidence or enforce FreshnessExpiresAt.
 func (v *Verification) CryptoMaterialData(id, format string) (string, error) {
 	if v == nil {
-		return "", &errs.ConfigurationError{Err: fmt.Errorf("verification is required")}
+		return "", &errs.UsageError{Err: fmt.Errorf("verification is required")}
 	}
 	return CryptoMaterialData(v.CryptoMaterial, id, format)
 }
@@ -117,11 +117,11 @@ func CryptoMaterialData(items []document.CryptoMaterialItem, id, format string) 
 			continue
 		}
 		if item.Format != format {
-			return "", &errs.AttestationError{Err: fmt.Errorf("crypto_material item %q has format %q, want %q", id, item.Format, format)}
+			return "", &errs.VerificationError{Err: fmt.Errorf("crypto_material item %q has format %q, want %q", id, item.Format, format)}
 		}
 		return item.Data, nil
 	}
-	return "", &errs.AttestationError{Err: fmt.Errorf("document endorses no %q crypto material", id)}
+	return "", &errs.VerificationError{Err: fmt.Errorf("document endorses no %q crypto material", id)}
 }
 
 func cloneMeasurement(value *measurement.Measurement) *measurement.Measurement {

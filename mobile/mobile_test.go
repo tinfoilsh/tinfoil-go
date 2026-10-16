@@ -12,6 +12,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/tinfoilsh/tinfoil-go/enclave"
 	"github.com/tinfoilsh/tinfoil-go/internal/testutil"
 	"github.com/tinfoilsh/tinfoil-go/verify"
 	"github.com/tinfoilsh/tinfoil-go/verify/document"
@@ -26,10 +27,15 @@ const routerRepo = "tinfoilsh/confidential-model-router"
 // callers can still unwrap the category.
 func TestErrorPrefixesMatchCategories(t *testing.T) {
 	cause := errors.New("cause")
-	for prefix, category := range map[string]error{
-		ConfigurationErrorPrefix: &verify.ConfigurationError{Err: cause},
-		AttestationErrorPrefix:   &verify.AttestationError{Err: cause},
+	for _, tc := range []struct {
+		prefix   string
+		category error
+	}{
+		{ConfigurationErrorPrefix, &verify.UsageError{Err: cause}},
+		{ConfigurationErrorPrefix, &enclave.ConfigurationError{Err: cause}},
+		{AttestationErrorPrefix, &verify.VerificationError{Err: cause}},
 	} {
+		prefix, category := tc.prefix, tc.category
 		assert.Equal(t, prefix+"cause", toMobileError(category).Error())
 		wrapped := toMobileError(fmt.Errorf("context: %w", category))
 		assert.Equal(t, prefix+"context: cause", wrapped.Error())
@@ -97,7 +103,7 @@ func TestCheckFreshRejectsExpired(t *testing.T) {
 	require.NoError(t, checkFresh(verified, verified.FreshnessExpiresAt.Add(-time.Second)))
 	err := checkFresh(verified, verified.FreshnessExpiresAt)
 	require.Error(t, err)
-	assert.True(t, strings.HasPrefix(err.Error(), AttestationErrorPrefix), err.Error())
+	assert.True(t, strings.HasPrefix(toMobileError(err).Error(), AttestationErrorPrefix), err.Error())
 }
 
 // The flow a mobile caller runs: its own fetch, then a stateless verify.

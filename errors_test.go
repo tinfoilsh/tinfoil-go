@@ -53,19 +53,20 @@ func TestPublicInputErrors(t *testing.T) {
 	var config *tinfoil.ConfigurationError
 	_, err := tinfoil.NewClientWithOptions(tinfoil.WithTransport("invalid"))
 	require.ErrorAs(t, err, &config)
+	var usage *verify.UsageError
 	verifier, err := verify.NewVerifier()
 	require.NoError(t, err)
 	_, err = verifier.VerifyV3(nil, nil, "")
-	require.ErrorAs(t, err, &config)
+	require.ErrorAs(t, err, &usage)
 	_, err = verifier.VerifyV3(nil, nil, "org/repo")
-	require.ErrorAs(t, err, &config)
+	require.ErrorAs(t, err, &usage)
 	_, err = enclave.NewHandle("enclave.example", "", nil)
 	require.ErrorAs(t, err, &config, "reject missing trust configuration before fetching")
 	for _, repo := range []string{"owner", "owner/repo/extra", "owner/repo@sha256:bad"} {
 		_, err = enclave.NewHandle("enclave.example", repo, nil)
 		require.ErrorAs(t, err, &config)
 		_, err = verifier.VerifyV3(nil, nil, repo)
-		require.ErrorAs(t, err, &config)
+		require.ErrorAs(t, err, &usage)
 	}
 	_, err = enclave.NewHandle("enclave.example", "org/repo@v1@sha256:"+strings.Repeat("a", 64), nil)
 	require.NoError(t, err)
@@ -77,11 +78,11 @@ func TestPublicInputErrors(t *testing.T) {
 	require.ErrorAs(t, err, &config)
 	var verified *verify.Verification
 	_, err = verified.TLSPublicKeyFP()
-	require.ErrorAs(t, err, &config)
+	require.ErrorAs(t, err, &usage)
 
-	var attestation *tinfoil.AttestationError
+	var rejected *verify.VerificationError
 	_, err = verifier.VerifyV3([]byte(`{}`), make([]byte, document.NonceSize), "org/repo")
-	require.ErrorAs(t, err, &attestation, "malformed evidence is not a caller configuration error")
+	require.ErrorAs(t, err, &rejected, "malformed evidence is not a usage error")
 }
 
 func TestMalformedPinsAreConfigurationErrors(t *testing.T) {
@@ -99,7 +100,8 @@ func TestMalformedPinsAreConfigurationErrors(t *testing.T) {
 		_, err = enclave.NewDefaultHandle(opts)
 		require.ErrorAs(t, err, &config, "reject malformed pins before discovery")
 		_, err = verify.NewVerifier(verify.WithPinnedRegisters(pins))
-		require.ErrorAs(t, err, &config)
+		var usage *verify.UsageError
+		require.ErrorAs(t, err, &usage)
 	}
 	for _, pins := range []*measurement.Measurement{
 		{Type: measurement.SevGuestV2, Registers: []string{strings.Repeat("AB", 48)}},

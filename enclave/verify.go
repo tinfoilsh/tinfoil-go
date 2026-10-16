@@ -12,12 +12,12 @@ import (
 // TLS key, and the HPKE key when the document endorses one.
 func validateTransportKeys(v *verify.Verification) error {
 	if _, err := v.TLSPublicKeyFP(); err != nil {
-		return err
+		return fromVerify(err)
 	}
 	for _, item := range v.CryptoMaterial {
 		if item.ID == document.CryptoMaterialIDHPKE {
 			_, err := v.HPKEPublicKey()
-			return err
+			return fromVerify(err)
 		}
 	}
 	return nil
@@ -37,7 +37,7 @@ func (s *Handle) fetchVerification() (*verify.Verification, error) {
 
 	verified, err := s.verifier.VerifyV3(docBytes, nonce, s.repo)
 	if err != nil {
-		return nil, err
+		return nil, fromVerify(err)
 	}
 	if err := validateTransportKeys(verified); err != nil {
 		return nil, err

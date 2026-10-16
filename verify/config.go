@@ -59,17 +59,17 @@ func WithFreshnessSigningKeys(keys []crypto.PublicKey) Option {
 
 func (v *Verifier) configReferences(doc *document.Document, ref string, now time.Time) (*endorsementResult, error) {
 	if v.configAuthorizer != nil && ref != "" {
-		return nil, configurationError(fmt.Errorf("config authorizer cannot authenticate repository or revision pins; enforce them in caller policy"))
+		return nil, usageError(fmt.Errorf("config authorizer cannot authenticate repository or revision pins; enforce them in caller policy"))
 	}
 	pins := endorsement.ConfigPolicy{Now: now, MaxAge: v.freshnessMaxAge, IgnoreFreshness: v.ignoreFreshness}
 	if ref != "" || (v.embedded.Config == nil && v.configAuthorizer == nil) {
 		name, revision, digest, err := endorsement.ParseReference(ref)
 		if err != nil {
-			return nil, configurationError(err)
+			return nil, usageError(err)
 		}
 		pins.Identity, pins.Revision, pins.Digest = "/"+name, revision, digest
 		if err := pins.ValidatePins(); err != nil {
-			return nil, configurationError(err)
+			return nil, usageError(err)
 		}
 	}
 	config, approved, err := v.resolveConfig(doc, pins)

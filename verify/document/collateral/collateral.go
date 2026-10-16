@@ -89,7 +89,7 @@ type ConfigReference struct {
 // ErrNotFound reports that a document carries no collateral entry for the
 // requested purpose. Malformed collateral never reaches the document's
 // accessors, because Decode rejects it. Verification classifies missing
-// required collateral as an AttestationError while preserving this cause.
+// required collateral as a VerificationError while preserving this cause.
 var ErrNotFound = errors.New("collateral entry not found")
 
 // Set is decoded collateral: for each purpose the verifier knows, the first

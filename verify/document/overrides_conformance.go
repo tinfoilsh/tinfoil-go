@@ -2,7 +2,7 @@
 
 package document
 
-import "github.com/tinfoilsh/tinfoil-go/internal/errs"
+import "github.com/tinfoilsh/tinfoil-go/verify/internal/errs"
 
 // DangerousTestOnlyDecode applies Parse's structural rules without checking
 // the challenge against a nonce, so the conformance harness can drive the
@@ -11,6 +11,6 @@ import "github.com/tinfoilsh/tinfoil-go/internal/errs"
 // binding would let a replayed document through, which is why this exists
 // only in the conformance build.
 func DangerousTestOnlyDecode(docBytes []byte) (result *Document, err error) {
-	defer func() { err = errs.WrapAttestation(err) }()
+	defer func() { err = errs.WrapVerification(err) }()
 	return decode(docBytes)
 }

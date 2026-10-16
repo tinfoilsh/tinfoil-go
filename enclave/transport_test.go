@@ -184,6 +184,26 @@ func TestVerificationFetchStillTimesOut(t *testing.T) {
 	})
 }
 
+func TestRejectedDocumentIsAttestationError(t *testing.T) {
+	original := http.DefaultClient
+	t.Cleanup(func() { http.DefaultClient = original })
+	synctest.Test(t, func(t *testing.T) {
+		http.DefaultClient = &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+			resp := testResponse()
+			resp.Body = io.NopCloser(strings.NewReader("{}"))
+			return resp, nil
+		})}
+		client, err := NewHandle("enclave.example", "org/repo", nil)
+		require.NoError(t, err)
+		_, err = client.Verify()
+		var attestation *AttestationError
+		require.ErrorAs(t, err, &attestation)
+		var rejected *verify.VerificationError
+		require.ErrorAs(t, err, &rejected, "verify's error remains the cause")
+		require.True(t, strings.HasPrefix(err.Error(), "attestation error: "), err.Error())
+	})
+}
+
 func TestPreviouslyReturnedTransportsUseExplicitVerification(t *testing.T) {
 	var attempts int
 	s := &Handle{verify: func() (*verify.Verification, error) {

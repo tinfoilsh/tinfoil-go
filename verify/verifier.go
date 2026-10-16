@@ -7,9 +7,9 @@
 // expiry all belong to the caller — see package enclave for an implementation
 // that does those things.
 //
-// This package also re-exports the SDK's error categories, which are defined
-// in internal/errs so the lower-level verification packages can classify
-// their errors without importing this one, which imports them in turn.
+// It returns two error types: a UsageError when the verifier is built or
+// called with invalid inputs, and a VerificationError when the document must
+// not be trusted.
 package verify
 
 import (
@@ -17,11 +17,11 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/tinfoilsh/tinfoil-go/internal/errs"
 	"github.com/tinfoilsh/tinfoil-go/internal/sdkinfo"
 	"github.com/tinfoilsh/tinfoil-go/verify/document"
 	"github.com/tinfoilsh/tinfoil-go/verify/document/collateral"
 	"github.com/tinfoilsh/tinfoil-go/verify/internal/endorsement"
+	"github.com/tinfoilsh/tinfoil-go/verify/internal/errs"
 	"github.com/tinfoilsh/tinfoil-go/verify/internal/policy"
 	"github.com/tinfoilsh/tinfoil-go/verify/internal/quote"
 	"github.com/tinfoilsh/tinfoil-go/verify/measurement"
@@ -71,7 +71,7 @@ func NewVerifier(opts ...Option) (*Verifier, error) {
 	// Build default endorsement.Client with embedded roots
 	endorsementClient, err := endorsement.NewDefaultClient()
 	if err != nil {
-		return nil, configurationError(err)
+		return nil, usageError(err)
 	}
 	v := &Verifier{
 		freshnessMaxAge: endorsement.MaxFreshnessAge,
@@ -83,21 +83,21 @@ func NewVerifier(opts ...Option) (*Verifier, error) {
 			continue
 		}
 		if err := opt(v); err != nil {
-			return nil, configurationError(err)
+			return nil, usageError(err)
 		}
 	}
 	if v.embedded.Config != nil && v.configKeys != nil {
-		return nil, configurationError(fmt.Errorf("embedded config and config signing keys select conflicting trust sources"))
+		return nil, usageError(fmt.Errorf("embedded config and config signing keys select conflicting trust sources"))
 	}
 	if v.configAuthorizer != nil && (v.embedded.Config != nil || v.configKeys != nil) {
-		return nil, configurationError(fmt.Errorf("config authorizer conflicts with embedded config or config signing keys"))
+		return nil, usageError(fmt.Errorf("config authorizer conflicts with embedded config or config signing keys"))
 	}
 	if v.embedded.Runtime != nil && v.embedded.Platform != nil && v.freshnessKeys != nil {
-		return nil, configurationError(fmt.Errorf("freshness signing keys have no endorsed artifact to verify"))
+		return nil, usageError(fmt.Errorf("freshness signing keys have no endorsed artifact to verify"))
 	}
 	publicKeys, err := endorsement.PublicSigningKeys()
 	if err != nil {
-		return nil, configurationError(err)
+		return nil, usageError(err)
 	}
 	configKeys, freshnessKeys := v.configKeys, v.freshnessKeys
 	if configKeys == nil {
@@ -108,11 +108,11 @@ func NewVerifier(opts ...Option) (*Verifier, error) {
 	}
 	v.configVerifier, err = v.endorsements.ConfigVerifier(configKeys)
 	if err != nil {
-		return nil, configurationError(err)
+		return nil, usageError(err)
 	}
 	v.freshnessVerifier, err = v.endorsements.FreshnessVerifier(freshnessKeys)
 	if err != nil {
-		return nil, configurationError(err)
+		return nil, usageError(err)
 	}
 	return v, nil
 }
@@ -170,7 +170,7 @@ type endorsementResult struct {
 // verifyV3 is VerifyV3, also reporting which layer rejected the document.
 func (v *Verifier) verifyV3(docBytes, nonce []byte, repo string) (*Verification, layer, error) {
 	if v == nil || v.now == nil || v.endorsements == nil || v.configVerifier == nil || v.freshnessVerifier == nil {
-		return nil, layerNone, &errs.ConfigurationError{Err: fmt.Errorf("verifier must be built with NewVerifier")}
+		return nil, layerNone, &errs.UsageError{Err: fmt.Errorf("verifier must be built with NewVerifier")}
 	}
 	doc, err := document.Parse(docBytes, nonce)
 	if err != nil {
@@ -187,10 +187,10 @@ func (v *Verifier) verifyV3(docBytes, nonce []byte, repo string) (*Verification,
 	case collateral.FormatV2:
 		refs, err = v.codeReferences(doc, repo, now)
 	default:
-		return nil, layerProvenance, errs.WrapAttestation(fmt.Errorf("unsupported collateral format %q", doc.CollateralFormat()))
+		return nil, layerProvenance, errs.WrapVerification(fmt.Errorf("unsupported collateral format %q", doc.CollateralFormat()))
 	}
 	if err != nil {
-		return nil, layerProvenance, errs.WrapAttestation(err)
+		return nil, layerProvenance, errs.WrapVerification(err)
 	}
 
 	authenticated, err := quote.Authenticate(doc.CPUEvidence(), doc.CPUEndorsements(), v.quoteOptions(now))

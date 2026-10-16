@@ -15,8 +15,8 @@ import (
 	"slices"
 
 	"github.com/tinfoilsh/tinfoil-go/internal/canonical"
-	"github.com/tinfoilsh/tinfoil-go/internal/errs"
 	"github.com/tinfoilsh/tinfoil-go/verify/document/collateral"
+	"github.com/tinfoilsh/tinfoil-go/verify/internal/errs"
 )
 
 // Attestation document v3 (predicate https://tinfoil.sh/predicate/attestation/v3).
@@ -330,9 +330,9 @@ func RandomNonce() ([]byte, error) {
 // and item ids unique. A parsed document is not authenticated: nothing in it
 // is trusted until the quote proves the hardware bound that REPORT_DATA.
 func Parse(docBytes, expectedNonce []byte) (result *Document, err error) {
-	defer func() { err = errs.WrapAttestation(err) }()
+	defer func() { err = errs.WrapVerification(err) }()
 	if len(expectedNonce) != NonceSize {
-		return nil, &errs.ConfigurationError{Err: fmt.Errorf("expected nonce must be %d bytes, got %d", NonceSize, len(expectedNonce))}
+		return nil, &errs.UsageError{Err: fmt.Errorf("expected nonce must be %d bytes, got %d", NonceSize, len(expectedNonce))}
 	}
 	doc, err := decode(docBytes)
 	if err != nil {

@@ -8,10 +8,10 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/tinfoilsh/tinfoil-go/internal/errs"
 	"github.com/tinfoilsh/tinfoil-go/verify/document"
 	"github.com/tinfoilsh/tinfoil-go/verify/document/collateral"
 	"github.com/tinfoilsh/tinfoil-go/verify/internal/endorsement"
+	"github.com/tinfoilsh/tinfoil-go/verify/internal/errs"
 	"github.com/tinfoilsh/tinfoil-go/verify/measurement"
 )
 
@@ -37,8 +37,8 @@ func TestWithFreshnessMaxAge(t *testing.T) {
 		v, err := NewVerifier(WithFreshnessMaxAge(maxAge))
 		require.Nil(t, v)
 		require.ErrorContains(t, err, "freshness maximum age must not be negative")
-		var configuration *errs.ConfigurationError
-		require.ErrorAs(t, err, &configuration)
+		var usage *errs.UsageError
+		require.ErrorAs(t, err, &usage)
 	}
 }
 
@@ -70,8 +70,8 @@ func TestWithPinnedRegistersRejectsInvalid(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			v, err := NewVerifier(WithPinnedRegisters(pins))
 			require.Nil(t, v)
-			var configuration *errs.ConfigurationError
-			require.ErrorAs(t, err, &configuration)
+			var usage *errs.UsageError
+			require.ErrorAs(t, err, &usage)
 		})
 	}
 }
@@ -87,8 +87,8 @@ func TestVerifyV3RejectsBadRepo(t *testing.T) {
 	require.NoError(t, err)
 	verified, err := v.VerifyV3(raw, nonce, "not a repo reference")
 	require.Nil(t, verified)
-	var configuration *errs.ConfigurationError
-	require.ErrorAs(t, err, &configuration)
+	var usage *errs.UsageError
+	require.ErrorAs(t, err, &usage)
 }
 
 func TestNewIgnoresNilOption(t *testing.T) {
@@ -99,15 +99,15 @@ func TestNewIgnoresNilOption(t *testing.T) {
 
 // A caller that ignores NewVerifier's error holds a nil *Verifier, and a zero
 // value carries neither a trust root nor a clock. Verifying with either must
-// report a configuration error rather than panicking once a well-formed
+// report a usage error rather than panicking once a well-formed
 // document gets past the parse and the receiver is first dereferenced.
 func TestVerifyV3RejectsUnbuiltVerifier(t *testing.T) {
 	for name, v := range map[string]*Verifier{"nil": nil, "zero value": {}} {
 		t.Run(name, func(t *testing.T) {
 			verified, err := v.VerifyV3([]byte("{}"), make([]byte, 32), "org/repo")
 			require.Nil(t, verified)
-			var configuration *errs.ConfigurationError
-			require.ErrorAs(t, err, &configuration)
+			var usage *errs.UsageError
+			require.ErrorAs(t, err, &usage)
 			require.ErrorContains(t, err, "verifier must be built with NewVerifier")
 		})
 	}

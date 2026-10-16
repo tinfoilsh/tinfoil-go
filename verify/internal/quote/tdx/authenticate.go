@@ -23,8 +23,8 @@ import (
 	tdxverify "github.com/google/go-tdx-guest/verify"
 	tdxtrust "github.com/google/go-tdx-guest/verify/trust"
 
-	"github.com/tinfoilsh/tinfoil-go/internal/errs"
 	"github.com/tinfoilsh/tinfoil-go/verify/document/collateral"
+	"github.com/tinfoilsh/tinfoil-go/verify/internal/errs"
 	"github.com/tinfoilsh/tinfoil-go/verify/measurement"
 )
 
@@ -48,7 +48,7 @@ func (q *Quote) Identity() string { return q.identity }
 // caller-visible Measurement summary.
 func (q *Quote) PlatformMeasurements() (mrtd, rtmr0 string, err error) {
 	if q == nil || q.quote == nil {
-		return "", "", &errs.ConfigurationError{Err: fmt.Errorf("authenticated TDX quote is required")}
+		return "", "", &errs.UsageError{Err: fmt.Errorf("authenticated TDX quote is required")}
 	}
 	body := q.quote.GetTdQuoteBody()
 	return hex.EncodeToString(body.GetMrTd()), hex.EncodeToString(body.GetRtmrs()[0]), nil
@@ -67,7 +67,7 @@ type Evidence struct {
 // SGX root, replaying the captured PCS collateral — no network fetches.
 // Callers must assemble a policy and validate before trusting the platform.
 func Authenticate(ev Evidence, opts *Options) (result *Quote, err error) {
-	defer func() { err = errs.WrapAttestation(err) }()
+	defer func() { err = errs.WrapVerification(err) }()
 	// Sampled once so the replayed CRL windows and the library's own validity
 	// checks appraise the same instant.
 	now := opts.now()

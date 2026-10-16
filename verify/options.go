@@ -4,12 +4,12 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/tinfoilsh/tinfoil-go/internal/errs"
+	"github.com/tinfoilsh/tinfoil-go/verify/internal/errs"
 	"github.com/tinfoilsh/tinfoil-go/verify/measurement"
 )
 
 // Option configures a Verifier. Options are applied in order by NewVerifier,
-// which reports the first one that fails as a ConfigurationError.
+// which reports the first one that fails as a UsageError.
 type Option func(*Verifier) error
 
 // WithPinnedRegisters adds register checks; empty entries retain defaults.
@@ -52,9 +52,9 @@ func WithIgnoreFreshness() Option {
 	}
 }
 
-func configurationError(err error) error {
+func usageError(err error) error {
 	if err == nil {
 		return nil
 	}
-	return &errs.ConfigurationError{Err: err}
+	return &errs.UsageError{Err: err}
 }

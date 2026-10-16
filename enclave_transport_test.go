@@ -108,6 +108,24 @@ func (f transportVerifierFunc) NewTransport(build func(*verify.Verification) (ht
 	return f(build, isKeyError)
 }
 
+func TestEHBPTransportWithoutHPKEKeyIsAttestationError(t *testing.T) {
+	var build func(*verify.Verification) (http.RoundTripper, error)
+	verifier := transportVerifierFunc(func(b func(*verify.Verification) (http.RoundTripper, error), _ func(error) bool) (http.RoundTripper, error) {
+		build = b
+		return roundTripFunc(func(*http.Request) (*http.Response, error) {
+			return nil, errors.New("unused")
+		}), nil
+	})
+	_, err := ehbpHTTPClient(verifier, "enclave.example", "https://enclave.example")
+	require.NoError(t, err)
+	_, err = build(&verify.Verification{})
+	var attestation *enclave.AttestationError
+	require.ErrorAs(t, err, &attestation)
+	var rejected *verify.VerificationError
+	require.ErrorAs(t, err, &rejected, "verify's error remains the cause")
+	require.ErrorContains(t, err, "WithTransport(TransportTLS)")
+}
+
 func TestEHBPClientPreservesAdmissionAndProxyHeader(t *testing.T) {
 	admissionFailure := &enclave.AttestationError{Err: errors.New("expired witnesses")}
 	seen := make(chan string, 2)

@@ -74,8 +74,8 @@ func TestConfigReferencePins(t *testing.T) {
 	}
 	for _, ref := range []string{"", "/org/project", "Org/project", "org/project_name", "org/project@v1/path", "org/project@sha256:bad", "org/project@v1@v2"} {
 		_, err := v.VerifyV3(raw, nonce, ref)
-		var configErr *ConfigurationError
-		require.ErrorAs(t, err, &configErr, ref)
+		var usage *UsageError
+		require.ErrorAs(t, err, &usage, ref)
 	}
 }
 
