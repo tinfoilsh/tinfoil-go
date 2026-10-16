@@ -34,12 +34,6 @@ type Expectations struct {
 // Assemble combines policy with the launch digest, REPORT_DATA, and authenticated CHIP_ID.
 func Assemble(p *policy.SEVSNPPolicy, q *Quote, launchDigest string, reportData [64]byte) (result *Expectations, err error) {
 	defer func() { err = errs.WrapVerification(err) }()
-	if p == nil {
-		return nil, &errs.UsageError{Err: fmt.Errorf("SEV policy is required")}
-	}
-	if q == nil || q.attestation == nil {
-		return nil, &errs.UsageError{Err: fmt.Errorf("authenticated SEV quote is required")}
-	}
 	opts, err := options(p, q.ProductLine())
 	if err != nil {
 		return nil, err
@@ -68,12 +62,6 @@ func Assemble(p *policy.SEVSNPPolicy, q *Quote, launchDigest string, reportData 
 // applied.
 func (e *Expectations) Validate(q *Quote) (err error) {
 	defer func() { err = errs.WrapVerification(err) }()
-	if e == nil || e.opts == nil {
-		return &errs.UsageError{Err: fmt.Errorf("assembled SEV expectations are required")}
-	}
-	if q == nil || q.attestation == nil {
-		return &errs.UsageError{Err: fmt.Errorf("authenticated SEV quote is required")}
-	}
 	if err := sevvalidate.SnpAttestation(q.attestation, e.opts); err != nil {
 		return err
 	}

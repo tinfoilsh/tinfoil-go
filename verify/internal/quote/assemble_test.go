@@ -27,10 +27,10 @@ func boundDocument(t *testing.T, report []byte) *document.Document {
 }
 
 func TestAssembleRequiresParsedDocument(t *testing.T) {
-	var usage *errs.UsageError
+	var rejected *errs.VerificationError
 	for _, doc := range []*document.Document{nil, {}} {
 		_, err := Assemble(doc, LegacyReferenceValues{Endorsements: &policy.Artifact{}, Code: &measurement.Measurement{}, Shape: testShape}, nil, &Authenticated{})
-		require.ErrorAs(t, err, &usage)
+		require.ErrorAs(t, err, &rejected, "an unbound document is rejected, not blamed on the caller")
 		assert.ErrorContains(t, err, "checked by document.Parse")
 	}
 }
@@ -40,14 +40,14 @@ func TestAssembleRejectsQuoteFromAnotherDocument(t *testing.T) {
 	authenticated := func(format, report string) *Authenticated {
 		return &Authenticated{evidence: document.CPUEvidence{Format: format, Report: []byte(report)}}
 	}
-	var usage *errs.UsageError
+	var rejected *errs.VerificationError
 
 	for name, q := range map[string]*Authenticated{
 		"other report": authenticated(document.SEVSNPReportV1Format, "report b"),
 		"other format": authenticated(document.TDXQuoteV1Format, "report a"),
 	} {
 		_, err := Assemble(doc, LegacyReferenceValues{Endorsements: &policy.Artifact{}, Code: &measurement.Measurement{}, Shape: testShape}, nil, q)
-		require.ErrorAs(t, err, &usage, name)
+		require.ErrorAs(t, err, &rejected, name)
 		assert.ErrorContains(t, err, "not this document's CPU evidence", name)
 	}
 
@@ -56,5 +56,5 @@ func TestAssembleRejectsQuoteFromAnotherDocument(t *testing.T) {
 	_, err := Assemble(doc, LegacyReferenceValues{Endorsements: &policy.Artifact{}, Code: &measurement.Measurement{}, Shape: testShape}, nil, authenticated(document.SEVSNPReportV1Format, "report a"))
 	require.Error(t, err)
 	assert.NotContains(t, err.Error(), "not this document's CPU evidence")
-	assert.ErrorContains(t, err, "authenticated quote is required")
+	assert.ErrorContains(t, err, "is not endorsed")
 }

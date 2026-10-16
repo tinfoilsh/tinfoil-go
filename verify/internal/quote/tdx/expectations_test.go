@@ -148,12 +148,7 @@ func TestPlatformMeasurementsUseAuthenticatedEvidence(t *testing.T) {
 	require.NoError(t, err)
 	raw := parsed.(*tdxpb.QuoteV4)
 	q := &Quote{quote: raw, Measurement: &measurement.Measurement{Registers: []string{"substituted", "summary"}}}
-	mrtd, rtmr0, err := q.PlatformMeasurements()
-	require.NoError(t, err)
+	mrtd, rtmr0 := q.PlatformMeasurements()
 	require.Equal(t, hex.EncodeToString(raw.TdQuoteBody.MrTd), mrtd)
 	require.Equal(t, hex.EncodeToString(raw.TdQuoteBody.Rtmrs[0]), rtmr0)
-	for _, invalid := range []*Quote{nil, {}} {
-		_, _, err := invalid.PlatformMeasurements()
-		require.ErrorContains(t, err, "authenticated TDX quote is required")
-	}
 }
