@@ -87,10 +87,11 @@ func TestLiveVerifyFreshnessExpiration(t *testing.T) {
 	badPins.Registers[0] = strings.Repeat("ab", 48)
 	require.NotEqual(t, verified.EnclaveMeasurement.Registers[0], badPins.Registers[0])
 	_, err = verifyDocument(raw, nonce, repo, &Options{PinnedRegisters: badPins})
-	var attestation *AttestationError
-	require.ErrorAs(t, err, &attestation)
+	var rejected *verify.VerificationError
+	require.ErrorAs(t, err, &rejected)
 	s, err := NewDefaultHandle(&Options{PinnedRegisters: badPins, FreshnessMaxAge: maxAge})
 	require.NoError(t, err)
 	_, err = s.Verify()
+	var attestation *AttestationError
 	require.ErrorAs(t, err, &attestation)
 }
