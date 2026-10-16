@@ -93,6 +93,8 @@ func TestEmbeddedReferencesCannotOverridePins(t *testing.T) {
 	raw, nonce, doc := embeddedDocument(t, collateral.FormatV3)
 	for _, ref := range []string{"other/project", "org/project@v2", "org/project@sha256:" + strings.Repeat("00", sha256.Size)} {
 		_, err := v.VerifyV3(raw, nonce, ref)
+		var usage *UsageError
+		require.ErrorAs(t, err, &usage, "a pin the embedded config cannot meet is the caller's mistake")
 		require.ErrorContains(t, err, "does not match the caller's pins")
 	}
 	inputs.Runtime = append(inputs.Runtime, '\n')
@@ -106,6 +108,8 @@ func TestEmbeddedReferencesCannotOverridePins(t *testing.T) {
 	v, err = NewVerifier(WithEmbeddedReferences(inputs))
 	require.NoError(t, err)
 	_, err = v.VerifyV3(raw, nonce, "org/project")
+	var usage *UsageError
+	require.ErrorAs(t, err, &usage)
 	require.ErrorContains(t, err, "does not match the caller's pins")
 	_, layer, err := v.verifyV3(raw, nonce, "")
 	require.Error(t, err)

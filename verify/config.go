@@ -117,7 +117,7 @@ func (v *Verifier) resolveConfig(doc *document.Document, pins endorsement.Config
 		digest := sha256.Sum256(embedded.Bytes)
 		hexDigest := hex.EncodeToString(digest[:])
 		if (pins.Identity != "" && pins.Identity != identity) || (pins.Revision != "" && pins.Revision != revision) || (pins.Digest != "" && pins.Digest != hexDigest) {
-			return nil, nil, fmt.Errorf("embedded config does not match the caller's pins")
+			return nil, nil, usageError(fmt.Errorf("embedded config does not match the caller's pins"))
 		}
 		return embedded.Bytes, &ConfigVerification{Source: SourceEmbedded, Name: embedded.Name, Digest: hexDigest}, nil
 	}
