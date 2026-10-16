@@ -90,7 +90,7 @@ func TestEmbeddedReferencesCannotOverridePins(t *testing.T) {
 	inputs := embeddedInputs(t)
 	v, err := NewVerifier(WithEmbeddedReferences(inputs))
 	require.NoError(t, err)
-	raw, nonce, doc := embeddedDocument(t, collateral.FormatV3)
+	raw, nonce, _ := embeddedDocument(t, collateral.FormatV3)
 	for _, ref := range []string{"other/project", "org/project@v2", "org/project@sha256:" + strings.Repeat("00", sha256.Size)} {
 		_, err := v.VerifyV3(raw, nonce, ref)
 		var usage *UsageError
@@ -98,9 +98,8 @@ func TestEmbeddedReferencesCannotOverridePins(t *testing.T) {
 		require.ErrorContains(t, err, "does not match the caller's pins")
 	}
 	inputs.Runtime = append(inputs.Runtime, '\n')
-	v, err = NewVerifier(WithEmbeddedReferences(inputs))
-	require.NoError(t, err)
-	_, err = v.configReferences(doc, "", time.Now())
+	_, err = NewVerifier(WithEmbeddedReferences(inputs))
+	require.ErrorAs(t, err, new(*UsageError), "a manifest the embedded config does not pin is the caller's mistake")
 	require.ErrorContains(t, err, "config's digest pin")
 
 	inputs = embeddedInputs(t)
@@ -142,9 +141,18 @@ func TestEmbeddedTrustRejectsInvalidOrUnusedInputs(t *testing.T) {
 	inputs := embeddedInputs(t)
 	keys, err := endorsement.PublicSigningKeys()
 	require.NoError(t, err)
-	for _, refs := range []EmbeddedReferences{{}, {Config: &EmbeddedConfig{}}, {Runtime: []byte{}}, {Platform: []byte{}}, {Platform: []byte(`{"format":"unknown"}`)}} {
+	for _, refs := range []EmbeddedReferences{{}, {Config: &EmbeddedConfig{}}, {Runtime: []byte{}}, {Runtime: []byte(`{}`)}, {Platform: []byte{}}, {Platform: []byte(`{"format":"unknown"}`)}} {
 		_, err := NewVerifier(WithEmbeddedReferences(refs))
 		require.Error(t, err)
+	}
+	for _, version := range []string{"", "0.15.0", "v0.15"} {
+		var manifest runtime.Manifest
+		require.NoError(t, json.Unmarshal(inputs.Runtime, &manifest))
+		manifest.Version = version
+		data, err := json.Marshal(manifest)
+		require.NoError(t, err)
+		_, err = NewVerifier(WithEmbeddedReferences(EmbeddedReferences{Runtime: data}))
+		require.ErrorAs(t, err, new(*UsageError), "a manifest no config can pin, version %q", version)
 	}
 	for _, options := range [][]Option{
 		{WithEmbeddedReferences(inputs), WithConfigSigningKeys(keys)},

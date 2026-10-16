@@ -44,13 +44,23 @@ func WithEmbeddedReferences(refs EmbeddedReferences) Option {
 					return err
 				}
 			}
-			if _, err := runtime.ConfigRuntime(refs.Config.Bytes); err != nil {
+			expected, err := runtime.ConfigRuntime(refs.Config.Bytes)
+			if err != nil {
 				return err
+			}
+			// Both come from the caller, so a manifest the config does not
+			// pin is rejected here rather than at verification.
+			if refs.Runtime != nil {
+				if _, err := runtime.ParseManifest(refs.Runtime, expected); err != nil {
+					return err
+				}
 			}
 			copied.Config = &EmbeddedConfig{Name: refs.Config.Name, Bytes: bytes.Clone(refs.Config.Bytes)}
 		}
-		if refs.Runtime != nil && (len(refs.Runtime) == 0 || len(refs.Runtime) > runtime.MaxManifestSize) {
-			return fmt.Errorf("embedded runtime manifest size is outside allowed bounds")
+		if refs.Runtime != nil {
+			if _, err := runtime.DecodeManifest(refs.Runtime); err != nil {
+				return err
+			}
 		}
 		if refs.Platform != nil {
 			artifact, err := policy.Parse(refs.Platform)
