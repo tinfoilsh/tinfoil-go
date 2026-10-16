@@ -41,6 +41,8 @@ func TestErrorPrefixesMatchCategories(t *testing.T) {
 		assert.Equal(t, prefix+"context: cause", wrapped.Error())
 		assert.ErrorIs(t, wrapped, category)
 	}
+	nested := toMobileError(&verify.VerificationError{Err: &verify.UsageError{Err: cause}})
+	assert.True(t, strings.HasPrefix(nested.Error(), AttestationErrorPrefix), "the outermost verify error decides the prefix")
 	assert.NoError(t, toMobileError(nil))
 	uncategorized := errors.New("uncategorized")
 	assert.Same(t, uncategorized, toMobileError(uncategorized))

@@ -15,17 +15,19 @@ type (
 	AttestationError   = errs.AttestationError
 )
 
-// fromVerify reports a verify error in the SDK's categories: a UsageError is
-// the caller's configuration error, and anything else verify rejects is an
-// attestation failure. The verify error remains the cause.
+// fromVerify reports a verify error in the SDK's categories by its outermost
+// verify type: a UsageError is the caller's configuration error, and anything
+// else verify rejects is an attestation failure. The verify error remains the
+// cause.
 func fromVerify(err error) error {
-	var usage *verify.UsageError
-	switch {
-	case err == nil:
+	if err == nil {
 		return nil
-	case errors.As(err, &usage):
-		return &ConfigurationError{Err: err}
-	default:
-		return &AttestationError{Err: err}
 	}
+	var classified verify.Error
+	if errors.As(err, &classified) {
+		if _, usage := classified.(*verify.UsageError); usage {
+			return &ConfigurationError{Err: err}
+		}
+	}
+	return &AttestationError{Err: err}
 }
