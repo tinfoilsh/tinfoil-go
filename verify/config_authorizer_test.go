@@ -14,6 +14,24 @@ import (
 	"github.com/tinfoilsh/tinfoil-go/verify/internal/quote"
 )
 
+// A config authorizer's error is the cause of a VerificationError. It never
+// chooses verify's error type, even when it is one of verify's own types.
+func TestConfigAuthorizerErrorNeverChoosesTheType(t *testing.T) {
+	inputs := embeddedInputs(t)
+	data, err := json.Marshal(map[string][]byte{"config_base64": inputs.Config.Bytes})
+	require.NoError(t, err)
+	raw, nonce, _ := embeddedDocument(t, collateral.FormatV3, collateral.Entry{ID: collateral.ConfigID, Role: collateral.RoleReferenceValues, Format: collateral.ConfigV1Format, Data: data})
+	inputs.Config = nil
+	refused := &UsageError{Err: errors.New("config is not authorized")}
+	v, err := NewVerifier(WithEmbeddedReferences(inputs), WithConfigAuthorizer(func(collateral.ConfigEndorsement) error { return refused }))
+	require.NoError(t, err)
+	_, err = v.VerifyV3(raw, nonce, "")
+	var classified Error
+	require.ErrorAs(t, err, &classified)
+	require.IsType(t, &VerificationError{}, classified, "the outermost verify error is the type")
+	require.ErrorIs(t, err, refused, "the authorizer's error remains the cause")
+}
+
 func TestConfigAuthorizerPreservesReferencesAndHardwareChecks(t *testing.T) {
 	inputs := embeddedInputs(t)
 	digest := sha256.Sum256(inputs.Config.Bytes)
