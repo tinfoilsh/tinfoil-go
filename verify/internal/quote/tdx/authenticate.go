@@ -46,12 +46,9 @@ func (q *Quote) Identity() string { return q.identity }
 
 // PlatformMeasurements reads the authenticated evidence, independently of the
 // caller-visible Measurement summary.
-func (q *Quote) PlatformMeasurements() (mrtd, rtmr0 string, err error) {
-	if q == nil || q.quote == nil {
-		return "", "", &errs.UsageError{Err: fmt.Errorf("authenticated TDX quote is required")}
-	}
+func (q *Quote) PlatformMeasurements() (mrtd, rtmr0 string) {
 	body := q.quote.GetTdQuoteBody()
-	return hex.EncodeToString(body.GetMrTd()), hex.EncodeToString(body.GetRtmrs()[0]), nil
+	return hex.EncodeToString(body.GetMrTd()), hex.EncodeToString(body.GetRtmrs()[0])
 }
 
 // Evidence is a TDX quote with the Intel PCS responses captured to

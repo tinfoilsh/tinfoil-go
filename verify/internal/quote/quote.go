@@ -178,28 +178,21 @@ func Assemble(doc *document.Document, refs ReferenceValues, pins *measurement.Me
 }
 
 func (q *Authenticated) reportData(doc *document.Document) ([64]byte, error) {
+	// Both checks bind the quote to the caller's challenge. verify never
+	// fails them, so failing one is an SDK bug, and the document is rejected.
 	reportData, ok := doc.ExpectedReportData()
 	if !ok {
-		return reportData, &errs.UsageError{Err: fmt.Errorf("a document checked by document.Parse is required")}
-	}
-	if q == nil {
-		return reportData, &errs.UsageError{Err: fmt.Errorf("authenticated quote is required")}
+		return reportData, fmt.Errorf("a document checked by document.Parse is required")
 	}
 	evidence := doc.CPUEvidence()
 	if evidence.Format != q.evidence.Format || !bytes.Equal(evidence.Report, q.evidence.Report) {
-		return reportData, &errs.UsageError{Err: fmt.Errorf("authenticated quote is not this document's CPU evidence")}
+		return reportData, fmt.Errorf("authenticated quote is not this document's CPU evidence")
 	}
 	return reportData, nil
 }
 
 // assemble is Assemble against an explicit REPORT_DATA.
 func assemble(refs ReferenceValues, pins *measurement.Measurement, reportData [64]byte, q *Authenticated) (*AssembledPolicy, error) {
-	if refs == nil {
-		return nil, &errs.UsageError{Err: fmt.Errorf("reference values are required")}
-	}
-	if q == nil || q.sev == nil && q.tdx == nil {
-		return nil, &errs.UsageError{Err: fmt.Errorf("authenticated quote is required")}
-	}
 	resolved, err := refs.resolve(q, pins)
 	if err != nil {
 		return nil, err
@@ -231,9 +224,6 @@ func assemble(refs ReferenceValues, pins *measurement.Measurement, reportData [6
 // single vendor library call: no lookups, no translation.
 func (p *AssembledPolicy) Validate() (err error) {
 	defer func() { err = errs.WrapVerification(err) }()
-	if p == nil || p.sev == nil && p.tdx == nil {
-		return &errs.UsageError{Err: fmt.Errorf("assembled policy is required")}
-	}
 	switch p.quote.platform {
 	case policy.PlatformSEVSNP:
 		return p.sev.Validate(p.quote.sev)
@@ -245,9 +235,6 @@ func (p *AssembledPolicy) Validate() (err error) {
 }
 
 func resolvePolicy(endorsements *policy.Artifact, q *Authenticated) (*resolvedValues, error) {
-	if endorsements == nil {
-		return nil, &errs.UsageError{Err: fmt.Errorf("endorsements are required")}
-	}
 	name, p, err := endorsements.PolicyFor(q.identity, q.platform)
 	if err != nil {
 		return nil, err
