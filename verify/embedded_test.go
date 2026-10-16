@@ -90,15 +90,14 @@ func TestEmbeddedReferencesCannotOverridePins(t *testing.T) {
 	inputs := embeddedInputs(t)
 	v, err := NewVerifier(WithEmbeddedReferences(inputs))
 	require.NoError(t, err)
-	raw, nonce, doc := embeddedDocument(t, collateral.FormatV3)
+	raw, nonce, _ := embeddedDocument(t, collateral.FormatV3)
 	for _, ref := range []string{"other/project", "org/project@v2", "org/project@sha256:" + strings.Repeat("00", sha256.Size)} {
 		_, err := v.VerifyV3(raw, nonce, ref)
 		require.ErrorContains(t, err, "does not match the caller's pins")
 	}
 	inputs.Runtime = append(inputs.Runtime, '\n')
-	v, err = NewVerifier(WithEmbeddedReferences(inputs))
-	require.NoError(t, err)
-	_, err = v.configReferences(doc, "", time.Now())
+	_, err = NewVerifier(WithEmbeddedReferences(inputs))
+	require.ErrorAs(t, err, new(*UsageError), "a manifest the embedded config does not pin is the caller's mistake")
 	require.ErrorContains(t, err, "config's digest pin")
 
 	inputs = embeddedInputs(t)
@@ -138,7 +137,7 @@ func TestEmbeddedTrustRejectsInvalidOrUnusedInputs(t *testing.T) {
 	inputs := embeddedInputs(t)
 	keys, err := endorsement.PublicSigningKeys()
 	require.NoError(t, err)
-	for _, refs := range []EmbeddedReferences{{}, {Config: &EmbeddedConfig{}}, {Runtime: []byte{}}, {Platform: []byte{}}, {Platform: []byte(`{"format":"unknown"}`)}} {
+	for _, refs := range []EmbeddedReferences{{}, {Config: &EmbeddedConfig{}}, {Runtime: []byte{}}, {Runtime: []byte(`{}`)}, {Platform: []byte{}}, {Platform: []byte(`{"format":"unknown"}`)}} {
 		_, err := NewVerifier(WithEmbeddedReferences(refs))
 		require.Error(t, err)
 	}

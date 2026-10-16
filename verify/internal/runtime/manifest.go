@@ -44,20 +44,35 @@ func (s TDXLaunch) Registers() [5]string {
 	return [5]string{s.MRTD, s.RTMR0, s.RTMR1, s.RTMR2, s.RTMR3}
 }
 
+// ParseManifest checks that data is the manifest expected pins, then decodes
+// it. The digest is checked before anything is parsed.
 func ParseManifest(data []byte, expected collateral.RuntimeReference) (*Manifest, error) {
-	if len(data) == 0 || len(data) > MaxManifestSize {
-		return nil, fmt.Errorf("runtime manifest size is outside allowed bounds")
-	}
 	digest := sha256.Sum256(data)
 	if hex.EncodeToString(digest[:]) != expected.Digest {
 		return nil, fmt.Errorf("runtime manifest does not match the config's digest pin")
+	}
+	m, err := DecodeManifest(data)
+	if err != nil {
+		return nil, err
+	}
+	if m.Version != expected.Tag {
+		return nil, fmt.Errorf("runtime manifest version %q does not match the config's pin %q", m.Version, expected.Tag)
+	}
+	return m, nil
+}
+
+// DecodeManifest checks a manifest's size and structure, without a config pin
+// to match it against.
+func DecodeManifest(data []byte) (*Manifest, error) {
+	if len(data) == 0 || len(data) > MaxManifestSize {
+		return nil, fmt.Errorf("runtime manifest size is outside allowed bounds")
 	}
 	var m Manifest
 	if err := json.Unmarshal(data, &m); err != nil {
 		return nil, fmt.Errorf("parsing runtime manifest: %w", err)
 	}
-	if m.Version != expected.Tag || m.Measurements == nil || m.Measurements.FormatVersion != FormatVersion {
-		return nil, fmt.Errorf("runtime manifest version or runtime format is unsupported")
+	if m.Measurements == nil || m.Measurements.FormatVersion != FormatVersion {
+		return nil, fmt.Errorf("runtime manifest format is unsupported")
 	}
 	g := m.Measurements
 	if g.SNPLaunch == nil || g.TDXLaunch == nil {
