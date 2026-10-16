@@ -6,7 +6,7 @@ import (
 	tdxabi "github.com/google/go-tdx-guest/abi"
 	tdxvalidate "github.com/google/go-tdx-guest/validate"
 
-	"github.com/tinfoilsh/tinfoil-go/internal/errs"
+	"github.com/tinfoilsh/tinfoil-go/verify/internal/errs"
 	"github.com/tinfoilsh/tinfoil-go/verify/internal/policy"
 )
 
@@ -20,12 +20,12 @@ type Expectations struct {
 
 // Assemble translates complete reference values into vendor validation options.
 func Assemble(p *policy.TDXPolicy, q *Quote, registers [5]string, reportData [64]byte, configID [tdxabi.MrConfigIDSize]byte) (result *Expectations, err error) {
-	defer func() { err = errs.WrapAttestation(err) }()
+	defer func() { err = errs.WrapVerification(err) }()
 	if p == nil {
-		return nil, &errs.ConfigurationError{Err: fmt.Errorf("TDX policy is required")}
+		return nil, &errs.UsageError{Err: fmt.Errorf("TDX policy is required")}
 	}
 	if q == nil || q.quote == nil {
-		return nil, &errs.ConfigurationError{Err: fmt.Errorf("authenticated TDX quote is required")}
+		return nil, &errs.UsageError{Err: fmt.Errorf("authenticated TDX quote is required")}
 	}
 	opts, err := options(p)
 	if err != nil {
@@ -53,12 +53,12 @@ func Assemble(p *policy.TDXPolicy, q *Quote, registers [5]string, reportData [64
 // library validation options plus the collateral floor. It is the only TDX
 // enforcement entry point, so no subset of the policy can be applied.
 func (e *Expectations) Validate(q *Quote) (err error) {
-	defer func() { err = errs.WrapAttestation(err) }()
+	defer func() { err = errs.WrapVerification(err) }()
 	if e == nil || e.opts == nil {
-		return &errs.ConfigurationError{Err: fmt.Errorf("assembled TDX expectations are required")}
+		return &errs.UsageError{Err: fmt.Errorf("assembled TDX expectations are required")}
 	}
 	if q == nil || q.quote == nil {
-		return &errs.ConfigurationError{Err: fmt.Errorf("authenticated TDX quote is required")}
+		return &errs.UsageError{Err: fmt.Errorf("authenticated TDX quote is required")}
 	}
 	if err := tdxvalidate.TdxQuote(q.quote, e.opts); err != nil {
 		return err

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/tinfoilsh/tinfoil-go/enclave"
 	"github.com/tinfoilsh/tinfoil-go/verify"
 )
 
@@ -24,15 +25,19 @@ const (
 // comes from err's type rather than its text, so the Go error types can word
 // their messages freely without changing what Swift matches on.
 func toMobileError(err error) error {
-	var configuration *verify.ConfigurationError
-	var attestation *verify.AttestationError
+	var usage *verify.UsageError
+	var rejected *verify.VerificationError
+	// Option parsing and AttestationURL report the SDK's configuration error.
+	var configuration *enclave.ConfigurationError
 	var category, cause error
 	var prefix string
 	switch {
+	case errors.As(err, &usage):
+		category, cause, prefix = usage, usage.Err, ConfigurationErrorPrefix
+	case errors.As(err, &rejected):
+		category, cause, prefix = rejected, rejected.Err, AttestationErrorPrefix
 	case errors.As(err, &configuration):
 		category, cause, prefix = configuration, configuration.Err, ConfigurationErrorPrefix
-	case errors.As(err, &attestation):
-		category, cause, prefix = attestation, attestation.Err, AttestationErrorPrefix
 	default:
 		return err
 	}

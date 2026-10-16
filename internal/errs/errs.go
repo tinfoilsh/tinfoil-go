@@ -1,11 +1,10 @@
 // Package errs defines the SDK's three error categories. Wrapping preserves
 // an existing category and the underlying cause, as in the JS SDK's wrapOrThrow.
 //
-// The categories live in this leaf package so that the low-level verification
-// packages (document, quote, quote/sev, quote/tdx) can classify their errors
-// without importing verify, which imports them in turn. Callers should use the
-// aliases re-exported from tinfoil and enclave; verify re-exports only the two
-// categories it returns.
+// The categories live in this leaf package so that internal/fetch can classify
+// its errors without importing enclave, which imports it in turn. Callers
+// should use the aliases re-exported from tinfoil and enclave. Package verify
+// has error types of its own, which enclave reports in these categories.
 package errs
 
 import (

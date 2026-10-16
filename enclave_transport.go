@@ -58,7 +58,7 @@ func ehbpHTTPClient(handle transportVerifier, enclave, baseURL string) (*http.Cl
 	transport, err := handle.NewTransport(func(verified *verify.Verification) (http.RoundTripper, error) {
 		key, err := verified.HPKEPublicKey()
 		if err != nil {
-			return nil, fmt.Errorf("%w; cannot use the EHBP transport (use WithTransport(TransportTLS))", err)
+			return nil, &AttestationError{Err: fmt.Errorf("%w; cannot use the EHBP transport (use WithTransport(TransportTLS))", err)}
 		}
 		inner, err := buildEHBPTransport(key)
 		if err != nil {

@@ -4,7 +4,7 @@ import (
 	"cmp"
 	"fmt"
 
-	"github.com/tinfoilsh/tinfoil-go/internal/errs"
+	"github.com/tinfoilsh/tinfoil-go/verify/internal/errs"
 	"github.com/tinfoilsh/tinfoil-go/verify/internal/policy"
 	"github.com/tinfoilsh/tinfoil-go/verify/measurement"
 )
@@ -18,10 +18,10 @@ type LegacyReferenceValues struct {
 
 func (r LegacyReferenceValues) resolve(q *Authenticated, pins *measurement.Measurement) (*resolvedValues, error) {
 	if r.Code == nil {
-		return nil, &errs.ConfigurationError{Err: fmt.Errorf("assembling policy: expected code measurement is required")}
+		return nil, &errs.UsageError{Err: fmt.Errorf("assembling policy: expected code measurement is required")}
 	}
 	if q.platform == policy.PlatformTDX && r.Shape == nil {
-		return nil, &errs.ConfigurationError{Err: fmt.Errorf("assembling policy: the code artifact's VM shape is required")}
+		return nil, &errs.UsageError{Err: fmt.Errorf("assembling policy: the code artifact's VM shape is required")}
 	}
 	code := r.Code
 	resolved, err := resolvePolicy(r.Endorsements, q)

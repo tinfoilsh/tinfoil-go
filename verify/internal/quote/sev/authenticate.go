@@ -20,7 +20,7 @@ import (
 	"github.com/tinfoilsh/go-sev-guest/verify"
 	"github.com/tinfoilsh/go-sev-guest/verify/trust"
 
-	"github.com/tinfoilsh/tinfoil-go/internal/errs"
+	"github.com/tinfoilsh/tinfoil-go/verify/internal/errs"
 	"github.com/tinfoilsh/tinfoil-go/verify/measurement"
 )
 
@@ -178,7 +178,7 @@ type Evidence struct {
 // root and its VCEK against the supplied CRL — no network fetches. Callers
 // must assemble a policy and validate before trusting the platform.
 func Authenticate(ev Evidence, opts *Options) (result *Quote, err error) {
-	defer func() { err = errs.WrapAttestation(err) }()
+	defer func() { err = errs.WrapVerification(err) }()
 	// Sampled once so the CRL window and the library's own validity checks
 	// appraise the same instant.
 	now := opts.now()

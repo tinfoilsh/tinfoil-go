@@ -20,9 +20,9 @@ import (
 
 	tdxabi "github.com/google/go-tdx-guest/abi"
 
-	"github.com/tinfoilsh/tinfoil-go/internal/errs"
 	"github.com/tinfoilsh/tinfoil-go/verify/document"
 	"github.com/tinfoilsh/tinfoil-go/verify/document/collateral"
+	"github.com/tinfoilsh/tinfoil-go/verify/internal/errs"
 	"github.com/tinfoilsh/tinfoil-go/verify/internal/policy"
 	"github.com/tinfoilsh/tinfoil-go/verify/internal/quote/sev"
 	"github.com/tinfoilsh/tinfoil-go/verify/internal/quote/tdx"
@@ -112,7 +112,7 @@ func (o *Options) tdxOptions() *tdx.Options {
 // fetches. Callers must assemble a policy and validate before trusting the
 // platform.
 func Authenticate(ev document.CPUEvidence, en collateral.CPUEndorsements, opts *Options) (result *Authenticated, err error) {
-	defer func() { err = errs.WrapAttestation(err) }()
+	defer func() { err = errs.WrapVerification(err) }()
 	switch ev.Format {
 	case document.SEVSNPReportV1Format:
 		// v3 is single-request: missing collateral is rejected, never
@@ -169,7 +169,7 @@ func Authenticate(ev document.CPUEvidence, en collateral.CPUEndorsements, opts *
 // from doc's own CPU evidence: a quote cannot be appraised against another
 // document's challenge.
 func Assemble(doc *document.Document, refs ReferenceValues, pins *measurement.Measurement, q *Authenticated) (result *AssembledPolicy, err error) {
-	defer func() { err = errs.WrapAttestation(err) }()
+	defer func() { err = errs.WrapVerification(err) }()
 	reportData, err := q.reportData(doc)
 	if err != nil {
 		return nil, err
@@ -180,14 +180,14 @@ func Assemble(doc *document.Document, refs ReferenceValues, pins *measurement.Me
 func (q *Authenticated) reportData(doc *document.Document) ([64]byte, error) {
 	reportData, ok := doc.ExpectedReportData()
 	if !ok {
-		return reportData, &errs.ConfigurationError{Err: fmt.Errorf("a document checked by document.Parse is required")}
+		return reportData, &errs.UsageError{Err: fmt.Errorf("a document checked by document.Parse is required")}
 	}
 	if q == nil {
-		return reportData, &errs.ConfigurationError{Err: fmt.Errorf("authenticated quote is required")}
+		return reportData, &errs.UsageError{Err: fmt.Errorf("authenticated quote is required")}
 	}
 	evidence := doc.CPUEvidence()
 	if evidence.Format != q.evidence.Format || !bytes.Equal(evidence.Report, q.evidence.Report) {
-		return reportData, &errs.ConfigurationError{Err: fmt.Errorf("authenticated quote is not this document's CPU evidence")}
+		return reportData, &errs.UsageError{Err: fmt.Errorf("authenticated quote is not this document's CPU evidence")}
 	}
 	return reportData, nil
 }
@@ -195,10 +195,10 @@ func (q *Authenticated) reportData(doc *document.Document) ([64]byte, error) {
 // assemble is Assemble against an explicit REPORT_DATA.
 func assemble(refs ReferenceValues, pins *measurement.Measurement, reportData [64]byte, q *Authenticated) (*AssembledPolicy, error) {
 	if refs == nil {
-		return nil, &errs.ConfigurationError{Err: fmt.Errorf("reference values are required")}
+		return nil, &errs.UsageError{Err: fmt.Errorf("reference values are required")}
 	}
 	if q == nil || q.sev == nil && q.tdx == nil {
-		return nil, &errs.ConfigurationError{Err: fmt.Errorf("authenticated quote is required")}
+		return nil, &errs.UsageError{Err: fmt.Errorf("authenticated quote is required")}
 	}
 	resolved, err := refs.resolve(q, pins)
 	if err != nil {
@@ -230,9 +230,9 @@ func assemble(refs ReferenceValues, pins *measurement.Measurement, reportData [6
 // Validate compares the captured quote against the assembled policy in a
 // single vendor library call: no lookups, no translation.
 func (p *AssembledPolicy) Validate() (err error) {
-	defer func() { err = errs.WrapAttestation(err) }()
+	defer func() { err = errs.WrapVerification(err) }()
 	if p == nil || p.sev == nil && p.tdx == nil {
-		return &errs.ConfigurationError{Err: fmt.Errorf("assembled policy is required")}
+		return &errs.UsageError{Err: fmt.Errorf("assembled policy is required")}
 	}
 	switch p.quote.platform {
 	case policy.PlatformSEVSNP:
@@ -246,7 +246,7 @@ func (p *AssembledPolicy) Validate() (err error) {
 
 func resolvePolicy(endorsements *policy.Artifact, q *Authenticated) (*resolvedValues, error) {
 	if endorsements == nil {
-		return nil, &errs.ConfigurationError{Err: fmt.Errorf("endorsements are required")}
+		return nil, &errs.UsageError{Err: fmt.Errorf("endorsements are required")}
 	}
 	name, p, err := endorsements.PolicyFor(q.identity, q.platform)
 	if err != nil {
@@ -257,7 +257,7 @@ func resolvePolicy(endorsements *policy.Artifact, q *Authenticated) (*resolvedVa
 
 func applyPins(registers []string, enclaveType measurement.PredicateType, pins *measurement.Measurement) ([]string, error) {
 	if err := measurement.ValidatePins(pins); err != nil {
-		return nil, &errs.ConfigurationError{Err: err}
+		return nil, &errs.UsageError{Err: err}
 	}
 	if pins == nil {
 		return registers, nil

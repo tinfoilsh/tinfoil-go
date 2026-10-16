@@ -6,8 +6,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/tinfoilsh/tinfoil-go/internal/errs"
 	"github.com/tinfoilsh/tinfoil-go/verify/document"
+	"github.com/tinfoilsh/tinfoil-go/verify/internal/errs"
 	"github.com/tinfoilsh/tinfoil-go/verify/internal/policy"
 	"github.com/tinfoilsh/tinfoil-go/verify/measurement"
 )
@@ -27,10 +27,10 @@ func boundDocument(t *testing.T, report []byte) *document.Document {
 }
 
 func TestAssembleRequiresParsedDocument(t *testing.T) {
-	var config *errs.ConfigurationError
+	var usage *errs.UsageError
 	for _, doc := range []*document.Document{nil, {}} {
 		_, err := Assemble(doc, LegacyReferenceValues{Endorsements: &policy.Artifact{}, Code: &measurement.Measurement{}, Shape: testShape}, nil, &Authenticated{})
-		require.ErrorAs(t, err, &config)
+		require.ErrorAs(t, err, &usage)
 		assert.ErrorContains(t, err, "checked by document.Parse")
 	}
 }
@@ -40,14 +40,14 @@ func TestAssembleRejectsQuoteFromAnotherDocument(t *testing.T) {
 	authenticated := func(format, report string) *Authenticated {
 		return &Authenticated{evidence: document.CPUEvidence{Format: format, Report: []byte(report)}}
 	}
-	var config *errs.ConfigurationError
+	var usage *errs.UsageError
 
 	for name, q := range map[string]*Authenticated{
 		"other report": authenticated(document.SEVSNPReportV1Format, "report b"),
 		"other format": authenticated(document.TDXQuoteV1Format, "report a"),
 	} {
 		_, err := Assemble(doc, LegacyReferenceValues{Endorsements: &policy.Artifact{}, Code: &measurement.Measurement{}, Shape: testShape}, nil, q)
-		require.ErrorAs(t, err, &config, name)
+		require.ErrorAs(t, err, &usage, name)
 		assert.ErrorContains(t, err, "not this document's CPU evidence", name)
 	}
 

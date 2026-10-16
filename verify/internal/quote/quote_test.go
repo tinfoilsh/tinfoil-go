@@ -14,9 +14,9 @@ import (
 	sevabi "github.com/tinfoilsh/go-sev-guest/abi"
 	"github.com/tinfoilsh/tinfoil-go/internal/testutil"
 
-	"github.com/tinfoilsh/tinfoil-go/internal/errs"
 	"github.com/tinfoilsh/tinfoil-go/verify/document"
 	"github.com/tinfoilsh/tinfoil-go/verify/document/collateral"
+	"github.com/tinfoilsh/tinfoil-go/verify/internal/errs"
 	"github.com/tinfoilsh/tinfoil-go/verify/internal/policy"
 	"github.com/tinfoilsh/tinfoil-go/verify/internal/quote/tdx"
 	"github.com/tinfoilsh/tinfoil-go/verify/measurement"
@@ -212,16 +212,16 @@ func TestPinnedLayoutUsesAuthenticatedPlatform(t *testing.T) {
 		{Type: measurement.TdxGuestV2, Registers: []string{4: "bad"}},
 	} {
 		_, err = layout(code, malformed, q)
-		var config *errs.ConfigurationError
-		require.ErrorAs(t, err, &config, "phase callers receive the same pin validation as client options")
+		var usage *errs.UsageError
+		require.ErrorAs(t, err, &usage, "phase callers receive the same pin validation as client options")
 	}
 }
 
 func TestMissingTDXShapePrecedesPolicyLookup(t *testing.T) {
 	q := &Authenticated{platform: policy.PlatformTDX, tdx: &tdx.Quote{}}
 	_, err := assemble(LegacyReferenceValues{Endorsements: &policy.Artifact{}, Code: &measurement.Measurement{}}, nil, [64]byte{}, q)
-	var config *errs.ConfigurationError
-	require.ErrorAs(t, err, &config)
+	var usage *errs.UsageError
+	require.ErrorAs(t, err, &usage)
 	require.ErrorContains(t, err, "VM shape", "missing input must be reported before the unendorsed machine")
 }
 

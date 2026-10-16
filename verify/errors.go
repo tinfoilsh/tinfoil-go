@@ -1,12 +1,14 @@
 package verify
 
-import "github.com/tinfoilsh/tinfoil-go/internal/errs"
+import "github.com/tinfoilsh/tinfoil-go/verify/internal/errs"
 
-// Error identifies an SDK error; upstream API errors retain their own types.
+// Error identifies an error returned by this package: a UsageError or a
+// VerificationError.
 type Error = errs.Error
 
-// ConfigurationError reports invalid caller arguments or client configuration.
-type ConfigurationError = errs.ConfigurationError
+// UsageError reports a verifier built or called with invalid inputs. Fix the
+// caller; retrying will not help.
+type UsageError = errs.UsageError
 
-// AttestationError reports rejected evidence, policy, or channel binding.
-type AttestationError = errs.AttestationError
+// VerificationError reports a document that must not be trusted.
+type VerificationError = errs.VerificationError
