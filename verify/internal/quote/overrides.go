@@ -3,15 +3,18 @@
 package quote
 
 import (
+	"time"
+
 	"github.com/tinfoilsh/tinfoil-go/verify/internal/quote/sev"
 	"github.com/tinfoilsh/tinfoil-go/verify/internal/quote/tdx"
 )
 
-// overrides carries nothing in a production build: neither the verification
-// clock nor the vendor trust anchors can be replaced, so a shipped binary
-// cannot be made to accept expired collateral or to trust a supplied root.
-// The conformance build substitutes a populated version of this type.
+// overrides carries no trust-anchor replacements in a production build.
 type overrides struct{}
 
-func (overrides) sev() *sev.Options { return nil }
-func (overrides) tdx() *tdx.Options { return nil }
+func (overrides) sev(now time.Time) *sev.Options {
+	return &sev.Options{VerificationTime: now}
+}
+func (overrides) tdx(now time.Time) *tdx.Options {
+	return &tdx.Options{VerificationTime: now}
+}

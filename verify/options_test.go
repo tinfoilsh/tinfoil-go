@@ -42,6 +42,24 @@ func TestWithFreshnessMaxAge(t *testing.T) {
 	}
 }
 
+func TestWithVerificationTime(t *testing.T) {
+	_, err := NewVerifier(WithVerificationTime(time.Time{}))
+	var configuration *errs.ConfigurationError
+	require.ErrorAs(t, err, &configuration)
+
+	const offset = -7 * 60 * 60
+	at := time.Date(2026, time.January, 15, 12, 0, 0, 0, time.FixedZone("archive", offset))
+	v, err := NewVerifier(WithVerificationTime(at))
+	require.NoError(t, err)
+	require.Equal(t, at.UTC(), v.now())
+	require.Equal(t, at.UTC(), v.quoteOptions(v.now()).VerificationTime)
+
+	before := time.Now()
+	live, err := NewVerifier()
+	require.NoError(t, err)
+	assert.False(t, live.now().Before(before))
+}
+
 func TestWithPinnedRegistersCopies(t *testing.T) {
 	register := strings.Repeat("ab", 48)
 	pins := &measurement.Measurement{Type: measurement.TdxGuestV2, Registers: []string{4: register}}

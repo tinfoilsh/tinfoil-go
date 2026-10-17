@@ -37,18 +37,17 @@ var askArkTurinPEM []byte
 // the current time. Overrides are held per verification rather than in process
 // state, so concurrent verifications cannot observe each other.
 //
-// The overrides themselves exist only in the conformance build. A production
-// binary has no way to set them, so it cannot be made to trust a supplied
-// anchor or to appraise collateral at anything but the current time.
+// Trust-anchor overrides exist only in the conformance build.
 type Options struct {
-	overrides overrides
+	VerificationTime time.Time
+	overrides        overrides
 }
 
 func (o *Options) now() time.Time {
 	if o == nil {
 		return time.Now()
 	}
-	if pinned := o.overrides.clock(); !pinned.IsZero() {
+	if pinned := o.VerificationTime; !pinned.IsZero() {
 		return pinned
 	}
 	return time.Now()

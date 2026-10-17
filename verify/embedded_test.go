@@ -206,11 +206,10 @@ func TestEndorsedConfigWithEmbeddedArtifactsRetainsFreshnessAndAuthority(t *test
 	expiredAt := refs.freshnessExpiresAt.Add(time.Second)
 	_, err = v.configReferences(doc, "org/project", expiredAt)
 	require.ErrorContains(t, err, "too old")
-	require.NoError(t, WithIgnoreFreshness()(v))
-	refs, err = v.configReferences(doc, "org/project", expiredAt)
+	refs, err = v.configReferences(doc, "org/project", f.Now)
 	require.NoError(t, err)
 	require.Equal(t, at, refs.config.ApprovalTime)
-	require.True(t, refs.freshnessExpiresAt.IsZero())
+	require.Equal(t, at.Add(v.freshnessMaxAge), refs.freshnessExpiresAt)
 
 	other := sigstoretest.New(t)
 	v.configVerifier, err = endorsement.NewConfigVerifier(&f.Trust, []crypto.PublicKey{other.Key.Public()})

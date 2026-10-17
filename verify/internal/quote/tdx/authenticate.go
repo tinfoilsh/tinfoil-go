@@ -119,6 +119,9 @@ func Authenticate(ev Evidence, opts *Options) (result *Quote, err error) {
 	if err := tdxverify.TdxQuote(parsed, verifyOpts); err != nil {
 		return nil, fmt.Errorf("verifying TDX quote: %w", err)
 	}
+	if err := recorder.checkIssueDates(now); err != nil {
+		return nil, err
+	}
 
 	identity, err := Identity(quote)
 	if err != nil {
@@ -210,12 +213,14 @@ func (g *pcsReplayGetter) Get(requestURL string) (map[string][]string, []byte, e
 	return headers, body, nil
 }
 
-// tcbEvaluationRecorder observes the tcbEvaluationDataNumber carried by the
-// TCB Info and QE Identity responses that quote verification consumes.
+// tcbEvaluationRecorder observes the evaluation numbers and issue dates carried
+// by the TCB Info and QE Identity responses that quote verification consumes.
 type tcbEvaluationRecorder struct {
-	inner      tdxtrust.HTTPSGetter
-	tcbInfo    *int
-	qeIdentity *int
+	inner              tdxtrust.HTTPSGetter
+	tcbInfo            *int
+	qeIdentity         *int
+	tcbInfoIssuedAt    *time.Time
+	qeIdentityIssuedAt *time.Time
 }
 
 func (r *tcbEvaluationRecorder) Get(requestURL string) (map[string][]string, []byte, error) {
@@ -226,8 +231,8 @@ func (r *tcbEvaluationRecorder) Get(requestURL string) (map[string][]string, []b
 
 	// Parse failures below are ignored on purpose: these bytes are
 	// authenticated and interpreted by the verification library, and this
-	// wrapper only observes one field. A response that never parses leaves
-	// its pointer nil, which fails minimum() after verification.
+	// wrapper only observes their evaluation numbers and issue dates. A response
+	// that never parses leaves nil pointers, which fail appraisal after verification.
 	u, parseErr := url.Parse(requestURL)
 	if parseErr != nil {
 		return headers, body, nil
@@ -236,23 +241,41 @@ func (r *tcbEvaluationRecorder) Get(requestURL string) (map[string][]string, []b
 	case strings.HasSuffix(u.Path, "/tcb"):
 		var resp struct {
 			TcbInfo struct {
-				TcbEvaluationDataNumber *int `json:"tcbEvaluationDataNumber"`
+				TcbEvaluationDataNumber *int       `json:"tcbEvaluationDataNumber"`
+				IssueDate               *time.Time `json:"issueDate"`
 			} `json:"tcbInfo"`
 		}
 		if json.Unmarshal(body, &resp) == nil && resp.TcbInfo.TcbEvaluationDataNumber != nil {
 			r.tcbInfo = resp.TcbInfo.TcbEvaluationDataNumber
+			r.tcbInfoIssuedAt = resp.TcbInfo.IssueDate
 		}
 	case strings.HasSuffix(u.Path, "/qe/identity"):
 		var resp struct {
 			EnclaveIdentity struct {
-				TcbEvaluationDataNumber *int `json:"tcbEvaluationDataNumber"`
+				TcbEvaluationDataNumber *int       `json:"tcbEvaluationDataNumber"`
+				IssueDate               *time.Time `json:"issueDate"`
 			} `json:"enclaveIdentity"`
 		}
 		if json.Unmarshal(body, &resp) == nil && resp.EnclaveIdentity.TcbEvaluationDataNumber != nil {
 			r.qeIdentity = resp.EnclaveIdentity.TcbEvaluationDataNumber
+			r.qeIdentityIssuedAt = resp.EnclaveIdentity.IssueDate
 		}
 	}
 	return headers, body, nil
+}
+
+func (r *tcbEvaluationRecorder) checkIssueDates(now time.Time) error {
+	if r.tcbInfoIssuedAt == nil || r.qeIdentityIssuedAt == nil {
+		return fmt.Errorf("collateral issueDate was not observed during quote verification")
+	}
+	// go-tdx-guest checks nextUpdate, but not the start of these validity windows.
+	if now.Before(*r.tcbInfoIssuedAt) {
+		return fmt.Errorf("TCB Info is not yet valid")
+	}
+	if now.Before(*r.qeIdentityIssuedAt) {
+		return fmt.Errorf("QE Identity is not yet valid")
+	}
+	return nil
 }
 
 // minimum returns the lower of the two observed numbers; both responses must
@@ -299,18 +322,17 @@ func poolFromPEM(rootPEM []byte) (*x509.CertPool, error) {
 // current time. Overrides are held per verification rather than in process
 // state, so concurrent verifications cannot observe each other.
 //
-// The overrides themselves exist only in the conformance build. A production
-// binary has no way to set them, so it cannot be made to trust a supplied
-// root or to appraise collateral at anything but the current time.
+// Trust-anchor overrides exist only in the conformance build.
 type Options struct {
-	overrides overrides
+	VerificationTime time.Time
+	overrides        overrides
 }
 
 func (o *Options) now() time.Time {
 	if o == nil {
 		return time.Now()
 	}
-	if pinned := o.overrides.clock(); !pinned.IsZero() {
+	if pinned := o.VerificationTime; !pinned.IsZero() {
 		return pinned
 	}
 	return time.Now()

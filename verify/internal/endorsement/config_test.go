@@ -96,7 +96,7 @@ func TestPolicyValidatePins(t *testing.T) {
 	}
 }
 
-func TestApprovalVerificationRequiresTSATrustEvenWhenIgnoringAge(t *testing.T) {
+func TestApprovalVerificationRequiresTSATrust(t *testing.T) {
 	f := newFixture(t)
 	trust, err := root.NewTrustedRoot(root.TrustedRootMediaType01, nil, nil, nil, f.Trust.RekorLogs())
 	require.NoError(t, err)
@@ -108,14 +108,11 @@ func TestApprovalVerificationRequiresTSATrustEvenWhenIgnoringAge(t *testing.T) {
 	configBundle := sigstoretest.MarshalBundle(t, f.Bundle(t, f.statement(t, f.Now)))
 	a := artifact(freshness.KindRuntime)
 	approvalBundle := sigstoretest.MarshalBundle(t, f.Bundle(t, statement(t, f.Fixture, a, f.Now)))
-	for _, ignore := range []bool{false, true} {
-		policy := f.policy()
-		policy.IgnoreFreshness = ignore
-		_, err := configs.Verify(testConfig, configBundle, policy)
-		require.ErrorContains(t, err, "no trusted timestamp authority")
-		_, err = approvals.Verify(approvalBundle, endorsement.FreshnessPolicy{Artifact: a, Now: f.Now, IgnoreFreshness: ignore})
-		require.ErrorContains(t, err, "no trusted timestamp authority")
-	}
+	policy := f.policy()
+	_, err = configs.Verify(testConfig, configBundle, policy)
+	require.ErrorContains(t, err, "no trusted timestamp authority")
+	_, err = approvals.Verify(approvalBundle, endorsement.FreshnessPolicy{Artifact: a, Now: f.Now})
+	require.ErrorContains(t, err, "no trusted timestamp authority")
 }
 
 func TestVerifyRejectsWrongPinsAndUntrustedKeys(t *testing.T) {
@@ -131,8 +128,6 @@ func TestVerifyRejectsWrongPinsAndUntrustedKeys(t *testing.T) {
 		{"missing clock", func(p *endorsement.ConfigPolicy) { p.Now = time.Time{} }},
 		{"negative age", func(p *endorsement.ConfigPolicy) { p.MaxAge = -time.Second }},
 		{"negative skew", func(p *endorsement.ConfigPolicy) { p.FutureSkew = -time.Second }},
-		{"archived negative age", func(p *endorsement.ConfigPolicy) { p.IgnoreFreshness = true; p.MaxAge = -time.Second }},
-		{"archived negative skew", func(p *endorsement.ConfigPolicy) { p.IgnoreFreshness = true; p.FutureSkew = -time.Second }},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			policy := f.policy()
@@ -232,7 +227,7 @@ func TestFreshnessUsesInnerTimeAndInclusiveBounds(t *testing.T) {
 	require.ErrorContains(t, err, "future")
 }
 
-func TestIgnoreFreshnessSkipsOnlyTheAgeCheck(t *testing.T) {
+func TestArchivedConfigRequiresAuthenticatedApproval(t *testing.T) {
 	f := newFixture(t)
 	inner := f.Now.Add(-time.Minute)
 	b := sigstoretest.MarshalBundle(t, f.Bundle(t, f.statement(t, inner)))
@@ -241,7 +236,7 @@ func TestIgnoreFreshnessSkipsOnlyTheAgeCheck(t *testing.T) {
 	_, err := f.verifier(t).Verify(testConfig, b, stale)
 	require.ErrorContains(t, err, "too old")
 
-	policy := endorsement.ConfigPolicy{Identity: testIdentity, IgnoreFreshness: true}
+	policy := endorsement.ConfigPolicy{Identity: testIdentity, Now: inner}
 	verified, err := f.verifier(t).Verify(testConfig, b, policy)
 	require.NoError(t, err)
 	require.True(t, verified.ApprovalTime.Equal(inner))

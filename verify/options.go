@@ -41,13 +41,18 @@ func WithFreshnessMaxAge(maxAge time.Duration) Option {
 	}
 }
 
-// WithIgnoreFreshness permits archived attestations. Legacy documents skip their
-// code/platform witnesses; config documents still require and authenticate every
-// freshness proof, but skip approval age checks. FreshnessExpiresAt is zero;
-// signatures, timestamps, inclusion, pins, and hardware checks still apply.
-func WithIgnoreFreshness() Option {
+// WithVerificationTime appraises archived evidence at a fixed, nonzero instant.
+// Freshness and hardware certificate/collateral validity are checked at that time.
+// The caller must independently authenticate this time; the SDK does not prove
+// when a receipt existed or account for revocations learned after that instant.
+// Omit this option to use the current time. It is not a live-client option.
+func WithVerificationTime(at time.Time) Option {
 	return func(v *Verifier) error {
-		v.ignoreFreshness = true
+		if at.IsZero() {
+			return fmt.Errorf("verification time must not be zero")
+		}
+		instant := at.UTC()
+		v.now = func() time.Time { return instant }
 		return nil
 	}
 }

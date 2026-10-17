@@ -81,6 +81,7 @@ jobs:
       - name: Run the shared v3 fixtures
         run: |
           set -euo pipefail
+          go test -tags tinfoil_conformance ./verify/internal/quote/tdx
           shopt -s nullglob
           suites=("$GITHUB_WORKSPACE"/tinfoil-conformance/vectors/v3/*/)
           if [ "${#suites[@]}" -eq 0 ]; then
