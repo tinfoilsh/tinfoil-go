@@ -32,7 +32,12 @@ func collateralFixture(t *testing.T, name string) (verify.CollateralCheck, []byt
 		}
 		dir = filepath.Dir(filepath.Clean(suite))
 	}
-	data, err := os.ReadFile(filepath.Join(dir, name+".json"))
+	return readCollateralFixture(t, filepath.Join(dir, name+".json"))
+}
+
+func readCollateralFixture(t *testing.T, path string) (verify.CollateralCheck, []byte, []byte, []verify.Option) {
+	t.Helper()
+	data, err := os.ReadFile(path)
 	require.NoError(t, err)
 	var fixture struct{ Input conformance.Input }
 	require.NoError(t, json.Unmarshal(data, &fixture))
@@ -162,16 +167,17 @@ func TestFixturesCollateralCompatibilityRejectsMissingOrDamagedEvidence(t *testi
 }
 
 func TestFixturesCollateralRuntimeCheckDoesNotAuthorizePrivateConfig(t *testing.T) {
-	checkRuntimeWithoutPrivateConfig(t, "golden/golden-happy")
+	candidate, raw, nonce, opts := collateralFixture(t, "golden/golden-happy")
+	checkRuntimeWithoutPrivateConfig(t, candidate, raw, nonce, opts)
 }
 
-func TestFixturesCollateralRuntimeRejectsLegacyTDXMeasurements(t *testing.T) {
-	checkRuntimeWithoutPrivateConfig(t, "golden-tdx/tdx-golden-happy")
+func TestFixturesCollateralRuntimeTDXDoesNotAuthorizePrivateConfig(t *testing.T) {
+	candidate, raw, nonce, opts := readCollateralFixture(t, filepath.Join("testdata", "collateral", "runtime-tdx-zero-rtmrs.json"))
+	checkRuntimeWithoutPrivateConfig(t, candidate, raw, nonce, opts)
 }
 
-func checkRuntimeWithoutPrivateConfig(t *testing.T, fixture string) {
+func checkRuntimeWithoutPrivateConfig(t *testing.T, candidate verify.CollateralCheck, raw, nonce []byte, opts []verify.Option) {
 	t.Helper()
-	candidate, raw, nonce, opts := collateralFixture(t, fixture)
 	v, err := verify.NewVerifier(opts...)
 	require.NoError(t, err)
 	attested, err := v.VerifyV3(raw, nonce, candidate.Reference)
@@ -204,8 +210,10 @@ func checkRuntimeWithoutPrivateConfig(t *testing.T, fixture string) {
 		SNPLaunch:     &runtime.SNPLaunch{Measurement: attested.EnclaveMeasurement.Registers[0]},
 		TDXLaunch:     &runtime.TDXLaunch{MRTD: zero, RTMR0: zero, RTMR1: zero, RTMR2: zero, RTMR3: zero},
 	}}
+	wantRuntimeError, wantConfigError := "MEASUREMENT", "HOST_DATA"
 	if candidate.Evidence.Format == document.TDXQuoteV1Format {
 		manifest.Measurements.TDXLaunch.MRTD = attested.EnclaveMeasurement.Registers[0]
+		wantRuntimeError, wantConfigError = "MR_TD", "MR_CONFIG_ID"
 	}
 	manifestBytes, err := json.Marshal(manifest)
 	require.NoError(t, err)
@@ -222,11 +230,6 @@ func checkRuntimeWithoutPrivateConfig(t *testing.T, fixture string) {
 	}
 	candidate.Format, candidate.Reference, candidate.Runtime, candidate.Entries = collateral.FormatV3, "", ref, cpuEntries
 	compatible, err := v.CheckCollateral(candidate)
-	if candidate.Evidence.Format == document.TDXQuoteV1Format {
-		require.ErrorContains(t, err, "RTMR[0]")
-		require.Nil(t, compatible, "excluding a private config must retain the runtime's zero-RTMR policy")
-		return
-	}
 	require.NoError(t, err)
 	require.False(t, compatible.WorkloadChecked)
 	require.True(t, compatible.FreshnessExpiresAt.IsZero(), "embedded references do not provide approval freshness")
@@ -239,6 +242,7 @@ func checkRuntimeWithoutPrivateConfig(t *testing.T, fixture string) {
 	candidate.Runtime = ref
 
 	manifest.Measurements.SNPLaunch.Measurement = zero
+	manifest.Measurements.TDXLaunch.MRTD = zero
 	wrongManifest, err := json.Marshal(manifest)
 	require.NoError(t, err)
 	wrongDigest := sha256.Sum256(wrongManifest)
@@ -250,7 +254,7 @@ func checkRuntimeWithoutPrivateConfig(t *testing.T, fixture string) {
 	require.NoError(t, err)
 	candidate.Runtime = &wrongRef
 	compatible, err = wrong.CheckCollateral(candidate)
-	require.ErrorContains(t, err, "MEASUREMENT")
+	require.ErrorContains(t, err, wantRuntimeError)
 	require.Nil(t, compatible)
 
 	refs.Config = &verify.EmbeddedConfig{Bytes: []byte("cvm-version: " + version + "@sha256:" + ref.Digest + "\n")}
@@ -258,6 +262,6 @@ func checkRuntimeWithoutPrivateConfig(t *testing.T, fixture string) {
 	require.NoError(t, err)
 	candidate.Runtime = nil
 	compatible, err = full.CheckCollateral(candidate)
-	require.ErrorContains(t, err, "HOST_DATA")
+	require.ErrorContains(t, err, wantConfigError)
 	require.Nil(t, compatible, "runtime compatibility must not imply a matching private config")
 }
