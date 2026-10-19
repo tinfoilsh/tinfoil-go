@@ -22,7 +22,6 @@ import (
 
 	"github.com/tinfoilsh/tinfoil-go/verify/document"
 	"github.com/tinfoilsh/tinfoil-go/verify/document/collateral"
-	"github.com/tinfoilsh/tinfoil-go/verify/internal/errs"
 	"github.com/tinfoilsh/tinfoil-go/verify/internal/policy"
 	"github.com/tinfoilsh/tinfoil-go/verify/internal/quote/sev"
 	"github.com/tinfoilsh/tinfoil-go/verify/internal/quote/tdx"
@@ -112,7 +111,6 @@ func (o *Options) tdxOptions() *tdx.Options {
 // fetches. Callers must assemble a policy and validate before trusting the
 // platform.
 func Authenticate(ev document.CPUEvidence, en collateral.CPUEndorsements, opts *Options) (result *Authenticated, err error) {
-	defer func() { err = errs.WrapVerification(err) }()
 	switch ev.Format {
 	case document.SEVSNPReportV1Format:
 		// v3 is single-request: missing collateral is rejected, never
@@ -169,7 +167,6 @@ func Authenticate(ev document.CPUEvidence, en collateral.CPUEndorsements, opts *
 // from doc's own CPU evidence: a quote cannot be appraised against another
 // document's challenge.
 func Assemble(doc *document.Document, refs ReferenceValues, pins *measurement.Measurement, q *Authenticated) (result *AssembledPolicy, err error) {
-	defer func() { err = errs.WrapVerification(err) }()
 	reportData, err := q.reportData(doc)
 	if err != nil {
 		return nil, err
@@ -223,7 +220,6 @@ func assemble(refs ReferenceValues, pins *measurement.Measurement, reportData [6
 // Validate compares the captured quote against the assembled policy in a
 // single vendor library call: no lookups, no translation.
 func (p *AssembledPolicy) Validate() (err error) {
-	defer func() { err = errs.WrapVerification(err) }()
 	switch p.quote.platform {
 	case policy.PlatformSEVSNP:
 		return p.sev.Validate(p.quote.sev)
@@ -243,8 +239,9 @@ func resolvePolicy(endorsements *policy.Artifact, q *Authenticated) (*resolvedVa
 }
 
 func applyPins(registers []string, enclaveType measurement.PredicateType, pins *measurement.Measurement) ([]string, error) {
+	// NewVerifier has already validated the pins; this only fails closed.
 	if err := measurement.ValidatePins(pins); err != nil {
-		return nil, &errs.UsageError{Err: err}
+		return nil, err
 	}
 	if pins == nil {
 		return registers, nil

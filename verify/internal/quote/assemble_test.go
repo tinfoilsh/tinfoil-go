@@ -7,7 +7,6 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/tinfoilsh/tinfoil-go/verify/document"
-	"github.com/tinfoilsh/tinfoil-go/verify/internal/errs"
 	"github.com/tinfoilsh/tinfoil-go/verify/internal/policy"
 	"github.com/tinfoilsh/tinfoil-go/verify/measurement"
 )
@@ -27,10 +26,9 @@ func boundDocument(t *testing.T, report []byte) *document.Document {
 }
 
 func TestAssembleRequiresParsedDocument(t *testing.T) {
-	var rejected *errs.VerificationError
 	for _, doc := range []*document.Document{nil, {}} {
 		_, err := Assemble(doc, LegacyReferenceValues{Endorsements: &policy.Artifact{}, Code: &measurement.Measurement{}, Shape: testShape}, nil, &Authenticated{})
-		require.ErrorAs(t, err, &rejected, "an unbound document is rejected, not blamed on the caller")
+		require.Error(t, err)
 		assert.ErrorContains(t, err, "checked by document.Parse")
 	}
 }
@@ -40,14 +38,12 @@ func TestAssembleRejectsQuoteFromAnotherDocument(t *testing.T) {
 	authenticated := func(format, report string) *Authenticated {
 		return &Authenticated{evidence: document.CPUEvidence{Format: format, Report: []byte(report)}}
 	}
-	var rejected *errs.VerificationError
-
 	for name, q := range map[string]*Authenticated{
 		"other report": authenticated(document.SEVSNPReportV1Format, "report b"),
 		"other format": authenticated(document.TDXQuoteV1Format, "report a"),
 	} {
 		_, err := Assemble(doc, LegacyReferenceValues{Endorsements: &policy.Artifact{}, Code: &measurement.Measurement{}, Shape: testShape}, nil, q)
-		require.ErrorAs(t, err, &rejected, name)
+		require.Error(t, err, name)
 		assert.ErrorContains(t, err, "not this document's CPU evidence", name)
 	}
 

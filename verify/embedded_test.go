@@ -78,7 +78,7 @@ func TestEmbeddedReferencesPreserveBindingsAndOwnTheirBytes(t *testing.T) {
 	require.True(t, refs.config.ApprovalTime.IsZero())
 	require.True(t, refs.freshnessExpiresAt.IsZero())
 	result, layer, err := v.verifyV3(raw, nonce, "org/project@v1")
-	require.Error(t, err)
+	require.ErrorAs(t, err, new(*VerificationError), "verifyV3 classifies the quote stage's plain error")
 	require.Nil(t, result)
 	require.Equal(t, layerQuote, layer, "embedding must never bypass hardware authentication")
 	_, layer, err = v.verifyV3(raw, nonce, "")

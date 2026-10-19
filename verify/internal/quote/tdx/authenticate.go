@@ -24,7 +24,6 @@ import (
 	tdxtrust "github.com/google/go-tdx-guest/verify/trust"
 
 	"github.com/tinfoilsh/tinfoil-go/verify/document/collateral"
-	"github.com/tinfoilsh/tinfoil-go/verify/internal/errs"
 	"github.com/tinfoilsh/tinfoil-go/verify/measurement"
 )
 
@@ -64,7 +63,6 @@ type Evidence struct {
 // SGX root, replaying the captured PCS collateral — no network fetches.
 // Callers must assemble a policy and validate before trusting the platform.
 func Authenticate(ev Evidence, opts *Options) (result *Quote, err error) {
-	defer func() { err = errs.WrapVerification(err) }()
 	// Sampled once so the replayed CRL windows and the library's own validity
 	// checks appraise the same instant.
 	now := opts.now()
