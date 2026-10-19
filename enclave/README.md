@@ -7,13 +7,27 @@ itself performs no I/O.
 
 ## Quick Start
 ```go
-import "github.com/tinfoilsh/tinfoil-go/enclave"
+package main
 
-// Attestation happens automatically on the first request.
-handle, err := enclave.NewHandle("enclave.example.com", "org/repo", nil)
-if err != nil { log.Fatal(err) }
+import (
+	"log"
 
-resp, err := handle.Request("GET", "/api/data", "", nil)
+	"github.com/tinfoilsh/tinfoil-go/enclave"
+)
+
+func main() {
+	handle, err := enclave.NewHandle("enclave.example.com", "org/repo", nil)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	// Attestation happens automatically on the first request.
+	resp, err := handle.Request("GET", "/api/data", "", nil)
+	if err != nil {
+		log.Fatal(err)
+	}
+	log.Printf("%s: %s", resp.Status, resp.Body)
+}
 ```
 
 `handle.HTTPClient()` returns the underlying pinned `*http.Client`, and
@@ -35,13 +49,21 @@ response, may finish. There is no background refresh.
 the Swift bindings can construct:
 
 ```go
-opts := enclave.Options{
-    PinnedRegisters: &measurement.Measurement{
-        Type:      measurement.TdxGuestV2,
-        Registers: []string{4: rtmr3},
-    },
+import (
+	"github.com/tinfoilsh/tinfoil-go/enclave"
+	"github.com/tinfoilsh/tinfoil-go/verify/measurement"
+)
+
+// newPinnedHandle also requires the enclave's RTMR3 to equal rtmr3 (hex).
+func newPinnedHandle(rtmr3 string) (*enclave.Handle, error) {
+	opts := enclave.Options{
+		PinnedRegisters: &measurement.Measurement{
+			Type:      measurement.TdxGuestV2,
+			Registers: []string{4: rtmr3},
+		},
+	}
+	return enclave.NewHandle("enclave.example.com", "org/repo", &opts)
 }
-handle, err := enclave.NewHandle("enclave.example.com", "org/repo", &opts)
 ```
 
 To trust a local config instead of a registry endorsement, set
