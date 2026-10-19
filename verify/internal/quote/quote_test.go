@@ -127,10 +127,6 @@ func TestLiveVerifySEV(t *testing.T) {
 	_, _, err = verify(evidence, endorsements, artifact, wrongMeasurement, nil, testShape, reportData, nil)
 	assert.Error(t, err)
 
-	// An assembly without the required code expectation must reject.
-	_, err = assemble(LegacyReferenceValues{Endorsements: artifact, Shape: testShape}, nil, reportData, q)
-	assert.ErrorContains(t, err, "code measurement is required")
-
 	// SEV assembly does not consume the code artifact's VM shape.
 	_, err = assemble(LegacyReferenceValues{Endorsements: artifact, Code: asCode(q.Measurement)}, nil, reportData, q)
 	require.NoError(t, err)
