@@ -91,6 +91,21 @@ returned TLS/HPKE material and stop authorizing new requests at
 [`enclave.Handle`](../enclave/README.md) adds fetching, caching and
 transport binding on top.
 
+### Checking collateral availability
+
+`Verifier.CheckCollateral` checks a raw CPU quote against candidate collateral
+without constructing a client attestation document. ATC can use it to reject
+incompatible platform or workload measurements before serving collateral.
+It reuses provenance, freshness, hardware authentication, and policy checks,
+but does not verify a nonce, application keys, or device-evidence bindings.
+Its result cannot authorize a connection; clients must still use `VerifyV3`.
+
+For local configs, supplying an exact `Runtime` reference checks runtime and
+platform compatibility without disclosing the config. `WorkloadChecked` is
+false in that case: private config hashes and authorization remain unchecked.
+`FreshnessExpiresAt` bounds approval freshness, not vendor certificate validity
+or the lifetime of a client attestation.
+
 ### Migration from v2
 
 The v3 client always requests a nonce-bound v3 document. Enclaves serving only

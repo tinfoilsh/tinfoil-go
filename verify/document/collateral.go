@@ -15,7 +15,9 @@ func (d *Document) CollateralFormat() string {
 	return d.collateralFormat
 }
 
-func decodeCollateral(format string, entries []collateral.Entry) (collateral.Set, error) {
+// DecodeCollateral checks collateral structure and profile compatibility.
+// It authenticates no signatures or reference values.
+func DecodeCollateral(format string, entries []collateral.Entry) (collateral.Set, error) {
 	switch format {
 	case "", collateral.FormatV2, collateral.FormatV3:
 	default:

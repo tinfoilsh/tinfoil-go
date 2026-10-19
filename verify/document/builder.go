@@ -55,7 +55,7 @@ func Build(in BuildInput, generateQuote QuoteGenerator) ([]byte, error) {
 	}
 	// Parse decodes every entry of a known role and format; decoding them
 	// here rejects one Parse would refuse before it costs a hardware quote.
-	if _, err := decodeCollateral(in.CollateralFormat, in.Collateral); err != nil {
+	if _, err := DecodeCollateral(in.CollateralFormat, in.Collateral); err != nil {
 		return nil, &errs.UsageError{Err: err}
 	}
 	// Serializing rejects what Decode does not check, such as invalid UTF-8

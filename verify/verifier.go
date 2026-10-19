@@ -226,7 +226,7 @@ func (v *Verifier) verifyV3(docBytes, nonce []byte, repo string) (*Verification,
 	return result, layerNone, nil
 }
 
-func (v *Verifier) codeReferences(doc *document.Document, repo string, appraisalTime time.Time) (*endorsementResult, error) {
+func (v *Verifier) codeReferences(doc referenceMaterial, repo string, appraisalTime time.Time) (*endorsementResult, error) {
 	if v.requiresConfigCollateral() {
 		return nil, fmt.Errorf("configured trust requires %s", collateral.FormatV3)
 	}
@@ -268,7 +268,7 @@ func (v *Verifier) codeReferences(doc *document.Document, repo string, appraisal
 	return refs, nil
 }
 
-func (v *Verifier) authenticateFreshness(doc *document.Document, id string, artifact *endorsement.AuthenticatedArtifact, now time.Time) (time.Time, error) {
+func (v *Verifier) authenticateFreshness(doc referenceMaterial, id string, artifact *endorsement.AuthenticatedArtifact, now time.Time) (time.Time, error) {
 	freshness, err := doc.Freshness(id)
 	if err != nil {
 		return time.Time{}, err

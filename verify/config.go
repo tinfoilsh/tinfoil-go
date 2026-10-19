@@ -9,7 +9,6 @@ import (
 
 	configendorsement "github.com/tinfoilsh/tinfoil-go/endorsement/config"
 	"github.com/tinfoilsh/tinfoil-go/endorsement/freshness"
-	"github.com/tinfoilsh/tinfoil-go/verify/document"
 	"github.com/tinfoilsh/tinfoil-go/verify/document/collateral"
 	"github.com/tinfoilsh/tinfoil-go/verify/internal/endorsement"
 	"github.com/tinfoilsh/tinfoil-go/verify/internal/errs"
@@ -58,7 +57,7 @@ func WithFreshnessSigningKeys(keys []crypto.PublicKey) Option {
 	}
 }
 
-func (v *Verifier) configReferences(doc *document.Document, ref string, now time.Time) (*endorsementResult, error) {
+func (v *Verifier) configReferences(doc referenceMaterial, ref string, now time.Time) (*endorsementResult, error) {
 	if v.configAuthorizer != nil && ref != "" {
 		return nil, usageError(fmt.Errorf("config authorizer cannot authenticate repository or revision pins; enforce them in caller policy"))
 	}
@@ -105,7 +104,7 @@ func (v *Verifier) configReferences(doc *document.Document, ref string, now time
 	return result, nil
 }
 
-func (v *Verifier) resolveConfig(doc *document.Document, pins endorsement.ConfigPolicy) ([]byte, *ConfigVerification, error) {
+func (v *Verifier) resolveConfig(doc referenceMaterial, pins endorsement.ConfigPolicy) ([]byte, *ConfigVerification, error) {
 	if embedded := v.embedded.Config; embedded != nil {
 		var identity, revision string
 		if embedded.Name != "" {
@@ -152,7 +151,7 @@ func (v *Verifier) resolveConfig(doc *document.Document, pins endorsement.Config
 	}, nil
 }
 
-func (v *Verifier) resolveRuntime(doc *document.Document, expected collateral.RuntimeReference, now time.Time) (*runtime.Manifest, ArtifactVerification, error) {
+func (v *Verifier) resolveRuntime(doc referenceMaterial, expected collateral.RuntimeReference, now time.Time) (*runtime.Manifest, ArtifactVerification, error) {
 	if v.embedded.Runtime != nil {
 		manifest, err := runtime.ParseManifest(v.embedded.Runtime, expected)
 		return manifest, ArtifactVerification{Source: SourceEmbedded, Repo: expected.Repo, Tag: expected.Tag, Digest: expected.Digest}, err
@@ -172,7 +171,7 @@ func (v *Verifier) resolveRuntime(doc *document.Document, expected collateral.Ru
 	return authenticated.Manifest, artifactVerification(authenticated.AuthenticatedArtifact, approvedAt), nil
 }
 
-func (v *Verifier) resolvePlatform(doc *document.Document, now time.Time) (*platformpolicy.Artifact, ArtifactVerification, error) {
+func (v *Verifier) resolvePlatform(doc referenceMaterial, now time.Time) (*platformpolicy.Artifact, ArtifactVerification, error) {
 	if v.embedded.Platform != nil {
 		artifact, err := platformpolicy.Parse(v.embedded.Platform)
 		digest := sha256.Sum256(v.embedded.Platform)
@@ -203,7 +202,7 @@ func artifactVerification(artifact endorsement.AuthenticatedArtifact, approvedAt
 	}
 }
 
-func (v *Verifier) authenticateArtifactFreshness(doc *document.Document, id, kind string, artifact *endorsement.AuthenticatedArtifact, now time.Time) (time.Time, error) {
+func (v *Verifier) authenticateArtifactFreshness(doc referenceMaterial, id, kind string, artifact *endorsement.AuthenticatedArtifact, now time.Time) (time.Time, error) {
 	material, err := doc.Freshness(id)
 	if err != nil {
 		return time.Time{}, err

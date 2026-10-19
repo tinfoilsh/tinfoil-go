@@ -376,7 +376,7 @@ func decode(docBytes []byte) (*Document, error) {
 		return nil, err
 	}
 
-	set, err := decodeCollateral(raw.CollateralFormat, raw.Collateral)
+	set, err := DecodeCollateral(raw.CollateralFormat, raw.Collateral)
 	if err != nil {
 		return nil, err
 	}
