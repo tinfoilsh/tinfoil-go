@@ -57,7 +57,7 @@ func main() {
 
 - [Go SDK documentation](https://docs.tinfoil.sh/sdk/go-sdk) and [error handling](https://docs.tinfoil.sh/sdk/error-handling).
 - Multi-user services must scope prompt caches to each end user with `tinfoil.WithUserCacheSecret` or a per-request `user_cache_secret`; see [Prompt caching](https://docs.tinfoil.sh/sdk/prompt-caching).
-- `tinfoil.NewClientWithOptions` accepts the [verification options](verify/README.md#verification-options) described in the verifier package, and the [enclave handle](enclave/README.md) makes verified HTTP requests to any enclave.
+- Pass `tinfoil.WithVerificationOptions` an [`enclave.Options`](enclave/README.md#verification-options) struct to pin registers or set freshness, and use the [enclave handle](enclave/README.md) for verified HTTP requests to any enclave.
 - All OpenAI methods and types are unchanged; see the [OpenAI Go client documentation](https://pkg.go.dev/github.com/openai/openai-go/v3).
 
 ## Development
