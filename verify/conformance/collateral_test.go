@@ -70,24 +70,25 @@ func TestFixturesCollateralCompatibilitySignedFixtures(t *testing.T) {
 	for _, tc := range []struct {
 		name                 string
 		compatible, attested bool
+		wantError            string
 	}{
-		{"golden/golden-happy", true, true},
-		{"golden-tdx/tdx-golden-happy", true, true},
-		{"golden-tdx/st1-shape-filter", false, false},
-		{"golden-tdx/st2-multi-measurement", true, true},
-		{"golden-tdx/t14-mrtd", false, false},
-		{"golden-tdx/t17-rtmr0", false, false},
-		{"golden-tdx/t18-rtmr1", false, false},
-		{"golden-tdx/t18-rtmr2", false, false},
-		{"golden-tdx/t19-rtmr3", false, false},
-		{"golden-tdx/t10-td-attributes", false, false},
-		{"golden-tdx/t23-tcb-eval", false, false},
-		{"golden/i5-not-endorsed", false, false},
-		{"golden/s7-vmpl", false, false},
-		{"golden/s14-measurement", false, false},
-		{"golden/s19-tcb-floor", false, false},
-		{"golden/s13-report-data", true, false},
-		{"golden-tdx/t20-report-data", true, false},
+		{"golden/golden-happy", true, true, ""},
+		{"golden-tdx/tdx-golden-happy", true, true, ""},
+		{"golden-tdx/st1-shape-filter", false, false, "VM shape"},
+		{"golden-tdx/st2-multi-measurement", true, true, ""},
+		{"golden-tdx/t14-mrtd", false, false, "platform measurements"},
+		{"golden-tdx/t17-rtmr0", false, false, "platform measurements"},
+		{"golden-tdx/t18-rtmr1", false, false, "RTMR[1]"},
+		{"golden-tdx/t18-rtmr2", false, false, "RTMR[2]"},
+		{"golden-tdx/t19-rtmr3", false, false, "RTMR[3]"},
+		{"golden-tdx/t10-td-attributes", false, false, "TD_ATTRIBUTES"},
+		{"golden-tdx/t23-tcb-eval", false, false, "below the policy minimum"},
+		{"golden/i5-not-endorsed", false, false, "not endorsed"},
+		{"golden/s7-vmpl", false, false, "VMPL"},
+		{"golden/s14-measurement", false, false, "MEASUREMENT"},
+		{"golden/s19-tcb-floor", false, false, "TCB"},
+		{"golden/s13-report-data", true, false, ""},
+		{"golden-tdx/t20-report-data", true, false, ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			candidate, raw, nonce, opts := collateralFixture(t, tc.name)
@@ -99,7 +100,7 @@ func TestFixturesCollateralCompatibilitySignedFixtures(t *testing.T) {
 				require.True(t, result.WorkloadChecked)
 				require.False(t, result.FreshnessExpiresAt.IsZero())
 			} else {
-				require.Error(t, err)
+				require.ErrorContains(t, err, tc.wantError)
 				require.Nil(t, result)
 			}
 			_, err = v.VerifyV3(raw, nonce, candidate.Reference)
@@ -108,8 +109,10 @@ func TestFixturesCollateralCompatibilitySignedFixtures(t *testing.T) {
 				nonce[0] ^= 1
 				_, err = v.VerifyV3(raw, nonce, candidate.Reference)
 				require.ErrorContains(t, err, "nonce")
+			} else if tc.compatible {
+				require.ErrorContains(t, err, "REPORT_DATA")
 			} else {
-				require.Error(t, err)
+				require.ErrorContains(t, err, tc.wantError)
 			}
 		})
 	}
