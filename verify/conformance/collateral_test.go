@@ -162,7 +162,16 @@ func TestFixturesCollateralCompatibilityRejectsMissingOrDamagedEvidence(t *testi
 }
 
 func TestFixturesCollateralRuntimeCheckDoesNotAuthorizePrivateConfig(t *testing.T) {
-	candidate, raw, nonce, opts := collateralFixture(t, "golden/golden-happy")
+	checkRuntimeWithoutPrivateConfig(t, "golden/golden-happy")
+}
+
+func TestFixturesCollateralRuntimeRejectsLegacyTDXMeasurements(t *testing.T) {
+	checkRuntimeWithoutPrivateConfig(t, "golden-tdx/tdx-golden-happy")
+}
+
+func checkRuntimeWithoutPrivateConfig(t *testing.T, fixture string) {
+	t.Helper()
+	candidate, raw, nonce, opts := collateralFixture(t, fixture)
 	v, err := verify.NewVerifier(opts...)
 	require.NoError(t, err)
 	attested, err := v.VerifyV3(raw, nonce, candidate.Reference)
@@ -195,6 +204,9 @@ func TestFixturesCollateralRuntimeCheckDoesNotAuthorizePrivateConfig(t *testing.
 		SNPLaunch:     &runtime.SNPLaunch{Measurement: attested.EnclaveMeasurement.Registers[0]},
 		TDXLaunch:     &runtime.TDXLaunch{MRTD: zero, RTMR0: zero, RTMR1: zero, RTMR2: zero, RTMR3: zero},
 	}}
+	if candidate.Evidence.Format == document.TDXQuoteV1Format {
+		manifest.Measurements.TDXLaunch.MRTD = attested.EnclaveMeasurement.Registers[0]
+	}
 	manifestBytes, err := json.Marshal(manifest)
 	require.NoError(t, err)
 	digest := sha256.Sum256(manifestBytes)
@@ -210,6 +222,11 @@ func TestFixturesCollateralRuntimeCheckDoesNotAuthorizePrivateConfig(t *testing.
 	}
 	candidate.Format, candidate.Reference, candidate.Runtime, candidate.Entries = collateral.FormatV3, "", ref, cpuEntries
 	compatible, err := v.CheckCollateral(candidate)
+	if candidate.Evidence.Format == document.TDXQuoteV1Format {
+		require.ErrorContains(t, err, "RTMR[0]")
+		require.Nil(t, compatible, "excluding a private config must retain the runtime's zero-RTMR policy")
+		return
+	}
 	require.NoError(t, err)
 	require.False(t, compatible.WorkloadChecked)
 	require.True(t, compatible.FreshnessExpiresAt.IsZero(), "embedded references do not provide approval freshness")
@@ -233,7 +250,7 @@ func TestFixturesCollateralRuntimeCheckDoesNotAuthorizePrivateConfig(t *testing.
 	require.NoError(t, err)
 	candidate.Runtime = &wrongRef
 	compatible, err = wrong.CheckCollateral(candidate)
-	require.Error(t, err)
+	require.ErrorContains(t, err, "MEASUREMENT")
 	require.Nil(t, compatible)
 
 	refs.Config = &verify.EmbeddedConfig{Bytes: []byte("cvm-version: " + version + "@sha256:" + ref.Digest + "\n")}
