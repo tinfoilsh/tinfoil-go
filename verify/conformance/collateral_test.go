@@ -3,11 +3,13 @@
 package conformance_test
 
 import (
+	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -16,6 +18,8 @@ import (
 	"github.com/tinfoilsh/tinfoil-go/verify/conformance"
 	"github.com/tinfoilsh/tinfoil-go/verify/document"
 	"github.com/tinfoilsh/tinfoil-go/verify/document/collateral"
+	"github.com/tinfoilsh/tinfoil-go/verify/internal/policy"
+	"github.com/tinfoilsh/tinfoil-go/verify/internal/runtime"
 )
 
 func collateralFixture(t *testing.T, name string) (verify.CollateralCheck, []byte, []byte, []verify.Option) {
@@ -152,4 +156,88 @@ func TestFixturesCollateralCompatibilityRejectsMissingOrDamagedEvidence(t *testi
 	result, err = v.CheckCollateral(candidate)
 	require.ErrorContains(t, err, "stale")
 	require.Nil(t, result)
+}
+
+func TestFixturesCollateralRuntimeCheckDoesNotAuthorizePrivateConfig(t *testing.T) {
+	candidate, raw, nonce, opts := collateralFixture(t, "golden/golden-happy")
+	v, err := verify.NewVerifier(opts...)
+	require.NoError(t, err)
+	attested, err := v.VerifyV3(raw, nonce, candidate.Reference)
+	require.NoError(t, err)
+	set, err := document.DecodeCollateral(candidate.Format, candidate.Entries)
+	require.NoError(t, err)
+	var bundle struct {
+		Envelope struct{ Payload []byte } `json:"dsseEnvelope"`
+	}
+	require.NoError(t, json.Unmarshal(set.SigstorePlatform.Bundle, &bundle))
+	var statement struct{ Predicate policy.Artifact }
+	require.NoError(t, json.Unmarshal(bundle.Envelope.Payload, &statement))
+	platform := statement.Predicate
+	platform.Format, platform.Measurements = policy.ArtifactFormatV2, nil
+	for name, p := range platform.Policies {
+		if p.SEVSNP != nil {
+			p.SEVSNP.HostData = ""
+		}
+		if p.TDX != nil {
+			p.TDX.PlatformMeasurements = nil
+		}
+		platform.Policies[name] = p
+	}
+	platformBytes, err := json.Marshal(platform)
+	require.NoError(t, err)
+	const version = "v0.15.0"
+	zero := strings.Repeat("00", runtime.MeasurementSize)
+	manifest := runtime.Manifest{Version: version, Measurements: &runtime.Measurements{
+		FormatVersion: runtime.FormatVersion,
+		SNPLaunch:     &runtime.SNPLaunch{Measurement: attested.EnclaveMeasurement.Registers[0]},
+		TDXLaunch:     &runtime.TDXLaunch{MRTD: zero, RTMR0: zero, RTMR1: zero, RTMR2: zero, RTMR3: zero},
+	}}
+	manifestBytes, err := json.Marshal(manifest)
+	require.NoError(t, err)
+	digest := sha256.Sum256(manifestBytes)
+	ref := &collateral.RuntimeReference{Repo: collateral.RuntimeRepo, Tag: version, Digest: hex.EncodeToString(digest[:])}
+	refs := verify.EmbeddedReferences{Runtime: manifestBytes, Platform: platformBytes}
+	v, err = verify.NewVerifier(append(opts, verify.WithEmbeddedReferences(refs))...)
+	require.NoError(t, err)
+	var cpuEntries []collateral.Entry
+	for _, entry := range candidate.Entries {
+		if entry.Role == collateral.RoleEndorsement {
+			cpuEntries = append(cpuEntries, entry)
+		}
+	}
+	candidate.Format, candidate.Reference, candidate.Runtime, candidate.Entries = collateral.FormatV3, "", ref, cpuEntries
+	compatible, err := v.CheckCollateral(candidate)
+	require.NoError(t, err)
+	require.False(t, compatible.WorkloadChecked)
+	require.True(t, compatible.FreshnessExpiresAt.IsZero(), "embedded references do not provide approval freshness")
+
+	badRef := *ref
+	badRef.Digest = strings.Repeat("00", sha256.Size)
+	candidate.Runtime = &badRef
+	_, err = v.CheckCollateral(candidate)
+	require.ErrorContains(t, err, "digest pin")
+	candidate.Runtime = ref
+
+	manifest.Measurements.SNPLaunch.Measurement = zero
+	wrongManifest, err := json.Marshal(manifest)
+	require.NoError(t, err)
+	wrongDigest := sha256.Sum256(wrongManifest)
+	wrongRef := *ref
+	wrongRef.Digest = hex.EncodeToString(wrongDigest[:])
+	wrongRefs := refs
+	wrongRefs.Runtime = wrongManifest
+	wrong, err := verify.NewVerifier(append(opts, verify.WithEmbeddedReferences(wrongRefs))...)
+	require.NoError(t, err)
+	candidate.Runtime = &wrongRef
+	compatible, err = wrong.CheckCollateral(candidate)
+	require.Error(t, err)
+	require.Nil(t, compatible)
+
+	refs.Config = &verify.EmbeddedConfig{Bytes: []byte("cvm-version: " + version + "@sha256:" + ref.Digest + "\n")}
+	full, err := verify.NewVerifier(append(opts, verify.WithEmbeddedReferences(refs))...)
+	require.NoError(t, err)
+	candidate.Runtime = nil
+	compatible, err = full.CheckCollateral(candidate)
+	require.ErrorContains(t, err, "HOST_DATA")
+	require.Nil(t, compatible, "runtime compatibility must not imply a matching private config")
 }
