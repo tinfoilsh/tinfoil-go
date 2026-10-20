@@ -62,14 +62,14 @@ func runLive() int {
 		}
 		return exit
 	}
-	tlsFP, err := verified.TLSPublicKeyFP()
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "endorsed keys: %v\n", err)
+	tlsFP, ok := verified.TLSPublicKeyFP()
+	if !ok {
+		fmt.Fprintln(os.Stderr, "endorsed keys: document endorses no TLS key")
 		return rejectLive("ENVELOPE_REJECTED")
 	}
-	hpke, err := verified.HPKEPublicKey()
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "endorsed keys: %v\n", err)
+	hpke, ok := verified.HPKEPublicKey()
+	if !ok {
+		fmt.Fprintln(os.Stderr, "endorsed keys: document endorses no HPKE key")
 		return rejectLive("ENVELOPE_REJECTED")
 	}
 

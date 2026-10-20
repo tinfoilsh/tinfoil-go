@@ -15,13 +15,13 @@ func TestCryptoMaterialData(t *testing.T) {
 			{ID: "workload", Format: futureFormat, Data: "010203"},
 		},
 	}
-	data, err := v.CryptoMaterialData("workload", futureFormat)
-	require.NoError(t, err)
+	data, ok := v.CryptoMaterialData("workload", futureFormat)
+	require.True(t, ok)
 	require.Equal(t, "010203", data)
-	_, err = v.CryptoMaterialData("workload", document.KeySPKIV1Format)
-	require.ErrorContains(t, err, "has format")
-	_, err = v.CryptoMaterialData("missing", futureFormat)
-	require.ErrorContains(t, err, "endorses no")
-	_, err = (*Verification)(nil).CryptoMaterialData("workload", futureFormat)
-	require.ErrorContains(t, err, "verification is required")
+	_, ok = v.CryptoMaterialData("workload", document.KeySPKIV1Format)
+	require.False(t, ok, "an item in another format is not the one asked for")
+	_, ok = v.CryptoMaterialData("missing", futureFormat)
+	require.False(t, ok)
+	_, ok = (*Verification)(nil).CryptoMaterialData("workload", futureFormat)
+	require.False(t, ok, "a nil verification endorses nothing")
 }

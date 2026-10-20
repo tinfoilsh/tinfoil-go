@@ -176,9 +176,9 @@ A successful `VerifyV3` or `Verify` result retains every endorsed
 `CryptoMaterial` item. Select by exact ID and format:
 
 ```go
-data, err := verified.CryptoMaterialData("host-ssh", document.KeySPKIV1Format)
-if err != nil {
-    return err
+data, ok := verified.CryptoMaterialData("host-ssh", document.KeySPKIV1Format)
+if !ok {
+    return fmt.Errorf("document endorses no host-ssh key")
 }
 // data is lowercase hex of full DER SPKI. Decode and validate the key for
 // your application's protocol before binding a connection to it.

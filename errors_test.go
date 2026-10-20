@@ -77,8 +77,8 @@ func TestPublicInputErrors(t *testing.T) {
 	_, err = fetch.Document(t.Context(), "", "", make([]byte, document.NonceSize))
 	require.ErrorAs(t, err, &config)
 	var verified *verify.Verification
-	_, err = verified.TLSPublicKeyFP()
-	require.ErrorAs(t, err, &usage)
+	_, ok := verified.TLSPublicKeyFP()
+	require.False(t, ok, "a nil verification endorses nothing")
 
 	var rejected *verify.VerificationError
 	_, err = verifier.VerifyV3([]byte(`{}`), make([]byte, document.NonceSize), "org/repo")

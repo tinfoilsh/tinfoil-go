@@ -2,22 +2,36 @@ package enclave
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/tinfoilsh/tinfoil-go/internal/fetch"
 	"github.com/tinfoilsh/tinfoil-go/verify"
 	"github.com/tinfoilsh/tinfoil-go/verify/document"
 )
 
+// errNoTLSKey reports a verification with no TLS key to bind a channel to.
+var errNoTLSKey = fmt.Errorf("document endorses no %q key", document.CryptoMaterialIDTLS)
+
 // validateTransportKeys requires the keys a Handle binds traffic to: the
 // TLS key, and the HPKE key when the document endorses one.
 func validateTransportKeys(v *verify.Verification) error {
-	if _, err := v.TLSPublicKeyFP(); err != nil {
-		return fromVerify(err)
+	if err := keyFormat(v, document.CryptoMaterialIDTLS, document.KeySPKIFPSHA256V1Format); err != nil {
+		return &AttestationError{Err: err}
 	}
+	if _, ok := v.TLSPublicKeyFP(); !ok {
+		return &AttestationError{Err: errNoTLSKey}
+	}
+	if err := keyFormat(v, document.CryptoMaterialIDHPKE, document.KeyX25519HPKEV1Format); err != nil {
+		return &AttestationError{Err: err}
+	}
+	return nil
+}
+
+// keyFormat reports an endorsed id key whose format is not format.
+func keyFormat(v *verify.Verification, id, format string) error {
 	for _, item := range v.CryptoMaterial {
-		if item.ID == document.CryptoMaterialIDHPKE {
-			_, err := v.HPKEPublicKey()
-			return fromVerify(err)
+		if item.ID == id && item.Format != format {
+			return fmt.Errorf("crypto_material item %q has format %q, want %q", id, item.Format, format)
 		}
 	}
 	return nil
