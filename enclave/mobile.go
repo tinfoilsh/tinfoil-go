@@ -1,10 +1,7 @@
 package enclave
 
 import (
-	jsonv1 "encoding/json"
-	"encoding/json/v2"
 	"errors"
-	"fmt"
 	"strings"
 )
 
@@ -42,16 +39,3 @@ type prefixedError struct {
 
 func (e *prefixedError) Error() string { return e.message }
 func (e *prefixedError) Unwrap() error { return e.err }
-
-// ParseOptionsJSON decodes policy for use with the Go and mobile APIs.
-// Use {} for defaults. Freshness age is encoded in integer nanoseconds.
-func ParseOptionsJSON(raw string) (*Options, error) {
-	var opts *Options
-	if err := json.Unmarshal([]byte(raw), &opts, json.RejectUnknownMembers(true), jsonv1.FormatDurationAsNano(true)); err != nil {
-		return nil, &ConfigurationError{Err: fmt.Errorf("parsing verification options: %w", err)}
-	}
-	if opts == nil {
-		return nil, &ConfigurationError{Err: fmt.Errorf("verification options must be a JSON object")}
-	}
-	return opts, nil
-}

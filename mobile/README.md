@@ -20,7 +20,8 @@ This package performs no I/O. The caller:
   `freshness_expires_at`.
 
 `NewVerifier` takes the policy as a JSON object with `pinned_registers` and
-integer `freshness_max_age_ns`; an empty string selects the default policy.
+integer `freshness_max_age_ns`; any other member is rejected, and an empty
+string selects the default policy.
 
 ## Errors
 

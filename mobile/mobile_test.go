@@ -12,7 +12,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/tinfoilsh/tinfoil-go/enclave"
 	"github.com/tinfoilsh/tinfoil-go/internal/testutil"
 	"github.com/tinfoilsh/tinfoil-go/verify"
 	"github.com/tinfoilsh/tinfoil-go/verify/document"
@@ -32,7 +31,6 @@ func TestErrorPrefixesMatchCategories(t *testing.T) {
 		category error
 	}{
 		{UsageErrorPrefix, &verify.UsageError{Err: cause}},
-		{UsageErrorPrefix, &enclave.ConfigurationError{Err: cause}},
 		{VerificationErrorPrefix + "quote: ", &verify.VerificationError{Layer: verify.LayerQuote, Err: cause}},
 	} {
 		prefix, category := tc.prefix, tc.category
@@ -65,6 +63,9 @@ func TestErrorsLeadWithCategory(t *testing.T) {
 	}{
 		{"invalid options", UsageErrorPrefix, func() error { _, err := NewVerifier(`{"freshness_max_age_ns":-1}`); return err }},
 		{"unknown option", UsageErrorPrefix, func() error { _, err := NewVerifier(`{"enclave":"x"}`); return err }},
+		{"misspelled option", UsageErrorPrefix, func() error { _, err := NewVerifier(`{"freshness_max_age":1}`); return err }},
+		{"options not an object", UsageErrorPrefix, func() error { _, err := NewVerifier(`null`); return err }},
+		{"option mobile cannot apply", UsageErrorPrefix, func() error { _, err := NewVerifier(`{"embedded_config":{}}`); return err }},
 		{"URL as host", UsageErrorPrefix, func() error { _, err := AttestationURL("https://enclave.example", "", nonce); return err }},
 		{"invalid repo", UsageErrorPrefix, func() error { _, err := verifier.Verify(doc, nonce, "owner"); return err }},
 		{"short nonce", UsageErrorPrefix, func() error { _, err := verifier.Verify([]byte("{}"), nonce[1:], routerRepo); return err }},

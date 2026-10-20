@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/tinfoilsh/tinfoil-go/enclave"
 	"github.com/tinfoilsh/tinfoil-go/verify"
 )
 
@@ -28,25 +27,16 @@ const (
 // text, so the Go error types can word their messages freely without changing
 // what Swift matches on.
 func toMobileError(err error) error {
-	// Verification reports verify's types, the outermost deciding the type;
-	// option parsing and AttestationURL report the SDK's configuration error,
-	// which is the caller's mistake too.
+	// The outermost verify error decides the type.
 	var classified verify.Error
-	var configuration *enclave.ConfigurationError
-	var category, cause error
-	var prefix string
-	switch {
-	case errors.As(err, &classified):
-		category, cause, prefix = classified, classified.Unwrap(), UsageErrorPrefix
-		if rejected, ok := classified.(*verify.VerificationError); ok {
-			prefix = VerificationErrorPrefix + string(rejected.Layer) + ": "
-		}
-	case errors.As(err, &configuration):
-		category, cause, prefix = configuration, configuration.Err, UsageErrorPrefix
-	default:
+	if !errors.As(err, &classified) {
 		return err
 	}
-	message := strings.Replace(err.Error(), category.Error(), fmt.Sprint(cause), 1)
+	prefix := UsageErrorPrefix
+	if rejected, ok := classified.(*verify.VerificationError); ok {
+		prefix = VerificationErrorPrefix + string(rejected.Layer) + ": "
+	}
+	message := strings.Replace(err.Error(), classified.Error(), fmt.Sprint(classified.Unwrap()), 1)
 	return &mobileError{message: prefix + message, err: err}
 }
 

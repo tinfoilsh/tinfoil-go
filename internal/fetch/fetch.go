@@ -26,7 +26,7 @@ func Document(ctx context.Context, host, relay string, nonce []byte) (result []b
 	defer func() { err = errs.WrapFetch(err) }()
 	target, err := URL(host, relay, nonce)
 	if err != nil {
-		return nil, err
+		return nil, &errs.ConfigurationError{Err: err}
 	}
 	ctx, cancel := context.WithTimeout(ctx, attestationFetchTimeout)
 	defer cancel()
@@ -89,14 +89,14 @@ func Document(ctx context.Context, host, relay string, nonce []byte) (result []b
 // relay is not empty. Both are a host with an optional port, not a URL.
 func URL(host, relay string, nonce []byte) (string, error) {
 	if host == "" {
-		return "", &errs.ConfigurationError{Err: fmt.Errorf("enclave host is required")}
+		return "", fmt.Errorf("enclave host is required")
 	}
 	if len(nonce) != document.NonceSize {
-		return "", &errs.ConfigurationError{Err: fmt.Errorf("nonce must be %d bytes, got %d", document.NonceSize, len(nonce))}
+		return "", fmt.Errorf("nonce must be %d bytes, got %d", document.NonceSize, len(nonce))
 	}
 	for _, authority := range []string{host, relay} {
 		if authority != "" && !isAuthority(authority) {
-			return "", &errs.ConfigurationError{Err: fmt.Errorf("invalid host %q: want a host with an optional port", authority)}
+			return "", fmt.Errorf("invalid host %q: want a host with an optional port", authority)
 		}
 	}
 	u := url.URL{
