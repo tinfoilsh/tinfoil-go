@@ -11,12 +11,12 @@ import (
 	"encoding/hex"
 	"encoding/json/jsontext"
 	"encoding/json/v2"
+	"errors"
 	"fmt"
 	"slices"
 
 	"github.com/tinfoilsh/tinfoil-go/internal/canonical"
 	"github.com/tinfoilsh/tinfoil-go/verify/document/collateral"
-	"github.com/tinfoilsh/tinfoil-go/verify/internal/errs"
 )
 
 // Attestation document v3 (predicate https://tinfoil.sh/predicate/attestation/v3).
@@ -74,6 +74,12 @@ const (
 
 // NonceSize is the required challenge nonce size in bytes.
 const NonceSize = 32
+
+// ErrInvalidInput marks a mistake in the caller's input to Parse or Build: a
+// nonce of the wrong length, or a BuildInput that Parse would reject. A
+// document that fails to parse, and a quote generator that fails, are not
+// marked.
+var ErrInvalidInput = errors.New("invalid input")
 
 // rawDocument is the serialized shape of a v3 attestation document. The
 // endorsed sections travel base64-encoded: the builder serializes each
@@ -329,10 +335,9 @@ func RandomNonce() ([]byte, error) {
 // member names reject everywhere, hex must be lowercase, base64 canonical,
 // and item ids unique. A parsed document is not authenticated: nothing in it
 // is trusted until the quote proves the hardware bound that REPORT_DATA.
-func Parse(docBytes, expectedNonce []byte) (result *Document, err error) {
-	defer func() { err = errs.WrapVerification(err) }()
+func Parse(docBytes, expectedNonce []byte) (*Document, error) {
 	if len(expectedNonce) != NonceSize {
-		return nil, &errs.UsageError{Err: fmt.Errorf("expected nonce must be %d bytes, got %d", NonceSize, len(expectedNonce))}
+		return nil, fmt.Errorf("%w: expected nonce must be %d bytes, got %d", ErrInvalidInput, NonceSize, len(expectedNonce))
 	}
 	doc, err := decode(docBytes)
 	if err != nil {

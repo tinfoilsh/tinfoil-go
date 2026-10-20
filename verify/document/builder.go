@@ -9,7 +9,6 @@ import (
 	"slices"
 
 	"github.com/tinfoilsh/tinfoil-go/verify/document/collateral"
-	"github.com/tinfoilsh/tinfoil-go/verify/internal/errs"
 )
 
 // BuildInput is everything a v3 document carries besides its CPU evidence.
@@ -38,30 +37,30 @@ type QuoteGenerator func(reportData [64]byte) (format string, report []byte, err
 //
 // The input is held to the rules Parse enforces before any quote is generated,
 // and Build derives every other field itself, so it never yields a document
-// Parse would reject. Invalid input is a UsageError. A failure of
+// Parse would reject. Invalid input wraps ErrInvalidInput. A failure of
 // generateQuote, including evidence of an unknown format or an empty report,
-// is not a usage error: it is returned unclassified. Build keeps no state and
-// is safe for concurrent use.
+// is not marked: it is returned unchanged. Build keeps no state and is safe
+// for concurrent use.
 func Build(in BuildInput, generateQuote QuoteGenerator) ([]byte, error) {
 	if generateQuote == nil {
-		return nil, &errs.UsageError{Err: fmt.Errorf("a quote generator is required")}
+		return nil, fmt.Errorf("%w: a quote generator is required", ErrInvalidInput)
 	}
 	// Copied so a caller reusing its buffer cannot change the nonce between
 	// the REPORT_DATA the quote signs and the challenge the document carries.
 	nonce := slices.Clone(in.Nonce)
 	sections, err := endorse(nonce, in.CryptoMaterial, in.DeviceEvidence)
 	if err != nil {
-		return nil, &errs.UsageError{Err: err}
+		return nil, fmt.Errorf("%w: %w", ErrInvalidInput, err)
 	}
 	// Parse decodes every entry of a known role and format; decoding them
 	// here rejects one Parse would refuse before it costs a hardware quote.
 	if _, err := decodeCollateral(in.CollateralFormat, in.Collateral); err != nil {
-		return nil, &errs.UsageError{Err: err}
+		return nil, fmt.Errorf("%w: %w", ErrInvalidInput, err)
 	}
 	// Serializing rejects what Decode does not check, such as invalid UTF-8
 	// in an entry's ID.
 	if _, err := json.Marshal(in.Collateral); err != nil {
-		return nil, &errs.UsageError{Err: fmt.Errorf("serializing collateral: %w", err)}
+		return nil, fmt.Errorf("%w: serializing collateral: %w", ErrInvalidInput, err)
 	}
 	format, report, err := generateQuote(sections.reportData)
 	if err != nil {
@@ -75,7 +74,7 @@ func Build(in BuildInput, generateQuote QuoteGenerator) ([]byte, error) {
 	}
 	docBytes, err := sections.assemble(nonce, format, report, in.Collateral, in.CollateralFormat)
 	if err != nil {
-		return nil, &errs.UsageError{Err: err}
+		return nil, fmt.Errorf("%w: %w", ErrInvalidInput, err)
 	}
 	return docBytes, nil
 }

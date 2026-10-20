@@ -12,7 +12,6 @@ import (
 	"github.com/tinfoilsh/tinfoil-go/verify/document"
 	"github.com/tinfoilsh/tinfoil-go/verify/document/collateral"
 	"github.com/tinfoilsh/tinfoil-go/verify/internal/endorsement"
-	"github.com/tinfoilsh/tinfoil-go/verify/internal/errs"
 	platformpolicy "github.com/tinfoilsh/tinfoil-go/verify/internal/policy"
 	"github.com/tinfoilsh/tinfoil-go/verify/internal/quote"
 	"github.com/tinfoilsh/tinfoil-go/verify/internal/runtime"
@@ -131,7 +130,7 @@ func (v *Verifier) resolveConfig(doc *document.Document, pins endorsement.Config
 			return nil, nil, fmt.Errorf("config size is outside allowed bounds")
 		}
 		if err := v.configAuthorizer(config.Clone()); err != nil {
-			return nil, nil, &errs.VerificationError{Err: fmt.Errorf("authorizing config: %w", err)}
+			return nil, nil, &VerificationError{Err: fmt.Errorf("authorizing config: %w", err)}
 		}
 		digest := sha256.Sum256(config.Config)
 		return config.Config, &ConfigVerification{Source: SourcePolicy, Digest: hex.EncodeToString(digest[:])}, nil

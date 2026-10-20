@@ -14,6 +14,7 @@ package verify
 
 import (
 	"crypto"
+	"errors"
 	"fmt"
 	"time"
 
@@ -21,7 +22,6 @@ import (
 	"github.com/tinfoilsh/tinfoil-go/verify/document"
 	"github.com/tinfoilsh/tinfoil-go/verify/document/collateral"
 	"github.com/tinfoilsh/tinfoil-go/verify/internal/endorsement"
-	"github.com/tinfoilsh/tinfoil-go/verify/internal/errs"
 	"github.com/tinfoilsh/tinfoil-go/verify/internal/policy"
 	"github.com/tinfoilsh/tinfoil-go/verify/internal/quote"
 	"github.com/tinfoilsh/tinfoil-go/verify/measurement"
@@ -171,14 +171,17 @@ type endorsementResult struct {
 // verifyV3 is VerifyV3, also reporting which layer rejected the document.
 func (v *Verifier) verifyV3(docBytes, nonce []byte, repo string) (_ *Verification, _ layer, err error) {
 	// A stage reports a rejected document with a plain error and a caller's
-	// mistake with a UsageError. WrapVerification leaves the UsageError, or
+	// mistake with a UsageError. wrapVerification leaves the UsageError, or
 	// any error already carrying a verify type, as it is and makes every other
 	// failure a VerificationError.
-	defer func() { err = errs.WrapVerification(err) }()
+	defer func() { err = wrapVerification(err) }()
 	if v == nil || v.now == nil || v.endorsements == nil || v.configVerifier == nil || v.freshnessVerifier == nil {
-		return nil, layerNone, &errs.UsageError{Err: fmt.Errorf("verifier must be built with NewVerifier")}
+		return nil, layerNone, &UsageError{Err: fmt.Errorf("verifier must be built with NewVerifier")}
 	}
 	doc, err := document.Parse(docBytes, nonce)
+	if errors.Is(err, document.ErrInvalidInput) {
+		return nil, layerEnvelope, &UsageError{Err: err}
+	}
 	if err != nil {
 		return nil, layerEnvelope, err
 	}
