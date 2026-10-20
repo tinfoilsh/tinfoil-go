@@ -85,14 +85,16 @@ type SoftwareIdentity struct {
 	Version string `json:"version"`
 }
 
-// TLSPublicKeyFP returns the endorsed TLS key fingerprint (the id=tls
-// crypto_material entry). ok is false if the document endorses none.
+// TLSPublicKeyFP returns the endorsed TLS key fingerprint: the id=tls
+// crypto_material entry in KeySPKIFPSHA256V1Format. ok is false if the
+// document endorses no such entry, including a tls entry in another format.
 func (v *Verification) TLSPublicKeyFP() (fp string, ok bool) {
 	return v.CryptoMaterialData(document.CryptoMaterialIDTLS, document.KeySPKIFPSHA256V1Format)
 }
 
-// HPKEPublicKey returns the endorsed HPKE public key (the id=hpke
-// crypto_material entry). ok is false if the document endorses none.
+// HPKEPublicKey returns the endorsed HPKE public key: the id=hpke
+// crypto_material entry in KeyX25519HPKEV1Format. ok is false if the
+// document endorses no such entry, including an hpke entry in another format.
 func (v *Verification) HPKEPublicKey() (key string, ok bool) {
 	return v.CryptoMaterialData(document.CryptoMaterialIDHPKE, document.KeyX25519HPKEV1Format)
 }

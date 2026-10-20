@@ -64,12 +64,12 @@ func runLive() int {
 	}
 	tlsFP, ok := verified.TLSPublicKeyFP()
 	if !ok {
-		fmt.Fprintln(os.Stderr, "endorsed keys: document endorses no TLS key")
+		fmt.Fprintf(os.Stderr, "endorsed keys: document endorses no %q key in format %q\n", document.CryptoMaterialIDTLS, document.KeySPKIFPSHA256V1Format)
 		return rejectLive("ENVELOPE_REJECTED")
 	}
 	hpke, ok := verified.HPKEPublicKey()
 	if !ok {
-		fmt.Fprintln(os.Stderr, "endorsed keys: document endorses no HPKE key")
+		fmt.Fprintf(os.Stderr, "endorsed keys: document endorses no %q key in format %q\n", document.CryptoMaterialIDHPKE, document.KeyX25519HPKEV1Format)
 		return rejectLive("ENVELOPE_REJECTED")
 	}
 
