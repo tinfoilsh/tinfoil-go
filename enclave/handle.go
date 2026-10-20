@@ -216,8 +216,7 @@ func (s *Handle) HTTPClient() (*http.Client, error) {
 }
 
 // Request sends an HTTPS request. headersJSON is a JSON object or empty.
-func (s *Handle) Request(method, url, headersJSON string, body []byte) (result *Response, err error) {
-	defer func() { err = mobileError(err) }()
+func (s *Handle) Request(method, url, headersJSON string, body []byte) (*Response, error) {
 	req, err := http.NewRequest(method, url, bytes.NewReader(body))
 	if err != nil {
 		return nil, &ConfigurationError{Err: err}
