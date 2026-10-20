@@ -17,14 +17,14 @@ package mobile
 
 import (
 	"crypto/rand"
-	"encoding/json"
+	"encoding/json/v2"
 	"fmt"
 	"time"
 
-	"github.com/tinfoilsh/tinfoil-go/enclave"
 	"github.com/tinfoilsh/tinfoil-go/internal/fetch"
 	"github.com/tinfoilsh/tinfoil-go/verify"
 	"github.com/tinfoilsh/tinfoil-go/verify/document"
+	"github.com/tinfoilsh/tinfoil-go/verify/measurement"
 )
 
 // NewNonce returns a fresh random challenge for one attestation fetch. Pass
@@ -41,7 +41,10 @@ func NewNonce() []byte {
 // forwards it to host. Both are a host with an optional port, not a URL.
 func AttestationURL(host, relay string, nonce []byte) (string, error) {
 	url, err := fetch.URL(host, relay, nonce)
-	return url, toMobileError(err)
+	if err != nil {
+		return "", toMobileError(&verify.UsageError{Err: err})
+	}
+	return url, nil
 }
 
 // Verifier appraises attestation documents under one immutable policy. It is
@@ -50,21 +53,31 @@ type Verifier struct {
 	inner *verify.Verifier
 }
 
-// NewVerifier builds a verifier from options, as the JSON object
-// enclave.Options describes: pinned registers and a freshness bound in integer
-// nanoseconds. An empty string selects the defaults.
+// options is the policy NewVerifier accepts as JSON.
+type options struct {
+	PinnedRegisters   *measurement.Measurement `json:"pinned_registers,omitempty"`
+	FreshnessMaxAgeNs int64                    `json:"freshness_max_age_ns,omitempty"`
+}
+
+// NewVerifier builds a verifier from options, a JSON object with
+// pinned_registers and freshness_max_age_ns, a freshness bound in integer
+// nanoseconds. Any other member is rejected, and an empty string selects the
+// defaults.
 func NewVerifier(optionsJSON string) (_ *Verifier, err error) {
 	defer func() { err = toMobileError(err) }()
-	opts := &enclave.Options{}
+	opts := &options{}
 	if optionsJSON != "" {
-		var err error
-		if opts, err = enclave.ParseOptionsJSON(optionsJSON); err != nil {
-			return nil, err
+		opts = nil
+		if err := json.Unmarshal([]byte(optionsJSON), &opts, json.RejectUnknownMembers(true)); err != nil {
+			return nil, &verify.UsageError{Err: fmt.Errorf("parsing verification options: %w", err)}
+		}
+		if opts == nil {
+			return nil, &verify.UsageError{Err: fmt.Errorf("verification options must be a JSON object")}
 		}
 	}
 	inner, err := verify.NewVerifier(
 		verify.WithPinnedRegisters(opts.PinnedRegisters),
-		verify.WithFreshnessMaxAge(opts.FreshnessMaxAge),
+		verify.WithFreshnessMaxAge(time.Duration(opts.FreshnessMaxAgeNs)),
 	)
 	if err != nil {
 		return nil, err

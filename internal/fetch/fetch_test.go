@@ -65,16 +65,20 @@ func TestURL(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "https://relay.example:8443/.well-known/tinfoil-attestation?nonce="+nonce+"&enclave=enclave.example", relayed)
 
-	var config *errs.ConfigurationError
 	for _, bad := range []string{"https://enclave.example", "enclave.example/path", "user@enclave.example", "enclave.example:port", "enclave.example?x=1"} {
 		_, err = URL(bad, "", testNonce())
-		require.ErrorAs(t, err, &config, bad)
+		require.Error(t, err, bad)
 		_, err = URL("enclave.example", bad, testNonce())
-		require.ErrorAs(t, err, &config, "relay "+bad)
+		require.Error(t, err, "relay "+bad)
 	}
 	_, err = URL("", "", testNonce())
-	require.ErrorAs(t, err, &config)
+	require.Error(t, err)
 	_, err = URL("enclave.example", "", testNonce()[1:])
+	require.Error(t, err)
+
+	// Document reports a URL it cannot build as the caller's configuration.
+	var config *errs.ConfigurationError
+	_, err = Document(t.Context(), "https://enclave.example", "", testNonce())
 	require.ErrorAs(t, err, &config)
 }
 
