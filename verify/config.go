@@ -130,7 +130,7 @@ func (v *Verifier) resolveConfig(doc *document.Document, pins endorsement.Config
 			return nil, nil, fmt.Errorf("config size is outside allowed bounds")
 		}
 		if err := v.configAuthorizer(config.Clone()); err != nil {
-			return nil, nil, &VerificationError{Err: fmt.Errorf("authorizing config: %w", err)}
+			return nil, nil, &VerificationError{Layer: LayerProvenance, Err: fmt.Errorf("authorizing config: %w", err)}
 		}
 		digest := sha256.Sum256(config.Config)
 		return config.Config, &ConfigVerification{Source: SourcePolicy, Digest: hex.EncodeToString(digest[:])}, nil

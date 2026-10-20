@@ -73,12 +73,3 @@ func DangerousTestOnlyWithVendorRoots(amdRootPEM, intelRootPEM []byte) Option {
 		return nil
 	}
 }
-
-// VerifyV3WithLayer is VerifyV3, also naming the layer that rejected the
-// document: "envelope", "provenance", "quote" or "policy", or "" when the
-// Verifier itself was unusable or the document verified. The conformance
-// adapter reports that layer, so this runs exactly the code VerifyV3 does.
-func (v *Verifier) VerifyV3WithLayer(docBytes, nonce []byte, repo string) (*Verification, string, error) {
-	verified, layer, err := v.verifyV3(docBytes, nonce, repo)
-	return verified, string(layer), err
-}

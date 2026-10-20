@@ -77,13 +77,11 @@ func TestEmbeddedReferencesPreserveBindingsAndOwnTheirBytes(t *testing.T) {
 	require.Empty(t, refs.config.SigningKeyHint)
 	require.True(t, refs.config.ApprovalTime.IsZero())
 	require.True(t, refs.freshnessExpiresAt.IsZero())
-	result, layer, err := v.verifyV3(raw, nonce, "org/project@v1")
-	require.ErrorAs(t, err, new(*VerificationError), "verifyV3 classifies the quote stage's plain error")
+	result, err := v.VerifyV3(raw, nonce, "org/project@v1")
 	require.Nil(t, result)
-	require.Equal(t, layerQuote, layer, "embedding must never bypass hardware authentication")
-	_, layer, err = v.verifyV3(raw, nonce, "")
-	require.Error(t, err)
-	require.Equal(t, layerQuote, layer, "exact local bytes can identify a workload without a registry pin")
+	requireRejectedAt(t, err, LayerQuote, "embedding must never bypass hardware authentication")
+	_, err = v.VerifyV3(raw, nonce, "")
+	requireRejectedAt(t, err, LayerQuote, "exact local bytes can identify a workload without a registry pin")
 }
 
 func TestEmbeddedReferencesCannotOverridePins(t *testing.T) {
@@ -110,9 +108,8 @@ func TestEmbeddedReferencesCannotOverridePins(t *testing.T) {
 	var usage *UsageError
 	require.ErrorAs(t, err, &usage)
 	require.ErrorContains(t, err, "does not match the caller's pins")
-	_, layer, err := v.verifyV3(raw, nonce, "")
-	require.Error(t, err)
-	require.Equal(t, layerQuote, layer)
+	_, err = v.VerifyV3(raw, nonce, "")
+	requireRejectedAt(t, err, LayerQuote)
 }
 
 func TestEmbeddedReferencesStillRequireOtherEndorsements(t *testing.T) {

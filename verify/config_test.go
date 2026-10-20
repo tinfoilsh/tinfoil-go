@@ -53,9 +53,9 @@ func TestCollateralVersionSelectsVerification(t *testing.T) {
 		t.Run(tc.format, func(t *testing.T) {
 			raw, err := document.Build(document.BuildInput{Nonce: nonce, CollateralFormat: tc.format}, func([64]byte) (string, []byte, error) { return document.SEVSNPReportV1Format, []byte("quote"), nil })
 			require.NoError(t, err)
-			_, rejectedAt, err := v.verifyV3(raw, nonce, "org/project")
+			_, err = v.VerifyV3(raw, nonce, "org/project")
 			require.ErrorContains(t, err, tc.want)
-			require.Equal(t, layerProvenance, rejectedAt)
+			requireRejectedAt(t, err, LayerProvenance)
 		})
 	}
 }

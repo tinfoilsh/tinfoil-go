@@ -4,26 +4,39 @@ package conformance
 
 import (
 	"crypto/tls"
+	"errors"
 	"net"
 	"time"
 
 	"github.com/tinfoilsh/tinfoil-go/enclave"
+	"github.com/tinfoilsh/tinfoil-go/verify"
 )
 
-// RejectionCode maps the layer Verifier.VerifyV3WithLayer reports to the wire
-// rejection code. A rejection with no layer, which only an unusable Verifier
-// produces, is attributed to the envelope.
-func RejectionCode(layer string) string {
-	switch layer {
-	case "provenance":
-		return "PROVENANCE_REJECTED"
-	case "quote":
-		return "QUOTE_REJECTED"
-	case "policy":
-		return "POLICY_REJECTED"
-	default:
-		return "ENVELOPE_REJECTED"
+// RejectionCode reports a VerifyV3 error the way the wire contract does: a
+// VerificationError is rejected with its layer's code, and a UsageError means
+// the input was malformed. Anything else, including a VerificationError
+// without a known layer, is a bug in the verifier and reports ExitInternal.
+func RejectionCode(err error) (code string, exit int) {
+	var classified verify.Error
+	if !errors.As(err, &classified) {
+		return "", ExitInternal
 	}
+	switch classified := classified.(type) {
+	case *verify.UsageError:
+		return "MALFORMED_INPUT", ExitMalformed
+	case *verify.VerificationError:
+		switch classified.Layer {
+		case verify.LayerEnvelope:
+			return "ENVELOPE_REJECTED", ExitRejected
+		case verify.LayerProvenance:
+			return "PROVENANCE_REJECTED", ExitRejected
+		case verify.LayerQuote:
+			return "QUOTE_REJECTED", ExitRejected
+		case verify.LayerPolicy:
+			return "POLICY_REJECTED", ExitRejected
+		}
+	}
+	return "", ExitInternal
 }
 
 // TLSSPKIFingerprint dials host:443 and returns the SDK's canonical SPKI
