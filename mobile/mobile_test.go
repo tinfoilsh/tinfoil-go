@@ -22,18 +22,18 @@ import (
 
 const routerRepo = "tinfoilsh/confidential-model-router"
 
-// Swift tells error categories apart by prefix alone, so toMobileError must lead
-// each category's message with its exported prefix, exactly once, while Go
-// callers can still unwrap the category.
+// Swift tells error types apart by prefix alone, so toMobileError must lead
+// each type's message with its exported prefix, and a verification error's
+// with its layer, exactly once, while Go callers can still unwrap the type.
 func TestErrorPrefixesMatchCategories(t *testing.T) {
 	cause := errors.New("cause")
 	for _, tc := range []struct {
 		prefix   string
 		category error
 	}{
-		{ConfigurationErrorPrefix, &verify.UsageError{Err: cause}},
-		{ConfigurationErrorPrefix, &enclave.ConfigurationError{Err: cause}},
-		{AttestationErrorPrefix, &verify.VerificationError{Err: cause}},
+		{UsageErrorPrefix, &verify.UsageError{Err: cause}},
+		{UsageErrorPrefix, &enclave.ConfigurationError{Err: cause}},
+		{VerificationErrorPrefix + "quote: ", &verify.VerificationError{Layer: verify.LayerQuote, Err: cause}},
 	} {
 		prefix, category := tc.prefix, tc.category
 		assert.Equal(t, prefix+"cause", toMobileError(category).Error())
@@ -41,8 +41,8 @@ func TestErrorPrefixesMatchCategories(t *testing.T) {
 		assert.Equal(t, prefix+"context: cause", wrapped.Error())
 		assert.ErrorIs(t, wrapped, category)
 	}
-	nested := toMobileError(&verify.VerificationError{Err: &verify.UsageError{Err: cause}})
-	assert.True(t, strings.HasPrefix(nested.Error(), AttestationErrorPrefix), "the outermost verify error decides the prefix")
+	nested := toMobileError(&verify.VerificationError{Layer: verify.LayerProvenance, Err: &verify.UsageError{Err: cause}})
+	assert.True(t, strings.HasPrefix(nested.Error(), VerificationErrorPrefix+"provenance: "), "the outermost verify error decides the prefix")
 	assert.NoError(t, toMobileError(nil))
 	uncategorized := errors.New("uncategorized")
 	assert.Same(t, uncategorized, toMobileError(uncategorized))
@@ -63,12 +63,12 @@ func TestErrorsLeadWithCategory(t *testing.T) {
 		prefix string
 		call   func() error
 	}{
-		{"invalid options", ConfigurationErrorPrefix, func() error { _, err := NewVerifier(`{"freshness_max_age_ns":-1}`); return err }},
-		{"unknown option", ConfigurationErrorPrefix, func() error { _, err := NewVerifier(`{"enclave":"x"}`); return err }},
-		{"URL as host", ConfigurationErrorPrefix, func() error { _, err := AttestationURL("https://enclave.example", "", nonce); return err }},
-		{"invalid repo", ConfigurationErrorPrefix, func() error { _, err := verifier.Verify(doc, nonce, "owner"); return err }},
-		{"short nonce", ConfigurationErrorPrefix, func() error { _, err := verifier.Verify([]byte("{}"), nonce[1:], routerRepo); return err }},
-		{"malformed document", AttestationErrorPrefix, func() error { _, err := verifier.Verify([]byte("{}"), nonce, routerRepo); return err }},
+		{"invalid options", UsageErrorPrefix, func() error { _, err := NewVerifier(`{"freshness_max_age_ns":-1}`); return err }},
+		{"unknown option", UsageErrorPrefix, func() error { _, err := NewVerifier(`{"enclave":"x"}`); return err }},
+		{"URL as host", UsageErrorPrefix, func() error { _, err := AttestationURL("https://enclave.example", "", nonce); return err }},
+		{"invalid repo", UsageErrorPrefix, func() error { _, err := verifier.Verify(doc, nonce, "owner"); return err }},
+		{"short nonce", UsageErrorPrefix, func() error { _, err := verifier.Verify([]byte("{}"), nonce[1:], routerRepo); return err }},
+		{"malformed document", VerificationErrorPrefix + "envelope: ", func() error { _, err := verifier.Verify([]byte("{}"), nonce, routerRepo); return err }},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			err := tt.call()
@@ -105,7 +105,7 @@ func TestCheckFreshRejectsExpired(t *testing.T) {
 	require.NoError(t, checkFresh(verified, verified.FreshnessExpiresAt.Add(-time.Second)))
 	err := checkFresh(verified, verified.FreshnessExpiresAt)
 	require.Error(t, err)
-	assert.True(t, strings.HasPrefix(toMobileError(err).Error(), AttestationErrorPrefix), err.Error())
+	assert.True(t, strings.HasPrefix(toMobileError(err).Error(), VerificationErrorPrefix+"provenance: "), err.Error())
 }
 
 // The flow a mobile caller runs: its own fetch, then a stateless verify.

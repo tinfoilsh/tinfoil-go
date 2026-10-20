@@ -25,9 +25,11 @@ integer `freshness_max_age_ns`; an empty string selects the default policy.
 ## Errors
 
 Errors reach Swift as an `NSError` carrying only a message. Every error this
-package returns leads with `ConfigurationErrorPrefix` or
-`AttestationErrorPrefix` from `errors.go`, so callers match on those constants
-instead of on literals.
+package returns leads with `UsageErrorPrefix` or `VerificationErrorPrefix` from
+`errors.go`, so callers match on those constants instead of on literals. A
+verification error's message then names the layer that rejected the document
+(`envelope`, `provenance`, `quote` or `policy`) and `: `, as in
+`verification error: quote: <detail>`.
 
 ## Checking a change
 
