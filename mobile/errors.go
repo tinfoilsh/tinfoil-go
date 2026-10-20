@@ -9,37 +9,40 @@ import (
 	"github.com/tinfoilsh/tinfoil-go/verify"
 )
 
-// An error crosses the FFI as its message alone, so its category is read from
-// the prefix this package gives it. These are the prefixes; any other message
-// is an error outside the two categories.
+// An error crosses the FFI as its message alone, so its type is read from the
+// prefix this package gives it. These are the prefixes; any other message is
+// an error outside the two types.
 const (
-	// ConfigurationErrorPrefix leads an error in the caller's arguments or
-	// options. Retrying will not help.
-	ConfigurationErrorPrefix = "configuration error: "
-	// AttestationErrorPrefix leads rejected evidence, policy or channel binding.
-	AttestationErrorPrefix = "attestation error: "
+	// UsageErrorPrefix leads an error in the caller's arguments or options.
+	// Retrying will not help.
+	UsageErrorPrefix = "usage error: "
+	// VerificationErrorPrefix leads a document that must not be trusted. The
+	// layer that rejected it comes next, then ": " and the detail, as in
+	// "verification error: quote: <detail>".
+	VerificationErrorPrefix = "verification error: "
 )
 
-// toMobileError gives err the message Swift reads: its category's prefix, then
-// the message with the category's own text reduced to its cause. The prefix
-// comes from err's type rather than its text, so the Go error types can word
-// their messages freely without changing what Swift matches on.
+// toMobileError gives err the message Swift reads: its type's prefix, the
+// layer for a verification error, then the message with the type's own text
+// reduced to its cause. The prefix comes from err's type rather than its
+// text, so the Go error types can word their messages freely without changing
+// what Swift matches on.
 func toMobileError(err error) error {
-	// Verification reports verify's types, the outermost deciding the
-	// category; option parsing and AttestationURL report the SDK's
-	// configuration error.
+	// Verification reports verify's types, the outermost deciding the type;
+	// option parsing and AttestationURL report the SDK's configuration error,
+	// which is the caller's mistake too.
 	var classified verify.Error
 	var configuration *enclave.ConfigurationError
 	var category, cause error
 	var prefix string
 	switch {
 	case errors.As(err, &classified):
-		category, cause, prefix = classified, classified.Unwrap(), AttestationErrorPrefix
-		if _, usage := classified.(*verify.UsageError); usage {
-			prefix = ConfigurationErrorPrefix
+		category, cause, prefix = classified, classified.Unwrap(), UsageErrorPrefix
+		if rejected, ok := classified.(*verify.VerificationError); ok {
+			prefix = VerificationErrorPrefix + string(rejected.Layer) + ": "
 		}
 	case errors.As(err, &configuration):
-		category, cause, prefix = configuration, configuration.Err, ConfigurationErrorPrefix
+		category, cause, prefix = configuration, configuration.Err, UsageErrorPrefix
 	default:
 		return err
 	}

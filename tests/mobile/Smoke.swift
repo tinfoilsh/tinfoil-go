@@ -34,8 +34,8 @@ func checkMobileSurface() throws {
 
     // Errors cross as NSError with only a message; the prefix is the category.
     let _: [String] = [
-        MobileConfigurationErrorPrefix,
-        MobileAttestationErrorPrefix,
+        MobileUsageErrorPrefix,
+        MobileVerificationErrorPrefix,
     ]
 }
 
