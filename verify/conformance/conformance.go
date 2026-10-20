@@ -72,9 +72,11 @@ type Input struct {
 	VerificationTimeUnix int64 `json:"verification_time_unix,omitempty"`
 }
 
-// Output is the stdout JSON. Rejection is present iff Accepted is false;
-// Outputs is present on accepts that carry verified facts (block-stage
-// accepts may carry neither).
+// Output is the stdout JSON; the exit code is the verdict. A rejection
+// (ExitRejected or ExitMalformed) carries Rejection, and an accept that
+// carries verified facts carries Outputs (block-stage accepts may carry
+// neither). ExitUnsupported and ExitInternal give no verdict, so they set
+// neither.
 type Output struct {
 	Stage     string         `json:"stage"`
 	Accepted  bool           `json:"accepted"`
