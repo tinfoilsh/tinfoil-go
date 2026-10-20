@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/tinfoilsh/tinfoil-go/verify/internal/errs"
 	"github.com/tinfoilsh/tinfoil-go/verify/measurement"
 )
 
@@ -56,5 +55,5 @@ func usageError(err error) error {
 	if err == nil {
 		return nil
 	}
-	return &errs.UsageError{Err: err}
+	return &UsageError{Err: err}
 }

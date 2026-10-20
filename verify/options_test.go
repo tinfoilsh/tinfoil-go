@@ -11,7 +11,6 @@ import (
 	"github.com/tinfoilsh/tinfoil-go/verify/document"
 	"github.com/tinfoilsh/tinfoil-go/verify/document/collateral"
 	"github.com/tinfoilsh/tinfoil-go/verify/internal/endorsement"
-	"github.com/tinfoilsh/tinfoil-go/verify/internal/errs"
 	"github.com/tinfoilsh/tinfoil-go/verify/measurement"
 )
 
@@ -37,7 +36,7 @@ func TestWithFreshnessMaxAge(t *testing.T) {
 		v, err := NewVerifier(WithFreshnessMaxAge(maxAge))
 		require.Nil(t, v)
 		require.ErrorContains(t, err, "freshness maximum age must not be negative")
-		var usage *errs.UsageError
+		var usage *UsageError
 		require.ErrorAs(t, err, &usage)
 	}
 }
@@ -70,7 +69,7 @@ func TestWithPinnedRegistersRejectsInvalid(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			v, err := NewVerifier(WithPinnedRegisters(pins))
 			require.Nil(t, v)
-			var usage *errs.UsageError
+			var usage *UsageError
 			require.ErrorAs(t, err, &usage)
 		})
 	}
@@ -87,7 +86,7 @@ func TestVerifyV3RejectsBadRepo(t *testing.T) {
 	require.NoError(t, err)
 	verified, err := v.VerifyV3(raw, nonce, "not a repo reference")
 	require.Nil(t, verified)
-	var usage *errs.UsageError
+	var usage *UsageError
 	require.ErrorAs(t, err, &usage)
 }
 
@@ -106,7 +105,7 @@ func TestVerifyV3RejectsUnbuiltVerifier(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			verified, err := v.VerifyV3([]byte("{}"), make([]byte, 32), "org/repo")
 			require.Nil(t, verified)
-			var usage *errs.UsageError
+			var usage *UsageError
 			require.ErrorAs(t, err, &usage)
 			require.ErrorContains(t, err, "verifier must be built with NewVerifier")
 		})

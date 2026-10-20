@@ -13,8 +13,6 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/tinfoilsh/tinfoil-go/verify/document/collateral"
-
-	"github.com/tinfoilsh/tinfoil-go/verify/internal/errs"
 )
 
 func testNonce() []byte {
@@ -164,8 +162,7 @@ func TestParseRejectsWrongNonceLength(t *testing.T) {
 
 	for _, n := range [][]byte{nil, nonce[:NonceSize-1], append(bytes.Clone(nonce), 0)} {
 		_, err := Parse(docBytes, n)
-		var usage *errs.UsageError
-		require.ErrorAs(t, err, &usage, "nonce of %d bytes", len(n))
+		require.ErrorIs(t, err, ErrInvalidInput, "nonce of %d bytes", len(n))
 	}
 }
 

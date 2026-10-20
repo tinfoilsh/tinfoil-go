@@ -11,8 +11,6 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/tinfoilsh/tinfoil-go/verify/document/collateral"
-
-	"github.com/tinfoilsh/tinfoil-go/verify/internal/errs"
 )
 
 func testCryptoMaterial() []CryptoMaterialItem {
@@ -88,8 +86,7 @@ func TestBuildRejectsInvalidEndorsedInput(t *testing.T) {
 				called = true
 				return SEVSNPReportV1Format, []byte("quote"), nil
 			})
-			var usage *errs.UsageError
-			require.ErrorAs(t, err, &usage)
+			require.ErrorIs(t, err, ErrInvalidInput)
 			assert.ErrorContains(t, err, tt.wantErr)
 			assert.False(t, called, "no quote is generated for input that cannot become a document")
 		})
@@ -120,8 +117,7 @@ func TestBuildRejectsInvalidCollateralBeforeQuoting(t *testing.T) {
 				called = true
 				return SEVSNPReportV1Format, []byte("quote"), nil
 			})
-			var usage *errs.UsageError
-			require.ErrorAs(t, err, &usage)
+			require.ErrorIs(t, err, ErrInvalidInput)
 			assert.ErrorContains(t, err, tt.wantErr)
 			assert.False(t, called, "invalid collateral must not cost a hardware quote")
 		})
@@ -142,8 +138,7 @@ func TestBuildRejectsBadQuoteGeneratorOutput(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			_, err := Build(BuildInput{Nonce: testNonce()}, fakeQuote(tt.format, tt.report, nil))
 			assert.ErrorContains(t, err, tt.wantErr)
-			var usage *errs.UsageError
-			assert.False(t, errors.As(err, &usage), "bad generator output is not a usage error")
+			assert.NotErrorIs(t, err, ErrInvalidInput, "bad generator output is not the caller's input mistake")
 		})
 	}
 }
@@ -154,11 +149,10 @@ func TestBuildPassesThroughQuoteErrors(t *testing.T) {
 		return "", nil, hardware
 	})
 	require.ErrorIs(t, err, hardware)
-	var usage *errs.UsageError
-	assert.False(t, errors.As(err, &usage), "a hardware failure is not a usage error")
+	assert.NotErrorIs(t, err, ErrInvalidInput, "a hardware failure is not the caller's input mistake")
 
 	_, err = Build(BuildInput{Nonce: testNonce()}, nil)
-	require.ErrorAs(t, err, &usage)
+	require.ErrorIs(t, err, ErrInvalidInput)
 }
 
 func TestBuildCopiesTheNonce(t *testing.T) {
