@@ -17,7 +17,6 @@ package mobile
 
 import (
 	"crypto/rand"
-	jsonv1 "encoding/json"
 	"encoding/json/v2"
 	"fmt"
 	"time"
@@ -56,8 +55,8 @@ type Verifier struct {
 
 // options is the policy NewVerifier accepts as JSON.
 type options struct {
-	PinnedRegisters *measurement.Measurement `json:"pinned_registers,omitempty"`
-	FreshnessMaxAge time.Duration            `json:"freshness_max_age_ns,omitempty"`
+	PinnedRegisters   *measurement.Measurement `json:"pinned_registers,omitempty"`
+	FreshnessMaxAgeNs int64                    `json:"freshness_max_age_ns,omitempty"`
 }
 
 // NewVerifier builds a verifier from options, a JSON object with
@@ -69,7 +68,7 @@ func NewVerifier(optionsJSON string) (_ *Verifier, err error) {
 	opts := &options{}
 	if optionsJSON != "" {
 		opts = nil
-		if err := json.Unmarshal([]byte(optionsJSON), &opts, json.RejectUnknownMembers(true), jsonv1.FormatDurationAsNano(true)); err != nil {
+		if err := json.Unmarshal([]byte(optionsJSON), &opts, json.RejectUnknownMembers(true)); err != nil {
 			return nil, &verify.UsageError{Err: fmt.Errorf("parsing verification options: %w", err)}
 		}
 		if opts == nil {
@@ -78,7 +77,7 @@ func NewVerifier(optionsJSON string) (_ *Verifier, err error) {
 	}
 	inner, err := verify.NewVerifier(
 		verify.WithPinnedRegisters(opts.PinnedRegisters),
-		verify.WithFreshnessMaxAge(opts.FreshnessMaxAge),
+		verify.WithFreshnessMaxAge(time.Duration(opts.FreshnessMaxAgeNs)),
 	)
 	if err != nil {
 		return nil, err
@@ -112,7 +111,7 @@ func checkFresh(verified *verify.Verification, now time.Time) error {
 }
 
 func encode(verified *verify.Verification) (string, error) {
-	encoded, err := jsonv1.Marshal(toVerificationJSON(verified))
+	encoded, err := json.Marshal(toVerificationJSON(verified))
 	if err != nil {
 		return "", err
 	}
