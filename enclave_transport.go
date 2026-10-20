@@ -1,6 +1,7 @@
 package tinfoil
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
 
@@ -56,9 +57,9 @@ type transportVerifier interface {
 func ehbpHTTPClient(handle transportVerifier, enclave, baseURL string) (*http.Client, error) {
 	headerValue, proxied := enclaveURLHeaderValue(baseURL, enclave)
 	transport, err := handle.NewTransport(func(verified *verify.Verification) (http.RoundTripper, error) {
-		key, err := verified.HPKEPublicKey()
-		if err != nil {
-			return nil, &AttestationError{Err: fmt.Errorf("%w; cannot use the EHBP transport (use WithTransport(TransportTLS))", err)}
+		key, ok := verified.HPKEPublicKey()
+		if !ok {
+			return nil, &AttestationError{Err: errors.New("document endorses no HPKE key; cannot use the EHBP transport (use WithTransport(TransportTLS))")}
 		}
 		inner, err := buildEHBPTransport(key)
 		if err != nil {

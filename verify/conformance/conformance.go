@@ -227,12 +227,12 @@ func verifyFull(doc, nonce []byte, repo string, verifier *verify.Verifier) (Outp
 	// A document that verifies but endorses no usable channel keys is useless
 	// to every real client (an enclave.Handle rejects at binding), so the full
 	// stage requires both — mirroring the deployed end-to-end behavior.
-	tlsFP, err := verified.TLSPublicKeyFP()
-	if err != nil {
+	tlsFP, ok := verified.TLSPublicKeyFP()
+	if !ok {
 		return reject(StageVerify, "ENVELOPE_REJECTED")
 	}
-	hpke, err := verified.HPKEPublicKey()
-	if err != nil {
+	hpke, ok := verified.HPKEPublicKey()
+	if !ok {
 		return reject(StageVerify, "ENVELOPE_REJECTED")
 	}
 	return Output{Stage: StageVerify, Accepted: true, Outputs: &AcceptOutputs{

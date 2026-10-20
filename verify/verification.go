@@ -1,7 +1,6 @@
 package verify
 
 import (
-	"fmt"
 	"time"
 
 	"github.com/tinfoilsh/tinfoil-go/verify/document"
@@ -86,41 +85,40 @@ type SoftwareIdentity struct {
 	Version string `json:"version"`
 }
 
-// TLSPublicKeyFP returns the endorsed TLS key fingerprint (the id=tls
-// crypto_material entry), or an error if the document does not endorse one.
-func (v *Verification) TLSPublicKeyFP() (string, error) {
+// TLSPublicKeyFP returns the endorsed TLS key fingerprint: the id=tls
+// crypto_material entry in KeySPKIFPSHA256V1Format. ok is false if the
+// document endorses no such entry, including a tls entry in another format.
+func (v *Verification) TLSPublicKeyFP() (fp string, ok bool) {
 	return v.CryptoMaterialData(document.CryptoMaterialIDTLS, document.KeySPKIFPSHA256V1Format)
 }
 
-// HPKEPublicKey returns the endorsed HPKE public key (the id=hpke
-// crypto_material entry), or an error if the document does not endorse one.
-func (v *Verification) HPKEPublicKey() (string, error) {
+// HPKEPublicKey returns the endorsed HPKE public key: the id=hpke
+// crypto_material entry in KeyX25519HPKEV1Format. ok is false if the
+// document endorses no such entry, including an hpke entry in another format.
+func (v *Verification) HPKEPublicKey() (key string, ok bool) {
 	return v.CryptoMaterialData(document.CryptoMaterialIDHPKE, document.KeyX25519HPKEV1Format)
 }
 
-// CryptoMaterialData returns the endorsed lowercase-hex data for exactly id and
-// format. Lookup does not refresh evidence or enforce FreshnessExpiresAt.
-func (v *Verification) CryptoMaterialData(id, format string) (string, error) {
+// CryptoMaterialData returns the endorsed lowercase-hex data for exactly id
+// and format. ok is false if the document endorses no such item or v is nil.
+// Lookup does not refresh evidence or enforce FreshnessExpiresAt.
+func (v *Verification) CryptoMaterialData(id, format string) (data string, ok bool) {
 	if v == nil {
-		return "", &UsageError{Err: fmt.Errorf("verification is required")}
+		return "", false
 	}
 	return CryptoMaterialData(v.CryptoMaterial, id, format)
 }
 
-// CryptoMaterialData looks up exactly id and format among endorsed key items.
-// It is exported so a caller holding its own record of a verification reuses
-// this lookup rather than reimplementing it.
-func CryptoMaterialData(items []document.CryptoMaterialItem, id, format string) (string, error) {
+// CryptoMaterialData looks up exactly id and format among endorsed key items;
+// ok is false if none matches. It is exported so a caller holding its own
+// record of a verification reuses this lookup rather than reimplementing it.
+func CryptoMaterialData(items []document.CryptoMaterialItem, id, format string) (data string, ok bool) {
 	for _, item := range items {
-		if item.ID != id {
-			continue
+		if item.ID == id && item.Format == format {
+			return item.Data, true
 		}
-		if item.Format != format {
-			return "", &VerificationError{Layer: LayerEnvelope, Err: fmt.Errorf("crypto_material item %q has format %q, want %q", id, item.Format, format)}
-		}
-		return item.Data, nil
 	}
-	return "", &VerificationError{Layer: LayerEnvelope, Err: fmt.Errorf("document endorses no %q crypto material", id)}
+	return "", false
 }
 
 func cloneMeasurement(value *measurement.Measurement) *measurement.Measurement {

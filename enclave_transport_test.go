@@ -121,8 +121,6 @@ func TestEHBPTransportWithoutHPKEKeyIsAttestationError(t *testing.T) {
 	_, err = build(&verify.Verification{})
 	var attestation *enclave.AttestationError
 	require.ErrorAs(t, err, &attestation)
-	var rejected *verify.VerificationError
-	require.ErrorAs(t, err, &rejected, "verify's error remains the cause")
 	require.ErrorContains(t, err, "WithTransport(TransportTLS)")
 }
 
