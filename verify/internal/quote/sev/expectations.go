@@ -12,7 +12,6 @@ import (
 	"github.com/tinfoilsh/go-sev-guest/proto/sevsnp"
 	sevvalidate "github.com/tinfoilsh/go-sev-guest/validate"
 
-	"github.com/tinfoilsh/tinfoil-go/verify/internal/errs"
 	"github.com/tinfoilsh/tinfoil-go/verify/internal/policy"
 )
 
@@ -33,7 +32,6 @@ type Expectations struct {
 
 // Assemble combines policy with the launch digest, REPORT_DATA, and authenticated CHIP_ID.
 func Assemble(p *policy.SEVSNPPolicy, q *Quote, launchDigest string, reportData [64]byte) (result *Expectations, err error) {
-	defer func() { err = errs.WrapVerification(err) }()
 	opts, err := options(p, q.ProductLine())
 	if err != nil {
 		return nil, err
@@ -61,7 +59,6 @@ func Assemble(p *policy.SEVSNPPolicy, q *Quote, launchDigest string, reportData 
 // the only SEV enforcement entry point, so no subset of the policy can be
 // applied.
 func (e *Expectations) Validate(q *Quote) (err error) {
-	defer func() { err = errs.WrapVerification(err) }()
 	if err := sevvalidate.SnpAttestation(q.attestation, e.opts); err != nil {
 		return err
 	}

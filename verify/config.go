@@ -64,11 +64,11 @@ func (v *Verifier) configReferences(doc *document.Document, ref string, now time
 	}
 	pins := endorsement.ConfigPolicy{Now: now, MaxAge: v.freshnessMaxAge, IgnoreFreshness: v.ignoreFreshness}
 	if ref != "" || (v.embedded.Config == nil && v.configAuthorizer == nil) {
-		name, revision, digest, err := endorsement.ParseReference(ref)
+		parsed, err := endorsement.ParseReference(ref)
 		if err != nil {
 			return nil, usageError(err)
 		}
-		pins.Identity, pins.Revision, pins.Digest = "/"+name, revision, digest
+		pins.Identity, pins.Revision, pins.Digest = "/"+parsed.Repo, parsed.Tag, parsed.Digest
 		if err := pins.ValidatePins(); err != nil {
 			return nil, usageError(err)
 		}

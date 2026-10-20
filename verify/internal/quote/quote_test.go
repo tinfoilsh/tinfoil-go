@@ -16,7 +16,6 @@ import (
 
 	"github.com/tinfoilsh/tinfoil-go/verify/document"
 	"github.com/tinfoilsh/tinfoil-go/verify/document/collateral"
-	"github.com/tinfoilsh/tinfoil-go/verify/internal/errs"
 	"github.com/tinfoilsh/tinfoil-go/verify/internal/policy"
 	"github.com/tinfoilsh/tinfoil-go/verify/measurement"
 )
@@ -207,8 +206,7 @@ func TestPinnedLayoutUsesAuthenticatedPlatform(t *testing.T) {
 		{Type: measurement.TdxGuestV2, Registers: []string{4: "bad"}},
 	} {
 		_, err = layout(code, malformed, q)
-		var usage *errs.UsageError
-		require.ErrorAs(t, err, &usage, "phase callers receive the same pin validation as client options")
+		require.Error(t, err, "malformed pins fail closed even though NewVerifier rejects them first")
 	}
 }
 

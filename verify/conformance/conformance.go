@@ -169,7 +169,11 @@ func Run(stage string, in Input) (Output, int) {
 		if err != nil {
 			return reject(stage, "PROVENANCE_REJECTED")
 		}
-		code, err := prov.AuthenticateCode(codeRef.Bundle, in.Repo, codeRef.Tag, codeRef.Digest)
+		pin, err := endorsement.ParseReference(in.Repo)
+		if err != nil {
+			return reject(stage, "PROVENANCE_REJECTED")
+		}
+		code, err := prov.AuthenticateCode(codeRef.Bundle, pin, codeRef.Tag, codeRef.Digest)
 		if err != nil {
 			return reject(stage, "PROVENANCE_REJECTED")
 		}

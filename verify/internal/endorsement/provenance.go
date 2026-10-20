@@ -24,7 +24,6 @@ import (
 
 	"github.com/tinfoilsh/tinfoil-go/endorsement/freshness"
 	"github.com/tinfoilsh/tinfoil-go/verify/document/collateral"
-	"github.com/tinfoilsh/tinfoil-go/verify/internal/errs"
 	"github.com/tinfoilsh/tinfoil-go/verify/internal/policy"
 	"github.com/tinfoilsh/tinfoil-go/verify/measurement"
 )
@@ -109,13 +108,18 @@ var sha256DigestRE = regexp.MustCompile(`^[0-9a-f]{64}$`)
 // refRE matches owner/name[@tag][@sha256:digest]; the tag group is lazy so @sha256: alone is a digest.
 var refRE = regexp.MustCompile(`^([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)(?:@([^@\s~^:?*\[\\]+))??(?:@sha256:([0-9a-f]{64}))?$`)
 
+// Reference is a parsed owner/name[@tag][@sha256:digest] release reference.
+type Reference struct {
+	Repo, Tag, Digest string
+}
+
 // ParseReference validates owner/name[@tag][@sha256:digest] and returns its parts.
-func ParseReference(ref string) (repo, tag, digest string, err error) {
+func ParseReference(ref string) (Reference, error) {
 	match := refRE.FindStringSubmatch(ref)
 	if match == nil {
-		return "", "", "", fmt.Errorf("invalid release reference %q: want owner/name[@tag][@sha256:digest]", ref)
+		return Reference{}, fmt.Errorf("invalid release reference %q: want owner/name[@tag][@sha256:digest]", ref)
 	}
-	return match[1], match[2], match[3], nil
+	return Reference{Repo: match[1], Tag: match[2], Digest: match[3]}, nil
 }
 
 // signingIdentity returns the anchored SAN regex accepted for artifacts
@@ -263,15 +267,12 @@ type Code struct {
 	Shape *policy.Shape
 }
 
-// AuthenticateCode verifies code provenance against owner/name[@tag][@sha256:digest].
+// AuthenticateCode verifies code provenance against the pinned reference.
 // Pins in ref take precedence over the document's tag and digest hints.
-func (c *Client) AuthenticateCode(bundleJSON []byte, ref, tag, hexDigest string) (*Code, error) {
-	repo, pinnedTag, pinnedDigest, err := ParseReference(ref)
-	if err != nil {
-		return nil, &errs.UsageError{Err: err}
-	}
-	tag = cmp.Or(pinnedTag, tag)
-	hexDigest = cmp.Or(pinnedDigest, hexDigest)
+func (c *Client) AuthenticateCode(bundleJSON []byte, ref Reference, tag, hexDigest string) (*Code, error) {
+	repo := ref.Repo
+	tag = cmp.Or(ref.Tag, tag)
+	hexDigest = cmp.Or(ref.Digest, hexDigest)
 	result, err := c.verifyBundle(bundleJSON, repo, hexDigest)
 	if err != nil {
 		return nil, fmt.Errorf("verifying bundle: %w", err)

@@ -65,7 +65,7 @@ func TestLiveAuthenticateCode(t *testing.T) {
 	bundle, err := fetchAttestationBundle(repo, hexDigest)
 	require.NoError(t, err)
 
-	code, err := client.AuthenticateCode(bundle, repo, tag, hexDigest)
+	code, err := client.AuthenticateCode(bundle, Reference{Repo: repo}, tag, hexDigest)
 	require.NoError(t, err)
 	assert.Equal(t, repo, code.Repo)
 	assert.Equal(t, tag, code.Tag)
@@ -98,7 +98,9 @@ func TestLiveAuthenticateCode(t *testing.T) {
 		{repo + "@wrong-tag@sha256:" + hexDigest, tag, hexDigest, false},
 	} {
 		t.Run(tt.ref, func(t *testing.T) {
-			got, err := client.AuthenticateCode(bundle, tt.ref, tt.tagHint, tt.digestHint)
+			pin, err := ParseReference(tt.ref)
+			require.NoError(t, err)
+			got, err := client.AuthenticateCode(bundle, pin, tt.tagHint, tt.digestHint)
 			if tt.valid {
 				require.NoError(t, err)
 				require.Equal(t, code, got)
@@ -110,10 +112,9 @@ func TestLiveAuthenticateCode(t *testing.T) {
 	}
 }
 
-func TestAuthenticateCodeRejectsInvalidReference(t *testing.T) {
-	client := testClient(t)
+func TestParseReferenceRejectsInvalidReference(t *testing.T) {
 	for _, ref := range []string{"", "org/repo@", "org/repo@sha256:bad", "org/repo@v1@v2", "org/repo/extra", "org/(repo|other)"} {
-		_, err := client.AuthenticateCode(nil, ref, "", "")
+		_, err := ParseReference(ref)
 		require.ErrorContains(t, err, "invalid release reference")
 	}
 }
