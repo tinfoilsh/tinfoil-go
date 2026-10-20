@@ -116,11 +116,11 @@ func CryptoMaterialData(items []document.CryptoMaterialItem, id, format string) 
 			continue
 		}
 		if item.Format != format {
-			return "", &VerificationError{Err: fmt.Errorf("crypto_material item %q has format %q, want %q", id, item.Format, format)}
+			return "", &VerificationError{Layer: LayerEnvelope, Err: fmt.Errorf("crypto_material item %q has format %q, want %q", id, item.Format, format)}
 		}
 		return item.Data, nil
 	}
-	return "", &VerificationError{Err: fmt.Errorf("document endorses no %q crypto material", id)}
+	return "", &VerificationError{Layer: LayerEnvelope, Err: fmt.Errorf("document endorses no %q crypto material", id)}
 }
 
 func cloneMeasurement(value *measurement.Measurement) *measurement.Measurement {

@@ -27,9 +27,7 @@ type liveRequest struct {
 // verify.NewVerifier with no options, so the embedded roots, the current time
 // and the default freshness bound, never the adapter's injected seams — then
 // asserts the live connection's SPKI fingerprint equals the endorsed one
-// before reporting the facts with channel_binding "tls-spki". It calls
-// VerifyV3WithLayer, which runs exactly VerifyV3 and also names the layer
-// that rejected a document.
+// before reporting the facts with channel_binding "tls-spki".
 func runLive() int {
 	var req liveRequest
 	dec := json.NewDecoder(os.Stdin)
@@ -55,10 +53,14 @@ func runLive() int {
 		return conformance.ExitInternal
 	}
 
-	verified, layer, err := v.VerifyV3WithLayer(doc, nonce, req.Repo)
+	verified, err := v.VerifyV3(doc, nonce, req.Repo)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "live verification: %v\n", err)
-		return rejectLive(conformance.RejectionCode(layer))
+		code, exit := conformance.RejectionCode(err)
+		if exit != conformance.ExitInternal {
+			writeJSON(conformance.Output{Stage: stageLive, Rejection: &conformance.Rejection{Code: code}})
+		}
+		return exit
 	}
 	tlsFP, err := verified.TLSPublicKeyFP()
 	if err != nil {

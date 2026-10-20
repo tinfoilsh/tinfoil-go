@@ -5,9 +5,9 @@
 // language-neutral wire contract below. Every SDK implements the same
 // Input/Output shapes and exit codes so the suite drives them identically.
 //
-// The full-verify stage is one Verifier.VerifyV3WithLayer call, so the shared
-// fixtures appraise exactly the code production runs; the layer it reports
-// names the rejection. The block stages isolate a single layer by calling into
+// The full-verify stage is one Verifier.VerifyV3 call, so the shared fixtures
+// appraise exactly the code production runs; the layer on its
+// VerificationError names the rejection. The block stages isolate a single layer by calling into
 // the document, endorsement and quote packages the verifier uses.
 //
 // Synthetic roots and the appraisal clock travel as ordinary per-call options,
@@ -211,12 +211,16 @@ func Run(stage string, in Input) (Output, int) {
 	}
 }
 
-// verifyFull runs the whole flow through the verifier; the layer it reports
-// names the rejection.
+// verifyFull runs the whole flow through the verifier; the layer on its
+// VerificationError names the rejection.
 func verifyFull(doc, nonce []byte, repo string, verifier *verify.Verifier) (Output, int) {
-	verified, layer, err := verifier.VerifyV3WithLayer(doc, nonce, repo)
+	verified, err := verifier.VerifyV3(doc, nonce, repo)
 	if err != nil {
-		return reject(StageVerify, RejectionCode(layer))
+		code, exit := RejectionCode(err)
+		if exit == ExitInternal {
+			return Output{Stage: StageVerify}, exit
+		}
+		return Output{Stage: StageVerify, Rejection: &Rejection{Code: code}}, exit
 	}
 	// A document that verifies but endorses no usable channel keys is useless
 	// to every real client (an enclave.Handle rejects at binding), so the full

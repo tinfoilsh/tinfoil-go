@@ -29,6 +29,7 @@ func TestConfigAuthorizerErrorNeverChoosesTheType(t *testing.T) {
 	var classified Error
 	require.ErrorAs(t, err, &classified)
 	require.IsType(t, &VerificationError{}, classified, "the outermost verify error is the type")
+	require.Equal(t, LayerProvenance, classified.(*VerificationError).Layer)
 	require.ErrorIs(t, err, refused, "the authorizer's error remains the cause")
 }
 
@@ -58,10 +59,9 @@ func TestConfigAuthorizerPreservesReferencesAndHardwareChecks(t *testing.T) {
 	require.Equal(t, &ConfigVerification{Source: SourcePolicy, Digest: fmt.Sprintf("%x", digest)}, refs.config)
 	_, err = v.configReferences(doc, "org/project", time.Now())
 	require.ErrorContains(t, err, "cannot authenticate repository")
-	result, layer, err := v.verifyV3(raw, nonce, "")
-	require.Error(t, err)
+	result, err := v.VerifyV3(raw, nonce, "")
 	require.Nil(t, result)
-	require.Equal(t, layerQuote, layer)
+	requireRejectedAt(t, err, LayerQuote)
 
 	v.embedded.Runtime = append(v.embedded.Runtime, '\n')
 	_, err = v.configReferences(doc, "", time.Now())

@@ -143,22 +143,16 @@ func (v *Verifier) PinnedRegisters() *measurement.Measurement {
 // FreshnessExpiresAt. With all references embedded, the caller owns renewal
 // and cache lifetime; zero is not a guarantee of unlimited evidence validity.
 func (v *Verifier) VerifyV3(docBytes, nonce []byte, repo string) (*Verification, error) {
-	verified, _, err := v.verifyV3(docBytes, nonce, repo)
-	return verified, err
+	verified, rejectedAt, err := v.verifyV3(docBytes, nonce, repo)
+	// An error already carrying a verify type, such as the UsageError for a
+	// caller's mistake, passes through; anything else becomes a
+	// VerificationError for the layer that rejected the document.
+	var classified Error
+	if err == nil || errors.As(err, &classified) {
+		return verified, err
+	}
+	return nil, &VerificationError{Layer: rejectedAt, Err: err}
 }
-
-// layer names the verification step that rejected a document. It travels
-// beside the error rather than inside it, so it changes nothing about how
-// errors are classified or displayed; only the conformance build reads it.
-type layer string
-
-const (
-	layerNone       layer = ""
-	layerEnvelope   layer = "envelope"
-	layerProvenance layer = "provenance"
-	layerQuote      layer = "quote"
-	layerPolicy     layer = "policy"
-)
 
 type endorsementResult struct {
 	quote              quote.ReferenceValues
@@ -168,22 +162,19 @@ type endorsementResult struct {
 	freshnessExpiresAt time.Time
 }
 
-// verifyV3 is VerifyV3, also reporting which layer rejected the document.
-func (v *Verifier) verifyV3(docBytes, nonce []byte, repo string) (_ *Verification, _ layer, err error) {
-	// A stage reports a rejected document with a plain error and a caller's
-	// mistake with a UsageError. wrapVerification leaves the UsageError, or
-	// any error already carrying a verify type, as it is and makes every other
-	// failure a VerificationError.
-	defer func() { err = wrapVerification(err) }()
+// verifyV3 is VerifyV3 before classification: it returns the error a stage
+// reported, a plain error for a rejected document or a UsageError for a
+// caller's mistake, and the layer of that stage.
+func (v *Verifier) verifyV3(docBytes, nonce []byte, repo string) (*Verification, Layer, error) {
 	if v == nil || v.now == nil || v.endorsements == nil || v.configVerifier == nil || v.freshnessVerifier == nil {
-		return nil, layerNone, &UsageError{Err: fmt.Errorf("verifier must be built with NewVerifier")}
+		return nil, "", &UsageError{Err: fmt.Errorf("verifier must be built with NewVerifier")}
 	}
 	doc, err := document.Parse(docBytes, nonce)
 	if errors.Is(err, document.ErrInvalidInput) {
-		return nil, layerEnvelope, &UsageError{Err: err}
+		return nil, LayerEnvelope, &UsageError{Err: err}
 	}
 	if err != nil {
-		return nil, layerEnvelope, err
+		return nil, LayerEnvelope, err
 	}
 
 	// All reference values are appraised against the same instant.
@@ -196,22 +187,22 @@ func (v *Verifier) verifyV3(docBytes, nonce []byte, repo string) (_ *Verificatio
 	case collateral.FormatV2:
 		refs, err = v.codeReferences(doc, repo, now)
 	default:
-		return nil, layerProvenance, fmt.Errorf("unsupported collateral format %q", doc.CollateralFormat())
+		return nil, LayerProvenance, fmt.Errorf("unsupported collateral format %q", doc.CollateralFormat())
 	}
 	if err != nil {
-		return nil, layerProvenance, err
+		return nil, LayerProvenance, err
 	}
 
 	authenticated, err := quote.Authenticate(doc.CPUEvidence(), doc.CPUEndorsements(), v.quoteOptions(now))
 	if err != nil {
-		return nil, layerQuote, err
+		return nil, LayerQuote, err
 	}
 	assembled, err := quote.Assemble(doc, refs.quote, v.pinnedRegisters, authenticated)
 	if err != nil {
-		return nil, layerPolicy, err
+		return nil, LayerPolicy, err
 	}
 	if err := assembled.Validate(); err != nil {
-		return nil, layerPolicy, err
+		return nil, LayerPolicy, err
 	}
 
 	result := &Verification{
@@ -232,7 +223,7 @@ func (v *Verifier) verifyV3(docBytes, nonce []byte, repo string) (_ *Verificatio
 	if refs.config != nil {
 		result.Runtime = &refs.artifact
 	}
-	return result, layerNone, nil
+	return result, "", nil
 }
 
 func (v *Verifier) codeReferences(doc *document.Document, repo string, appraisalTime time.Time) (*endorsementResult, error) {

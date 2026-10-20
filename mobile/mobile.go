@@ -92,7 +92,7 @@ func (v *Verifier) Verify(doc, nonce []byte, repo string) (_ string, err error) 
 // caller enforcing FreshnessExpiresAt does not re-verify in a loop.
 func checkFresh(verified *verify.Verification, now time.Time) error {
 	if !now.Before(verified.FreshnessExpiresAt) {
-		return &verify.VerificationError{Err: fmt.Errorf("attestation freshness witnesses expired at %s", verified.FreshnessExpiresAt.UTC().Format(time.RFC3339))}
+		return &verify.VerificationError{Layer: verify.LayerProvenance, Err: fmt.Errorf("attestation freshness witnesses expired at %s", verified.FreshnessExpiresAt.UTC().Format(time.RFC3339))}
 	}
 	return nil
 }
