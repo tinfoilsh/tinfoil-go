@@ -56,11 +56,10 @@ holds no cache and is immutable, so it is safe for concurrent use — fetching
 the document, caching the result and enforcing its deadline stay with the
 caller.
 
-By default, `VerifyV3` samples the appraisal clock once and
-judges the freshness witnesses against that instant; the CPU evidence layer
-reads the clock separately for vendor certificate and CRL validity windows,
-because a production build cannot pass an instant down to it. So the same
-document is accepted today and rejected once its witnesses go stale. What a
+By default, `VerifyV3` samples the appraisal clock once and judges the
+freshness witnesses and the vendor certificate and CRL validity windows
+against that instant. So the same document is accepted today and rejected once
+its witnesses go stale. What a
 successful verification reports does not drift, though: `FreshnessExpiresAt` is
 derived from the authenticated witness timestamps, never from the local clock.
 
