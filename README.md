@@ -8,7 +8,7 @@ A Go client for verifiably private AI inference with Tinfoil. It wraps the [Open
 
 ## Installation
 
-Requires Go 1.27.2 or later.
+Requires Go 1.27.3 or later.
 
 ```bash
 go get github.com/tinfoilsh/tinfoil-go
