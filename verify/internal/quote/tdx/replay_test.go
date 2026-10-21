@@ -6,6 +6,7 @@ import (
 	"crypto/rand"
 	"crypto/x509"
 	"crypto/x509/pkix"
+	"fmt"
 	"math/big"
 	"testing"
 	"time"
@@ -61,6 +62,50 @@ func TestTCBEvaluationRecorder(t *testing.T) {
 	n, err := recorder.minimum()
 	require.NoError(t, err)
 	assert.Equal(t, 19, n)
+}
+
+// go-tdx-guest checks only nextUpdate, so the recorder rejects TCB Info and QE
+// Identity issued after the verification time.
+func TestTCBEvaluationRecorderRejectsCollateralIssuedLater(t *testing.T) {
+	const tcbURL = "https://api.trustedservices.intel.com/tdx/certification/v4/tcb?fmspc=90c06f000000"
+	const qeURL = "https://api.trustedservices.intel.com/tdx/certification/v4/qe/identity"
+	now := time.Date(2026, time.January, 15, 0, 0, 0, 0, time.UTC)
+	later := now.Add(time.Second)
+	body := func(object string, issued time.Time) []byte {
+		if issued.IsZero() {
+			return fmt.Appendf(nil, `{%q:{"tcbEvaluationDataNumber":20}}`, object)
+		}
+		return fmt.Appendf(nil, `{%q:{"tcbEvaluationDataNumber":20,"issueDate":%q}}`, object, issued.Format(time.RFC3339))
+	}
+	for _, tt := range []struct {
+		name                string
+		tcbInfo, qeIdentity time.Time
+		wantError           string
+	}{
+		{"issued at the verification time", now, now, ""},
+		{"TCB Info issued later", later, now, "TCB Info is not yet valid"},
+		{"QE Identity issued later", now, later, "QE Identity is not yet valid"},
+		{"no issue date", time.Time{}, now, "issueDate was not observed"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			inner, err := newPCSReplayGetter([]collateral.PCSResponse{
+				{URL: tcbURL, Body: body("tcbInfo", tt.tcbInfo)},
+				{URL: qeURL, Body: body("enclaveIdentity", tt.qeIdentity)},
+			}, now)
+			require.NoError(t, err)
+			recorder := &tcbEvaluationRecorder{inner: inner}
+			for _, u := range []string{tcbURL, qeURL} {
+				_, _, err = recorder.Get(u)
+				require.NoError(t, err)
+			}
+			err = recorder.checkIssueDates(now)
+			if tt.wantError == "" {
+				require.NoError(t, err)
+				return
+			}
+			require.ErrorContains(t, err, tt.wantError)
+		})
+	}
 }
 
 func TestPCSReplayGetterValidatesCRL(t *testing.T) {
