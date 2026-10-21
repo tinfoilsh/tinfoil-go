@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -78,7 +79,7 @@ func TestLiveSEVFixture(t *testing.T) {
 	evidence := doc.CPUEvidence()
 	endorsements := doc.CPUEndorsements()
 	endorsements.AMDCRL = liveCRL(t)
-	q, err := Authenticate(evidence, endorsements, nil)
+	q, err := Authenticate(evidence, endorsements, time.Now(), nil)
 	require.NoError(t, err)
 	assembled, verified, err := verify(evidence, endorsements, loadEndorsementArtifact(t), asCode(q.Measurement), nil, testShape, reportData, nil)
 	require.NoError(t, err)

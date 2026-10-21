@@ -21,6 +21,11 @@ func TestVerifySignatureRejectsNonExactReportSize(t *testing.T) {
 	}
 }
 
+func TestAuthenticateRequiresVerificationTime(t *testing.T) {
+	_, err := Authenticate(Evidence{}, time.Time{}, nil)
+	assert.ErrorContains(t, err, "verification time is required", "the library would substitute its own clock")
+}
+
 func TestTrustedRootsSelectProduct(t *testing.T) {
 	for _, productLine := range []string{ProductGenoa, ProductTurin} {
 		t.Run(productLine, func(t *testing.T) {

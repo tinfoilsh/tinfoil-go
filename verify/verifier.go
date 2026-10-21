@@ -35,13 +35,12 @@ import (
 // cache, so it never decides that an earlier answer is still good enough —
 // that judgement belongs to whatever fetches documents.
 //
-// It does read the clock. VerifyV3 samples it once and judges the freshness
-// witnesses against that instant. The CPU evidence layer reads the clock
-// separately for vendor certificate and CRL validity windows, because a
-// production build has no way to pass an instant down to it (see
-// overrides.go); only the conformance build threads one through. Unless
-// freshness is explicitly ignored, the same document is accepted today and
-// rejected once its witnesses go stale.
+// It does read the clock. VerifyV3 samples it once and judges everything
+// time-bound against that instant: the freshness witnesses and approvals, and
+// the vendor certificate and CRL validity windows of the CPU evidence. The
+// same instant is reported as VerifiedAt. Unless freshness is explicitly
+// ignored, the same document is accepted today and rejected once its
+// witnesses go stale.
 type Verifier struct {
 	embedded        EmbeddedReferences
 	pinnedRegisters *measurement.Measurement
@@ -177,7 +176,8 @@ func (v *Verifier) verifyV3(docBytes, nonce []byte, repo string) (*Verification,
 		return nil, LayerEnvelope, err
 	}
 
-	// All reference values are appraised against the same instant.
+	// The only clock read: reference values and CPU evidence are appraised
+	// against the same instant.
 	now := v.now()
 
 	var refs *endorsementResult
@@ -193,7 +193,7 @@ func (v *Verifier) verifyV3(docBytes, nonce []byte, repo string) (*Verification,
 		return nil, LayerProvenance, err
 	}
 
-	authenticated, err := quote.Authenticate(doc.CPUEvidence(), doc.CPUEndorsements(), v.quoteOptions(now))
+	authenticated, err := quote.Authenticate(doc.CPUEvidence(), doc.CPUEndorsements(), now, v.quoteOptions())
 	if err != nil {
 		return nil, LayerQuote, err
 	}

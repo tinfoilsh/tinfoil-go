@@ -17,19 +17,17 @@ type overrides struct {
 	intelRootPEM []byte
 }
 
-// quoteOptions hands the CPU evidence layer the instant this verification is
-// being appraised at, so a replayed document is judged consistently by both
-// the freshness witnesses and the certificate and CRL validity windows, along
-// with any synthetic vendor roots.
-func (v *Verifier) quoteOptions(now time.Time) *quote.Options {
+// quoteOptions hands the CPU evidence layer any synthetic vendor roots.
+func (v *Verifier) quoteOptions() *quote.Options {
 	opts := &quote.Options{}
-	opts.DangerousTestOnlySetClock(now)
 	opts.DangerousTestOnlySetRoots(v.overrides.amdRootPEM, v.overrides.intelRootPEM)
 	return opts
 }
 
 // DangerousTestOnlyWithClock replaces the appraisal clock, so the conformance
-// harness can replay a frozen document at its capture time. A rewound clock
+// harness can replay a frozen document at its capture time. VerifyV3 reads it
+// once and judges both the freshness witnesses and the CPU evidence's
+// certificate and CRL validity windows at that instant. A rewound clock
 // accepts witnesses and collateral that have since expired, which is why this
 // exists only in the conformance build.
 func DangerousTestOnlyWithClock(now func() time.Time) Option {

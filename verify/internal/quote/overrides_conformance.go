@@ -3,40 +3,29 @@
 package quote
 
 import (
-	"time"
-
 	"github.com/tinfoilsh/tinfoil-go/verify/internal/quote/sev"
 	"github.com/tinfoilsh/tinfoil-go/verify/internal/quote/tdx"
 )
 
-// overrides carries the conformance build's replacements for the verification
-// clock and the vendor trust anchors, translated down to whichever platform
-// the document's evidence selects. See the setters below.
+// overrides carries the conformance build's replacements for the vendor trust
+// anchors, translated down to whichever platform the document's evidence
+// selects. See the setter below.
 type overrides struct {
-	now   time.Time
 	amd   []byte
 	intel []byte
 }
 
 func (o overrides) sev() *sev.Options {
 	opts := &sev.Options{}
-	opts.DangerousTestOnlySetClock(o.now)
 	opts.DangerousTestOnlySetRoot(o.amd)
 	return opts
 }
 
 func (o overrides) tdx() *tdx.Options {
 	opts := &tdx.Options{}
-	opts.DangerousTestOnlySetClock(o.now)
 	opts.DangerousTestOnlySetRoot(o.intel)
 	return opts
 }
-
-// DangerousTestOnlySetClock pins the instant certificate and CRL validity
-// windows are evaluated at, so the conformance harness can replay a frozen
-// document at its capture time. A rewound clock accepts expired certificates
-// and superseded CRLs, which is why this exists only in the conformance build.
-func (o *Options) DangerousTestOnlySetClock(t time.Time) { o.overrides.now = t }
 
 // DangerousTestOnlySetRoots replaces the embedded vendor anchors, so the
 // conformance harness can authenticate synthetic evidence. A supplied anchor

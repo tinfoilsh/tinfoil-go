@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	tdxabi "github.com/google/go-tdx-guest/abi"
 	tdxpb "github.com/google/go-tdx-guest/proto/tdx"
@@ -48,7 +49,7 @@ func TestVerifyLiveFixtureTDX(t *testing.T) {
 
 	evidence := doc.CPUEvidence()
 	endorsements := doc.CPUEndorsements()
-	q, err := Authenticate(evidence, endorsements, nil)
+	q, err := Authenticate(evidence, endorsements, time.Now(), nil)
 	if err != nil && strings.Contains(err.Error(), "expired") {
 		t.Skipf("captured Intel PCS collateral has expired: %v", err)
 	}

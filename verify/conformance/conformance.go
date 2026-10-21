@@ -143,7 +143,6 @@ func Run(stage string, in Input) (Output, int) {
 		return malformed(stage)
 	}
 	quoteOpts := &quote.Options{}
-	quoteOpts.DangerousTestOnlySetClock(appraisal)
 	quoteOpts.DangerousTestOnlySetRoots(rts.amd, rts.intel)
 	verifier, err := verify.NewVerifier(
 		verify.DangerousTestOnlyWithClock(func() time.Time { return appraisal }),
@@ -201,7 +200,7 @@ func Run(stage string, in Input) (Output, int) {
 		if err != nil {
 			return malformed(stage)
 		}
-		auth, err := quote.Authenticate(parsed.CPUEvidence(), parsed.CPUEndorsements(), quoteOpts)
+		auth, err := quote.Authenticate(parsed.CPUEvidence(), parsed.CPUEndorsements(), appraisal, quoteOpts)
 		if err != nil {
 			return reject(stage, "QUOTE_REJECTED")
 		}

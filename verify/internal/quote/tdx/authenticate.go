@@ -60,12 +60,16 @@ type Evidence struct {
 }
 
 // Authenticate verifies the quote's signature chain up to the pinned Intel
-// SGX root, replaying the captured PCS collateral — no network fetches.
-// Callers must assemble a policy and validate before trusting the platform.
-func Authenticate(ev Evidence, opts *Options) (result *Quote, err error) {
-	// Sampled once so the replayed CRL windows and the library's own validity
-	// checks appraise the same instant.
-	now := opts.now()
+// SGX root, replaying the captured PCS collateral — no network fetches. The
+// replayed CRL windows and the library's certificate and collateral validity
+// checks are all appraised at now, which the caller samples once for the
+// whole verification. Callers must assemble a policy and validate before
+// trusting the platform.
+func Authenticate(ev Evidence, now time.Time, opts *Options) (result *Quote, err error) {
+	// The library substitutes its own clock for a zero instant.
+	if now.IsZero() {
+		return nil, fmt.Errorf("verification time is required")
+	}
 	roots, err := opts.roots()
 	if err != nil {
 		return nil, err
@@ -103,7 +107,7 @@ func Authenticate(ev Evidence, opts *Options) (result *Quote, err error) {
 
 	// All options explicit: collateral replayed from the document, chain
 	// pinned to the configured Intel root, revocation checking on, validity
-	// evaluated at the sampled instant.
+	// evaluated at the caller's instant.
 	verifyOpts := &tdxverify.Options{
 		Getter:           recorder,
 		TrustedRoots:     roots,
@@ -290,25 +294,15 @@ func poolFromPEM(rootPEM []byte) (*x509.CertPool, error) {
 }
 
 // Options carries per-authentication overrides. A nil *Options, and the zero
-// value, select the production defaults: the embedded Intel SGX root and the
-// current time. Overrides are held per verification rather than in process
-// state, so concurrent verifications cannot observe each other.
+// value, select the production default: the embedded Intel SGX root.
+// Overrides are held per verification rather than in process state, so
+// concurrent verifications cannot observe each other.
 //
 // The overrides themselves exist only in the conformance build. A production
 // binary has no way to set them, so it cannot be made to trust a supplied
-// root or to appraise collateral at anything but the current time.
+// root.
 type Options struct {
 	overrides overrides
-}
-
-func (o *Options) now() time.Time {
-	if o == nil {
-		return time.Now()
-	}
-	if pinned := o.overrides.clock(); !pinned.IsZero() {
-		return pinned
-	}
-	return time.Now()
 }
 
 func (o *Options) roots() (*x509.CertPool, error) {
