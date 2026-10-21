@@ -3,8 +3,6 @@
 package verify
 
 import (
-	"time"
-
 	"github.com/tinfoilsh/tinfoil-go/verify/internal/quote"
 )
 
@@ -13,6 +11,5 @@ import (
 type overrides struct{}
 
 // quoteOptions carries nothing to the CPU evidence layer in a production
-// build, so that layer uses its own embedded vendor roots and reads the clock
-// itself. The conformance build passes the appraisal instant down instead.
-func (v *Verifier) quoteOptions(time.Time) *quote.Options { return nil }
+// build, so that layer uses its own embedded vendor roots.
+func (v *Verifier) quoteOptions() *quote.Options { return nil }

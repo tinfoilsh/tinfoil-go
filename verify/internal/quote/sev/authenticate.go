@@ -32,25 +32,15 @@ var askArkGenoaPEM []byte
 var askArkTurinPEM []byte
 
 // Options carries per-authentication overrides. A nil *Options, and the zero
-// value, select the production defaults: the embedded per-product anchor and
-// the current time. Overrides are held per verification rather than in process
-// state, so concurrent verifications cannot observe each other.
+// value, select the production default: the embedded per-product anchor.
+// Overrides are held per verification rather than in process state, so
+// concurrent verifications cannot observe each other.
 //
 // The overrides themselves exist only in the conformance build. A production
 // binary has no way to set them, so it cannot be made to trust a supplied
-// anchor or to appraise collateral at anything but the current time.
+// anchor.
 type Options struct {
 	overrides overrides
-}
-
-func (o *Options) now() time.Time {
-	if o == nil {
-		return time.Now()
-	}
-	if pinned := o.overrides.clock(); !pinned.IsZero() {
-		return pinned
-	}
-	return time.Now()
 }
 
 func (o *Options) rootPEM() []byte {
@@ -174,12 +164,15 @@ type Evidence struct {
 }
 
 // Authenticate verifies the report's signature chain up to the pinned AMD
-// root and its VCEK against the supplied CRL — no network fetches. Callers
-// must assemble a policy and validate before trusting the platform.
-func Authenticate(ev Evidence, opts *Options) (result *Quote, err error) {
-	// Sampled once so the CRL window and the library's own validity checks
-	// appraise the same instant.
-	now := opts.now()
+// root and its VCEK against the supplied CRL — no network fetches. The CRL
+// window and the library's certificate validity checks are all appraised at
+// now, which the caller samples once for the whole verification. Callers must
+// assemble a policy and validate before trusting the platform.
+func Authenticate(ev Evidence, now time.Time, opts *Options) (result *Quote, err error) {
+	// The library substitutes its own clock for a zero instant.
+	if now.IsZero() {
+		return nil, fmt.Errorf("verification time is required")
+	}
 	// An empty VCEK would make the library try to fetch one.
 	if len(ev.VCEKDER) == 0 {
 		return nil, fmt.Errorf("amd-vcek collateral carries an empty VCEK")

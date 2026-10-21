@@ -17,6 +17,7 @@ import (
 	"cmp"
 	"fmt"
 	"strings"
+	"time"
 
 	tdxabi "github.com/google/go-tdx-guest/abi"
 
@@ -82,12 +83,12 @@ type resolvedValues struct {
 }
 
 // Options carries per-authentication overrides. A nil *Options, and the zero
-// value, select the production defaults: the embedded vendor roots and the
-// current time. Only the anchor for the document's own platform is used.
+// value, select the production default: the embedded vendor roots. Only the
+// anchor for the document's own platform is used.
 //
 // The overrides themselves exist only in the conformance build. A production
 // binary has no way to set them, so it cannot be made to trust a supplied
-// vendor root or to appraise collateral at anything but the current time.
+// vendor root.
 type Options struct {
 	overrides overrides
 }
@@ -108,9 +109,11 @@ func (o *Options) tdxOptions() *tdx.Options {
 
 // Authenticate verifies the evidence's signature chain up to the pinned
 // vendor root, from the supplied endorsement collateral alone — no network
-// fetches. Callers must assemble a policy and validate before trusting the
-// platform.
-func Authenticate(ev document.CPUEvidence, en collateral.CPUEndorsements, opts *Options) (result *Authenticated, err error) {
+// fetches. Certificate and CRL validity windows are appraised at now, the
+// instant the caller judges the rest of the document against; this layer
+// never reads the clock. Callers must assemble a policy and validate before
+// trusting the platform.
+func Authenticate(ev document.CPUEvidence, en collateral.CPUEndorsements, now time.Time, opts *Options) (result *Authenticated, err error) {
 	switch ev.Format {
 	case document.SEVSNPReportV1Format:
 		// v3 is single-request: missing collateral is rejected, never
@@ -126,7 +129,7 @@ func Authenticate(ev document.CPUEvidence, en collateral.CPUEndorsements, opts *
 			VCEKDER:      en.AMDVCEK.VCEKDER,
 			CertChainPEM: en.AMDVCEK.CertChainPEM,
 			CRLDER:       en.AMDCRL.CRLDER,
-		}, opts.sevOptions())
+		}, now, opts.sevOptions())
 		if err != nil {
 			return nil, err
 		}
@@ -141,7 +144,7 @@ func Authenticate(ev document.CPUEvidence, en collateral.CPUEndorsements, opts *
 		if en.IntelPCS == nil {
 			return nil, fmt.Errorf("no intel-pcs endorsement collateral for the cpu")
 		}
-		q, err := tdx.Authenticate(tdx.Evidence{Quote: ev.Report, PCS: en.IntelPCS.Responses}, opts.tdxOptions())
+		q, err := tdx.Authenticate(tdx.Evidence{Quote: ev.Report, PCS: en.IntelPCS.Responses}, now, opts.tdxOptions())
 		if err != nil {
 			return nil, err
 		}

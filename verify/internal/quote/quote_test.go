@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -102,7 +103,7 @@ func TestLiveVerifySEV(t *testing.T) {
 	// The fixture predates per-release code provenance, so the expected
 	// launch measurement is the quote's own; the equality path is still
 	// exercised, and the mismatch case is covered below.
-	q, err := Authenticate(evidence, endorsements, nil)
+	q, err := Authenticate(evidence, endorsements, time.Now(), nil)
 	require.NoError(t, err)
 	assembled, verified, err := verify(evidence, endorsements, artifact, asCode(q.Measurement), nil, testShape, reportData, nil)
 	require.NoError(t, err)
@@ -169,7 +170,7 @@ func TestVerifySEVRejectsBadCRL(t *testing.T) {
 		AMDVCEK: &collateral.AMDVCEK{VCEKDER: vcekDER, CertChainPEM: string(chain)},
 		AMDCRL:  &collateral.AMDCRL{CRLDER: []byte("not a crl")},
 	}
-	_, err = Authenticate(evidence, endorsements, nil)
+	_, err = Authenticate(evidence, endorsements, time.Now(), nil)
 	assert.ErrorContains(t, err, "parsing amd-crl collateral")
 }
 
@@ -219,10 +220,10 @@ func asCode(m *measurement.Measurement) *measurement.Measurement {
 }
 
 // verify composes Authenticate, assemble against an explicit REPORT_DATA, and
-// Validate, for tests whose evidence predates the v3 REPORT_DATA ladder. A nil
-// opts selects the production clock and embedded vendor roots.
+// Validate at the current time, for tests whose evidence predates the v3
+// REPORT_DATA ladder. A nil opts selects the embedded vendor roots.
 func verify(ev document.CPUEvidence, en collateral.CPUEndorsements, endorsements *policy.Artifact, code, pins *measurement.Measurement, shape *policy.Shape, reportData [64]byte, opts *Options) (*AssembledPolicy, *Authenticated, error) {
-	q, err := Authenticate(ev, en, opts)
+	q, err := Authenticate(ev, en, time.Now(), opts)
 	if err != nil {
 		return nil, nil, err
 	}
