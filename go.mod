@@ -6,7 +6,7 @@ require (
 	github.com/digitorus/timestamp v0.0.0-20250524132541-c45532741eea
 	github.com/google/go-tdx-guest v0.3.1
 	github.com/in-toto/attestation v1.2.0
-	github.com/openai/openai-go/v3 v3.42.0
+	github.com/openai/openai-go/v3 v3.80.0
 	github.com/secure-systems-lab/go-securesystemslib v0.11.0
 	github.com/sigstore/protobuf-specs v0.5.1
 	github.com/sigstore/rekor-tiles/v2 v2.3.0
@@ -27,6 +27,7 @@ require (
 	github.com/blang/semver v3.5.1+incompatible // indirect
 	github.com/cenkalti/backoff/v5 v5.0.3 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
+	github.com/coder/websocket v1.8.15 // indirect
 	github.com/cyberphone/json-canonicalization v0.0.0-20241213102144-19d51d7fe467 // indirect
 	github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc // indirect
 	github.com/digitorus/pkcs7 v0.0.0-20250730155240-ffadbf3f398c // indirect
