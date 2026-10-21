@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"github.com/tinfoilsh/tinfoil-go/verifier/attestation"
 	"github.com/tinfoilsh/tinfoil-go/verifier/github"
 )
@@ -48,20 +49,21 @@ func TestVerifyAttestation(t *testing.T) {
 		t.Skip("live external services test; skipped with -short")
 	}
 	client, err := NewClient()
-	assert.NoError(t, err)
+	require.NoError(t, err)
 
-	const repo = "tinfoilsh/confidential-deepseek-r1-0528"
-	const hexDigest = "7e76d5a6d81f19ecdc1f3c18c8f0cf5b89d22ea107a05a1ae23ce46e79270f26"
+	// confidential-model-router v0.0.159
+	const repo = "tinfoilsh/confidential-model-router"
+	const hexDigest = "1ffc1cde7acd5134367cb9f430024203ed4455a51ee4473f7b3e75bd556d0a6b"
 	bundle, err := github.FetchAttestationBundle(repo, hexDigest)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 
 	measurement, err := client.VerifyAttestation(bundle, repo, hexDigest)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	assert.Equal(t, measurement.Type, attestation.SnpTdxMultiPlatformV1)
 	assert.Equal(t, measurement.Registers, []string{
-		"442df00d945bdd2849e6df4eb28c757e9e94428787268b452eacb3f86bbc38528d6712e2c41b6953f1a96d2493d5f9b6", // SEV-SNP
-		"10a05f3fba7d66babcc8a8143451443a564963ced77c7fa126f004857753f87c318720e29e9ed2f46c8753b44b01004d", // RTRM1
-		"fc744ecc4550ec0ea6c25deaa777bd2ed6e5feda35ac1e88a2c2b6e62584a8ad47a93526638de3b97fe45cd67cb5339f", // RTRM2
+		"dd2bc29f91f1bd68b5c946257ab6c89cf801d234ad99bc714ba5521337860b52fc47a48816f5c66ab6775c8b7a7fd0bb", // SEV-SNP
+		"7e57f9877b4533e7dcb8dd7419dfaf422f3c7cef6fd337a4eaf27ae90a751ff04945ef0d4fb6c3753285cb1f09ce048e", // RTRM1
+		"d8514ec73464b650ed3e27bc03b840c176f22790c759515422b91d89e8f36e1ffe2e41dccc4e699ae12cbbab6b1ff8f6", // RTRM2
 	})
 
 	// Check TDX equality
@@ -70,8 +72,8 @@ func TestVerifyAttestation(t *testing.T) {
 		Registers: []string{
 			"mrtd",
 			"rtmr0",
-			"10a05f3fba7d66babcc8a8143451443a564963ced77c7fa126f004857753f87c318720e29e9ed2f46c8753b44b01004d", // RTMR1
-			"fc744ecc4550ec0ea6c25deaa777bd2ed6e5feda35ac1e88a2c2b6e62584a8ad47a93526638de3b97fe45cd67cb5339f", // RTMR2
+			"7e57f9877b4533e7dcb8dd7419dfaf422f3c7cef6fd337a4eaf27ae90a751ff04945ef0d4fb6c3753285cb1f09ce048e", // RTMR1
+			"d8514ec73464b650ed3e27bc03b840c176f22790c759515422b91d89e8f36e1ffe2e41dccc4e699ae12cbbab6b1ff8f6", // RTMR2
 			"000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000", // RTMR3
 		},
 	}
@@ -81,7 +83,7 @@ func TestVerifyAttestation(t *testing.T) {
 	sevSNPMeasurement := &attestation.Measurement{
 		Type: attestation.SevGuestV2,
 		Registers: []string{
-			"442df00d945bdd2849e6df4eb28c757e9e94428787268b452eacb3f86bbc38528d6712e2c41b6953f1a96d2493d5f9b6", // SEV-SNP
+			"dd2bc29f91f1bd68b5c946257ab6c89cf801d234ad99bc714ba5521337860b52fc47a48816f5c66ab6775c8b7a7fd0bb", // SEV-SNP
 		},
 	}
 	assert.NoError(t, measurement.Equals(sevSNPMeasurement))
