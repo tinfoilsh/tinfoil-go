@@ -49,22 +49,6 @@ Re-verifying unchanged witnesses does not extend their deadline. The
 [enclave handle](../enclave/README.md#pinning-and-refresh) enforces this deadline
 for its own requests.
 
-### IGVM runtime pins
-
-For config-based verification, the verifier reads only `cvm-version` to select
-the runtime. The pin is `<version>[+gpu]@sha256:<digest>`: a full semantic
-version with an optional `v` prefix and prerelease, followed by a 64-character
-lowercase hexadecimal manifest digest. Other build metadata is rejected.
-The release tag excludes `+gpu`; the hash binds the complete manifest bytes.
-
-Each image has its own format 1 manifest, digest, and provenance subject:
-`tinfoil-inference-v0.15.0-manifest.json` or
-`tinfoil-inference-v0.15.0+gpu-manifest.json`. Both are published by the
-`v0.15.0` release workflow. The manifest version includes the suffix and must
-match the config pin. The authenticated CPU quote determines whether to compare
-that manifest's SNP or TDX measurements. The config hash binds the original
-config bytes; the verifier does not validate the workload's other fields.
-
 ### Verifying a document you already hold
 
 `verify.Verifier` appraises a document offline. It opens no connections,
