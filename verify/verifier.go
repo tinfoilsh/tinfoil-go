@@ -38,9 +38,9 @@ import (
 // It does read the clock. VerifyV3 samples it once and judges everything
 // time-bound against that instant: the freshness witnesses and approvals, and
 // the vendor certificate and CRL validity windows of the CPU evidence. The
-// same instant is reported as VerifiedAt. VerifyV3At takes that instant from
-// the caller instead. Unless freshness is explicitly ignored, the same
-// document is accepted today and rejected once its witnesses go stale.
+// same instant is reported as Metadata.VerifiedAt. VerifyV3At takes that
+// instant from the caller instead. Unless freshness is explicitly ignored, the
+// same document is accepted today and rejected once its witnesses go stale.
 type Verifier struct {
 	embedded        EmbeddedReferences
 	pinnedRegisters *measurement.Measurement
@@ -147,7 +147,7 @@ func (v *Verifier) VerifyV3(docBytes, nonce []byte, repo string) (*Verification,
 // VerifyV3At is VerifyV3 for an archived document. verificationTime replaces
 // the current time in every time-bound check: the freshness witnesses and
 // approvals, and the vendor certificate and CRL validity windows of the CPU
-// evidence. VerifiedAt reports it, and a zero verificationTime is a
+// evidence. Metadata.VerifiedAt reports it, and a zero verificationTime is a
 // UsageError.
 //
 // The caller must authenticate verificationTime independently, for example

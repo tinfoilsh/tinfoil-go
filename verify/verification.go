@@ -74,8 +74,9 @@ type Verification struct {
 type VerificationMetadata struct {
 	// Verifier identifies the SDK that performed the verification.
 	Verifier SoftwareIdentity
-	// VerifiedAt is the instant the document was appraised at, read once from
-	// the local clock. It is not a freshness guarantee.
+	// VerifiedAt is the instant the document was appraised at: read once from
+	// the local clock by VerifyV3, or the caller's verificationTime for
+	// VerifyV3At. It is not a freshness guarantee.
 	VerifiedAt time.Time
 }
 
