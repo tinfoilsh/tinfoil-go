@@ -145,7 +145,6 @@ func Run(stage string, in Input) (Output, int) {
 	quoteOpts := &quote.Options{}
 	quoteOpts.DangerousTestOnlySetRoots(rts.amd, rts.intel)
 	verifier, err := verify.NewVerifier(
-		verify.DangerousTestOnlyWithClock(func() time.Time { return appraisal }),
 		verify.DangerousTestOnlyWithSigstoreRoot(rts.sigstore),
 		verify.DangerousTestOnlyWithVendorRoots(rts.amd, rts.intel),
 	)
@@ -155,7 +154,7 @@ func Run(stage string, in Input) (Output, int) {
 
 	switch stage {
 	case StageVerify:
-		return verifyFull(doc, nonce, in.Repo, verifier)
+		return verifyFull(doc, nonce, in.Repo, verifier, appraisal)
 	case StageCheckEnvelope:
 		if _, err := document.Parse(doc, nonce); err != nil {
 			return reject(stage, "ENVELOPE_REJECTED")
@@ -214,8 +213,8 @@ func Run(stage string, in Input) (Output, int) {
 
 // verifyFull runs the whole flow through the verifier; the layer on its
 // VerificationError names the rejection.
-func verifyFull(doc, nonce []byte, repo string, verifier *verify.Verifier) (Output, int) {
-	verified, err := verifier.VerifyV3(doc, nonce, repo)
+func verifyFull(doc, nonce []byte, repo string, verifier *verify.Verifier, appraisal time.Time) (Output, int) {
+	verified, err := verifier.VerifyV3At(doc, nonce, repo, appraisal)
 	if err != nil {
 		code, exit := RejectionCode(err)
 		if exit == ExitInternal {
