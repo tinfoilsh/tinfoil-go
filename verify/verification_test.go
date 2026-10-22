@@ -84,11 +84,6 @@ func TestVerifyAppraisesCPUEvidenceAtTheVerificationInstant(t *testing.T) {
 	_, err = v.VerifyV3At(raw, nonce, "", appraisal)
 	requireRejectedAt(t, err, LayerQuote)
 	require.ErrorContains(t, err, "must be exactly", "the CRL window passed at the caller's instant")
-
-	v.now = func() time.Time { return appraisal }
-	_, err = v.VerifyV3(raw, nonce, "")
-	requireRejectedAt(t, err, LayerQuote)
-	require.ErrorContains(t, err, "must be exactly", "the CRL window passed at the verifier's instant")
 }
 
 func TestVerifyV3AtRequiresAnInstant(t *testing.T) {

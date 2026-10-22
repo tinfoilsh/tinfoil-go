@@ -46,7 +46,6 @@ type Verifier struct {
 	pinnedRegisters *measurement.Measurement
 	freshnessMaxAge time.Duration
 	ignoreFreshness bool
-	now             func() time.Time
 
 	configAuthorizer func(collateral.ConfigEndorsement) error
 
@@ -74,7 +73,6 @@ func NewVerifier(opts ...Option) (*Verifier, error) {
 	}
 	v := &Verifier{
 		freshnessMaxAge: endorsement.MaxFreshnessAge,
-		now:             time.Now,
 		endorsements:    endorsementClient,
 	}
 	for _, opt := range opts {
@@ -142,12 +140,8 @@ func (v *Verifier) PinnedRegisters() *measurement.Measurement {
 // FreshnessExpiresAt. With all references embedded, the caller owns renewal
 // and cache lifetime; zero is not a guarantee of unlimited evidence validity.
 func (v *Verifier) VerifyV3(docBytes, nonce []byte, repo string) (*Verification, error) {
-	// The only clock read. VerifyV3At rejects an unbuilt verifier.
-	var now time.Time
-	if v != nil && v.now != nil {
-		now = v.now()
-	}
-	return v.VerifyV3At(docBytes, nonce, repo, now)
+	// The only clock read.
+	return v.VerifyV3At(docBytes, nonce, repo, time.Now())
 }
 
 // VerifyV3At is VerifyV3 for an archived document. verificationTime replaces
@@ -184,7 +178,7 @@ type endorsementResult struct {
 // reported, a plain error for a rejected document or a UsageError for a
 // caller's mistake, and the layer of that stage.
 func (v *Verifier) verifyV3(docBytes, nonce []byte, repo string, now time.Time) (*Verification, Layer, error) {
-	if v == nil || v.now == nil || v.endorsements == nil || v.configVerifier == nil || v.freshnessVerifier == nil {
+	if v == nil || v.endorsements == nil || v.configVerifier == nil || v.freshnessVerifier == nil {
 		return nil, "", &UsageError{Err: fmt.Errorf("verifier must be built with NewVerifier")}
 	}
 	if now.IsZero() {
