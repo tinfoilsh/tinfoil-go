@@ -23,7 +23,7 @@ import (
 	"github.com/tinfoilsh/tinfoil-go/verify/internal/endorsement"
 )
 
-func TestConfigTrustAndIgnoreFreshnessStillRequireEndorsements(t *testing.T) {
+func TestConfigTrustRequiresEndorsements(t *testing.T) {
 	const ref = "org/project"
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	require.NoError(t, err)
@@ -32,7 +32,7 @@ func TestConfigTrustAndIgnoreFreshnessStillRequireEndorsements(t *testing.T) {
 	require.ErrorContains(t, err, "must not be empty")
 	_, err = NewVerifier(WithConfigSigningKeys(nil))
 	require.ErrorContains(t, err, "must not be empty")
-	v, err := NewVerifier(WithConfigSigningKeys(keys), WithFreshnessSigningKeys(keys), WithIgnoreFreshness())
+	v, err := NewVerifier(WithConfigSigningKeys(keys), WithFreshnessSigningKeys(keys))
 	require.NoError(t, err)
 	nonce := make([]byte, document.NonceSize)
 	raw, err := document.Build(document.BuildInput{Nonce: nonce, CollateralFormat: collateral.FormatV3}, func([64]byte) (string, []byte, error) { return document.SEVSNPReportV1Format, []byte("quote"), nil })
@@ -87,7 +87,7 @@ func TestConfigBoundFreshnessExpirationIncludesEveryApproval(t *testing.T) {
 	}
 }
 
-func TestConfiguredKeysAndIgnoredAgePreserveProofVerification(t *testing.T) {
+func TestConfiguredKeysPreserveProofVerification(t *testing.T) {
 	f := sigstoretest.New(t)
 	configKey := f.Key.Public()
 	trust, err := root.NewTrustedRoot(root.TrustedRootMediaType01, nil, nil, f.Trust.TimestampingAuthorities(), f.Trust.RekorLogs())
@@ -127,27 +127,30 @@ func TestConfiguredKeysAndIgnoredAgePreserveProofVerification(t *testing.T) {
 	require.NoError(t, err)
 	doc, err := document.Parse(raw, nonce)
 	require.NoError(t, err)
-	for _, ignore := range []bool{false, true} {
+	for _, expired := range []bool{false, true} {
 		v, err := NewVerifier(WithConfigSigningKeys([]crypto.PublicKey{configKey}), WithFreshnessSigningKeys([]crypto.PublicKey{f.Key.Public()}), func(v *Verifier) error {
-			v.endorsements, v.ignoreFreshness = client, ignore
+			v.endorsements = client
 			return nil
 		})
 		require.NoError(t, err)
-		now := f.Now.Add(endorsement.DefaultMaxAge + time.Second)
+		now := f.Now
+		if expired {
+			now = now.Add(endorsement.DefaultMaxAge + time.Second)
+		}
 		_, err = v.configReferences(doc, "org/project@v1", now)
-		if ignore {
+		if expired {
+			require.ErrorContains(t, err, "too old")
+		} else {
 			require.ErrorIs(t, err, collateral.ErrNotFound, "valid config must proceed to required runtime provenance")
 			require.ErrorContains(t, err, collateral.RuntimeID)
-		} else {
-			require.ErrorContains(t, err, "too old")
 		}
 		authenticated := &endorsement.AuthenticatedArtifact{Repo: artifact.Repo, Tag: artifact.Tag, SubjectName: artifact.Name, Digest: artifact.Digest}
 		at, err := v.authenticateArtifactFreshness(doc, collateral.FreshnessIDRuntime, artifact.Kind, authenticated, now)
-		if ignore {
+		if expired {
+			require.ErrorContains(t, err, "too old")
+		} else {
 			require.NoError(t, err)
 			require.Equal(t, f.Now, at)
-		} else {
-			require.ErrorContains(t, err, "too old")
 		}
 		_, err = v.authenticateArtifactFreshness(doc, collateral.FreshnessIDPlatform, freshness.KindPlatform, authenticated, now)
 		require.ErrorIs(t, err, collateral.ErrNotFound)

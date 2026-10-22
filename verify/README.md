@@ -70,11 +70,9 @@ independently, for example from a trusted timestamp recorded when the document
 was received: an earlier instant accepts collateral that has since expired or
 been revoked.
 
-For archived documents, `verify.WithIgnoreFreshness()` skips both freshness
-witness checks and leaves `FreshnessExpiresAt` zero. Code and platform
-provenance, CPU evidence, and certificate/collateral validity checks still apply.
-This option is only available on the core verifier; it does not authorize live
-SDK requests with expired evidence.
+The freshness checks cannot be skipped: an archived document must keep the
+freshness witnesses and approvals it carried, and `VerifyV3At` judges them at
+that instant like everything else.
 
 ```go
 import "github.com/tinfoilsh/tinfoil-go/verify"

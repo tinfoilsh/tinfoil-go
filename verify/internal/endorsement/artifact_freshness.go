@@ -12,18 +12,17 @@ import (
 )
 
 type FreshnessPolicy struct {
-	Artifact        freshness.Artifact
-	Now             time.Time
-	MaxAge          time.Duration
-	FutureSkew      time.Duration
-	IgnoreFreshness bool
+	Artifact   freshness.Artifact
+	Now        time.Time
+	MaxAge     time.Duration
+	FutureSkew time.Duration
 }
 
 func (p FreshnessPolicy) timePolicy() (timePolicy, error) {
 	if err := p.Artifact.Validate(); err != nil {
 		return timePolicy{}, err
 	}
-	return newTimePolicy(p.Now, p.MaxAge, p.FutureSkew, p.IgnoreFreshness)
+	return newTimePolicy(p.Now, p.MaxAge, p.FutureSkew)
 }
 
 type FreshnessVerified struct {

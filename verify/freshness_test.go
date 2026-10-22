@@ -40,7 +40,10 @@ func TestFreshnessExpiration(t *testing.T) {
 	}
 }
 
-func TestLiveIgnoreFreshness(t *testing.T) {
+// An archived document replays exactly at its verification time, but no
+// instant skips the freshness checks: its witnesses still expire, and missing
+// or invalid ones are still rejected.
+func TestLiveArchivedVerification(t *testing.T) {
 	const enclaveEnvVar, repoEnvVar = "TINFOIL_ENCLAVE", "TINFOIL_REPO"
 	const expiredMaxAge = time.Nanosecond
 	testutil.RequireLive(t, enclaveEnvVar, repoEnvVar)
@@ -54,10 +57,12 @@ func TestLiveIgnoreFreshness(t *testing.T) {
 	want, err := defaults.VerifyV3(raw, nonce, repo)
 	require.NoError(t, err)
 	require.False(t, want.FreshnessExpiresAt.IsZero())
-	want.FreshnessExpiresAt = time.Time{}
-	want.Metadata = VerificationMetadata{}
-	ignored, err := NewVerifier(WithFreshnessMaxAge(expiredMaxAge), WithIgnoreFreshness())
+	verifiedAt := want.Metadata.VerifiedAt
+	got, err := defaults.VerifyV3At(raw, nonce, repo, verifiedAt)
 	require.NoError(t, err)
+	require.Equal(t, want, got)
+	_, err = defaults.VerifyV3At(raw, nonce, repo, want.FreshnessExpiresAt.Add(time.Second))
+	require.ErrorContains(t, err, "stale")
 
 	changeCollateral := func(format string, remove bool) func(map[string]any) {
 		return func(doc map[string]any) {
@@ -82,13 +87,12 @@ func TestLiveIgnoreFreshness(t *testing.T) {
 		mutate    func(map[string]any)
 		maxAge    time.Duration
 		wantError string
-		accept    bool
 	}{
-		{"expired witnesses", nil, expiredMaxAge, "stale", true},
-		{"missing witnesses", changeCollateral(collateral.SigstoreFreshnessV1Format, true), 0, "code-freshness", true},
-		{"invalid witnesses", changeCollateral(collateral.SigstoreFreshnessV1Format, false), 0, "verifying code freshness", true},
-		{"invalid code provenance", changeCollateral(collateral.SigstoreCodeV1Format, false), 0, "parsing bundle", false},
-		{"invalid platform provenance", changeCollateral(collateral.SigstorePlatformV1Format, false), 0, "verifying platform endorsements", false},
+		{"expired witnesses", nil, expiredMaxAge, "stale"},
+		{"missing witnesses", changeCollateral(collateral.SigstoreFreshnessV1Format, true), 0, "code-freshness"},
+		{"invalid witnesses", changeCollateral(collateral.SigstoreFreshnessV1Format, false), 0, "verifying code freshness"},
+		{"invalid code provenance", changeCollateral(collateral.SigstoreCodeV1Format, false), 0, "parsing bundle"},
+		{"invalid platform provenance", changeCollateral(collateral.SigstorePlatformV1Format, false), 0, "verifying platform endorsements"},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			modified := raw
@@ -97,29 +101,19 @@ func TestLiveIgnoreFreshness(t *testing.T) {
 			}
 			bounded, err := NewVerifier(WithFreshnessMaxAge(tt.maxAge))
 			require.NoError(t, err)
-			_, err = bounded.VerifyV3(modified, nonce, repo)
+			_, err = bounded.VerifyV3At(modified, nonce, repo, verifiedAt)
 			require.ErrorContains(t, err, tt.wantError)
-			got, err := ignored.VerifyV3(modified, nonce, repo)
-			if !tt.accept {
-				require.ErrorContains(t, err, tt.wantError)
-				require.Nil(t, got)
-				return
-			}
-			require.NoError(t, err)
-			require.False(t, got.Metadata.VerifiedAt.IsZero())
-			got.Metadata = VerificationMetadata{}
-			require.Equal(t, want, got)
 		})
 	}
 
 	wrongNonce := slices.Clone(nonce)
 	wrongNonce[0] ^= 1
-	_, err = ignored.VerifyV3(raw, wrongNonce, repo)
+	_, err = defaults.VerifyV3At(raw, wrongNonce, repo, verifiedAt)
 	require.ErrorContains(t, err, "challenge nonce does not match")
 	modified := editDocument(t, raw, func(doc map[string]any) {
 		doc["cpu_evidence"].(map[string]any)["report_base64"] = base64.StdEncoding.EncodeToString([]byte("invalid quote"))
 	})
-	got, err := ignored.VerifyV3(modified, nonce, repo)
+	got, err = defaults.VerifyV3At(modified, nonce, repo, verifiedAt)
 	require.Error(t, err)
 	require.Nil(t, got)
 }
