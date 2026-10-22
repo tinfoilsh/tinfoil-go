@@ -60,7 +60,6 @@ type Verification struct {
 	// FreshnessExpiresAt is the earlier authenticated code/platform witness
 	// deadline. Cached verification must not authorize new requests at or
 	// after this time; re-verifying the same witness does not extend it.
-	// It is zero when WithIgnoreFreshness skips witness verification.
 	// Config verification uses the earliest nonzero config, platform, or runtime approval deadline.
 	// Embedded components add no deadline; all-embedded verification returns zero.
 	FreshnessExpiresAt time.Time

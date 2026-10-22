@@ -39,13 +39,12 @@ import (
 // time-bound against that instant: the freshness witnesses and approvals, and
 // the vendor certificate and CRL validity windows of the CPU evidence. The
 // same instant is reported as Metadata.VerifiedAt. VerifyV3At takes that
-// instant from the caller instead. Unless freshness is explicitly ignored, the
-// same document is accepted today and rejected once its witnesses go stale.
+// instant from the caller instead. So the same document is accepted today and
+// rejected once its witnesses go stale.
 type Verifier struct {
 	embedded        EmbeddedReferences
 	pinnedRegisters *measurement.Measurement
 	freshnessMaxAge time.Duration
-	ignoreFreshness bool
 
 	configAuthorizer func(collateral.ConfigEndorsement) error
 
@@ -269,10 +268,6 @@ func (v *Verifier) codeReferences(doc *document.Document, repo string, appraisal
 		},
 		artifact: artifactVerification(code.AuthenticatedArtifact, time.Time{}),
 	}
-	if v.ignoreFreshness {
-		return refs, nil
-	}
-
 	codeWitnessedAt, err := v.authenticateFreshness(doc, collateral.FreshnessIDCode, &code.AuthenticatedArtifact, appraisalTime)
 	if err != nil {
 		return nil, fmt.Errorf("verifying code freshness: %w", err)
