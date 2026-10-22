@@ -63,6 +63,13 @@ its witnesses go stale. What a
 successful verification reports does not drift, though: `FreshnessExpiresAt` is
 derived from the authenticated witness timestamps, never from the local clock.
 
+To appraise an archived document as of an earlier instant, `VerifyV3At` takes
+that instant in place of the clock for every one of those checks, and reports
+it as `Metadata.VerifiedAt`. The caller must authenticate the instant
+independently, for example from a trusted timestamp recorded when the document
+was received: an earlier instant accepts collateral that has since expired or
+been revoked.
+
 For archived documents, `verify.WithIgnoreFreshness()` skips both freshness
 witness checks and leaves `FreshnessExpiresAt` zero. Code and platform
 provenance, CPU evidence, and certificate/collateral validity checks still apply.

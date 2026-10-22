@@ -3,9 +3,6 @@
 package verify
 
 import (
-	"fmt"
-	"time"
-
 	"github.com/tinfoilsh/tinfoil-go/verify/internal/endorsement"
 	"github.com/tinfoilsh/tinfoil-go/verify/internal/quote"
 )
@@ -22,22 +19,6 @@ func (v *Verifier) quoteOptions() *quote.Options {
 	opts := &quote.Options{}
 	opts.DangerousTestOnlySetRoots(v.overrides.amdRootPEM, v.overrides.intelRootPEM)
 	return opts
-}
-
-// DangerousTestOnlyWithClock replaces the appraisal clock, so the conformance
-// harness can replay a frozen document at its capture time. VerifyV3 reads it
-// once and judges both the freshness witnesses and the CPU evidence's
-// certificate and CRL validity windows at that instant. A rewound clock
-// accepts witnesses and collateral that have since expired, which is why this
-// exists only in the conformance build.
-func DangerousTestOnlyWithClock(now func() time.Time) Option {
-	return func(v *Verifier) error {
-		if now == nil {
-			return fmt.Errorf("clock must not be nil")
-		}
-		v.now = now
-		return nil
-	}
 }
 
 // DangerousTestOnlyWithSigstoreRoot replaces the embedded Sigstore trusted

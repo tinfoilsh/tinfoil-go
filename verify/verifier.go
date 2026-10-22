@@ -38,15 +38,14 @@ import (
 // It does read the clock. VerifyV3 samples it once and judges everything
 // time-bound against that instant: the freshness witnesses and approvals, and
 // the vendor certificate and CRL validity windows of the CPU evidence. The
-// same instant is reported as VerifiedAt. Unless freshness is explicitly
-// ignored, the same document is accepted today and rejected once its
-// witnesses go stale.
+// same instant is reported as Metadata.VerifiedAt. VerifyV3At takes that
+// instant from the caller instead. Unless freshness is explicitly ignored, the
+// same document is accepted today and rejected once its witnesses go stale.
 type Verifier struct {
 	embedded        EmbeddedReferences
 	pinnedRegisters *measurement.Measurement
 	freshnessMaxAge time.Duration
 	ignoreFreshness bool
-	now             func() time.Time
 
 	configAuthorizer func(collateral.ConfigEndorsement) error
 
@@ -74,7 +73,6 @@ func NewVerifier(opts ...Option) (*Verifier, error) {
 	}
 	v := &Verifier{
 		freshnessMaxAge: endorsement.MaxFreshnessAge,
-		now:             time.Now,
 		endorsements:    endorsementClient,
 	}
 	for _, opt := range opts {
@@ -142,7 +140,22 @@ func (v *Verifier) PinnedRegisters() *measurement.Measurement {
 // FreshnessExpiresAt. With all references embedded, the caller owns renewal
 // and cache lifetime; zero is not a guarantee of unlimited evidence validity.
 func (v *Verifier) VerifyV3(docBytes, nonce []byte, repo string) (*Verification, error) {
-	verified, rejectedAt, err := v.verifyV3(docBytes, nonce, repo)
+	// The only clock read.
+	return v.VerifyV3At(docBytes, nonce, repo, time.Now())
+}
+
+// VerifyV3At is VerifyV3 for an archived document. verificationTime replaces
+// the current time in every time-bound check: the freshness witnesses and
+// approvals, and the vendor certificate and CRL validity windows of the CPU
+// evidence. Metadata.VerifiedAt reports it, and a zero verificationTime is a
+// UsageError.
+//
+// The caller must authenticate verificationTime independently, for example
+// from a trusted timestamp recorded when the document was received. An
+// earlier time accepts collateral that has since expired or been revoked, so
+// live clients use VerifyV3.
+func (v *Verifier) VerifyV3At(docBytes, nonce []byte, repo string, verificationTime time.Time) (*Verification, error) {
+	verified, rejectedAt, err := v.verifyV3(docBytes, nonce, repo, verificationTime)
 	// An error already carrying a verify type, such as the UsageError for a
 	// caller's mistake, passes through; anything else becomes a
 	// VerificationError for the layer that rejected the document.
@@ -164,9 +177,12 @@ type endorsementResult struct {
 // verifyV3 is VerifyV3 before classification: it returns the error a stage
 // reported, a plain error for a rejected document or a UsageError for a
 // caller's mistake, and the layer of that stage.
-func (v *Verifier) verifyV3(docBytes, nonce []byte, repo string) (*Verification, Layer, error) {
-	if v == nil || v.now == nil || v.endorsements == nil || v.configVerifier == nil || v.freshnessVerifier == nil {
+func (v *Verifier) verifyV3(docBytes, nonce []byte, repo string, now time.Time) (*Verification, Layer, error) {
+	if v == nil || v.endorsements == nil || v.configVerifier == nil || v.freshnessVerifier == nil {
 		return nil, "", &UsageError{Err: fmt.Errorf("verifier must be built with NewVerifier")}
+	}
+	if now.IsZero() {
+		return nil, "", &UsageError{Err: fmt.Errorf("verification time must not be zero")}
 	}
 	doc, err := document.Parse(docBytes, nonce)
 	if errors.Is(err, document.ErrInvalidInput) {
@@ -176,10 +192,7 @@ func (v *Verifier) verifyV3(docBytes, nonce []byte, repo string) (*Verification,
 		return nil, LayerEnvelope, err
 	}
 
-	// The only clock read: reference values and CPU evidence are appraised
-	// against the same instant.
-	now := v.now()
-
+	// Reference values and CPU evidence are appraised against the same instant.
 	var refs *endorsementResult
 	switch doc.CollateralFormat() {
 	case collateral.FormatV3:
