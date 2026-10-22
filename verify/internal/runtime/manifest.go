@@ -119,8 +119,8 @@ func DecodeManifest(data []byte) (*Manifest, error) {
 			return nil, err
 		}
 	case VariantFormatVersion:
-		if g.SNPLaunch != nil || g.TDXLaunch != nil || len(g.Variants) != 2 {
-			return nil, fmt.Errorf("runtime format v2 requires only CPU and GPU variants")
+		if g.SNPLaunch != nil || g.TDXLaunch != nil {
+			return nil, fmt.Errorf("runtime format v2 requires variant measurements")
 		}
 		for _, name := range []string{cvmruntime.VariantCPU, cvmruntime.VariantGPU} {
 			variant := g.Variants[name]
@@ -138,17 +138,16 @@ func DecodeManifest(data []byte) (*Manifest, error) {
 }
 
 func validateMeasurements(snp *SNPLaunch, tdx *TDXLaunch) error {
-	g := VariantMeasurements{SNPLaunch: snp, TDXLaunch: tdx}
-	if g.SNPLaunch == nil || g.TDXLaunch == nil {
+	if snp == nil || tdx == nil {
 		return fmt.Errorf("runtime manifest requires complete launch measurements")
 	}
-	if _, err := canonical.DecodeLowerHex("SNP measurement", g.SNPLaunch.Measurement, MeasurementSize); err != nil {
+	if _, err := canonical.DecodeLowerHex("SNP measurement", snp.Measurement, MeasurementSize); err != nil {
 		return err
 	}
-	if _, err := canonical.DecodeLowerHex("MRTD", g.TDXLaunch.MRTD, MeasurementSize); err != nil {
+	if _, err := canonical.DecodeLowerHex("MRTD", tdx.MRTD, MeasurementSize); err != nil {
 		return err
 	}
-	registers := g.TDXLaunch.Registers()
+	registers := tdx.Registers()
 	for _, value := range registers[1:] {
 		if value != strings.Repeat("0", MeasurementSize*2) {
 			return fmt.Errorf("runtime manifest requires zero TDX RTMRs")

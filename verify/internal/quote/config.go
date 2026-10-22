@@ -10,7 +10,7 @@ import (
 	"github.com/tinfoilsh/tinfoil-go/verify/measurement"
 )
 
-// ConfigReferenceValues prepares the runtime v1 and config-endorsement v1 contract.
+// ConfigReferenceValues prepares the config-bound runtime contract.
 type ConfigReferenceValues struct {
 	Endorsements *policy.Artifact
 	Runtime      *runtime.Measurements

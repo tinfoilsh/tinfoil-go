@@ -114,6 +114,7 @@ func TestManifestVariantSelection(t *testing.T) {
 			"gpu": {SNPLaunch: gpu.SNPLaunch, TDXLaunch: gpu.TDXLaunch},
 		},
 	}}
+	m.Measurements.Variants["initrd"] = &VariantMeasurements{}
 	data, ref := manifestBytes(t, m)
 	for selector, want := range map[string]*Measurements{"": cpu, "gpu": gpu} {
 		ref.Variant = selector
@@ -136,7 +137,6 @@ func TestManifestVariantSelection(t *testing.T) {
 	for name, mutate := range map[string]func(*Manifest){
 		"missing CPU":        func(m *Manifest) { delete(m.Measurements.Variants, "cpu") },
 		"missing GPU":        func(m *Manifest) { m.Measurements.Variants["gpu"] = nil },
-		"unknown variant":    func(m *Manifest) { m.Measurements.Variants["initrd"] = m.Measurements.Variants["cpu"] },
 		"mixed layouts":      func(m *Manifest) { m.Measurements.SNPLaunch = cpu.SNPLaunch },
 		"incomplete variant": func(m *Manifest) { m.Measurements.Variants["gpu"].TDXLaunch = nil },
 	} {
