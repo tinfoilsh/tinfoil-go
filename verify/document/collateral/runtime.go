@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"slices"
 
+	cvmruntime "github.com/tinfoilsh/tinfoil-config/runtime"
 	"github.com/tinfoilsh/tinfoil-go/internal/canonical"
 	"golang.org/x/mod/semver"
 )
@@ -18,9 +19,10 @@ const (
 )
 
 type RuntimeReference struct {
-	Repo   string `json:"repo"`
-	Tag    string `json:"tag"`
-	Digest string `json:"digest"`
+	Repo    string `json:"repo"`
+	Tag     string `json:"tag"`
+	Digest  string `json:"digest"`
+	Variant string `json:"variant,omitempty"`
 }
 
 func (r RuntimeReference) Validate() error {
@@ -29,6 +31,9 @@ func (r RuntimeReference) Validate() error {
 	}
 	if !semver.IsValid(r.Tag) || semver.Canonical(r.Tag) != r.Tag {
 		return fmt.Errorf("runtime tag must be a canonical semantic version")
+	}
+	if r.Variant != "" && r.Variant != cvmruntime.VariantGPU {
+		return fmt.Errorf("unsupported runtime variant %q", r.Variant)
 	}
 	_, err := canonical.DecodeLowerHex("runtime digest", r.Digest, sha256.Size)
 	return err

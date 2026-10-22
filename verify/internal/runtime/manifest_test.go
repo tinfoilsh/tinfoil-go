@@ -103,3 +103,50 @@ func TestConfigRuntimePin(t *testing.T) {
 		t.Run(name, func(t *testing.T) { _, err := ConfigRuntime([]byte(config)); require.Error(t, err) })
 	}
 }
+
+func TestManifestVariantSelection(t *testing.T) {
+	cpu, gpu := validManifest().Measurements, validManifest().Measurements
+	gpu.SNPLaunch.Measurement = strings.Repeat("ef", MeasurementSize)
+	gpu.TDXLaunch.MRTD = strings.Repeat("12", MeasurementSize)
+	m := Manifest{Version: "v0.15.0", Measurements: &Measurements{FormatVersion: VariantFormatVersion,
+		Variants: map[string]*VariantMeasurements{
+			"cpu": {SNPLaunch: cpu.SNPLaunch, TDXLaunch: cpu.TDXLaunch},
+			"gpu": {SNPLaunch: gpu.SNPLaunch, TDXLaunch: gpu.TDXLaunch},
+		},
+	}}
+	data, ref := manifestBytes(t, m)
+	for selector, want := range map[string]*Measurements{"": cpu, "gpu": gpu} {
+		ref.Variant = selector
+		parsed, err := ParseManifest(data, ref)
+		require.NoError(t, err)
+		selected, err := parsed.SelectVariant(selector)
+		require.NoError(t, err)
+		require.Equal(t, want.SNPLaunch, selected.SNPLaunch)
+		require.Equal(t, want.TDXLaunch, selected.TDXLaunch)
+	}
+	for _, selector := range []string{"cpu", "initrd", "GPU"} {
+		ref.Variant = selector
+		_, err := ParseManifest(data, ref)
+		require.Error(t, err)
+	}
+	legacy, legacyRef := manifestBytes(t, validManifest())
+	legacyRef.Variant = "gpu"
+	_, err := ParseManifest(legacy, legacyRef)
+	require.ErrorContains(t, err, "v1 does not support")
+	for name, mutate := range map[string]func(*Manifest){
+		"missing CPU":        func(m *Manifest) { delete(m.Measurements.Variants, "cpu") },
+		"missing GPU":        func(m *Manifest) { m.Measurements.Variants["gpu"] = nil },
+		"unknown variant":    func(m *Manifest) { m.Measurements.Variants["initrd"] = m.Measurements.Variants["cpu"] },
+		"mixed layouts":      func(m *Manifest) { m.Measurements.SNPLaunch = cpu.SNPLaunch },
+		"incomplete variant": func(m *Manifest) { m.Measurements.Variants["gpu"].TDXLaunch = nil },
+	} {
+		t.Run(name, func(t *testing.T) {
+			var invalid Manifest
+			require.NoError(t, json.Unmarshal(data, &invalid))
+			mutate(&invalid)
+			bytes, pin := manifestBytes(t, invalid)
+			_, err := ParseManifest(bytes, pin)
+			require.Error(t, err)
+		})
+	}
+}
