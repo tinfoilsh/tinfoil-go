@@ -47,6 +47,7 @@ func TestConfigPinsOneRuntimeManifest(t *testing.T) {
 		values := refs.quote.(quote.ConfigReferenceValues)
 		require.Equal(t, sha256.Sum256(inputs.Config.Bytes), values.Hash)
 		require.Equal(t, manifest.Measurements, values.Runtime)
+		require.Equal(t, "v0.15.0", refs.artifact.Tag)
 		inputs.Runtime = embeddedInputs(t).Runtime
 		if suffix != "" {
 			_, err = NewVerifier(WithEmbeddedReferences(inputs))

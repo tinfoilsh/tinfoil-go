@@ -15,18 +15,19 @@ import (
 )
 
 const (
-	StatementType    = statement.StatementType
-	PredicateType    = "https://tinfoil.sh/predicate/artifact-freshness/v1"
-	PayloadType      = statement.PayloadType
-	BundleType       = statement.BundleType
-	KindPlatform     = "platform"
-	KindRuntime      = "runtime"
-	PlatformRepo     = RuntimeRepo
-	RuntimeGPUSuffix = "+gpu"
-	RuntimeRepo      = "tinfoilsh/cvmimage"
-	PlatformName     = "platform-endorsements.json"
-	freshnessDomain  = "tinfoil-artifact-freshness/v1\x00"
+	StatementType   = statement.StatementType
+	PredicateType   = "https://tinfoil.sh/predicate/artifact-freshness/v1"
+	PayloadType     = statement.PayloadType
+	BundleType      = statement.BundleType
+	KindPlatform    = "platform"
+	KindRuntime     = "runtime"
+	PlatformRepo    = RuntimeRepo
+	RuntimeRepo     = "tinfoilsh/cvmimage"
+	PlatformName    = "platform-endorsements.json"
+	freshnessDomain = "tinfoil-artifact-freshness/v1\x00"
 )
+
+const RuntimeGPUSuffix = "+gpu"
 
 const PlatformTagPrefix = "platform-"
 
