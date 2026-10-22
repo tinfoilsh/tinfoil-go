@@ -95,6 +95,9 @@ func TestConfigRuntimePin(t *testing.T) {
 		{"0.15.0+gpu", "v0.15.0+gpu"},
 		{"v0.15.0+gpu", "v0.15.0+gpu"},
 		{"0.15.0-rc.1+gpu", "v0.15.0-rc.1+gpu"},
+		{"0.15.0+mini", "v0.15.0+mini"},
+		{"0.15.0+containers.initrd-1", "v0.15.0+containers.initrd-1"},
+		{"0.15.0+GPU", "v0.15.0+GPU"},
 	} {
 		config := []byte("cvm-version: " + test.version + "@sha256:" + digest + "\ncontainers: []\n")
 		ref, err := ConfigRuntime(config)
@@ -107,10 +110,7 @@ func TestConfigRuntimePin(t *testing.T) {
 		"duplicate":       good + good,
 		"two documents":   good + "---\n" + good,
 		"bad digest":      strings.ReplaceAll(good, digest, strings.ToUpper(digest)),
-		"build suffix":    strings.ReplaceAll(good, "0.15.0", "0.15.0+build"),
-		"CPU suffix":      strings.ReplaceAll(good, "0.15.0", "0.15.0+cpu"),
-		"uppercase GPU":   strings.ReplaceAll(good, "0.15.0", "0.15.0+GPU"),
-		"extra metadata":  strings.ReplaceAll(good, "0.15.0", "0.15.0+gpu.extra"),
+		"path metadata":   strings.ReplaceAll(good, "0.15.0", "0.15.0+mini/other"),
 		"partial version": strings.ReplaceAll(good, "0.15.0", "0.15+gpu"),
 		"empty metadata":  strings.ReplaceAll(good, "0.15.0", "0.15.0+"),
 		"double metadata": strings.ReplaceAll(good, "0.15.0", "0.15.0+gpu+gpu"),

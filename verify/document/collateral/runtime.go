@@ -5,9 +5,7 @@ import (
 	"encoding/json/jsontext"
 	"fmt"
 	"slices"
-	"strings"
 
-	"github.com/tinfoilsh/tinfoil-go/endorsement/freshness"
 	"github.com/tinfoilsh/tinfoil-go/internal/canonical"
 	"golang.org/x/mod/semver"
 )
@@ -29,8 +27,8 @@ func (r RuntimeReference) Validate() error {
 	if r.Repo != RuntimeRepo {
 		return fmt.Errorf("runtime repository must be %s", RuntimeRepo)
 	}
-	if !semver.IsValid(r.Tag) || semver.Canonical(r.Tag) != strings.TrimSuffix(r.Tag, freshness.RuntimeGPUSuffix) {
-		return fmt.Errorf("runtime tag must be a canonical semantic version")
+	if !semver.IsValid(r.Tag) || semver.Canonical(r.Tag)+semver.Build(r.Tag) != r.Tag {
+		return fmt.Errorf("runtime tag must be a full semantic version")
 	}
 	_, err := canonical.DecodeLowerHex("runtime digest", r.Digest, sha256.Size)
 	return err

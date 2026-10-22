@@ -67,12 +67,14 @@ func TestRuntimeFreshnessBindsEachManifest(t *testing.T) {
 	f := sigstoretest.New(t)
 	cpu := artifact(freshness.KindRuntime)
 	gpu := cpu
-	gpu.Name = freshness.RuntimeName(gpu.Tag + freshness.RuntimeGPUSuffix)
+	gpu.Name = freshness.RuntimeName(gpu.Tag + "+gpu")
 	gpu.Digest = strings.Repeat("cd", 32)
+	mini := gpu
+	mini.Name = freshness.RuntimeName(mini.Tag + "+mini")
 	v := verifier(t, f)
-	for _, endorsed := range []freshness.Artifact{cpu, gpu} {
+	for _, endorsed := range []freshness.Artifact{cpu, gpu, mini} {
 		bundle := sigstoretest.MarshalBundle(t, f.Bundle(t, statement(t, f, endorsed, f.Now)))
-		for _, expected := range []freshness.Artifact{cpu, gpu} {
+		for _, expected := range []freshness.Artifact{cpu, gpu, mini} {
 			got, err := v.Verify(bundle, endorsement.FreshnessPolicy{Artifact: expected, Now: f.Now})
 			if expected != endorsed {
 				require.Error(t, err)

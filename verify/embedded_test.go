@@ -27,7 +27,7 @@ const embeddedConfigName = "/org/project/v1"
 
 func TestConfigPinsOneRuntimeManifest(t *testing.T) {
 	_, _, doc := embeddedDocument(t, collateral.FormatV3)
-	for _, suffix := range []string{"", "+gpu"} {
+	for _, suffix := range []string{"", "+gpu", "+mini", "+containers.initrd-1"} {
 		inputs := embeddedInputs(t)
 		var manifest runtime.Manifest
 		require.NoError(t, json.Unmarshal(inputs.Runtime, &manifest))

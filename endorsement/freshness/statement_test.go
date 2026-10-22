@@ -46,9 +46,14 @@ func TestRuntimeManifestIdentities(t *testing.T) {
 		{"v0.15.0", "v0.15.0", true},
 		{"v0.15.0", "v0.15.0+gpu", true},
 		{"v0.15.0-rc.1", "v0.15.0-rc.1+gpu", true},
+		{"v0.15.0", "v0.15.0+mini", true},
+		{"v0.15.0", "v0.15.0+containers.initrd-1", true},
+		{"v0.15.0", "v0.15.0+GPU", true},
 		{"v0.15.0", "v0.15.1+gpu", false},
 		{"v0.15.0+gpu", "v0.15.0+gpu", false},
-		{"v0.15.0", "v0.15.0+other", false},
+		{"v0.15.0", "v0.15.0+", false},
+		{"v0.15.0", "v0.15.0+mini/other", false},
+		{"v0.15.0", "v0.15+mini", false},
 	} {
 		t.Run(tc.tag+"/"+tc.version, func(t *testing.T) {
 			artifact := Artifact{Kind: KindRuntime, Repo: RuntimeRepo, Tag: tc.tag, Name: RuntimeName(tc.version), Digest: strings.Repeat("ab", 32)}
@@ -59,6 +64,9 @@ func TestRuntimeManifestIdentities(t *testing.T) {
 			}
 			require.NoError(t, err)
 			require.Equal(t, artifact, stmt.artifact())
+			artifact.Name = "other-" + artifact.Name
+			_, err = NewStatement(artifact)
+			require.Error(t, err)
 		})
 	}
 }
