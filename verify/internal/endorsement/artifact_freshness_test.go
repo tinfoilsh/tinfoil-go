@@ -63,6 +63,27 @@ func TestVerifyArtifactApproval(t *testing.T) {
 	}
 }
 
+func TestRuntimeFreshnessBindsEachManifest(t *testing.T) {
+	f := sigstoretest.New(t)
+	cpu := artifact(freshness.KindRuntime)
+	gpu := cpu
+	gpu.Name = freshness.RuntimeName(gpu.Tag + freshness.RuntimeGPUSuffix)
+	gpu.Digest = strings.Repeat("cd", 32)
+	v := verifier(t, f)
+	for _, endorsed := range []freshness.Artifact{cpu, gpu} {
+		bundle := sigstoretest.MarshalBundle(t, f.Bundle(t, statement(t, f, endorsed, f.Now)))
+		for _, expected := range []freshness.Artifact{cpu, gpu} {
+			got, err := v.Verify(bundle, endorsement.FreshnessPolicy{Artifact: expected, Now: f.Now})
+			if expected != endorsed {
+				require.Error(t, err)
+				continue
+			}
+			require.NoError(t, err)
+			require.Equal(t, endorsed, got.Artifact)
+		}
+	}
+}
+
 func TestUninitializedVerifierReturnsError(t *testing.T) {
 	f := sigstoretest.New(t)
 	a := artifact(freshness.KindRuntime)

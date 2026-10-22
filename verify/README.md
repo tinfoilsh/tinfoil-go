@@ -57,10 +57,12 @@ version with an optional `v` prefix and prerelease, followed by a 64-character
 lowercase hexadecimal manifest digest. Other build metadata is rejected.
 The release tag excludes `+gpu`; the hash binds the complete manifest bytes.
 
-Manifest format 2 uses `igvm.variants.cpu` for an unqualified pin and
-`igvm.variants.gpu` for `+gpu`. The authenticated CPU quote determines whether
-to compare that entry's SNP or TDX measurements. Format 1 retains its single
-measurement set and rejects selectors. The config hash binds the original
+Each image has its own format 1 manifest, digest, and provenance subject:
+`tinfoil-inference-v0.15.0-manifest.json` or
+`tinfoil-inference-v0.15.0+gpu-manifest.json`. Both are published by the
+`v0.15.0` release workflow. The manifest version includes the suffix and must
+match the config pin. The authenticated CPU quote determines whether to compare
+that manifest's SNP or TDX measurements. The config hash binds the original
 config bytes; the verifier does not validate the workload's other fields.
 
 ### Verifying a document you already hold

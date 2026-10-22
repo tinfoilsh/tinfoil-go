@@ -25,23 +25,20 @@ import (
 
 const embeddedConfigName = "/org/project/v1"
 
-func TestConfigSelectsOneRuntimeVariant(t *testing.T) {
-	inputs := embeddedInputs(t)
-	var manifest runtime.Manifest
-	require.NoError(t, json.Unmarshal(inputs.Runtime, &manifest))
-	cpu := manifest.Measurements
-	gpu := &runtime.VariantMeasurements{
-		SNPLaunch: &runtime.SNPLaunch{Measurement: strings.Repeat("ef", runtime.MeasurementSize)},
-		TDXLaunch: &runtime.TDXLaunch{MRTD: strings.Repeat("12", runtime.MeasurementSize),
-			RTMR0: cpu.TDXLaunch.RTMR0, RTMR1: cpu.TDXLaunch.RTMR1, RTMR2: cpu.TDXLaunch.RTMR2, RTMR3: cpu.TDXLaunch.RTMR3},
-	}
-	manifest.Measurements = &runtime.Measurements{FormatVersion: runtime.VariantFormatVersion,
-		Variants: map[string]*runtime.VariantMeasurements{"cpu": {SNPLaunch: cpu.SNPLaunch, TDXLaunch: cpu.TDXLaunch}, "gpu": gpu}}
-	var err error
-	inputs.Runtime, err = json.Marshal(manifest)
-	require.NoError(t, err)
+func TestConfigPinsOneRuntimeManifest(t *testing.T) {
 	_, _, doc := embeddedDocument(t, collateral.FormatV3)
-	for suffix, want := range map[string]*runtime.VariantMeasurements{"": manifest.Measurements.Variants["cpu"], "+gpu": gpu} {
+	for _, suffix := range []string{"", "+gpu"} {
+		inputs := embeddedInputs(t)
+		var manifest runtime.Manifest
+		require.NoError(t, json.Unmarshal(inputs.Runtime, &manifest))
+		manifest.Version += suffix
+		if suffix != "" {
+			manifest.Measurements.SNPLaunch.Measurement = strings.Repeat("ef", runtime.MeasurementSize)
+			manifest.Measurements.TDXLaunch.MRTD = strings.Repeat("12", runtime.MeasurementSize)
+		}
+		var err error
+		inputs.Runtime, err = json.Marshal(manifest)
+		require.NoError(t, err)
 		inputs.Config.Bytes = []byte(fmt.Sprintf("cvm-version: 0.15.0%s@sha256:%x\n", suffix, sha256.Sum256(inputs.Runtime)))
 		v, err := NewVerifier(WithEmbeddedReferences(inputs))
 		require.NoError(t, err)
@@ -49,9 +46,12 @@ func TestConfigSelectsOneRuntimeVariant(t *testing.T) {
 		require.NoError(t, err)
 		values := refs.quote.(quote.ConfigReferenceValues)
 		require.Equal(t, sha256.Sum256(inputs.Config.Bytes), values.Hash)
-		require.Equal(t, want.SNPLaunch, values.Runtime.SNPLaunch)
-		require.Equal(t, want.TDXLaunch, values.Runtime.TDXLaunch)
-		require.Equal(t, "v0.15.0", refs.artifact.Tag)
+		require.Equal(t, manifest.Measurements, values.Runtime)
+		inputs.Runtime = embeddedInputs(t).Runtime
+		if suffix != "" {
+			_, err = NewVerifier(WithEmbeddedReferences(inputs))
+			require.ErrorContains(t, err, "digest pin")
+		}
 	}
 }
 

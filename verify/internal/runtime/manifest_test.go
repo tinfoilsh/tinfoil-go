@@ -88,19 +88,18 @@ func TestConfigRuntimePin(t *testing.T) {
 	for _, test := range []struct {
 		version string
 		tag     string
-		variant string
 	}{
-		{"0.15.0", "v0.15.0", ""},
-		{"v0.15.0", "v0.15.0", ""},
-		{"0.15.0-rc.1", "v0.15.0-rc.1", ""},
-		{"0.15.0+gpu", "v0.15.0", "gpu"},
-		{"v0.15.0+gpu", "v0.15.0", "gpu"},
-		{"0.15.0-rc.1+gpu", "v0.15.0-rc.1", "gpu"},
+		{"0.15.0", "v0.15.0"},
+		{"v0.15.0", "v0.15.0"},
+		{"0.15.0-rc.1", "v0.15.0-rc.1"},
+		{"0.15.0+gpu", "v0.15.0+gpu"},
+		{"v0.15.0+gpu", "v0.15.0+gpu"},
+		{"0.15.0-rc.1+gpu", "v0.15.0-rc.1+gpu"},
 	} {
 		config := []byte("cvm-version: " + test.version + "@sha256:" + digest + "\ncontainers: []\n")
 		ref, err := ConfigRuntime(config)
 		require.NoError(t, err)
-		require.Equal(t, collateral.RuntimeReference{Repo: collateral.RuntimeRepo, Tag: test.tag, Variant: test.variant, Digest: digest}, ref)
+		require.Equal(t, collateral.RuntimeReference{Repo: collateral.RuntimeRepo, Tag: test.tag, Digest: digest}, ref)
 	}
 	good := "cvm-version: 0.15.0@sha256:" + digest + "\n"
 	for name, config := range map[string]string{
@@ -123,49 +122,23 @@ func TestConfigRuntimePin(t *testing.T) {
 	}
 }
 
-func TestManifestVariantSelection(t *testing.T) {
-	cpu, gpu := validManifest().Measurements, validManifest().Measurements
-	gpu.SNPLaunch.Measurement = strings.Repeat("ef", MeasurementSize)
-	gpu.TDXLaunch.MRTD = strings.Repeat("12", MeasurementSize)
-	m := Manifest{Version: "v0.15.0", Measurements: &Measurements{FormatVersion: VariantFormatVersion,
-		Variants: map[string]*VariantMeasurements{
-			"cpu": {SNPLaunch: cpu.SNPLaunch, TDXLaunch: cpu.TDXLaunch},
-			"gpu": {SNPLaunch: gpu.SNPLaunch, TDXLaunch: gpu.TDXLaunch},
-		},
-	}}
-	m.Measurements.Variants["initrd"] = &VariantMeasurements{}
-	data, ref := manifestBytes(t, m)
-	for selector, want := range map[string]*Measurements{"": cpu, "gpu": gpu} {
-		ref.Variant = selector
-		parsed, err := ParseManifest(data, ref)
-		require.NoError(t, err)
-		selected, err := parsed.SelectVariant(selector)
-		require.NoError(t, err)
-		require.Equal(t, want.SNPLaunch, selected.SNPLaunch)
-		require.Equal(t, want.TDXLaunch, selected.TDXLaunch)
-	}
-	for _, selector := range []string{"cpu", "initrd", "GPU"} {
-		ref.Variant = selector
-		_, err := ParseManifest(data, ref)
-		require.Error(t, err)
-	}
-	legacy, legacyRef := manifestBytes(t, validManifest())
-	legacyRef.Variant = "gpu"
-	_, err := ParseManifest(legacy, legacyRef)
-	require.ErrorContains(t, err, "v1 does not support")
-	for name, mutate := range map[string]func(*Manifest){
-		"missing CPU":        func(m *Manifest) { delete(m.Measurements.Variants, "cpu") },
-		"missing GPU":        func(m *Manifest) { m.Measurements.Variants["gpu"] = nil },
-		"mixed layouts":      func(m *Manifest) { m.Measurements.SNPLaunch = cpu.SNPLaunch },
-		"incomplete variant": func(m *Manifest) { m.Measurements.Variants["gpu"].TDXLaunch = nil },
-	} {
-		t.Run(name, func(t *testing.T) {
-			var invalid Manifest
-			require.NoError(t, json.Unmarshal(data, &invalid))
-			mutate(&invalid)
-			bytes, pin := manifestBytes(t, invalid)
-			_, err := ParseManifest(bytes, pin)
-			require.Error(t, err)
-		})
-	}
+func TestRuntimeManifestsHaveIndependentPins(t *testing.T) {
+	cpuData, cpuRef := manifestBytes(t, validManifest())
+	gpu := validManifest()
+	gpu.Version += "+gpu"
+	gpu.Measurements.SNPLaunch.Measurement = strings.Repeat("ef", MeasurementSize)
+	gpu.Measurements.TDXLaunch.MRTD = strings.Repeat("12", MeasurementSize)
+	gpuData, gpuRef := manifestBytes(t, gpu)
+	gpuRef.Tag = gpu.Version
+	parsed, err := ParseManifest(gpuData, gpuRef)
+	require.NoError(t, err)
+	require.Equal(t, gpu, *parsed)
+	require.NotEqual(t, cpuRef.Digest, gpuRef.Digest)
+	_, err = ParseManifest(cpuData, gpuRef)
+	require.ErrorContains(t, err, "digest pin")
+	_, err = ParseManifest(gpuData, cpuRef)
+	require.ErrorContains(t, err, "digest pin")
+	gpuRef.Tag = cpuRef.Tag
+	_, err = ParseManifest(gpuData, gpuRef)
+	require.ErrorContains(t, err, "version")
 }

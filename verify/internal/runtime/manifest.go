@@ -7,17 +7,16 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/tinfoilsh/tinfoil-go/endorsement/freshness"
 	"github.com/tinfoilsh/tinfoil-go/internal/canonical"
 	"github.com/tinfoilsh/tinfoil-go/verify/document/collateral"
 	"golang.org/x/mod/semver"
 )
 
 const (
-	FormatVersion        = 1
-	VariantFormatVersion = 2
-	MeasurementSize      = 48
-	MaxManifestSize      = 1 << 20
-	variantCPU           = "cpu"
+	FormatVersion   = 1
+	MeasurementSize = 48
+	MaxManifestSize = 1 << 20
 )
 
 type Manifest struct {
@@ -26,15 +25,9 @@ type Manifest struct {
 }
 
 type Measurements struct {
-	FormatVersion int                             `json:"format_version"`
-	SNPLaunch     *SNPLaunch                      `json:"snp_launch"`
-	TDXLaunch     *TDXLaunch                      `json:"tdx_launch"`
-	Variants      map[string]*VariantMeasurements `json:"variants,omitempty"`
-}
-
-type VariantMeasurements struct {
-	SNPLaunch *SNPLaunch `json:"snp_launch"`
-	TDXLaunch *TDXLaunch `json:"tdx_launch"`
+	FormatVersion int        `json:"format_version"`
+	SNPLaunch     *SNPLaunch `json:"snp_launch"`
+	TDXLaunch     *TDXLaunch `json:"tdx_launch"`
 }
 
 type SNPLaunch struct {
@@ -67,31 +60,7 @@ func ParseManifest(data []byte, expected collateral.RuntimeReference) (*Manifest
 	if m.Version != expected.Tag {
 		return nil, fmt.Errorf("runtime manifest version %q does not match the config's pin %q", m.Version, expected.Tag)
 	}
-	if _, err := m.SelectVariant(expected.Variant); err != nil {
-		return nil, err
-	}
 	return m, nil
-}
-
-func (m *Manifest) SelectVariant(selector string) (*Measurements, error) {
-	if selector != "" && selector != collateral.RuntimeVariantGPU {
-		return nil, fmt.Errorf("unsupported runtime variant %q", selector)
-	}
-	if m.Measurements.FormatVersion == FormatVersion {
-		if selector != "" {
-			return nil, fmt.Errorf("runtime format v1 does not support variant selectors")
-		}
-		return m.Measurements, nil
-	}
-	variant := selector
-	if variant == "" {
-		variant = variantCPU
-	}
-	g := m.Measurements.Variants[variant]
-	if g == nil {
-		return nil, fmt.Errorf("runtime manifest is missing variant %q", variant)
-	}
-	return &Measurements{FormatVersion: VariantFormatVersion, SNPLaunch: g.SNPLaunch, TDXLaunch: g.TDXLaunch}, nil
 }
 
 // DecodeManifest checks a manifest's size and structure, without a config pin
@@ -106,55 +75,27 @@ func DecodeManifest(data []byte) (*Manifest, error) {
 	}
 	// Every config pins a canonical semantic version, so a manifest with any
 	// other version could never match one.
-	if !semver.IsValid(m.Version) || semver.Canonical(m.Version) != m.Version {
+	if !semver.IsValid(m.Version) || semver.Canonical(m.Version) != strings.TrimSuffix(m.Version, freshness.RuntimeGPUSuffix) {
 		return nil, fmt.Errorf("runtime manifest version must be a canonical semantic version")
 	}
-	if m.Measurements == nil {
+	if m.Measurements == nil || m.Measurements.FormatVersion != FormatVersion {
 		return nil, fmt.Errorf("runtime manifest format is unsupported")
 	}
 	g := m.Measurements
-	switch g.FormatVersion {
-	case FormatVersion:
-		if len(g.Variants) != 0 {
-			return nil, fmt.Errorf("runtime format v1 cannot contain variants")
-		}
-		if err := validateMeasurements(g.SNPLaunch, g.TDXLaunch); err != nil {
-			return nil, err
-		}
-	case VariantFormatVersion:
-		if g.SNPLaunch != nil || g.TDXLaunch != nil {
-			return nil, fmt.Errorf("runtime format v2 requires variant measurements")
-		}
-		for _, name := range []string{variantCPU, collateral.RuntimeVariantGPU} {
-			variant := g.Variants[name]
-			if variant == nil {
-				return nil, fmt.Errorf("runtime manifest is missing variant %q", name)
-			}
-			if err := validateMeasurements(variant.SNPLaunch, variant.TDXLaunch); err != nil {
-				return nil, fmt.Errorf("runtime variant %s: %w", name, err)
-			}
-		}
-	default:
-		return nil, fmt.Errorf("runtime manifest format is unsupported")
+	if g.SNPLaunch == nil || g.TDXLaunch == nil {
+		return nil, fmt.Errorf("runtime manifest requires complete launch measurements")
 	}
-	return &m, nil
-}
-
-func validateMeasurements(snp *SNPLaunch, tdx *TDXLaunch) error {
-	if snp == nil || tdx == nil {
-		return fmt.Errorf("runtime manifest requires complete launch measurements")
+	if _, err := canonical.DecodeLowerHex("SNP measurement", g.SNPLaunch.Measurement, MeasurementSize); err != nil {
+		return nil, err
 	}
-	if _, err := canonical.DecodeLowerHex("SNP measurement", snp.Measurement, MeasurementSize); err != nil {
-		return err
+	if _, err := canonical.DecodeLowerHex("MRTD", g.TDXLaunch.MRTD, MeasurementSize); err != nil {
+		return nil, err
 	}
-	if _, err := canonical.DecodeLowerHex("MRTD", tdx.MRTD, MeasurementSize); err != nil {
-		return err
-	}
-	registers := tdx.Registers()
+	registers := g.TDXLaunch.Registers()
 	for _, value := range registers[1:] {
 		if value != strings.Repeat("0", MeasurementSize*2) {
-			return fmt.Errorf("runtime manifest requires zero TDX RTMRs")
+			return nil, fmt.Errorf("runtime format v1 requires zero TDX RTMRs")
 		}
 	}
-	return nil
+	return &m, nil
 }

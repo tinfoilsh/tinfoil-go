@@ -84,10 +84,6 @@ func (v *Verifier) configReferences(doc *document.Document, ref string, now time
 	if err != nil {
 		return nil, err
 	}
-	measurements, err := manifest.SelectVariant(expectedRuntime.Variant)
-	if err != nil {
-		return nil, err
-	}
 	platform, platformTrust, err := v.resolvePlatform(doc, now)
 	if err != nil {
 		return nil, err
@@ -95,7 +91,7 @@ func (v *Verifier) configReferences(doc *document.Document, ref string, now time
 	result := &endorsementResult{
 		quote: quote.ConfigReferenceValues{
 			Endorsements: platform,
-			Runtime:      measurements,
+			Runtime:      manifest.Measurements,
 			Hash:         sha256.Sum256(config),
 		},
 		artifact: runtimeTrust,

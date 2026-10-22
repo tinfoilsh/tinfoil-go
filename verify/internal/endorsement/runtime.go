@@ -5,6 +5,8 @@ import (
 	"regexp"
 	"strings"
 
+	"golang.org/x/mod/semver"
+
 	"github.com/sigstore/sigstore-go/pkg/verify"
 	"github.com/tinfoilsh/tinfoil-go/verify/document/collateral"
 	"github.com/tinfoilsh/tinfoil-go/verify/internal/runtime"
@@ -26,7 +28,8 @@ func (c *Client) AuthenticateRuntime(material collateral.Runtime, expected colla
 		return nil, err
 	}
 	subject := "tinfoil-inference-" + expected.Tag + "-manifest.json"
-	identity := githubWorkflowIdentityPattern(collateral.RuntimeRepo, `release\.yml`, `refs/tags/`+regexp.QuoteMeta(expected.Tag))
+	releaseTag := semver.Canonical(expected.Tag)
+	identity := githubWorkflowIdentityPattern(collateral.RuntimeRepo, `release\.yml`, `refs/tags/`+regexp.QuoteMeta(releaseTag))
 	result, _, err := c.verifyBundleForSubject(material.Bundle, identity, expected.Digest, subject)
 	if err != nil {
 		return nil, fmt.Errorf("verifying runtime provenance: %w", err)
@@ -34,7 +37,7 @@ func (c *Client) AuthenticateRuntime(material collateral.Runtime, expected colla
 	if result.Statement.Type != inTotoStatementV1 || result.Statement.PredicateType != slsaProvenanceV1 {
 		return nil, fmt.Errorf("runtime provenance must use SLSA v1")
 	}
-	authenticated, err := authenticatedArtifact(result, expected.Repo, expected.Tag, expected.Digest, "runtime")
+	authenticated, err := authenticatedArtifact(result, expected.Repo, releaseTag, expected.Digest, "runtime")
 	if err != nil {
 		return nil, err
 	}

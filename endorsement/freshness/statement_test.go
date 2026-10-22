@@ -37,3 +37,28 @@ func TestPlatformReleaseIdentity(t *testing.T) {
 		})
 	}
 }
+
+func TestRuntimeManifestIdentities(t *testing.T) {
+	for _, tc := range []struct {
+		tag, version string
+		valid        bool
+	}{
+		{"v0.15.0", "v0.15.0", true},
+		{"v0.15.0", "v0.15.0+gpu", true},
+		{"v0.15.0-rc.1", "v0.15.0-rc.1+gpu", true},
+		{"v0.15.0", "v0.15.1+gpu", false},
+		{"v0.15.0+gpu", "v0.15.0+gpu", false},
+		{"v0.15.0", "v0.15.0+other", false},
+	} {
+		t.Run(tc.tag+"/"+tc.version, func(t *testing.T) {
+			artifact := Artifact{Kind: KindRuntime, Repo: RuntimeRepo, Tag: tc.tag, Name: RuntimeName(tc.version), Digest: strings.Repeat("ab", 32)}
+			stmt, err := NewStatement(artifact)
+			if !tc.valid {
+				require.Error(t, err)
+				return
+			}
+			require.NoError(t, err)
+			require.Equal(t, artifact, stmt.artifact())
+		})
+	}
+}
