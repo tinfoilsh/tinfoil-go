@@ -6,16 +6,16 @@ import (
 	"fmt"
 	"slices"
 
-	cvmruntime "github.com/tinfoilsh/tinfoil-config/runtime"
 	"github.com/tinfoilsh/tinfoil-go/internal/canonical"
 	"golang.org/x/mod/semver"
 )
 
 const (
-	RuntimeRepo     = "tinfoilsh/cvmimage"
-	RuntimeID       = "runtime"
-	RuntimeV1Format = "https://tinfoil.sh/collateral/igvm-runtime/v1"
-	PlatformID      = "platform"
+	RuntimeRepo       = "tinfoilsh/cvmimage"
+	RuntimeID         = "runtime"
+	RuntimeV1Format   = "https://tinfoil.sh/collateral/igvm-runtime/v1"
+	PlatformID        = "platform"
+	RuntimeVariantGPU = "gpu"
 )
 
 type RuntimeReference struct {
@@ -32,7 +32,7 @@ func (r RuntimeReference) Validate() error {
 	if !semver.IsValid(r.Tag) || semver.Canonical(r.Tag) != r.Tag {
 		return fmt.Errorf("runtime tag must be a canonical semantic version")
 	}
-	if r.Variant != "" && r.Variant != cvmruntime.VariantGPU {
+	if r.Variant != "" && r.Variant != RuntimeVariantGPU {
 		return fmt.Errorf("unsupported runtime variant %q", r.Variant)
 	}
 	_, err := canonical.DecodeLowerHex("runtime digest", r.Digest, sha256.Size)

@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"strings"
 
-	cvmruntime "github.com/tinfoilsh/tinfoil-config/runtime"
 	"github.com/tinfoilsh/tinfoil-go/internal/canonical"
 	"github.com/tinfoilsh/tinfoil-go/verify/document/collateral"
 	"golang.org/x/mod/semver"
@@ -18,6 +17,7 @@ const (
 	VariantFormatVersion = 2
 	MeasurementSize      = 48
 	MaxManifestSize      = 1 << 20
+	variantCPU           = "cpu"
 )
 
 type Manifest struct {
@@ -74,7 +74,7 @@ func ParseManifest(data []byte, expected collateral.RuntimeReference) (*Manifest
 }
 
 func (m *Manifest) SelectVariant(selector string) (*Measurements, error) {
-	if selector != "" && selector != cvmruntime.VariantGPU {
+	if selector != "" && selector != collateral.RuntimeVariantGPU {
 		return nil, fmt.Errorf("unsupported runtime variant %q", selector)
 	}
 	if m.Measurements.FormatVersion == FormatVersion {
@@ -83,7 +83,10 @@ func (m *Manifest) SelectVariant(selector string) (*Measurements, error) {
 		}
 		return m.Measurements, nil
 	}
-	variant := (cvmruntime.Reference{Variant: selector}).ImageVariant()
+	variant := selector
+	if variant == "" {
+		variant = variantCPU
+	}
 	g := m.Measurements.Variants[variant]
 	if g == nil {
 		return nil, fmt.Errorf("runtime manifest is missing variant %q", variant)
@@ -122,7 +125,7 @@ func DecodeManifest(data []byte) (*Manifest, error) {
 		if g.SNPLaunch != nil || g.TDXLaunch != nil {
 			return nil, fmt.Errorf("runtime format v2 requires variant measurements")
 		}
-		for _, name := range []string{cvmruntime.VariantCPU, cvmruntime.VariantGPU} {
+		for _, name := range []string{variantCPU, collateral.RuntimeVariantGPU} {
 			variant := g.Variants[name]
 			if variant == nil {
 				return nil, fmt.Errorf("runtime manifest is missing variant %q", name)

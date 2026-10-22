@@ -15,7 +15,6 @@ require (
 	github.com/stretchr/testify v1.11.1
 	github.com/tinfoilsh/encrypted-http-body-protocol v0.4.1
 	github.com/tinfoilsh/go-sev-guest v0.0.0-20260818055935-bec7bdb637fd
-	github.com/tinfoilsh/tinfoil-config v0.1.19-0.20261022174819-29980dfc867c
 	github.com/transparency-dev/formats v0.1.1
 	github.com/transparency-dev/merkle v0.0.2
 	golang.org/x/mod v0.41.0

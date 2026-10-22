@@ -85,11 +85,22 @@ func TestManifestRequiresCompleteSupportedMeasurements(t *testing.T) {
 
 func TestConfigRuntimePin(t *testing.T) {
 	digest := strings.Repeat("ab", sha256.Size)
-	for _, version := range []string{"0.15.0", "v0.15.0", "0.15.0-rc.1"} {
-		config := []byte("cvm-version: " + version + "@sha256:" + digest + "\ncontainers: []\n")
+	for _, test := range []struct {
+		version string
+		tag     string
+		variant string
+	}{
+		{"0.15.0", "v0.15.0", ""},
+		{"v0.15.0", "v0.15.0", ""},
+		{"0.15.0-rc.1", "v0.15.0-rc.1", ""},
+		{"0.15.0+gpu", "v0.15.0", "gpu"},
+		{"v0.15.0+gpu", "v0.15.0", "gpu"},
+		{"0.15.0-rc.1+gpu", "v0.15.0-rc.1", "gpu"},
+	} {
+		config := []byte("cvm-version: " + test.version + "@sha256:" + digest + "\ncontainers: []\n")
 		ref, err := ConfigRuntime(config)
 		require.NoError(t, err)
-		require.Equal(t, collateral.RuntimeReference{Repo: collateral.RuntimeRepo, Tag: "v" + strings.TrimPrefix(version, "v"), Digest: digest}, ref)
+		require.Equal(t, collateral.RuntimeReference{Repo: collateral.RuntimeRepo, Tag: test.tag, Variant: test.variant, Digest: digest}, ref)
 	}
 	good := "cvm-version: 0.15.0@sha256:" + digest + "\n"
 	for name, config := range map[string]string{
@@ -98,6 +109,14 @@ func TestConfigRuntimePin(t *testing.T) {
 		"two documents":   good + "---\n" + good,
 		"bad digest":      strings.ReplaceAll(good, digest, strings.ToUpper(digest)),
 		"build suffix":    strings.ReplaceAll(good, "0.15.0", "0.15.0+build"),
+		"CPU suffix":      strings.ReplaceAll(good, "0.15.0", "0.15.0+cpu"),
+		"uppercase GPU":   strings.ReplaceAll(good, "0.15.0", "0.15.0+GPU"),
+		"extra metadata":  strings.ReplaceAll(good, "0.15.0", "0.15.0+gpu.extra"),
+		"partial version": strings.ReplaceAll(good, "0.15.0", "0.15+gpu"),
+		"empty metadata":  strings.ReplaceAll(good, "0.15.0", "0.15.0+"),
+		"double metadata": strings.ReplaceAll(good, "0.15.0", "0.15.0+gpu+gpu"),
+		"short digest":    strings.ReplaceAll(good, digest, digest[:len(digest)-2]),
+		"extra digest":    strings.ReplaceAll(good, digest, digest+"@sha256:"+digest),
 		"missing version": "containers: []\n",
 	} {
 		t.Run(name, func(t *testing.T) { _, err := ConfigRuntime([]byte(config)); require.Error(t, err) })

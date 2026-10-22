@@ -4,10 +4,11 @@ import (
 	"bytes"
 	"fmt"
 	"io"
+	"strings"
 
+	"golang.org/x/mod/semver"
 	"gopkg.in/yaml.v3"
 
-	cvmruntime "github.com/tinfoilsh/tinfoil-config/runtime"
 	"github.com/tinfoilsh/tinfoil-go/verify/document/collateral"
 )
 
@@ -25,9 +26,18 @@ func ConfigRuntime(data []byte) (collateral.RuntimeReference, error) {
 	if err := decoder.Decode(&extra); err != io.EOF {
 		return collateral.RuntimeReference{}, fmt.Errorf("config must contain exactly one YAML document")
 	}
-	ref, err := cvmruntime.ParseReference(fields.Version)
-	if err != nil {
+	version, digest, found := strings.Cut(fields.Version, "@sha256:")
+	if !found {
+		return collateral.RuntimeReference{}, fmt.Errorf("cvm-version must pin a runtime manifest SHA-256 digest")
+	}
+	tag := "v" + strings.TrimPrefix(version, "v")
+	metadata := semver.Build(tag)
+	ref := collateral.RuntimeReference{
+		Repo: collateral.RuntimeRepo, Tag: strings.TrimSuffix(tag, metadata),
+		Variant: strings.TrimPrefix(metadata, "+"), Digest: digest,
+	}
+	if err := ref.Validate(); err != nil {
 		return collateral.RuntimeReference{}, err
 	}
-	return collateral.RuntimeReference{Repo: collateral.RuntimeRepo, Tag: ref.Tag, Variant: ref.Variant, Digest: ref.Digest}, nil
+	return ref, nil
 }
