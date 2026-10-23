@@ -8,13 +8,14 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/tinfoilsh/tinfoil-go/internal/verifytest"
 	"github.com/tinfoilsh/tinfoil-go/verify"
 	"github.com/tinfoilsh/tinfoil-go/verify/document"
 	"github.com/tinfoilsh/tinfoil-go/verify/measurement"
 )
 
-func sampleVerification() *verify.Verification {
-	return &verify.Verification{
+func sampleFields() verifytest.Fields {
+	return verifytest.Fields{
 		ConfigRepo:         "tinfoilsh/confidential-model-router",
 		CodeDigest:         "abc123",
 		CodeTag:            "v1.2.3",
@@ -25,11 +26,14 @@ func sampleVerification() *verify.Verification {
 			{ID: "hpke", Format: document.KeyX25519HPKEV1Format, Data: "cafebabe"},
 		},
 		FreshnessExpiresAt: time.Date(2026, 10, 3, 12, 0, 0, 0, time.UTC),
-		Metadata: verify.VerificationMetadata{
-			Verifier:   verify.SoftwareIdentity{Name: "tinfoil-go", Version: "0.15.7"},
-			VerifiedAt: time.Date(2026, 9, 26, 12, 0, 0, 0, time.UTC),
-		},
+		VerifierName:       "tinfoil-go",
+		VerifierVersion:    "0.15.7",
+		VerifiedAt:         time.Date(2026, 9, 26, 12, 0, 0, 0, time.UTC),
 	}
+}
+
+func sampleVerification() *verify.Verification {
+	return verifytest.New(sampleFields())
 }
 
 // Lifting the channel keys out of crypto_material by ID and format is the only
@@ -49,10 +53,10 @@ func TestVerificationLiftsChannelKeys(t *testing.T) {
 // A TLS-only enclave endorses no HPKE key. That has to be an absent field
 // rather than a failed mapping, or such an enclave could not be used at all.
 func TestVerificationOmitsMissingHPKE(t *testing.T) {
-	v := sampleVerification()
-	v.CryptoMaterial = v.CryptoMaterial[:1]
+	f := sampleFields()
+	f.CryptoMaterial = f.CryptoMaterial[:1]
 
-	encoded, err := encode(v)
+	encoded, err := encode(verifytest.New(f))
 	require.NoError(t, err)
 
 	var got map[string]any
@@ -71,7 +75,7 @@ func TestVerificationFormatsFreshnessDeadline(t *testing.T) {
 	require.NoError(t, json.Unmarshal([]byte(encoded), &got))
 	parsed, err := time.Parse(time.RFC3339Nano, got["freshness_expires_at"].(string))
 	require.NoError(t, err)
-	assert.True(t, parsed.Equal(sampleVerification().FreshnessExpiresAt))
+	assert.True(t, parsed.Equal(sampleVerification().FreshnessExpiresAt()))
 }
 
 // The appraisal time comes from the verification's metadata. The host and the

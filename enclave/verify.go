@@ -29,7 +29,7 @@ func validateTransportKeys(v *verify.Verification) error {
 
 // keyFormat reports an endorsed id key whose format is not format.
 func keyFormat(v *verify.Verification, id, format string) error {
-	for _, item := range v.CryptoMaterial {
+	for _, item := range v.CryptoMaterial() {
 		if item.ID == id && item.Format != format {
 			return fmt.Errorf("crypto_material item %q has format %q, want %q", id, item.Format, format)
 		}
@@ -65,5 +65,5 @@ func (s *Handle) Verify() (*verify.Verification, error) {
 	if err != nil {
 		return nil, err
 	}
-	return cloneVerification(state.Verification), nil
+	return state.Verification, nil
 }

@@ -18,6 +18,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 	ehbpidentity "github.com/tinfoilsh/encrypted-http-body-protocol/identity"
+	"github.com/tinfoilsh/tinfoil-go/internal/verifytest"
 	"github.com/tinfoilsh/tinfoil-go/verify"
 	"github.com/tinfoilsh/tinfoil-go/verify/document"
 )
@@ -27,13 +28,13 @@ type roundTripFunc func(*http.Request) (*http.Response, error)
 func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
 
 func testState(deadline time.Time, key string) *verify.Verification {
-	return &verify.Verification{
+	return verifytest.New(verifytest.Fields{
 		CodeTag: key, FreshnessExpiresAt: deadline,
 		CryptoMaterial: []document.CryptoMaterialItem{
 			{ID: document.CryptoMaterialIDTLS, Format: document.KeySPKIFPSHA256V1Format, Data: key},
 			{ID: document.CryptoMaterialIDHPKE, Format: document.KeyX25519HPKEV1Format, Data: key},
 		},
-	}
+	})
 }
 
 func testEnclaveState(deadline time.Time, key string) *enclaveState {
@@ -76,7 +77,7 @@ func TestTransportExpirationAndUnchangedWitness(t *testing.T) {
 		require.ErrorIs(t, err, io.ErrClosedPipe, "admission failure must close the request body")
 		require.Equal(t, 1, requests, "expired keys must never authorize an application request")
 		require.Equal(t, 3, verifications)
-		require.Equal(t, deadline, s.state.FreshnessExpiresAt)
+		require.Equal(t, deadline, s.state.FreshnessExpiresAt())
 	})
 }
 
@@ -95,7 +96,7 @@ func TestRefreshCoalescesRequestsAndExplicitVerify(t *testing.T) {
 				transport, err := s.NewTransport(func(verified *verify.Verification) (http.RoundTripper, error) {
 					return roundTripFunc(func(*http.Request) (*http.Response, error) {
 						requests.Add(1)
-						if verified.CryptoMaterial[0].Data != "new" {
+						if verified.CryptoMaterial()[0].Data != "new" {
 							return nil, errors.New("used old key")
 						}
 						return testResponse(), nil
@@ -217,7 +218,7 @@ func TestPreviouslyReturnedTransportsUseExplicitVerification(t *testing.T) {
 	build := func(verified *verify.Verification) (http.RoundTripper, error) {
 		return roundTripFunc(func(*http.Request) (*http.Response, error) {
 			resp := testResponse()
-			resp.Header.Set("Key", verified.CryptoMaterial[1].Data)
+			resp.Header.Set("Key", verified.CryptoMaterial()[1].Data)
 			return resp, nil
 		}), nil
 	}
@@ -227,15 +228,15 @@ func TestPreviouslyReturnedTransportsUseExplicitVerification(t *testing.T) {
 	require.NoError(t, err)
 	verified, err := s.Verify()
 	require.NoError(t, err)
-	verified.CryptoMaterial[1].Data = "caller mutation"
+	verified.CryptoMaterial()[1].Data = "caller mutation"
 	for _, transport := range []http.RoundTripper{first, second} {
 		req, _ := http.NewRequest(http.MethodGet, "https://enclave.example", nil)
 		resp, err := transport.RoundTrip(req)
 		require.NoError(t, err)
 		require.Equal(t, "new", resp.Header.Get("Key"))
 	}
-	require.Equal(t, "new", s.Verification().CryptoMaterial[1].Data)
-	require.Equal(t, "new", s.Verification().CodeTag)
+	require.Equal(t, "new", s.Verification().CryptoMaterial()[1].Data)
+	require.Equal(t, "new", s.Verification().CodeTag())
 	require.Equal(t, 2, attempts)
 }
 
@@ -269,7 +270,7 @@ func TestKeyRejectionInvalidatesWithoutReplay(t *testing.T) {
 			require.ErrorIs(t, err, mode.err)
 			require.Equal(t, mode.matches(mode.err), IsKeyRejection(err))
 			require.Equal(t, mode.matches(mode.err), s.state.rejected)
-			require.Equal(t, "old", s.Verification().CodeTag)
+			require.Equal(t, "old", s.Verification().CodeTag())
 			require.Equal(t, 1, sends)
 			require.Zero(t, refreshes)
 			if s.state.rejected {
@@ -280,7 +281,7 @@ func TestKeyRejectionInvalidatesWithoutReplay(t *testing.T) {
 				_, err = transport.RoundTrip(req)
 				require.ErrorIs(t, err, failure)
 				require.True(t, s.state.rejected)
-				require.Equal(t, "old", s.Verification().CodeTag)
+				require.Equal(t, "old", s.Verification().CodeTag())
 				require.Equal(t, 1, sends, "failed refresh must not authorize the rejected state")
 				s.verify = fetch
 				req, _ = http.NewRequest(http.MethodPost, "https://enclave.example", bytes.NewBufferString("another request"))

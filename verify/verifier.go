@@ -221,22 +221,22 @@ func (v *Verifier) verifyV3(docBytes, nonce []byte, repo string, now time.Time) 
 	}
 
 	result := &Verification{
-		ConfigRepo:         refs.artifact.Repo,
-		CodeDigest:         refs.artifact.Digest,
-		CodeTag:            refs.artifact.Tag,
-		CodeMeasurement:    assembled.CodeMeasurement,
-		Config:             refs.config,
-		Platform:           refs.platform,
-		EnclaveMeasurement: authenticated.Measurement,
-		CryptoMaterial:     doc.CryptoMaterialItems(),
-		FreshnessExpiresAt: refs.freshnessExpiresAt,
-		Metadata: VerificationMetadata{
+		configRepo:         refs.artifact.Repo,
+		codeDigest:         refs.artifact.Digest,
+		codeTag:            refs.artifact.Tag,
+		codeMeasurement:    assembled.CodeMeasurement,
+		config:             refs.config,
+		platform:           refs.platform,
+		enclaveMeasurement: authenticated.Measurement,
+		cryptoMaterial:     doc.CryptoMaterialItems(),
+		freshnessExpiresAt: refs.freshnessExpiresAt,
+		metadata: VerificationMetadata{
 			Verifier:   SoftwareIdentity{Name: sdkinfo.Name, Version: sdkinfo.Version()},
 			VerifiedAt: now.UTC(),
 		},
 	}
 	if refs.config != nil {
-		result.Runtime = &refs.artifact
+		result.runtime = &refs.artifact
 	}
 	return result, "", nil
 }

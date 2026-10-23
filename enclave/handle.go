@@ -176,14 +176,14 @@ func (s *Handle) Repo() string {
 	return s.repo
 }
 
-// Verification returns a copy of the last verified enclave state.
+// Verification returns the last verification, or nil before the first.
 func (s *Handle) Verification() *verify.Verification {
 	s.stateMu.RLock()
 	defer s.stateMu.RUnlock()
 	if s.state == nil {
 		return nil
 	}
-	return cloneVerification(s.state.Verification)
+	return s.state.Verification
 }
 
 // HTTPClient returns an HTTP client that only accepts TLS connections to the verified enclave

@@ -4,13 +4,14 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	"github.com/tinfoilsh/tinfoil-go/internal/verifytest"
 	"github.com/tinfoilsh/tinfoil-go/verify"
 )
 
 func TestGatewayVerificationsNameReplicaHosts(t *testing.T) {
 	seal := &sealTransport{}
 	for _, host := range []string{"b.example", "a.example"} {
-		verified := &verify.Verification{ConfigRepo: "tinfoilsh/model"}
+		verified := verifytest.New(verifytest.Fields{ConfigRepo: "tinfoilsh/model"})
 		seal.enclaves.Store(replica{host: host, ref: "tinfoilsh/model"}, &verifiedReplicaTransport{
 			verification: func() *verify.Verification { return verified },
 		})

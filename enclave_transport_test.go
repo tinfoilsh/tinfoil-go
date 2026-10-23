@@ -18,6 +18,7 @@ import (
 	ehbpidentity "github.com/tinfoilsh/encrypted-http-body-protocol/identity"
 	"github.com/tinfoilsh/tinfoil-go/enclave"
 	"github.com/tinfoilsh/tinfoil-go/internal/testutil"
+	"github.com/tinfoilsh/tinfoil-go/internal/verifytest"
 	"github.com/tinfoilsh/tinfoil-go/verify"
 	"github.com/tinfoilsh/tinfoil-go/verify/document"
 )
@@ -149,7 +150,7 @@ func TestEHBPClientPreservesAdmissionAndProxyHeader(t *testing.T) {
 	// Every transport rebuilt after re-verification, here for a rotated key,
 	// keeps routing to the client's enclave.
 	for _, key := range []string{strings.Repeat("01", 32), strings.Repeat("02", 32)} {
-		transport, err := rebuild(&verify.Verification{CryptoMaterial: []document.CryptoMaterialItem{{ID: document.CryptoMaterialIDHPKE, Format: document.KeyX25519HPKEV1Format, Data: key}}})
+		transport, err := rebuild(verifytest.New(verifytest.Fields{CryptoMaterial: []document.CryptoMaterialItem{{ID: document.CryptoMaterialIDHPKE, Format: document.KeyX25519HPKEV1Format, Data: key}}}))
 		require.NoError(t, err)
 		req, err := http.NewRequest(http.MethodGet, proxy.URL, nil)
 		require.NoError(t, err)

@@ -237,9 +237,9 @@ func verifyFull(doc, nonce []byte, repo string, verifier *verify.Verifier, appra
 		return reject(StageVerify, "ENVELOPE_REJECTED")
 	}
 	return Output{Stage: StageVerify, Accepted: true, Outputs: &AcceptOutputs{
-		CodeDigest:         verified.CodeDigest,
-		CodeMeasurement:    ExpectedOf(verified.CodeMeasurement),
-		EnclaveMeasurement: MeasurementOf(verified.EnclaveMeasurement),
+		CodeDigest:         verified.CodeDigest(),
+		CodeMeasurement:    ExpectedOf(verified.CodeMeasurement()),
+		EnclaveMeasurement: MeasurementOf(verified.EnclaveMeasurement()),
 		TLSPublicKeyFP:     tlsFP,
 		HPKEPublicKey:      hpke,
 	}}, ExitAccepted

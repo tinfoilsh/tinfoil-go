@@ -56,12 +56,12 @@ func TestLiveArchivedVerification(t *testing.T) {
 	require.NoError(t, err)
 	want, err := defaults.VerifyV3(raw, nonce, repo)
 	require.NoError(t, err)
-	require.False(t, want.FreshnessExpiresAt.IsZero())
-	verifiedAt := want.Metadata.VerifiedAt
+	require.False(t, want.FreshnessExpiresAt().IsZero())
+	verifiedAt := want.Metadata().VerifiedAt
 	got, err := defaults.VerifyV3At(raw, nonce, repo, verifiedAt)
 	require.NoError(t, err)
 	require.Equal(t, want, got)
-	_, err = defaults.VerifyV3At(raw, nonce, repo, want.FreshnessExpiresAt.Add(time.Second))
+	_, err = defaults.VerifyV3At(raw, nonce, repo, want.FreshnessExpiresAt().Add(time.Second))
 	require.ErrorContains(t, err, "stale")
 
 	changeCollateral := func(format string, remove bool) func(map[string]any) {
@@ -178,8 +178,8 @@ func TestLiveFreshnessWitnessExpiration(t *testing.T) {
 		_, err = provClient.AuthenticateFreshness(witness.Bundle, artifact, loggedAt.Add(7*24*time.Hour+time.Nanosecond), 0)
 		require.ErrorContains(t, err, "stale")
 		expiresAt := loggedAt.Add(endorsement.MaxFreshnessAge)
-		require.False(t, verified.FreshnessExpiresAt.After(expiresAt), "%s witness expires before public deadline", id)
-		matched = matched || verified.FreshnessExpiresAt.Equal(expiresAt)
+		require.False(t, verified.FreshnessExpiresAt().After(expiresAt), "%s witness expires before public deadline", id)
+		matched = matched || verified.FreshnessExpiresAt().Equal(expiresAt)
 	}
 	require.True(t, matched, "public deadline must equal one of the authenticated witness expirations")
 }

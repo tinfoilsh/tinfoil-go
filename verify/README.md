@@ -65,7 +65,7 @@ derived from the authenticated witness timestamps, never from the local clock.
 
 To appraise an archived document as of an earlier instant, `VerifyV3At` takes
 that instant in place of the clock for every one of those checks, and reports
-it as `Metadata.VerifiedAt`. The caller must authenticate the instant
+it as `Metadata().VerifiedAt`. The caller must authenticate the instant
 independently, for example from a trusted timestamp recorded when the document
 was received: an earlier instant accepts collateral that has since expired or
 been revoked.
@@ -90,7 +90,11 @@ if err != nil {
 The nonce and the repository reference are caller-owned expectations; the
 document cannot supply either. After success, bind service traffic to the
 returned TLS/HPKE material and stop authorizing new requests at
-`FreshnessExpiresAt`.
+`FreshnessExpiresAt()`. The returned `Verification` is immutable: its
+accessors return copies, so it is safe to share. Only verification creates
+one, so a `Verification` that holds data always came from `VerifyV3` or
+`VerifyV3At`. To test code that takes one, verify a captured document with
+`VerifyV3At` at its capture time.
 
 [`enclave.Handle`](../enclave/README.md) adds fetching, caching and
 transport binding on top.
@@ -128,7 +132,7 @@ defaults to seven days.
 `measurement.ParseExpectedTDX` and `ParseExpectedSEVSNP` build pins from hex,
 taking the registers in order and `""` for one left unpinned. To require
 exactly what an earlier verification measured, pin
-`verified.EnclaveMeasurement.Expected()`.
+`verified.EnclaveMeasurement().Expected()`.
 
 `verify.NewVerifier` takes functional options:
 

@@ -75,20 +75,21 @@ type cryptoMaterialJSON struct {
 // endorsed key is left empty rather than failing: the document is verified
 // either way, and a caller that needs a channel key checks for it.
 func toVerificationJSON(v *verify.Verification) verificationJSON {
+	items := v.CryptoMaterial()
 	out := verificationJSON{
 		SchemaVersion:      VerificationSchemaVersion,
-		ConfigRepo:         v.ConfigRepo,
-		CodeDigest:         v.CodeDigest,
-		CodeTag:            v.CodeTag,
-		CodeMeasurement:    toExpectedJSON(v.CodeMeasurement),
-		EnclaveMeasurement: toMeasurementJSON(v.EnclaveMeasurement),
-		CryptoMaterial:     make([]cryptoMaterialJSON, 0, len(v.CryptoMaterial)),
-		FreshnessExpiresAt: v.FreshnessExpiresAt.UTC().Format(time.RFC3339Nano),
-		VerifiedAt:         v.Metadata.VerifiedAt.UTC().Format(time.RFC3339Nano),
+		ConfigRepo:         v.ConfigRepo(),
+		CodeDigest:         v.CodeDigest(),
+		CodeTag:            v.CodeTag(),
+		CodeMeasurement:    toExpectedJSON(v.CodeMeasurement()),
+		EnclaveMeasurement: toMeasurementJSON(v.EnclaveMeasurement()),
+		CryptoMaterial:     make([]cryptoMaterialJSON, 0, len(items)),
+		FreshnessExpiresAt: v.FreshnessExpiresAt().UTC().Format(time.RFC3339Nano),
+		VerifiedAt:         v.Metadata().VerifiedAt.UTC().Format(time.RFC3339Nano),
 	}
 	out.TLSPublicKeyFP, _ = v.CryptoMaterialData(document.CryptoMaterialIDTLS, document.KeySPKIFPSHA256V1Format)
 	out.HPKEPublicKey, _ = v.CryptoMaterialData(document.CryptoMaterialIDHPKE, document.KeyX25519HPKEV1Format)
-	for _, item := range v.CryptoMaterial {
+	for _, item := range items {
 		out.CryptoMaterial = append(out.CryptoMaterial, cryptoMaterialJSON{ID: item.ID, Format: item.Format, Data: item.Data})
 	}
 	return out

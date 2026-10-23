@@ -18,8 +18,10 @@ import (
 	"github.com/tinfoilsh/tinfoil-go/internal/fetch"
 	"github.com/tinfoilsh/tinfoil-go/internal/sdkinfo"
 	"github.com/tinfoilsh/tinfoil-go/internal/testutil"
+	"github.com/tinfoilsh/tinfoil-go/internal/verifyhook"
 	"github.com/tinfoilsh/tinfoil-go/verify/document"
 	"github.com/tinfoilsh/tinfoil-go/verify/document/collateral"
+	"github.com/tinfoilsh/tinfoil-go/verify/measurement"
 )
 
 func TestLiveVerificationRecordsRepoAndMetadata(t *testing.T) {
@@ -39,16 +41,16 @@ func TestLiveVerificationRecordsRepoAndMetadata(t *testing.T) {
 	verified, err := verifier.VerifyV3(raw, nonce, repo)
 	after := time.Now()
 	require.NoError(t, err)
-	require.Equal(t, configRepo, verified.ConfigRepo)
-	require.Equal(t, SoftwareIdentity{Name: sdkinfo.Name, Version: sdkinfo.Version()}, verified.Metadata.Verifier)
-	require.Equal(t, time.UTC, verified.Metadata.VerifiedAt.Location())
-	require.WithinRange(t, verified.Metadata.VerifiedAt, before, after)
+	require.Equal(t, configRepo, verified.ConfigRepo())
+	require.Equal(t, SoftwareIdentity{Name: sdkinfo.Name, Version: sdkinfo.Version()}, verified.Metadata().Verifier)
+	require.Equal(t, time.UTC, verified.Metadata().VerifiedAt.Location())
+	require.WithinRange(t, verified.Metadata().VerifiedAt, before, after)
 
 	// A tag pin selects the release but is not part of the repository name.
-	require.NotEmpty(t, verified.CodeTag)
-	pinned, err := verifier.VerifyV3(raw, nonce, configRepo+"@"+verified.CodeTag)
+	require.NotEmpty(t, verified.CodeTag())
+	pinned, err := verifier.VerifyV3(raw, nonce, configRepo+"@"+verified.CodeTag())
 	require.NoError(t, err)
-	require.Equal(t, configRepo, pinned.ConfigRepo)
+	require.Equal(t, configRepo, pinned.ConfigRepo())
 }
 
 // VerifyV3 reads its clock once and the CPU evidence layer appraises vendor
@@ -98,4 +100,39 @@ func TestVerifyV3AtRequiresAnInstant(t *testing.T) {
 	_, err = unbuilt.VerifyV3(raw, nonce, "")
 	require.ErrorAs(t, err, new(*UsageError))
 	require.ErrorContains(t, err, "verifier must be built with NewVerifier")
+}
+
+// Accessors hand out copies, so a caller cannot change a Verification that
+// another holder, such as a Handle's cache, still uses.
+func TestVerificationAccessorsReturnCopies(t *testing.T) {
+	register := measurement.Register{0xab}
+	v := &Verification{
+		codeMeasurement: measurement.ExpectedTDX{RTMR1: &register},
+		cryptoMaterial:  []document.CryptoMaterialItem{{ID: "tls", Data: "key"}},
+	}
+	*v.CodeMeasurement().(measurement.ExpectedTDX).RTMR1 = measurement.Register{0xcd}
+	v.CryptoMaterial()[0].Data = "changed"
+	require.Equal(t, measurement.Register{0xab}, *v.codeMeasurement.(measurement.ExpectedTDX).RTMR1)
+	require.Equal(t, "key", v.cryptoMaterial[0].Data)
+
+	_, ok := v.Config()
+	require.False(t, ok, "code-release verification has no config")
+	_, ok = v.Runtime()
+	require.False(t, ok)
+	_, ok = v.Platform()
+	require.False(t, ok)
+}
+
+// The test constructor copies its inputs like the accessors do.
+func TestTestConstructorCopiesInputs(t *testing.T) {
+	register := measurement.Register{0xab}
+	items := []document.CryptoMaterialItem{{ID: "tls", Data: "key"}}
+	v := verifyhook.NewVerification(verifyhook.Fields{
+		CodeMeasurement: measurement.ExpectedTDX{RTMR1: &register},
+		CryptoMaterial:  items,
+	}).(*Verification)
+	register[0] = 0xcd
+	items[0].Data = "changed"
+	require.Equal(t, measurement.Register{0xab}, *v.CodeMeasurement().(measurement.ExpectedTDX).RTMR1)
+	require.Equal(t, "key", v.CryptoMaterial()[0].Data)
 }

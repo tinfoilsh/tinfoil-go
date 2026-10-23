@@ -29,7 +29,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	fmt.Printf("code %s@%s (sha256:%s)\n", verified.ConfigRepo, verified.CodeTag, verified.CodeDigest)
-	fmt.Printf("fresh until %s\n", verified.FreshnessExpiresAt)
-	fmt.Println(verified.EnclaveMeasurement)
+	fmt.Printf("code %s@%s (sha256:%s)\n", verified.ConfigRepo(), verified.CodeTag(), verified.CodeDigest())
+	fmt.Printf("fresh until %s\n", verified.FreshnessExpiresAt())
+	fmt.Println(verified.EnclaveMeasurement())
 }

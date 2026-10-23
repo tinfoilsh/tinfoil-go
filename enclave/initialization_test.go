@@ -72,7 +72,7 @@ func TestInitializationRecovery(t *testing.T) {
 				require.Equal(t, time.Duration(attempts-1)*time.Second, time.Since(start))
 				if attempts == 2 && tc.last == nil {
 					require.NoError(t, err)
-					require.Equal(t, "fresh", verified.CodeTag)
+					require.Equal(t, "fresh", verified.CodeTag())
 				} else {
 					require.ErrorIs(t, err, firstCause)
 					if tc.last != nil {
