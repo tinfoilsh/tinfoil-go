@@ -87,3 +87,12 @@ func TestNewClientWithOptionsRequiresEnclaveForCustomRepo(t *testing.T) {
 		require.ErrorContains(t, err, "requires an enclave")
 	}
 }
+
+func TestExplicitEnclaveDefaultsToRegistryTrust(t *testing.T) {
+	cfg := clientConfig{}
+	require.Equal(t, "tinfoilsh/confidential-model-router", cfg.configReference())
+	WithEnclave("private.example.com")(&cfg)
+	require.Empty(t, cfg.configReference())
+	WithRepo("acme/project")(&cfg)
+	require.Equal(t, "acme/project", cfg.configReference())
+}

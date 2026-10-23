@@ -5,11 +5,14 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/sigstore/sigstore-go/pkg/root"
 	configendorsement "github.com/tinfoilsh/tinfoil-go/endorsement/config"
+	"github.com/tinfoilsh/tinfoil-go/endorsement/scope"
 	"github.com/tinfoilsh/tinfoil-go/internal/statement"
+	"github.com/tinfoilsh/tinfoil-go/verify/document/collateral"
 )
 
 // ConfigPolicy pins the identity and supplies the client's clock and freshness rules.
@@ -22,6 +25,7 @@ type ConfigPolicy struct {
 	Now        time.Time
 	MaxAge     time.Duration
 	FutureSkew time.Duration
+	Scope      scope.Pins
 }
 
 type ConfigVerified struct {
@@ -31,10 +35,13 @@ type ConfigVerified struct {
 	SigningKeyHint string
 	ApprovalTime   time.Time
 	Runtime        *configendorsement.RuntimeReference
+	Scope          scope.Identity
+	ScopeExpiresAt time.Time
 }
 
 type ConfigVerifier struct {
 	cryptographic *endorsementVerifier
+	scopes        *ScopeVerifier
 }
 
 // NewConfigVerifier builds an offline verifier. The supplied roots authenticate TSA
@@ -49,18 +56,20 @@ func NewConfigVerifier(trust root.TrustedMaterial, keys []crypto.PublicKey) (*Co
 
 // ValidatePins checks config expectations independently of clock and freshness settings.
 func (p ConfigPolicy) ValidatePins() error {
-	if err := configendorsement.ValidateIdentity(p.Identity); err != nil {
-		return err
+	if p.Identity != "" {
+		if err := configendorsement.ValidateIdentity(p.Identity); err != nil {
+			return err
+		}
 	}
 	if p.Revision != "" {
-		if _, _, err := configendorsement.ParseName(p.Identity + "/" + p.Revision); err != nil {
+		if err := configendorsement.ValidateRevision(p.Revision); err != nil {
 			return err
 		}
 	}
 	if p.Digest != "" && !sha256DigestRE.MatchString(p.Digest) {
 		return fmt.Errorf("digest pin must be lowercase SHA-256")
 	}
-	return nil
+	return p.Scope.Validate()
 }
 
 func (p ConfigPolicy) timePolicy() (timePolicy, error) {
@@ -76,14 +85,21 @@ func (v *ConfigVerifier) Verify(config, bundleJSON []byte, policy ConfigPolicy) 
 	if len(config) == 0 || len(config) > configendorsement.MaxConfigSize {
 		return nil, fmt.Errorf("config size is outside allowed bounds")
 	}
-	return v.verify(config, bundleJSON, policy)
+	return v.verify(config, bundleJSON, nil, policy)
 }
 
 func (v *ConfigVerifier) VerifyDigest(bundleJSON []byte, policy ConfigPolicy) (*ConfigVerified, error) {
-	return v.verify(nil, bundleJSON, policy)
+	return v.verify(nil, bundleJSON, nil, policy)
 }
 
-func (v *ConfigVerifier) verify(config, bundleJSON []byte, policy ConfigPolicy) (*ConfigVerified, error) {
+func (v *ConfigVerifier) VerifyScoped(bundleJSON []byte, certificate collateral.ScopeCertificate, policy ConfigPolicy) (*ConfigVerified, error) {
+	if v.scopes == nil {
+		return nil, fmt.Errorf("registry scope trust is not configured")
+	}
+	return v.verify(nil, bundleJSON, &certificate, policy)
+}
+
+func (v *ConfigVerifier) verify(config, bundleJSON []byte, certificate *collateral.ScopeCertificate, policy ConfigPolicy) (*ConfigVerified, error) {
 	timePolicy, err := policy.timePolicy()
 	if err != nil {
 		return nil, err
@@ -101,7 +117,7 @@ func (v *ConfigVerifier) verify(config, bundleJSON []byte, policy ConfigPolicy) 
 	if err != nil {
 		return nil, err
 	}
-	if identity != policy.Identity || (policy.Revision != "" && revision != policy.Revision) {
+	if (policy.Identity != "" && identity != policy.Identity) || (policy.Revision != "" && revision != policy.Revision) {
 		return nil, fmt.Errorf("config endorsement does not match the pinned identity or revision")
 	}
 	hexDigest := s.Subject[0].Digest[statement.DigestAlgorithm]
@@ -131,8 +147,24 @@ func (v *ConfigVerifier) verify(config, bundleJSON []byte, policy ConfigPolicy) 
 	if err != nil {
 		return nil, err
 	}
-	hint, err := v.cryptographic.Verify(b, digest)
+	cryptographic := v.cryptographic
+	authority := ScopeVerified{Identity: scope.Identity{Namespace: strings.Split(identity, "/")[1]}}
+	if certificate != nil {
+		verified, err := v.scopes.Verify(*certificate, s.Subject[0].Name, policy.Now)
+		if err != nil {
+			return nil, err
+		}
+		authority = *verified
+		cryptographic, err = newEndorsementVerifier(v.cryptographic.trust, []crypto.PublicKey{authority.PublicKey})
+		if err != nil {
+			return nil, err
+		}
+	}
+	hint, err := cryptographic.Verify(b, digest)
 	if err != nil {
+		return nil, err
+	}
+	if err := policy.Scope.Match(authority.Identity, hint); err != nil {
 		return nil, err
 	}
 	input, err := s.TimestampInput()
@@ -143,13 +175,33 @@ func (v *ConfigVerifier) verify(config, bundleJSON []byte, policy ConfigPolicy) 
 	if err != nil {
 		return nil, fmt.Errorf("inner timestamp: %w", err)
 	}
+	if certificate != nil && (inner.Before(authority.ValidFrom) || inner.After(authority.ExpiresAt)) {
+		return nil, fmt.Errorf("config approval falls outside scope authorization")
+	}
 	return &ConfigVerified{
 		Name: s.Subject[0].Name, Digest: hexDigest,
 		Reference: statement.EndorsementReference(payload), SigningKeyHint: hint, ApprovalTime: inner,
 		Runtime: s.Predicate.Runtime,
+		Scope:   authority.Identity, ScopeExpiresAt: authority.ExpiresAt,
 	}, nil
 }
 
 func (c *Client) ConfigVerifier(keys []crypto.PublicKey) (*ConfigVerifier, error) {
 	return NewConfigVerifier(c.trustRoot, keys)
+}
+
+func (c *Client) RegistryVerifier(keys, rootKeys []crypto.PublicKey) (*ConfigVerifier, error) {
+	return NewRegistryVerifier(c.trustRoot, keys, rootKeys)
+}
+
+func NewRegistryVerifier(trust root.TrustedMaterial, keys, rootKeys []crypto.PublicKey) (*ConfigVerifier, error) {
+	v, err := NewConfigVerifier(trust, keys)
+	if err != nil {
+		return nil, err
+	}
+	v.scopes, err = NewScopeVerifier(trust, rootKeys)
+	if err != nil {
+		return nil, err
+	}
+	return v, nil
 }

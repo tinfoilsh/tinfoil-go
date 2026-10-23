@@ -22,17 +22,28 @@ type clientConfig struct {
 	openaiOpts         []option.RequestOption
 }
 
+func (c clientConfig) configReference() string {
+	if c.repo == "" && c.enclave == "" && c.verification.EmbeddedConfig == nil && c.verification.ConfigAuthorizer == nil {
+		return defaultConfigRepo
+	}
+	return c.repo
+}
+
 // ClientOption configures a Client created with NewClientWithOptions.
 type ClientOption func(*clientConfig)
 
 // WithEnclave sets the enclave host to verify and connect to. When unset, a
 // router is selected automatically.
+// An explicit enclave accepts Tinfoil-authorized registry scopes by default;
+// use WithRepo or verification pins to restrict the accepted workload.
 func WithEnclave(enclave string) ClientOption {
 	return func(c *clientConfig) { c.enclave = enclave }
 }
 
 // WithRepo sets the trusted repository reference, owner/name[@tag][@sha256:digest].
 // A reference other than the default repository requires WithEnclave.
+// Without WithRepo, an explicit enclave has no repository pin; automatic router
+// selection pins tinfoilsh/confidential-model-router.
 func WithRepo(repo string) ClientOption {
 	return func(c *clientConfig) { c.repo = repo }
 }

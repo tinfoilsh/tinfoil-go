@@ -60,8 +60,8 @@ func TestPublicInputErrors(t *testing.T) {
 	require.ErrorAs(t, err, &usage)
 	_, err = verifier.VerifyV3(nil, nil, "org/repo")
 	require.ErrorAs(t, err, &usage)
-	_, err = enclave.NewHandle("enclave.example", "", nil)
-	require.ErrorAs(t, err, &config, "reject missing trust configuration before fetching")
+	_, err = enclave.NewHandle("", "", nil)
+	require.ErrorAs(t, err, &config, "reject a missing enclave before fetching")
 	for _, repo := range []string{"owner", "owner/repo/extra", "owner/repo@sha256:bad"} {
 		_, err = enclave.NewHandle("enclave.example", repo, nil)
 		require.ErrorAs(t, err, &config)

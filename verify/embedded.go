@@ -77,5 +77,5 @@ func WithEmbeddedReferences(refs EmbeddedReferences) Option {
 }
 
 func (v *Verifier) requiresConfigCollateral() bool {
-	return v.embedded.Config != nil || v.embedded.Runtime != nil || v.embedded.Platform != nil || v.configKeys != nil || v.freshnessKeys != nil || v.configAuthorizer != nil
+	return v.embedded.Config != nil || v.embedded.Runtime != nil || v.embedded.Platform != nil || v.configKeys != nil || v.freshnessKeys != nil || v.configAuthorizer != nil || v.configPins != (ConfigPins{})
 }

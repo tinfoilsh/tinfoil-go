@@ -118,17 +118,22 @@ func validateEndorsementBundle(b *bundle.Bundle) error {
 	if sigs[0].GetKeyid() != "" && sigs[0].GetKeyid() != vm.GetPublicKey().GetHint() {
 		return fmt.Errorf("DSSE key ID disagrees with key hint")
 	}
+	return validateLogMaterial(b)
+}
+
+func validateLogMaterial(b *bundle.Bundle) error {
+	vm := b.GetVerificationMaterial()
 	entries := vm.GetTlogEntries()
 	if len(entries) == 0 || len(entries) > maxLogReceipts {
-		return fmt.Errorf("approval requires bounded Rekor inclusion evidence")
+		return fmt.Errorf("signed bundle requires bounded Rekor inclusion evidence")
 	}
 	for _, entry := range entries {
 		if entry.GetKindVersion().GetKind() != "hashedrekord" || entry.GetKindVersion().GetVersion() != "0.0.2" || entry.GetIntegratedTime() != 0 || entry.GetInclusionProof() == nil || entry.GetInclusionPromise() != nil {
-			return fmt.Errorf("approval requires Rekor v2 inclusion proofs")
+			return fmt.Errorf("signed bundle requires Rekor v2 inclusion proofs")
 		}
 	}
 	if len(vm.GetTimestampVerificationData().GetRfc3161Timestamps()) != 0 {
-		return fmt.Errorf("approval uses only its signed approval timestamp")
+		return fmt.Errorf("signed bundle cannot contain observer timestamps")
 	}
 	return nil
 }
