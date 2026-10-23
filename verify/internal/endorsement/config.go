@@ -30,6 +30,7 @@ type ConfigVerified struct {
 	Reference      string
 	SigningKeyHint string
 	ApprovalTime   time.Time
+	Runtime        *configendorsement.RuntimeReference
 }
 
 type ConfigVerifier struct {
@@ -72,12 +73,20 @@ func (p ConfigPolicy) timePolicy() (timePolicy, error) {
 // Verify authenticates exact config bytes, approval identity, signing authority,
 // an independent approval timestamp, and Rekor v2 inclusion. It never accesses a network.
 func (v *ConfigVerifier) Verify(config, bundleJSON []byte, policy ConfigPolicy) (*ConfigVerified, error) {
+	if len(config) == 0 || len(config) > configendorsement.MaxConfigSize {
+		return nil, fmt.Errorf("config size is outside allowed bounds")
+	}
+	return v.verify(config, bundleJSON, policy)
+}
+
+func (v *ConfigVerifier) VerifyDigest(bundleJSON []byte, policy ConfigPolicy) (*ConfigVerified, error) {
+	return v.verify(nil, bundleJSON, policy)
+}
+
+func (v *ConfigVerifier) verify(config, bundleJSON []byte, policy ConfigPolicy) (*ConfigVerified, error) {
 	timePolicy, err := policy.timePolicy()
 	if err != nil {
 		return nil, err
-	}
-	if len(config) == 0 || len(config) > configendorsement.MaxConfigSize {
-		return nil, fmt.Errorf("config size is outside allowed bounds")
 	}
 	b, err := parseEndorsementBundle(bundleJSON)
 	if err != nil {
@@ -95,12 +104,34 @@ func (v *ConfigVerifier) Verify(config, bundleJSON []byte, policy ConfigPolicy) 
 	if identity != policy.Identity || (policy.Revision != "" && revision != policy.Revision) {
 		return nil, fmt.Errorf("config endorsement does not match the pinned identity or revision")
 	}
-	digest := sha256.Sum256(config)
-	hexDigest := hex.EncodeToString(digest[:])
-	if s.Subject[0].Digest[statement.DigestAlgorithm] != hexDigest || (policy.Digest != "" && policy.Digest != hexDigest) {
-		return nil, fmt.Errorf("config bytes do not match the endorsed or pinned digest")
+	hexDigest := s.Subject[0].Digest[statement.DigestAlgorithm]
+	if policy.Digest != "" && policy.Digest != hexDigest {
+		return nil, fmt.Errorf("config endorsement does not match the pinned digest")
 	}
-	hint, err := v.cryptographic.Verify(b, digest[:])
+	if config == nil {
+		if s.PredicateType != configendorsement.PredicateTypeV2 {
+			return nil, fmt.Errorf("digest verification requires a v2 config endorsement")
+		}
+	} else {
+		digest := sha256.Sum256(config)
+		if hex.EncodeToString(digest[:]) != hexDigest {
+			return nil, fmt.Errorf("config bytes do not match the endorsed digest")
+		}
+		if s.Predicate.Runtime != nil {
+			runtime, err := configendorsement.RuntimeFromConfig(config)
+			if err != nil {
+				return nil, err
+			}
+			if runtime != *s.Predicate.Runtime {
+				return nil, fmt.Errorf("config runtime does not match the endorsed runtime")
+			}
+		}
+	}
+	digest, err := hex.DecodeString(hexDigest)
+	if err != nil {
+		return nil, err
+	}
+	hint, err := v.cryptographic.Verify(b, digest)
 	if err != nil {
 		return nil, err
 	}
@@ -115,6 +146,7 @@ func (v *ConfigVerifier) Verify(config, bundleJSON []byte, policy ConfigPolicy) 
 	return &ConfigVerified{
 		Name: s.Subject[0].Name, Digest: hexDigest,
 		Reference: statement.EndorsementReference(payload), SigningKeyHint: hint, ApprovalTime: inner,
+		Runtime: s.Predicate.Runtime,
 	}, nil
 }
 

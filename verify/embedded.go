@@ -44,7 +44,7 @@ func WithEmbeddedReferences(refs EmbeddedReferences) Option {
 					return err
 				}
 			}
-			expected, err := runtime.ConfigRuntime(refs.Config.Bytes)
+			expected, err := configendorsement.RuntimeFromConfig(refs.Config.Bytes)
 			if err != nil {
 				return err
 			}
