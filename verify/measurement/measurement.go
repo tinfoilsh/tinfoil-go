@@ -19,14 +19,12 @@ type Register [RegisterSize]byte
 // ParseRegister decodes a register from hex in either case.
 func ParseRegister(s string) (Register, error) {
 	var r Register
-	decoded, err := hex.DecodeString(s)
-	if err != nil {
-		return r, fmt.Errorf("register is not hex: %w", err)
+	if len(s) != 2*RegisterSize {
+		return r, fmt.Errorf("register must be %d hex characters, got %d", 2*RegisterSize, len(s))
 	}
-	if len(decoded) != RegisterSize {
-		return r, fmt.Errorf("register must be %d bytes, got %d", RegisterSize, len(decoded))
+	if _, err := hex.Decode(r[:], []byte(s)); err != nil {
+		return Register{}, fmt.Errorf("register is not hex: %w", err)
 	}
-	copy(r[:], decoded)
 	return r, nil
 }
 

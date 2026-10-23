@@ -19,15 +19,18 @@ func TestParseRegister(t *testing.T) {
 	}
 	assert.Equal(t, lower, want.String(), "the text form is lowercase")
 
-	for name, input := range map[string]string{
-		"not hex":   strings.Repeat("zz", RegisterSize),
-		"too short": strings.Repeat("ab", RegisterSize-1),
-		"too long":  strings.Repeat("ab", RegisterSize+1),
-		"empty":     "",
+	// The length is checked before decoding, so an oversized input is rejected
+	// without being decoded.
+	for name, tc := range map[string]struct{ input, err string }{
+		"not hex":          {strings.Repeat("zz", RegisterSize), "not hex"},
+		"too short":        {strings.Repeat("ab", RegisterSize-1), "96 hex characters"},
+		"too long":         {strings.Repeat("ab", RegisterSize+1), "96 hex characters"},
+		"too long, no hex": {strings.Repeat("zz", RegisterSize+1), "96 hex characters"},
+		"empty":            {"", "96 hex characters"},
 	} {
 		t.Run(name, func(t *testing.T) {
-			_, err := ParseRegister(input)
-			assert.Error(t, err)
+			_, err := ParseRegister(tc.input)
+			assert.ErrorContains(t, err, tc.err)
 		})
 	}
 }
