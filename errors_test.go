@@ -86,9 +86,14 @@ func TestPublicInputErrors(t *testing.T) {
 }
 
 func TestMalformedPinsAreConfigurationErrors(t *testing.T) {
-	// Registers are parsed when pins are built, so a nil pointer is the only
+	// Registers are parsed when pins are built, so a pointer is the only
 	// malformed pin the API can express.
-	for _, pins := range []measurement.Expected{(*measurement.ExpectedSEVSNP)(nil), (*measurement.ExpectedTDX)(nil)} {
+	register := measurement.Register{0xab}
+	for _, pins := range []measurement.Expected{
+		(*measurement.ExpectedSEVSNP)(nil),
+		(*measurement.ExpectedTDX)(nil),
+		&measurement.ExpectedTDX{RTMR3: &register},
+	} {
 		opts := &enclave.Options{PinnedRegisters: pins}
 		_, err := enclave.NewHandle("enclave.example", "org/repo", opts)
 		var config *tinfoil.ConfigurationError
@@ -99,13 +104,11 @@ func TestMalformedPinsAreConfigurationErrors(t *testing.T) {
 		var usage *verify.UsageError
 		require.ErrorAs(t, err, &usage)
 	}
-	register := measurement.Register{0xab}
 	for _, pins := range []measurement.Expected{
 		measurement.ExpectedSEVSNP{Launch: &register},
 		measurement.ExpectedTDX{RTMR3: &register},
-		&measurement.ExpectedTDX{RTMR3: &register},
 	} {
 		_, err := enclave.NewHandle("enclave.example", "org/repo", &enclave.Options{PinnedRegisters: pins})
-		require.NoError(t, err, "sparse and pointer pins remain supported")
+		require.NoError(t, err, "sparse pins remain supported")
 	}
 }

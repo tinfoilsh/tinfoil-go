@@ -14,20 +14,14 @@ type Option func(*Verifier) error
 // WithPinnedRegisters adds register checks. Each non-nil register in pins must
 // match the enclave: it fills a register the release leaves open, and must
 // equal one the release fixes. Pins for one platform reject every enclave on
-// the other. pins is copied, so later changes by the caller have no effect.
+// the other. pins must be a value, not a pointer, and is copied, so later
+// changes by the caller have no effect.
 func WithPinnedRegisters(pins measurement.Expected) Option {
 	return func(v *Verifier) error {
-		switch p := pins.(type) {
-		case *measurement.ExpectedSEVSNP:
-			if p == nil {
-				return fmt.Errorf("pinned registers must not be a nil pointer")
-			}
-			pins = *p
-		case *measurement.ExpectedTDX:
-			if p == nil {
-				return fmt.Errorf("pinned registers must not be a nil pointer")
-			}
-			pins = *p
+		switch pins.(type) {
+		case nil, measurement.ExpectedSEVSNP, measurement.ExpectedTDX:
+		default:
+			return fmt.Errorf("pinned registers must be a measurement.ExpectedSEVSNP or measurement.ExpectedTDX value, not %T", pins)
 		}
 		if pins != nil {
 			pins = pins.Clone()

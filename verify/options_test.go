@@ -58,14 +58,13 @@ func TestWithPinnedRegistersCopies(t *testing.T) {
 	assert.Equal(t, register, *v.PinnedRegisters().(measurement.ExpectedTDX).RTMR3)
 }
 
-// Malformed registers cannot be constructed, so the only invalid pins are a
-// nil pointer. A non-nil pointer is accepted and stored as a value.
-func TestWithPinnedRegistersAcceptsPointers(t *testing.T) {
+// Pins are values. A pointer, nil or not, satisfies measurement.Expected but
+// is a usage error.
+func TestWithPinnedRegistersRejectsPointers(t *testing.T) {
 	register := measurement.Register{0xab}
-	v, err := NewVerifier(WithPinnedRegisters(&measurement.ExpectedTDX{RTMR3: &register}))
-	require.NoError(t, err)
-	assert.IsType(t, measurement.ExpectedTDX{}, v.PinnedRegisters())
 	for name, pins := range map[string]measurement.Expected{
+		"SEV-SNP":     &measurement.ExpectedSEVSNP{Launch: &register},
+		"TDX":         &measurement.ExpectedTDX{RTMR3: &register},
 		"nil SEV-SNP": (*measurement.ExpectedSEVSNP)(nil),
 		"nil TDX":     (*measurement.ExpectedTDX)(nil),
 	} {
@@ -73,6 +72,7 @@ func TestWithPinnedRegistersAcceptsPointers(t *testing.T) {
 			v, err := NewVerifier(WithPinnedRegisters(pins))
 			require.Nil(t, v)
 			require.ErrorAs(t, err, new(*UsageError))
+			require.ErrorContains(t, err, "value, not *measurement.Expected")
 		})
 	}
 }
