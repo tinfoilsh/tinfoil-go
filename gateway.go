@@ -106,12 +106,12 @@ func (g *Gateway) HTTPClient() *http.Client {
 // GatewayVerification holds a replica's last successful verification.
 type GatewayVerification struct {
 	// Host is the replica the verification is for.
-	Host string `json:"host"`
+	Host string
 	// Request model names, not attested identities.
-	Models       []string             `json:"models"`
-	Reference    string               `json:"reference"`
-	PinnedModel  string               `json:"pinned_model,omitempty"`
-	Verification *verify.Verification `json:"verification"`
+	Models       []string
+	Reference    string
+	PinnedModel  string
+	Verification *verify.Verification
 }
 
 // Verifications returns cached results without re-verifying them.

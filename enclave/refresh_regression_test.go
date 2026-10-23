@@ -23,12 +23,12 @@ func TestTransportDiscardsSnapshotRefreshedDuringBuild(t *testing.T) {
 		go func() {
 			var err error
 			transport, err = s.NewTransport(func(verified *verify.Verification) (http.RoundTripper, error) {
-				built = append(built, verified.CodeTag)
-				if verified.CodeTag == "old" {
+				built = append(built, verified.CodeTag())
+				if verified.CodeTag() == "old" {
 					<-release
 				}
 				return roundTripFunc(func(*http.Request) (*http.Response, error) {
-					sent = append(sent, verified.CodeTag)
+					sent = append(sent, verified.CodeTag())
 					return testResponse(), nil
 				}), nil
 			}, nil)
@@ -67,7 +67,7 @@ func TestRefreshPublishesVerificationAndTransportTogether(t *testing.T) {
 				}}
 				release := make(chan struct{})
 				transport, err := s.NewTransport(func(verified *verify.Verification) (http.RoundTripper, error) {
-					if verified.CodeTag == "new" {
+					if verified.CodeTag() == "new" {
 						<-release
 						if buildErr != nil {
 							return nil, buildErr
@@ -75,7 +75,7 @@ func TestRefreshPublishesVerificationAndTransportTogether(t *testing.T) {
 					}
 					return roundTripFunc(func(*http.Request) (*http.Response, error) {
 						response := testResponse()
-						response.Header.Set("Key", verified.CodeTag)
+						response.Header.Set("Key", verified.CodeTag())
 						return response, nil
 					}), nil
 				}, nil)
@@ -83,7 +83,7 @@ func TestRefreshPublishesVerificationAndTransportTogether(t *testing.T) {
 				finished := make(chan error, 1)
 				go func() { _, err := s.Verify(); finished <- err }()
 				synctest.Wait()
-				require.Equal(t, "old", s.Verification().CodeTag)
+				require.Equal(t, "old", s.Verification().CodeTag())
 				req, _ := http.NewRequest(http.MethodGet, "https://enclave.example", nil)
 				resp, err := transport.RoundTrip(req)
 				require.NoError(t, err)
@@ -94,7 +94,7 @@ func TestRefreshPublishesVerificationAndTransportTogether(t *testing.T) {
 				if buildErr != nil {
 					expected = "old"
 				}
-				require.Equal(t, expected, s.Verification().CodeTag)
+				require.Equal(t, expected, s.Verification().CodeTag())
 				resp, err = transport.RoundTrip(req)
 				require.NoError(t, err)
 				require.Equal(t, expected, resp.Header.Get("Key"))
@@ -126,7 +126,7 @@ func TestRefreshRejectsExpiryBeforeTransportConstruction(t *testing.T) {
 	_, err = s.Verify()
 	require.ErrorIs(t, err, errFreshnessExpired)
 	require.Equal(t, 1, builds)
-	require.Equal(t, "old", s.Verification().CodeTag)
+	require.Equal(t, "old", s.Verification().CodeTag())
 }
 
 func TestLateRejectionDoesNotInvalidateReplacement(t *testing.T) {
@@ -139,7 +139,7 @@ func TestLateRejectionDoesNotInvalidateReplacement(t *testing.T) {
 		release := make(chan struct{})
 		transport, err := s.NewTransport(func(verified *verify.Verification) (http.RoundTripper, error) {
 			return roundTripFunc(func(*http.Request) (*http.Response, error) {
-				if verified.CodeTag == "old" {
+				if verified.CodeTag() == "old" {
 					<-release
 					return nil, errCertMismatch
 				}
@@ -159,7 +159,7 @@ func TestLateRejectionDoesNotInvalidateReplacement(t *testing.T) {
 		close(release)
 		require.ErrorIs(t, <-finished, errCertMismatch)
 		require.False(t, s.state.rejected)
-		require.Equal(t, "new", s.Verification().CodeTag)
+		require.Equal(t, "new", s.Verification().CodeTag())
 		require.Equal(t, 1, verifications)
 	})
 }

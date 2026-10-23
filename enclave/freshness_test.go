@@ -77,14 +77,14 @@ func TestLiveVerifyFreshnessExpiration(t *testing.T) {
 	require.NoError(t, err)
 	const maxAge = 30 * 24 * time.Hour
 	for _, age := range []time.Duration{0, maxAge} {
-		opts := Options{FreshnessMaxAge: age, PinnedRegisters: exactPins(verified.EnclaveMeasurement, nil)}
+		opts := Options{FreshnessMaxAge: age, PinnedRegisters: exactPins(verified.EnclaveMeasurement(), nil)}
 		custom, err := verifyDocument(raw, nonce, repo, &opts)
 		require.NoError(t, err)
-		require.Equal(t, verified.FreshnessExpiresAt.Add(cmp.Or(age, defaultMaxAge)-defaultMaxAge), custom.FreshnessExpiresAt)
+		require.Equal(t, verified.FreshnessExpiresAt().Add(cmp.Or(age, defaultMaxAge)-defaultMaxAge), custom.FreshnessExpiresAt())
 	}
 	bad := measurement.Register{0xab}
-	badPins := exactPins(verified.EnclaveMeasurement, &bad)
-	require.NotEqual(t, exactPins(verified.EnclaveMeasurement, nil), badPins)
+	badPins := exactPins(verified.EnclaveMeasurement(), &bad)
+	require.NotEqual(t, exactPins(verified.EnclaveMeasurement(), nil), badPins)
 	_, err = verifyDocument(raw, nonce, repo, &Options{PinnedRegisters: badPins})
 	var rejected *verify.VerificationError
 	require.ErrorAs(t, err, &rejected)

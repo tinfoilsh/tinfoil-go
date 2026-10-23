@@ -75,7 +75,7 @@ func (s *Handle) refresh(call *verificationCall, retries int) {
 	var err, firstErr error
 	for attempt := 0; ; attempt++ {
 		verified, err = fetch()
-		if err == nil && !time.Now().Before(verified.FreshnessExpiresAt) {
+		if err == nil && !time.Now().Before(verified.FreshnessExpiresAt()) {
 			err = &AttestationError{Err: errFreshnessExpired}
 		}
 		if attempt == retries || !retryableVerification(err) {
@@ -96,7 +96,7 @@ func (s *Handle) refresh(call *verificationCall, retries int) {
 		}
 	}
 	s.stateMu.Lock()
-	if err == nil && !time.Now().Before(state.FreshnessExpiresAt) {
+	if err == nil && !time.Now().Before(state.FreshnessExpiresAt()) {
 		err = &AttestationError{Err: errFreshnessExpired}
 	}
 	if err != nil && firstErr != nil {
@@ -124,7 +124,7 @@ func (state *enclaveState) closeIdleConnections() {
 }
 
 func (state *enclaveState) valid() bool {
-	return !state.rejected && time.Now().Before(state.FreshnessExpiresAt)
+	return !state.rejected && time.Now().Before(state.FreshnessExpiresAt())
 }
 
 func (s *Handle) invalidate(state *enclaveState) {

@@ -10,7 +10,7 @@ import (
 func TestCryptoMaterialData(t *testing.T) {
 	const futureFormat = "https://example.com/key/future/v1"
 	v := &Verification{
-		CryptoMaterial: []document.CryptoMaterialItem{
+		cryptoMaterial: []document.CryptoMaterialItem{
 			{ID: "tls", Format: document.KeySPKIFPSHA256V1Format, Data: "aabb"},
 			{ID: "workload", Format: futureFormat, Data: "010203"},
 		},

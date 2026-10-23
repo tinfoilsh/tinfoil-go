@@ -94,7 +94,7 @@ func TestLivePinsForTheOtherPlatformReject(t *testing.T) {
 	require.NoError(t, err)
 
 	var own, other measurement.Expected
-	switch m := verified.EnclaveMeasurement.(type) {
+	switch m := verified.EnclaveMeasurement().(type) {
 	case measurement.SEVSNP:
 		own, other = measurement.ExpectedSEVSNP{Launch: &m.Launch}, measurement.ExpectedTDX{MRTD: &m.Launch}
 	case measurement.TDX:

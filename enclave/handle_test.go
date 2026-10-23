@@ -105,33 +105,6 @@ func TestLiveVerify(t *testing.T) {
 	assert.NoError(t, err)
 }
 
-func TestClientVerificationCopies(t *testing.T) {
-	register := measurement.Register{0xab}
-	sample := func() *verify.Verification {
-		code := register
-		return &verify.Verification{
-			CodeDigest:         "feabcd",
-			CryptoMaterial:     testState(time.Time{}, "key").CryptoMaterial,
-			CodeMeasurement:    measurement.ExpectedTDX{RTMR1: &code},
-			EnclaveMeasurement: measurement.TDX{RTMR1: register},
-			Config:             &verify.ConfigVerification{Source: verify.SourceEndorsement, Name: "/org/project/v1"},
-			Runtime:            &verify.ArtifactVerification{Source: verify.SourceEndorsement, Digest: "runtime digest"},
-			Platform:           &verify.ArtifactVerification{Source: verify.SourceEndorsement, Digest: "platform digest"},
-		}
-	}
-	client := &Handle{
-		state: &enclaveState{Verification: sample()},
-	}
-
-	view := client.Verification()
-	*view.CodeMeasurement.(measurement.ExpectedTDX).RTMR1 = measurement.Register{0xcd}
-	view.CryptoMaterial[0].Data = "changed"
-	view.Config.Source = verify.SourceEmbedded
-	view.Runtime.Digest = "changed"
-	view.Platform.Digest = "changed"
-	assert.Equal(t, sample(), client.Verification(), "returned measurements must not alias cached verification")
-}
-
 func TestLiveNewDefaultHandle(t *testing.T) {
 	testutil.RequireLive(t)
 	client, err := NewDefaultHandle(nil)

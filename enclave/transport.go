@@ -82,7 +82,7 @@ type clientTransport struct {
 }
 
 func (t *clientTransport) buildTransport(verified *verify.Verification) (http.RoundTripper, error) {
-	transport, err := t.build(cloneVerification(verified))
+	transport, err := t.build(detached(verified))
 	if transport == nil && err == nil {
 		err = fmt.Errorf("transport builder returned nil")
 	}

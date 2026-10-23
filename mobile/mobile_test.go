@@ -121,8 +121,8 @@ func TestNewVerifierRejectsMalformedPins(t *testing.T) {
 // a caller that re-verifies at FreshnessExpiresAt cannot loop on it.
 func TestCheckFreshRejectsExpired(t *testing.T) {
 	verified := sampleVerification()
-	require.NoError(t, checkFresh(verified, verified.FreshnessExpiresAt.Add(-time.Second)))
-	err := checkFresh(verified, verified.FreshnessExpiresAt)
+	require.NoError(t, checkFresh(verified, verified.FreshnessExpiresAt().Add(-time.Second)))
+	err := checkFresh(verified, verified.FreshnessExpiresAt())
 	require.Error(t, err)
 	assert.True(t, strings.HasPrefix(toMobileError(err).Error(), VerificationErrorPrefix+"provenance: "), err.Error())
 }

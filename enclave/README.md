@@ -56,7 +56,7 @@ import (
 // repinnedHandle requires the enclave to measure exactly what an earlier
 // verification of it did.
 func repinnedHandle(earlier *verify.Verification) (*enclave.Handle, error) {
-	opts := enclave.Options{PinnedRegisters: earlier.EnclaveMeasurement.Expected()}
+	opts := enclave.Options{PinnedRegisters: earlier.EnclaveMeasurement().Expected()}
 	return enclave.NewHandle("enclave.example.com", "org/repo", &opts)
 }
 ```

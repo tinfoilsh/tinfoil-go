@@ -29,7 +29,7 @@ func validateTransportKeys(v *verify.Verification) error {
 
 // keyFormat reports an endorsed id key whose format is not format.
 func keyFormat(v *verify.Verification, id, format string) error {
-	for _, item := range v.CryptoMaterial {
+	for _, item := range v.CryptoMaterial() {
 		if item.ID == id && item.Format != format {
 			return fmt.Errorf("crypto_material item %q has format %q, want %q", id, item.Format, format)
 		}
@@ -65,5 +65,17 @@ func (s *Handle) Verify() (*verify.Verification, error) {
 	if err != nil {
 		return nil, err
 	}
-	return cloneVerification(state.Verification), nil
+	return detached(state.Verification), nil
+}
+
+// detached returns a copy of v for a caller to keep. Its fields cannot be
+// changed, but a caller holding a pointer can replace the whole value, so the
+// handle never hands out the one it caches. The copy shares v's internals,
+// which only copying accessors can reach.
+func detached(v *verify.Verification) *verify.Verification {
+	if v == nil {
+		return nil
+	}
+	c := *v
+	return &c
 }
