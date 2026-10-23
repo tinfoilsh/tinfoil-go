@@ -48,6 +48,9 @@ func (r *Register) UnmarshalText(text []byte) error {
 // only this package implements it, and a new platform adds a type here.
 type Measurement interface {
 	fmt.Stringer
+	// Expected returns expectations that pin every register of the
+	// measurement: an ExpectedSEVSNP or ExpectedTDX.
+	Expected() Expected
 	isMeasurement()
 }
 
@@ -63,6 +66,14 @@ type TDX struct {
 
 func (SEVSNP) isMeasurement() {}
 func (TDX) isMeasurement()    {}
+
+func (m SEVSNP) Expected() Expected {
+	return ExpectedSEVSNP{Launch: new(m.Launch)}
+}
+
+func (m TDX) Expected() Expected {
+	return ExpectedTDX{MRTD: new(m.MRTD), RTMR0: new(m.RTMR0), RTMR1: new(m.RTMR1), RTMR2: new(m.RTMR2), RTMR3: new(m.RTMR3)}
+}
 
 func (m SEVSNP) String() string {
 	return format("SEV-SNP", []string{"Launch"}, []*Register{&m.Launch})
@@ -95,6 +106,42 @@ type ExpectedTDX struct {
 
 func (ExpectedSEVSNP) isExpected() {}
 func (ExpectedTDX) isExpected()    {}
+
+// ParseExpectedSEVSNP parses the launch measurement from hex in either case.
+// An empty string leaves it unconstrained.
+func ParseExpectedSEVSNP(launch string) (ExpectedSEVSNP, error) {
+	register, err := parseExpected("Launch", launch)
+	if err != nil {
+		return ExpectedSEVSNP{}, err
+	}
+	return ExpectedSEVSNP{Launch: register}, nil
+}
+
+// ParseExpectedTDX parses each register from hex in either case. An empty
+// string leaves that register unconstrained.
+func ParseExpectedTDX(mrtd, rtmr0, rtmr1, rtmr2, rtmr3 string) (ExpectedTDX, error) {
+	var registers [5]*Register
+	for i, value := range [5]string{mrtd, rtmr0, rtmr1, rtmr2, rtmr3} {
+		register, err := parseExpected(tdxLabels[i], value)
+		if err != nil {
+			return ExpectedTDX{}, err
+		}
+		registers[i] = register
+	}
+	return ExpectedTDX{MRTD: registers[0], RTMR0: registers[1], RTMR1: registers[2], RTMR2: registers[3], RTMR3: registers[4]}, nil
+}
+
+// parseExpected parses one register, or returns nil for "".
+func parseExpected(label, value string) (*Register, error) {
+	if value == "" {
+		return nil, nil
+	}
+	register, err := ParseRegister(value)
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", label, err)
+	}
+	return &register, nil
+}
 
 func (e ExpectedSEVSNP) Clone() Expected {
 	return ExpectedSEVSNP{Launch: cloneRegister(e.Launch)}

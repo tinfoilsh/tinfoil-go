@@ -51,6 +51,36 @@ func TestRegisterTextRoundTrip(t *testing.T) {
 	assert.Error(t, json.Unmarshal([]byte(`{"RTMR3":"zz"}`), &decoded))
 }
 
+func TestParseExpected(t *testing.T) {
+	tdx := TDX{MRTD: Register{1}, RTMR0: Register{2}, RTMR1: Register{3}, RTMR2: Register{4}, RTMR3: Register{5}}
+	all, err := ParseExpectedTDX(tdx.MRTD.String(), tdx.RTMR0.String(), tdx.RTMR1.String(), tdx.RTMR2.String(), tdx.RTMR3.String())
+	require.NoError(t, err)
+	assert.Equal(t, tdx.Expected(), all, "arguments are in register order")
+	sparse, err := ParseExpectedTDX("", "", "", "", strings.ToUpper(tdx.RTMR3.String()))
+	require.NoError(t, err)
+	assert.Equal(t, ExpectedTDX{RTMR3: &tdx.RTMR3}, sparse, `"" leaves a register unconstrained`)
+
+	sev := SEVSNP{Launch: Register{1}}
+	launch, err := ParseExpectedSEVSNP(sev.Launch.String())
+	require.NoError(t, err)
+	assert.Equal(t, sev.Expected(), launch)
+	unpinned, err := ParseExpectedSEVSNP("")
+	require.NoError(t, err)
+	assert.Equal(t, ExpectedSEVSNP{}, unpinned)
+
+	_, err = ParseExpectedTDX("", "", "", "abcd", "")
+	assert.ErrorContains(t, err, "RTMR2: register must be 96 hex characters")
+	_, err = ParseExpectedSEVSNP(strings.Repeat("zz", RegisterSize))
+	assert.ErrorContains(t, err, "Launch: register is not hex")
+}
+
+func TestExpectedPinsEveryRegister(t *testing.T) {
+	tdx := TDX{MRTD: Register{1}, RTMR0: Register{2}, RTMR1: Register{3}, RTMR2: Register{4}, RTMR3: Register{5}}
+	assert.Equal(t, ExpectedTDX{MRTD: &tdx.MRTD, RTMR0: &tdx.RTMR0, RTMR1: &tdx.RTMR1, RTMR2: &tdx.RTMR2, RTMR3: &tdx.RTMR3}, tdx.Expected())
+	sev := SEVSNP{Launch: Register{1}}
+	assert.Equal(t, ExpectedSEVSNP{Launch: &sev.Launch}, sev.Expected())
+}
+
 func TestString(t *testing.T) {
 	register := Register{0xab}
 	assert.Equal(t, "SEV-SNP\nLaunch "+register.String(), SEVSNP{Launch: register}.String())

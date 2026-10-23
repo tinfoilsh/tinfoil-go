@@ -128,30 +128,25 @@ func (j *measurementJSON) expected() (measurement.Expected, error) {
 	if j == nil {
 		return nil, nil
 	}
-	count := 1
+	r := j.Registers
+	var pins measurement.Expected
+	var err error
 	switch j.Type {
 	case sevSNPMeasurementType:
+		if len(r) != 1 {
+			return nil, fmt.Errorf("pinned registers require 1 entry, got %d", len(r))
+		}
+		pins, err = measurement.ParseExpectedSEVSNP(r[0])
 	case tdxMeasurementType:
-		count = 5
+		if len(r) != 5 {
+			return nil, fmt.Errorf("pinned registers require 5 entries, got %d", len(r))
+		}
+		pins, err = measurement.ParseExpectedTDX(r[0], r[1], r[2], r[3], r[4])
 	default:
 		return nil, fmt.Errorf("pinned registers require an SNP or TDX measurement type")
 	}
-	if len(j.Registers) != count {
-		return nil, fmt.Errorf("pinned registers require %d entries, got %d", count, len(j.Registers))
+	if err != nil {
+		return nil, fmt.Errorf("pinned registers: %w", err)
 	}
-	registers := make([]*measurement.Register, count)
-	for i, value := range j.Registers {
-		if value == "" {
-			continue
-		}
-		register, err := measurement.ParseRegister(value)
-		if err != nil {
-			return nil, fmt.Errorf("pinned register %d: %w", i, err)
-		}
-		registers[i] = &register
-	}
-	if count == 1 {
-		return measurement.ExpectedSEVSNP{Launch: registers[0]}, nil
-	}
-	return measurement.ExpectedTDX{MRTD: registers[0], RTMR0: registers[1], RTMR1: registers[2], RTMR2: registers[3], RTMR3: registers[4]}, nil
+	return pins, nil
 }

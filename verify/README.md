@@ -125,6 +125,11 @@ cannot change afterwards. Pins are a `measurement.ExpectedSEVSNP` or
 Pins cannot override release or platform measurements, and `FreshnessMaxAge`
 defaults to seven days.
 
+`measurement.ParseExpectedTDX` and `ParseExpectedSEVSNP` build pins from hex,
+taking the registers in order and `""` for one left unpinned. To require
+exactly what an earlier verification measured, pin
+`verified.EnclaveMeasurement.Expected()`.
+
 `verify.NewVerifier` takes functional options:
 
 ```go
@@ -135,12 +140,13 @@ import (
     "github.com/tinfoilsh/tinfoil-go/verify/measurement"
 )
 
-rtmr3, err := measurement.ParseRegister(rtmr3Hex)
+// Pin RTMR3 only; MRTD, RTMR0, RTMR1 and RTMR2 stay with the release and platform.
+pins, err := measurement.ParseExpectedTDX("", "", "", "", rtmr3Hex)
 if err != nil {
     return err
 }
 verifier, err := verify.NewVerifier(
-    verify.WithPinnedRegisters(measurement.ExpectedTDX{RTMR3: &rtmr3}),
+    verify.WithPinnedRegisters(pins),
     verify.WithFreshnessMaxAge(24*time.Hour),
 )
 ```
