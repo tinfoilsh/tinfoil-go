@@ -90,11 +90,10 @@ if err != nil {
 The nonce and the repository reference are caller-owned expectations; the
 document cannot supply either. After success, bind service traffic to the
 returned TLS/HPKE material and stop authorizing new requests at
-`FreshnessExpiresAt()`. The returned `Verification` is immutable: its
-accessors return copies, so it is safe to share. Only verification creates
-one, so a `Verification` that holds data always came from `VerifyV3` or
-`VerifyV3At`. To test code that takes one, verify a captured document with
-`VerifyV3At` at its capture time.
+`FreshnessExpiresAt()`. The returned `Verification` cannot be changed: its
+accessors return copies. Only verification creates one, so a `Verification`
+that holds data always came from `VerifyV3` or `VerifyV3At`. To test code that
+takes one, verify a captured document with `VerifyV3At` at its capture time.
 
 [`enclave.Handle`](../enclave/README.md) adds fetching, caching and
 transport binding on top.

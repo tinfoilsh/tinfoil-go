@@ -43,8 +43,10 @@ type ArtifactVerification struct {
 
 // Verification holds the facts proven during the verification of an
 // attestation document, and metadata the verifier adds about the verification
-// itself. It is immutable: only the verifier creates one, and its accessors
-// return copies, so a Verification is safe to share.
+// itself. Only the verifier creates one, and its fields cannot be changed:
+// accessors return copies. Assigning through a pointer still replaces the whole
+// value, so code that keeps a Verification hands out copies of it, as
+// enclave.Handle does.
 type Verification struct {
 	configRepo         string
 	codeDigest         string

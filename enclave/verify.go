@@ -65,5 +65,17 @@ func (s *Handle) Verify() (*verify.Verification, error) {
 	if err != nil {
 		return nil, err
 	}
-	return state.Verification, nil
+	return detached(state.Verification), nil
+}
+
+// detached returns a copy of v for a caller to keep. Its fields cannot be
+// changed, but a caller holding a pointer can replace the whole value, so the
+// handle never hands out the one it caches. The copy shares v's internals,
+// which only copying accessors can reach.
+func detached(v *verify.Verification) *verify.Verification {
+	if v == nil {
+		return nil
+	}
+	c := *v
+	return &c
 }

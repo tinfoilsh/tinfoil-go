@@ -469,3 +469,26 @@ func TestIsCertificateError(t *testing.T) {
 		})
 	}
 }
+
+// Unexported fields do not stop a caller from replacing a whole Verification
+// through a pointer, here with another valid one carrying other keys, so every
+// one the handle hands out is the caller's own.
+func TestCallersCannotReplaceCachedVerification(t *testing.T) {
+	s := &Handle{verify: func() (*verify.Verification, error) {
+		return testState(time.Now().Add(time.Hour), "key"), nil
+	}}
+	verified, err := s.Verify()
+	require.NoError(t, err)
+	*verified = *testState(time.Now().Add(time.Hour), "other")
+	*s.Verification() = *testState(time.Now().Add(time.Hour), "other")
+	_, err = s.NewTransport(func(v *verify.Verification) (http.RoundTripper, error) {
+		*v = *testState(time.Now().Add(time.Hour), "other")
+		return roundTripFunc(func(*http.Request) (*http.Response, error) { return testResponse(), nil }), nil
+	}, nil)
+	require.NoError(t, err)
+
+	require.Equal(t, "key", s.Verification().CodeTag())
+	fp, ok := s.Verification().TLSPublicKeyFP()
+	require.True(t, ok)
+	require.Equal(t, "key", fp)
+}
