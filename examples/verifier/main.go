@@ -23,15 +23,13 @@ func main() {
 		slog.Error("creating client", "error", err)
 		os.Exit(1)
 	}
-	if _, err := c.Verify(); err != nil {
+	verified, err := c.Verify()
+	if err != nil {
 		slog.Error("verification failed", "error", err)
 		os.Exit(1)
 	}
 
-	verified, err := c.VerificationJSON()
-	if err != nil {
-		slog.Error("failed to encode verification", "error", err)
-		os.Exit(1)
-	}
-	fmt.Println(verified)
+	fmt.Printf("code %s@%s (sha256:%s)\n", verified.ConfigRepo, verified.CodeTag, verified.CodeDigest)
+	fmt.Printf("fresh until %s\n", verified.FreshnessExpiresAt)
+	fmt.Println(verified.EnclaveMeasurement)
 }

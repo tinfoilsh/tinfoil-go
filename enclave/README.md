@@ -45,23 +45,18 @@ response, may finish. There is no background refresh.
 ## Verification options
 
 `enclave.Options` carries the same policy as
-[`verify.NewVerifier`](../verify/README.md#verification-options) as a struct
-the Swift bindings can construct:
+[`verify.NewVerifier`](../verify/README.md#verification-options) as a struct:
 
 ```go
 import (
 	"github.com/tinfoilsh/tinfoil-go/enclave"
-	"github.com/tinfoilsh/tinfoil-go/verify/measurement"
+	"github.com/tinfoilsh/tinfoil-go/verify"
 )
 
-// newPinnedHandle also requires the enclave's RTMR3 to equal rtmr3 (hex).
-func newPinnedHandle(rtmr3 string) (*enclave.Handle, error) {
-	opts := enclave.Options{
-		PinnedRegisters: &measurement.Measurement{
-			Type:      measurement.TdxGuestV2,
-			Registers: []string{4: rtmr3},
-		},
-	}
+// repinnedHandle requires the enclave to measure exactly what an earlier
+// verification of it did.
+func repinnedHandle(earlier *verify.Verification) (*enclave.Handle, error) {
+	opts := enclave.Options{PinnedRegisters: earlier.EnclaveMeasurement.Expected()}
 	return enclave.NewHandle("enclave.example.com", "org/repo", &opts)
 }
 ```

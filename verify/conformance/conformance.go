@@ -178,8 +178,11 @@ func Run(stage string, in Input) (Output, int) {
 			return reject(stage, "PROVENANCE_REJECTED")
 		}
 		return Output{Stage: stage, Accepted: true, Outputs: &AcceptOutputs{
-			CodeDigest:      code.Digest,
-			CodeMeasurement: toMeasurement(code.Measurement),
+			CodeDigest: code.Digest,
+			// The release's own predicate: SNP launch, then TDX RTMR1 and RTMR2.
+			CodeMeasurement: Measurement{Type: endorsement.MultiPlatformPredicateType, Registers: []string{
+				code.SEVSNP.Launch.String(), code.TDX.RTMR1.String(), code.TDX.RTMR2.String(),
+			}},
 		}}, ExitAccepted
 	case StageAssemblePolicy:
 		parsed, err := document.DangerousTestOnlyDecode(doc)
@@ -204,7 +207,7 @@ func Run(stage string, in Input) (Output, int) {
 			return reject(stage, "QUOTE_REJECTED")
 		}
 		return Output{Stage: stage, Accepted: true, Outputs: &AcceptOutputs{
-			EnclaveMeasurement: toMeasurement(auth.Measurement),
+			EnclaveMeasurement: MeasurementOf(auth.Measurement),
 		}}, ExitAccepted
 	default:
 		return Output{Stage: stage}, ExitUnsupported
@@ -235,8 +238,8 @@ func verifyFull(doc, nonce []byte, repo string, verifier *verify.Verifier, appra
 	}
 	return Output{Stage: StageVerify, Accepted: true, Outputs: &AcceptOutputs{
 		CodeDigest:         verified.CodeDigest,
-		CodeMeasurement:    toMeasurement(verified.CodeMeasurement),
-		EnclaveMeasurement: toMeasurement(verified.EnclaveMeasurement),
+		CodeMeasurement:    ExpectedOf(verified.CodeMeasurement),
+		EnclaveMeasurement: MeasurementOf(verified.EnclaveMeasurement),
 		TLSPublicKeyFP:     tlsFP,
 		HPKEPublicKey:      hpke,
 	}}, ExitAccepted
@@ -287,11 +290,42 @@ func newProvClient(sigstoreRootJSON []byte) (*endorsement.Client, error) {
 	return client, nil
 }
 
-func toMeasurement(m *measurement.Measurement) Measurement {
-	if m == nil {
+// The measurement types of the wire contract.
+const (
+	sevSNPMeasurementType = "https://tinfoil.sh/predicate/sev-snp-guest/v2"
+	tdxMeasurementType    = "https://tinfoil.sh/predicate/tdx-guest/v2"
+)
+
+// MeasurementOf lays out an authenticated measurement for the wire, in
+// platform register order.
+func MeasurementOf(m measurement.Measurement) Measurement {
+	switch m := m.(type) {
+	case measurement.SEVSNP:
+		return Measurement{Type: sevSNPMeasurementType, Registers: []string{m.Launch.String()}}
+	case measurement.TDX:
+		return Measurement{Type: tdxMeasurementType, Registers: []string{m.MRTD.String(), m.RTMR0.String(), m.RTMR1.String(), m.RTMR2.String(), m.RTMR3.String()}}
+	default:
 		return Measurement{}
 	}
-	return Measurement{Type: string(m.Type), Registers: m.Registers}
+}
+
+// ExpectedOf lays out expected registers for the wire like MeasurementOf,
+// with "" for a register left unconstrained.
+func ExpectedOf(e measurement.Expected) Measurement {
+	hexOf := func(r *measurement.Register) string {
+		if r == nil {
+			return ""
+		}
+		return r.String()
+	}
+	switch e := e.(type) {
+	case measurement.ExpectedSEVSNP:
+		return Measurement{Type: sevSNPMeasurementType, Registers: []string{hexOf(e.Launch)}}
+	case measurement.ExpectedTDX:
+		return Measurement{Type: tdxMeasurementType, Registers: []string{hexOf(e.MRTD), hexOf(e.RTMR0), hexOf(e.RTMR1), hexOf(e.RTMR2), hexOf(e.RTMR3)}}
+	default:
+		return Measurement{}
+	}
 }
 
 func reject(stage, code string) (Output, int) {

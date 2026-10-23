@@ -31,8 +31,8 @@ import (
 // expected value.
 type Quote struct {
 	identity string
-	// Measurement is a detached summary of MRTD followed by the four RTMRs.
-	Measurement *measurement.Measurement
+	// Measurement is the authenticated MRTD and four RTMRs.
+	Measurement measurement.TDX
 	// tcbEvaluationDataNumber is the minimum tcbEvaluationDataNumber
 	// observed in the verified Intel collateral.
 	tcbEvaluationDataNumber int
@@ -132,15 +132,23 @@ func Authenticate(ev Evidence, now time.Time, opts *Options) (result *Quote, err
 	}
 
 	body := quote.GetTdQuoteBody()
-	registers := []string{hex.EncodeToString(body.GetMrTd())}
-	for _, rtmr := range body.GetRtmrs() {
-		registers = append(registers, hex.EncodeToString(rtmr))
+	mrtd, rtmrs := body.GetMrTd(), body.GetRtmrs()
+	if len(rtmrs) != 4 {
+		return nil, fmt.Errorf("TDX quote carries %d RTMRs, want 4", len(rtmrs))
+	}
+	// Converting a short slice to a Register panics, so check every length.
+	const size = measurement.RegisterSize
+	if len(mrtd) != size || len(rtmrs[0]) != size || len(rtmrs[1]) != size || len(rtmrs[2]) != size || len(rtmrs[3]) != size {
+		return nil, fmt.Errorf("TDX quote measurement registers must each be %d bytes", size)
 	}
 	return &Quote{
 		identity: identity,
-		Measurement: &measurement.Measurement{
-			Type:      measurement.TdxGuestV2,
-			Registers: registers,
+		Measurement: measurement.TDX{
+			MRTD:  measurement.Register(mrtd),
+			RTMR0: measurement.Register(rtmrs[0]),
+			RTMR1: measurement.Register(rtmrs[1]),
+			RTMR2: measurement.Register(rtmrs[2]),
+			RTMR3: measurement.Register(rtmrs[3]),
 		},
 		tcbEvaluationDataNumber: tcbEvaluationDataNumber,
 		quote:                   quote,

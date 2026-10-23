@@ -15,17 +15,16 @@ import (
 )
 
 func TestConfigBoundRuntimePinsCannotOverrideMeasurements(t *testing.T) {
-	register := strings.Repeat("ab", runtime.MeasurementSize)
-	measured := &measurement.Measurement{Type: measurement.TdxGuestV2, Registers: []string{register, register, register, register, register}}
-	pins := &measurement.Measurement{Type: measurement.TdxGuestV2, Registers: []string{"", "", strings.ToUpper(register), "", ""}}
-	got, err := applyPins(measured.Registers, measured.Type, pins)
+	register, other := measurement.Register{0xab}, measurement.Register{0xcd}
+	measured := func() []string {
+		return registersOf(measurement.ExpectedTDX{MRTD: &register, RTMR0: &register, RTMR1: &register, RTMR2: &register, RTMR3: &register})
+	}
+	got, err := applyPins(measured(), policy.PlatformTDX, measurement.ExpectedTDX{RTMR1: &register})
 	require.NoError(t, err)
-	require.Equal(t, []string{register, register, register, register, register}, got)
-	pins.Registers[2] = strings.Repeat("cd", runtime.MeasurementSize)
-	_, err = applyPins(measured.Registers, measured.Type, pins)
+	require.Equal(t, measured(), got)
+	_, err = applyPins(measured(), policy.PlatformTDX, measurement.ExpectedTDX{RTMR1: &other})
 	require.ErrorContains(t, err, "does not match")
-	pins = &measurement.Measurement{Type: measurement.SevGuestV2, Registers: []string{register}}
-	_, err = applyPins(measured.Registers, measured.Type, pins)
+	_, err = applyPins(measured(), policy.PlatformTDX, measurement.ExpectedSEVSNP{Launch: &register})
 	require.Error(t, err)
 }
 
@@ -77,8 +76,12 @@ func TestConfigPreparationResolvesRuntimeAndHash(t *testing.T) {
 				require.Equal(t, make([]byte, len(resolved.configID)-sha256.Size), resolved.configID[sha256.Size:])
 				require.Equal(t, []string{register, zero, zero, zero, zero}, resolved.registers)
 			}
-			pins := &measurement.Measurement{Type: resolved.code.Type, Registers: append([]string(nil), resolved.registers...)}
-			pins.Registers[0] = strings.Repeat("cd", runtime.MeasurementSize)
+			require.Equal(t, registersOf(resolved.code), resolved.registers, "the runtime fixes every register")
+			other := measurement.Register{0xcd}
+			var pins measurement.Expected = measurement.ExpectedSEVSNP{Launch: &other}
+			if platform == policy.PlatformTDX {
+				pins = measurement.ExpectedTDX{MRTD: &other}
+			}
 			_, err = refs.resolve(q, pins)
 			require.ErrorContains(t, err, "does not match")
 			refs.Runtime.SNPLaunch.Measurement = "changed"

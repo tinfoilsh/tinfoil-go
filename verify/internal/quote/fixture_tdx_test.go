@@ -69,9 +69,7 @@ func TestVerifyLiveFixtureTDX(t *testing.T) {
 	assert.Equal(t, policy.PlatformTDX, verified.Platform())
 	assert.Equal(t, tdxFixturePolicy(t), assembled.PolicyName)
 	assert.Equal(t, "dev-shape", assembled.PlatformMeasurementName)
-	require.NotNil(t, verified.Measurement)
-	assert.Equal(t, measurement.TdxGuestV2, verified.Measurement.Type)
-	assert.Len(t, verified.Measurement.Registers, 5)
+	assert.IsType(t, measurement.TDX{}, verified.Measurement)
 	*verified = Authenticated{}
 	require.NoError(t, assembled.Validate(), "assembly must retain its original authenticated quote")
 }

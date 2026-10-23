@@ -83,13 +83,13 @@ func fetchRouters() ([]string, error) {
 // Options is copied at construction. Create a new client to change it.
 type Options struct {
 	// EmbeddedConfig trusts exact caller-supplied bytes instead of a config endorsement.
-	EmbeddedConfig *verify.EmbeddedConfig `json:"embedded_config,omitempty"`
+	EmbeddedConfig *verify.EmbeddedConfig
 	// ConfigAuthorizer authorizes document-carried configs instead of their endorsement.
-	ConfigAuthorizer func(collateral.ConfigEndorsement) error `json:"-"`
-	// PinnedRegisters adds register checks; empty entries retain defaults.
-	PinnedRegisters *measurement.Measurement `json:"pinned_registers,omitempty"`
+	ConfigAuthorizer func(collateral.ConfigEndorsement) error
+	// PinnedRegisters adds register checks (see verify.WithPinnedRegisters).
+	PinnedRegisters measurement.Expected
 	// FreshnessMaxAge defaults to seven days when zero. Negative ages are invalid.
-	FreshnessMaxAge time.Duration `json:"freshness_max_age_ns,omitempty"`
+	FreshnessMaxAge time.Duration
 }
 
 // verifier builds the immutable policy these options describe, validating
@@ -184,15 +184,6 @@ func (s *Handle) Verification() *verify.Verification {
 		return nil
 	}
 	return cloneVerification(s.state.Verification)
-}
-
-// VerificationJSON returns the last verification as JSON.
-func (s *Handle) VerificationJSON() (string, error) {
-	encoded, err := json.Marshal(s.Verification())
-	if err != nil {
-		return "", err
-	}
-	return string(encoded), nil
 }
 
 // HTTPClient returns an HTTP client that only accepts TLS connections to the verified enclave

@@ -45,16 +45,19 @@ type ArtifactVerification struct {
 type Verification struct {
 	// ConfigRepo identifies the selected code or runtime, without version pins.
 	// Runtime reports its source of trust for config-based verification.
-	ConfigRepo      string
-	CodeDigest      string
-	CodeTag         string
-	CodeMeasurement *measurement.Measurement
+	ConfigRepo string
+	CodeDigest string
+	CodeTag    string
+	// CodeMeasurement holds the registers the release fixes on the enclave's
+	// platform: an ExpectedSEVSNP or ExpectedTDX, with nil for a register the
+	// release leaves to the platform.
+	CodeMeasurement measurement.Expected
 	Config          *ConfigVerification   `json:",omitempty"`
 	Runtime         *ArtifactVerification `json:",omitempty"`
 	Platform        *ArtifactVerification `json:",omitempty"`
-	// EnclaveMeasurement carries the quote's authenticated registers,
-	// proven to match the expectations.
-	EnclaveMeasurement *measurement.Measurement
+	// EnclaveMeasurement carries the quote's authenticated registers, proven
+	// to match the expectations: an SEVSNP or TDX.
+	EnclaveMeasurement measurement.Measurement
 	// CryptoMaterial holds the endorsed key items (hash-bound into the quote).
 	CryptoMaterial []document.CryptoMaterialItem
 	// FreshnessExpiresAt is the earlier authenticated code/platform witness
@@ -119,13 +122,4 @@ func CryptoMaterialData(items []document.CryptoMaterialItem, id, format string) 
 		}
 	}
 	return "", false
-}
-
-func cloneMeasurement(value *measurement.Measurement) *measurement.Measurement {
-	if value == nil {
-		return nil
-	}
-	cloned := *value
-	cloned.Registers = append([]string(nil), value.Registers...)
-	return &cloned
 }

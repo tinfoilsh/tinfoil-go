@@ -15,15 +15,11 @@ import (
 
 func sampleVerification() *verify.Verification {
 	return &verify.Verification{
-		ConfigRepo: "tinfoilsh/confidential-model-router",
-		CodeDigest: "abc123",
-		CodeTag:    "v1.2.3",
-		CodeMeasurement: &measurement.Measurement{
-			Type: measurement.SnpTdxMultiPlatformV1, Registers: []string{"aa", "bb", "cc"},
-		},
-		EnclaveMeasurement: &measurement.Measurement{
-			Type: measurement.TdxGuestV2, Registers: []string{"dd", "ee"},
-		},
+		ConfigRepo:         "tinfoilsh/confidential-model-router",
+		CodeDigest:         "abc123",
+		CodeTag:            "v1.2.3",
+		CodeMeasurement:    measurement.ExpectedTDX{RTMR1: &measurement.Register{0xbb}, RTMR2: &measurement.Register{0xcc}},
+		EnclaveMeasurement: measurement.TDX{MRTD: measurement.Register{0xdd}, RTMR1: measurement.Register{0xbb}, RTMR2: measurement.Register{0xcc}},
 		CryptoMaterial: []document.CryptoMaterialItem{
 			{ID: "tls", Format: document.KeySPKIFPSHA256V1Format, Data: "deadbeef"},
 			{ID: "hpke", Format: document.KeyX25519HPKEV1Format, Data: "cafebabe"},
@@ -90,4 +86,23 @@ func TestVerificationKeepsAppraisalTimeOnly(t *testing.T) {
 	assert.NotContains(t, got, "enclave_host")
 	assert.NotContains(t, got, "verifier")
 	assert.Equal(t, "2026-09-26T12:00:00Z", got["verified_at"])
+}
+
+// Measurements keep the contract's {type, registers} shape, with "" for a
+// register the release leaves to the platform.
+func TestVerificationMeasurements(t *testing.T) {
+	encoded, err := encode(sampleVerification())
+	require.NoError(t, err)
+
+	var got map[string]any
+	require.NoError(t, json.Unmarshal([]byte(encoded), &got))
+	rtmr1, rtmr2 := measurement.Register{0xbb}.String(), measurement.Register{0xcc}.String()
+	assert.Equal(t, map[string]any{
+		"type":      "https://tinfoil.sh/predicate/tdx-guest/v2",
+		"registers": []any{"", "", rtmr1, rtmr2, ""},
+	}, got["code_measurement"])
+	assert.Equal(t, map[string]any{
+		"type":      "https://tinfoil.sh/predicate/tdx-guest/v2",
+		"registers": []any{measurement.Register{0xdd}.String(), measurement.Register{}.String(), rtmr1, rtmr2, measurement.Register{}.String()},
+	}, got["enclave_measurement"])
 }

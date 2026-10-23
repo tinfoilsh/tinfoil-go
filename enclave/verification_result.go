@@ -3,17 +3,7 @@ package enclave
 import (
 	"github.com/tinfoilsh/tinfoil-go/verify"
 	"github.com/tinfoilsh/tinfoil-go/verify/document"
-	"github.com/tinfoilsh/tinfoil-go/verify/measurement"
 )
-
-func cloneMeasurement(value *measurement.Measurement) *measurement.Measurement {
-	if value == nil {
-		return nil
-	}
-	cloned := *value
-	cloned.Registers = append([]string(nil), value.Registers...)
-	return &cloned
-}
 
 func cloneVerification(verified *verify.Verification) *verify.Verification {
 	if verified == nil {
@@ -21,8 +11,11 @@ func cloneVerification(verified *verify.Verification) *verify.Verification {
 	}
 	cloned := *verified
 	cloned.CryptoMaterial = append([]document.CryptoMaterialItem(nil), verified.CryptoMaterial...)
-	cloned.CodeMeasurement = cloneMeasurement(verified.CodeMeasurement)
-	cloned.EnclaveMeasurement = cloneMeasurement(verified.EnclaveMeasurement)
+	// EnclaveMeasurement holds its registers by value, so the copy is already
+	// independent.
+	if verified.CodeMeasurement != nil {
+		cloned.CodeMeasurement = verified.CodeMeasurement.Clone()
+	}
 	if verified.Config != nil {
 		config := *verified.Config
 		cloned.Config = &config

@@ -147,7 +147,7 @@ func TestPlatformMeasurementsUseAuthenticatedEvidence(t *testing.T) {
 	parsed, err := tdxabi.QuoteToProto(tdxtestdata.RawQuote)
 	require.NoError(t, err)
 	raw := parsed.(*tdxpb.QuoteV4)
-	q := &Quote{quote: raw, Measurement: &measurement.Measurement{Registers: []string{"substituted", "summary"}}}
+	q := &Quote{quote: raw, Measurement: measurement.TDX{MRTD: measurement.Register{0xee}, RTMR0: measurement.Register{0xee}}}
 	mrtd, rtmr0 := q.PlatformMeasurements()
 	require.Equal(t, hex.EncodeToString(raw.TdQuoteBody.MrTd), mrtd)
 	require.Equal(t, hex.EncodeToString(raw.TdQuoteBody.Rtmrs[0]), rtmr0)

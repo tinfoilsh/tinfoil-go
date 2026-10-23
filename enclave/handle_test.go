@@ -2,7 +2,6 @@ package enclave
 
 import (
 	"crypto/sha256"
-	"encoding/json"
 	"errors"
 	"os"
 	"strings"
@@ -77,23 +76,21 @@ func TestClientEmbeddedConfigRetainsOtherEndorsements(t *testing.T) {
 }
 
 func TestClientOptionsCopyPinnedRegisters(t *testing.T) {
-	register := strings.Repeat("ab", 48)
-	pins := &measurement.Measurement{Type: measurement.TdxGuestV2, Registers: []string{4: register}}
-	opts := Options{PinnedRegisters: pins, FreshnessMaxAge: time.Hour}
+	register := measurement.Register{0xab}
+	pinned := register
+	opts := Options{PinnedRegisters: measurement.ExpectedTDX{RTMR3: &pinned}, FreshnessMaxAge: time.Hour}
 	first, err := NewHandle("enclave.example", "org/repo", &opts)
 	require.NoError(t, err)
 	second, err := NewHandle("enclave.example", "org/repo", &opts)
 	require.NoError(t, err)
 
-	// Mutating the caller's options and measurement after construction must
+	// Mutating the caller's options and registers after construction must
 	// not reach either client. That the accessor also copies on the way out is
 	// the verifier package's contract, covered by its own tests.
 	opts.FreshnessMaxAge = time.Minute
-	pins.Type = measurement.SevGuestV2
-	pins.Registers[4] = "changed"
-	assert.Equal(t, measurement.TdxGuestV2, first.verifier.PinnedRegisters().Type)
-	assert.Equal(t, register, first.verifier.PinnedRegisters().Registers[4])
-	assert.Equal(t, register, second.verifier.PinnedRegisters().Registers[4])
+	pinned[0] = 0xcd
+	assert.Equal(t, register, *first.verifier.PinnedRegisters().(measurement.ExpectedTDX).RTMR3)
+	assert.Equal(t, register, *second.verifier.PinnedRegisters().(measurement.ExpectedTDX).RTMR3)
 	assert.Equal(t, time.Hour, second.verifier.FreshnessMaxAge())
 }
 
@@ -108,43 +105,31 @@ func TestLiveVerify(t *testing.T) {
 	assert.NoError(t, err)
 }
 
-func TestClientVerificationJSON(t *testing.T) {
-	codeMeasurement := &measurement.Measurement{
-		Type:      measurement.SnpTdxMultiPlatformV1,
-		Registers: []string{"a", "b"},
-	}
-	enclaveMeasurement := &measurement.Measurement{
-		Type:      measurement.TdxGuestV2,
-		Registers: []string{"a"},
-	}
-
-	verified := &verify.Verification{
-		CodeDigest:         "feabcd",
-		CryptoMaterial:     testState(time.Time{}, "key").CryptoMaterial,
-		CodeMeasurement:    codeMeasurement,
-		EnclaveMeasurement: enclaveMeasurement,
-		Config:             &verify.ConfigVerification{Source: verify.SourceEndorsement, Name: "/org/project/v1"},
-		Runtime:            &verify.ArtifactVerification{Source: verify.SourceEndorsement, Digest: "runtime digest"},
-		Platform:           &verify.ArtifactVerification{Source: verify.SourceEndorsement, Digest: "platform digest"},
+func TestClientVerificationCopies(t *testing.T) {
+	register := measurement.Register{0xab}
+	sample := func() *verify.Verification {
+		code := register
+		return &verify.Verification{
+			CodeDigest:         "feabcd",
+			CryptoMaterial:     testState(time.Time{}, "key").CryptoMaterial,
+			CodeMeasurement:    measurement.ExpectedTDX{RTMR1: &code},
+			EnclaveMeasurement: measurement.TDX{RTMR1: register},
+			Config:             &verify.ConfigVerification{Source: verify.SourceEndorsement, Name: "/org/project/v1"},
+			Runtime:            &verify.ArtifactVerification{Source: verify.SourceEndorsement, Digest: "runtime digest"},
+			Platform:           &verify.ArtifactVerification{Source: verify.SourceEndorsement, Digest: "platform digest"},
+		}
 	}
 	client := &Handle{
-		state: &enclaveState{Verification: verified},
+		state: &enclaveState{Verification: sample()},
 	}
 
-	encoded, err := client.VerificationJSON()
-	assert.NoError(t, err)
-
-	var decoded verify.Verification
-	assert.NoError(t, json.Unmarshal([]byte(encoded), &decoded))
-	assert.Equal(t, verified, &decoded)
 	view := client.Verification()
-	view.CodeMeasurement.Registers[0] = "changed"
+	*view.CodeMeasurement.(measurement.ExpectedTDX).RTMR1 = measurement.Register{0xcd}
 	view.CryptoMaterial[0].Data = "changed"
-	view.EnclaveMeasurement.Registers[0] = "changed"
 	view.Config.Source = verify.SourceEmbedded
 	view.Runtime.Digest = "changed"
 	view.Platform.Digest = "changed"
-	assert.Equal(t, &decoded, client.Verification(), "returned measurements must not alias cached verification")
+	assert.Equal(t, sample(), client.Verification(), "returned measurements must not alias cached verification")
 }
 
 func TestLiveNewDefaultHandle(t *testing.T) {

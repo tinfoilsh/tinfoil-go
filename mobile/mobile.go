@@ -24,7 +24,6 @@ import (
 	"github.com/tinfoilsh/tinfoil-go/internal/fetch"
 	"github.com/tinfoilsh/tinfoil-go/verify"
 	"github.com/tinfoilsh/tinfoil-go/verify/document"
-	"github.com/tinfoilsh/tinfoil-go/verify/measurement"
 )
 
 // NewNonce returns a fresh random challenge for one attestation fetch. Pass
@@ -55,8 +54,8 @@ type Verifier struct {
 
 // options is the policy NewVerifier accepts as JSON.
 type options struct {
-	PinnedRegisters   *measurement.Measurement `json:"pinned_registers,omitempty"`
-	FreshnessMaxAgeNs int64                    `json:"freshness_max_age_ns,omitempty"`
+	PinnedRegisters   *measurementJSON `json:"pinned_registers,omitempty"`
+	FreshnessMaxAgeNs int64            `json:"freshness_max_age_ns,omitempty"`
 }
 
 // NewVerifier builds a verifier from options, a JSON object with
@@ -75,8 +74,12 @@ func NewVerifier(optionsJSON string) (_ *Verifier, err error) {
 			return nil, &verify.UsageError{Err: fmt.Errorf("verification options must be a JSON object")}
 		}
 	}
+	pins, err := opts.PinnedRegisters.expected()
+	if err != nil {
+		return nil, &verify.UsageError{Err: err}
+	}
 	inner, err := verify.NewVerifier(
-		verify.WithPinnedRegisters(opts.PinnedRegisters),
+		verify.WithPinnedRegisters(pins),
 		verify.WithFreshnessMaxAge(time.Duration(opts.FreshnessMaxAgeNs)),
 	)
 	if err != nil {

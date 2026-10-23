@@ -86,12 +86,13 @@ func TestPublicInputErrors(t *testing.T) {
 }
 
 func TestMalformedPinsAreConfigurationErrors(t *testing.T) {
-	for _, pins := range []*measurement.Measurement{
-		{Type: "unknown"},
-		{Type: measurement.SevGuestV2},
-		{Type: measurement.TdxGuestV2, Registers: []string{""}},
-		{Type: measurement.SevGuestV2, Registers: []string{"bad"}},
-		{Type: measurement.TdxGuestV2, Registers: []string{4: strings.Repeat("zz", 48)}},
+	// Registers are parsed when pins are built, so a pointer is the only
+	// malformed pin the API can express.
+	register := measurement.Register{0xab}
+	for _, pins := range []measurement.Expected{
+		(*measurement.ExpectedSEVSNP)(nil),
+		(*measurement.ExpectedTDX)(nil),
+		&measurement.ExpectedTDX{RTMR3: &register},
 	} {
 		opts := &enclave.Options{PinnedRegisters: pins}
 		_, err := enclave.NewHandle("enclave.example", "org/repo", opts)
@@ -103,11 +104,11 @@ func TestMalformedPinsAreConfigurationErrors(t *testing.T) {
 		var usage *verify.UsageError
 		require.ErrorAs(t, err, &usage)
 	}
-	for _, pins := range []*measurement.Measurement{
-		{Type: measurement.SevGuestV2, Registers: []string{strings.Repeat("AB", 48)}},
-		{Type: measurement.TdxGuestV2, Registers: []string{4: ""}},
+	for _, pins := range []measurement.Expected{
+		measurement.ExpectedSEVSNP{Launch: &register},
+		measurement.ExpectedTDX{RTMR3: &register},
 	} {
 		_, err := enclave.NewHandle("enclave.example", "org/repo", &enclave.Options{PinnedRegisters: pins})
-		require.NoError(t, err, "valid uppercase and sparse pins remain supported")
+		require.NoError(t, err, "sparse pins remain supported")
 	}
 }

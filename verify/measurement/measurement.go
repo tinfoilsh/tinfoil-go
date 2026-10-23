@@ -1,5 +1,7 @@
-// Package measurement defines the measurement value types shared by code
-// provenance and quote verification: register sets keyed by predicate type.
+// Package measurement defines the register values verification reports and
+// accepts: what a CPU measured at launch, and the registers a release or a
+// caller expects it to have measured. Each is a closed set with one type per
+// hardware platform, so callers distinguish them with a type switch.
 package measurement
 
 import (
@@ -8,75 +10,179 @@ import (
 	"strings"
 )
 
-const RTMR3_ZERO = "000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"
+// RegisterSize is the size of every SEV-SNP and TDX measurement register.
+const RegisterSize = 48
 
-type PredicateType string
+// Register is one measurement register. Its text form is lowercase hex.
+type Register [RegisterSize]byte
 
-const (
-	SevGuestV2 PredicateType = "https://tinfoil.sh/predicate/sev-snp-guest/v2"
-	TdxGuestV2 PredicateType = "https://tinfoil.sh/predicate/tdx-guest/v2"
-
-	SnpTdxMultiPlatformV1 PredicateType = "https://tinfoil.sh/predicate/snp-tdx-multiplatform/v1"
-)
-
-type Measurement struct {
-	Type      PredicateType `json:"type"`
-	Registers []string      `json:"registers"`
+// ParseRegister decodes a register from hex in either case.
+func ParseRegister(s string) (Register, error) {
+	var r Register
+	if len(s) != 2*RegisterSize {
+		return r, fmt.Errorf("register must be %d hex characters, got %d", 2*RegisterSize, len(s))
+	}
+	if _, err := hex.Decode(r[:], []byte(s)); err != nil {
+		return Register{}, fmt.Errorf("register is not hex: %w", err)
+	}
+	return r, nil
 }
 
-// ValidatePins checks caller-supplied register pins before verification.
-func ValidatePins(pins *Measurement) error {
-	if pins == nil {
-		return nil
+func (r Register) String() string { return hex.EncodeToString(r[:]) }
+
+// MarshalText encodes the register as lowercase hex.
+func (r Register) MarshalText() ([]byte, error) { return []byte(r.String()), nil }
+
+// UnmarshalText decodes the register from hex in either case.
+func (r *Register) UnmarshalText(text []byte) error {
+	parsed, err := ParseRegister(string(text))
+	if err != nil {
+		return err
 	}
-	count := 1
-	switch pins.Type {
-	case SevGuestV2:
-	case TdxGuestV2:
-		count = 5
-	default:
-		return fmt.Errorf("pinned registers require an SNP or TDX measurement type")
-	}
-	if len(pins.Registers) != count {
-		return fmt.Errorf("pinned registers require %d entries, got %d", count, len(pins.Registers))
-	}
-	for i, pin := range pins.Registers {
-		if pin == "" {
-			continue
-		}
-		decoded, err := hex.DecodeString(pin)
-		if err != nil {
-			return fmt.Errorf("pinned register %d is not hex: %w", i, err)
-		}
-		if len(decoded) != 48 {
-			return fmt.Errorf("pinned register %d must be 48 bytes, got %d", i, len(decoded))
-		}
-	}
+	*r = parsed
 	return nil
 }
 
-func (m *Measurement) String() string {
-	var out strings.Builder
+// Measurement is the set of registers a CPU measured at launch: SEVSNP or TDX.
+// The concrete type is always a value, never a pointer. The set is closed:
+// only this package implements it, and a new platform adds a type here.
+type Measurement interface {
+	fmt.Stringer
+	// Expected returns expectations that pin every register of the
+	// measurement: an ExpectedSEVSNP or ExpectedTDX.
+	Expected() Expected
+	isMeasurement()
+}
 
-	var platform []string
-	switch m.Type {
-	case SnpTdxMultiPlatformV1:
-		platform = []string{"SNP", "RTMR1", "RTMR2"}
-	case SevGuestV2:
-		platform = []string{"SNP"}
-	case TdxGuestV2:
-		platform = []string{"MRTD", "RTMR0", "RTMR1", "RTMR2", "RTMR3"}
+// SEVSNP is an AMD SEV-SNP launch measurement.
+type SEVSNP struct {
+	Launch Register
+}
+
+// TDX is an Intel TDX build-time measurement and its four runtime registers.
+type TDX struct {
+	MRTD, RTMR0, RTMR1, RTMR2, RTMR3 Register
+}
+
+func (SEVSNP) isMeasurement() {}
+func (TDX) isMeasurement()    {}
+
+func (m SEVSNP) Expected() Expected {
+	return ExpectedSEVSNP{Launch: new(m.Launch)}
+}
+
+func (m TDX) Expected() Expected {
+	return ExpectedTDX{MRTD: new(m.MRTD), RTMR0: new(m.RTMR0), RTMR1: new(m.RTMR1), RTMR2: new(m.RTMR2), RTMR3: new(m.RTMR3)}
+}
+
+func (m SEVSNP) String() string {
+	return format("SEV-SNP", []string{"Launch"}, []*Register{&m.Launch})
+}
+
+func (m TDX) String() string {
+	return format("TDX", tdxLabels, []*Register{&m.MRTD, &m.RTMR0, &m.RTMR1, &m.RTMR2, &m.RTMR3})
+}
+
+// Expected is a set of registers a measurement must match, where a nil
+// register is unconstrained: the registers a release fixes, or a caller's
+// pins. It is ExpectedSEVSNP or ExpectedTDX, always a value, and the set is
+// closed like Measurement's.
+type Expected interface {
+	fmt.Stringer
+	// Clone returns a copy that shares no registers with the original.
+	Clone() Expected
+	isExpected()
+}
+
+// ExpectedSEVSNP constrains an SEV-SNP launch measurement.
+type ExpectedSEVSNP struct {
+	Launch *Register
+}
+
+// ExpectedTDX constrains a TDX measurement register by register.
+type ExpectedTDX struct {
+	MRTD, RTMR0, RTMR1, RTMR2, RTMR3 *Register
+}
+
+func (ExpectedSEVSNP) isExpected() {}
+func (ExpectedTDX) isExpected()    {}
+
+// ParseExpectedSEVSNP parses the launch measurement from hex in either case.
+// An empty string leaves it unconstrained.
+func ParseExpectedSEVSNP(launch string) (ExpectedSEVSNP, error) {
+	register, err := parseExpected("Launch", launch)
+	if err != nil {
+		return ExpectedSEVSNP{}, err
 	}
+	return ExpectedSEVSNP{Launch: register}, nil
+}
 
-	out.WriteString(string(m.Type))
-	for i, register := range m.Registers {
-		var label string
-		if platform != nil && i < len(platform) {
-			label = fmt.Sprintf("%-5s", platform[i])
-		} else {
-			label = fmt.Sprintf("[%d]", i)
+// ParseExpectedTDX parses each register from hex in either case. An empty
+// string leaves that register unconstrained.
+func ParseExpectedTDX(mrtd, rtmr0, rtmr1, rtmr2, rtmr3 string) (ExpectedTDX, error) {
+	var registers [5]*Register
+	for i, value := range [5]string{mrtd, rtmr0, rtmr1, rtmr2, rtmr3} {
+		register, err := parseExpected(tdxLabels[i], value)
+		if err != nil {
+			return ExpectedTDX{}, err
 		}
-		out.WriteString(fmt.Sprintf("\n%s %s", label, register))
+		registers[i] = register
+	}
+	return ExpectedTDX{MRTD: registers[0], RTMR0: registers[1], RTMR1: registers[2], RTMR2: registers[3], RTMR3: registers[4]}, nil
+}
+
+// parseExpected parses one register, or returns nil for "".
+func parseExpected(label, value string) (*Register, error) {
+	if value == "" {
+		return nil, nil
+	}
+	register, err := ParseRegister(value)
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", label, err)
+	}
+	return &register, nil
+}
+
+func (e ExpectedSEVSNP) Clone() Expected {
+	return ExpectedSEVSNP{Launch: cloneRegister(e.Launch)}
+}
+
+func (e ExpectedTDX) Clone() Expected {
+	return ExpectedTDX{
+		MRTD: cloneRegister(e.MRTD), RTMR0: cloneRegister(e.RTMR0),
+		RTMR1: cloneRegister(e.RTMR1), RTMR2: cloneRegister(e.RTMR2), RTMR3: cloneRegister(e.RTMR3),
+	}
+}
+
+func cloneRegister(r *Register) *Register {
+	if r == nil {
+		return nil
+	}
+	copied := *r
+	return &copied
+}
+
+func (e ExpectedSEVSNP) String() string {
+	return format("SEV-SNP", []string{"Launch"}, []*Register{e.Launch})
+}
+
+func (e ExpectedTDX) String() string {
+	return format("TDX", tdxLabels, []*Register{e.MRTD, e.RTMR0, e.RTMR1, e.RTMR2, e.RTMR3})
+}
+
+var tdxLabels = []string{"MRTD", "RTMR0", "RTMR1", "RTMR2", "RTMR3"}
+
+// format writes the platform and one labeled register per line, with "any"
+// for an unconstrained register.
+func format(platform string, labels []string, registers []*Register) string {
+	var out strings.Builder
+	out.WriteString(platform)
+	for i, register := range registers {
+		value := "any"
+		if register != nil {
+			value = register.String()
+		}
+		fmt.Fprintf(&out, "\n%-6s %s", labels[i], value)
 	}
 	return out.String()
 }

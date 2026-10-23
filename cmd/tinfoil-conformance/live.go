@@ -86,18 +86,12 @@ func runLive() int {
 	}
 
 	writeJSON(conformance.Output{Stage: stageLive, Accepted: true, Outputs: &conformance.AcceptOutputs{
-		CodeDigest: verified.CodeDigest,
-		CodeMeasurement: conformance.Measurement{
-			Type:      string(verified.CodeMeasurement.Type),
-			Registers: verified.CodeMeasurement.Registers,
-		},
-		EnclaveMeasurement: conformance.Measurement{
-			Type:      string(verified.EnclaveMeasurement.Type),
-			Registers: verified.EnclaveMeasurement.Registers,
-		},
-		TLSPublicKeyFP: tlsFP,
-		HPKEPublicKey:  hpke,
-		ChannelBinding: "tls-spki",
+		CodeDigest:         verified.CodeDigest,
+		CodeMeasurement:    conformance.ExpectedOf(verified.CodeMeasurement),
+		EnclaveMeasurement: conformance.MeasurementOf(verified.EnclaveMeasurement),
+		TLSPublicKeyFP:     tlsFP,
+		HPKEPublicKey:      hpke,
+		ChannelBinding:     "tls-spki",
 	}})
 	return conformance.ExitAccepted
 }
