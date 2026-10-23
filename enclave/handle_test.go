@@ -66,7 +66,7 @@ func TestClientEmbeddedConfigRetainsOtherEndorsements(t *testing.T) {
 	}
 
 	_, err = NewHandle("enclave.example", "", nil)
-	require.Error(t, err)
+	require.NoError(t, err)
 	_, err = NewHandle("enclave.example", "", &Options{EmbeddedConfig: &verify.EmbeddedConfig{}})
 	require.Error(t, err)
 	config[0] = 'c'
@@ -92,6 +92,22 @@ func TestClientOptionsCopyPinnedRegisters(t *testing.T) {
 	assert.Equal(t, register, *first.verifier.PinnedRegisters().(measurement.ExpectedTDX).RTMR3)
 	assert.Equal(t, register, *second.verifier.PinnedRegisters().(measurement.ExpectedTDX).RTMR3)
 	assert.Equal(t, time.Hour, second.verifier.FreshnessMaxAge())
+}
+
+func TestConfigAuthorityPinsRequireRegistryEvidence(t *testing.T) {
+	opts := &Options{ConfigPins: verify.ConfigPins{Namespace: "acme"}}
+	handle, err := NewHandle("enclave.example", "", opts)
+	require.NoError(t, err)
+	opts.ConfigPins = verify.ConfigPins{}
+	nonce := make([]byte, document.NonceSize)
+	raw, err := document.Build(document.BuildInput{Nonce: nonce, CollateralFormat: collateral.FormatV2}, func([64]byte) (string, []byte, error) {
+		return document.SEVSNPReportV1Format, []byte("quote"), nil
+	})
+	require.NoError(t, err)
+	for _, h := range []*Handle{handle, handle.ForEnclave("other.example"), handle.ViaRelay("relay.example")} {
+		_, err := h.verifier.VerifyV3(raw, nonce, "")
+		require.ErrorContains(t, err, "configured trust requires "+collateral.FormatV3)
+	}
 }
 
 func TestLiveVerify(t *testing.T) {

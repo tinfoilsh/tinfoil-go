@@ -6,6 +6,7 @@ import (
 	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/sha256"
+	"crypto/x509"
 	"encoding/base64"
 	"encoding/json/jsontext"
 	"encoding/json/v2"
@@ -17,6 +18,7 @@ import (
 	"github.com/stretchr/testify/require"
 	configendorsement "github.com/tinfoilsh/tinfoil-go/endorsement/config"
 	"github.com/tinfoilsh/tinfoil-go/endorsement/freshness"
+	"github.com/tinfoilsh/tinfoil-go/endorsement/scope"
 	"github.com/tinfoilsh/tinfoil-go/internal/sigstoretest"
 	"github.com/tinfoilsh/tinfoil-go/verify/document"
 	"github.com/tinfoilsh/tinfoil-go/verify/document/collateral"
@@ -88,6 +90,62 @@ func TestDigestEndorsementBindsQuoteAndRuntimeWithoutConfig(t *testing.T) {
 	require.ErrorContains(t, err, "digest pin")
 }
 
+func TestScopedConfigVerificationExpiresWithItsCertificate(t *testing.T) {
+	f := sigstoretest.New(t)
+	rootKey := f.Key
+	leaf := sigstoretest.New(t).Key
+	identity := scope.Identity{OwnerKind: scope.User, OwnerID: "c5cbb595-6271-45a0-a851-65c67173ee8a", ScopeID: "36c405e9-30df-4fe7-85d5-c1a509484541", Namespace: "org"}
+	certificate := f.Scope(t, leaf.Public(), identity)
+	issuer, err := x509.ParseCertificate(certificate.Issuer)
+	require.NoError(t, err)
+	cert, err := x509.ParseCertificate(certificate.Certificate)
+	require.NoError(t, err)
+	cert.NotAfter = f.Now.Add(time.Minute)
+	certificate.Certificate, err = x509.CreateCertificate(rand.Reader, cert, issuer, leaf.Public(), rootKey)
+	require.NoError(t, err)
+	cert, err = x509.ParseCertificate(certificate.Certificate)
+	require.NoError(t, err)
+	certificate.Bundle = sigstoretest.MarshalBundle(t, f.CertificateBundle(t, cert))
+	f.Key = leaf
+	inputs := embeddedInputs(t)
+	s, err := configendorsement.NewDeploymentStatement(embeddedConfigName, inputs.Config.Bytes)
+	require.NoError(t, err)
+	input, err := s.TimestampInput()
+	require.NoError(t, err)
+	payload, err := s.Complete(f.Timestamp(t, input, f.Now))
+	require.NoError(t, err)
+	reference, err := configendorsement.EndorsementReference(payload)
+	require.NoError(t, err)
+	data, err := json.Marshal(map[string]any{
+		"endorsement_ref": reference, "scope": certificate,
+		"sigstore_bundle": jsontext.Value(sigstoretest.MarshalBundle(t, f.Bundle(t, payload))),
+	})
+	require.NoError(t, err)
+	_, _, doc := embeddedDocument(t, collateral.FormatV3, collateral.Entry{
+		ID: collateral.ConfigID, Role: collateral.RoleReferenceValues, Format: collateral.ConfigEndorsementV2Format, Data: data,
+	})
+	inputs.Config = nil
+	v, err := NewVerifier(WithEmbeddedReferences(inputs))
+	require.NoError(t, err)
+	v.configVerifier, err = endorsement.NewRegistryVerifier(&f.Trust, []crypto.PublicKey{rootKey.Public()}, []crypto.PublicKey{rootKey.Public()})
+	require.NoError(t, err)
+	refs, err := v.configReferences(doc, "", f.Now)
+	require.NoError(t, err)
+	require.Equal(t, identity, refs.config.Scope)
+	require.Equal(t, cert.NotAfter, refs.freshnessExpiresAt)
+	require.Equal(t, SourceEndorsement, refs.config.Source)
+	v.configPins = ConfigPins{OwnerID: identity.OwnerID}
+	_, err = v.configReferences(doc, "org/project@v1", f.Now)
+	require.NoError(t, err)
+	v.configPins.OwnerID = identity.ScopeID
+	_, err = v.configReferences(doc, "org/project@v1", f.Now)
+	require.ErrorContains(t, err, "does not match the caller's pins")
+	_, err = NewVerifier(WithEmbeddedReferences(embeddedInputs(t)), WithConfigPins(ConfigPins{OwnerID: identity.OwnerID}))
+	require.ErrorContains(t, err, "require endorsement verification")
+	_, err = NewVerifier(WithConfigPins(ConfigPins{OwnerID: identity.OwnerID}), WithConfigPins(ConfigPins{Namespace: "other"}))
+	require.ErrorContains(t, err, "must be supplied together")
+}
+
 func TestCollateralVersionSelectsVerification(t *testing.T) {
 	v, err := NewVerifier()
 	require.NoError(t, err)
@@ -115,11 +173,11 @@ func TestConfigReferencePins(t *testing.T) {
 	require.NoError(t, err)
 	const repo = "org/project"
 	digest := strings.Repeat("ab", sha256.Size)
-	for _, ref := range []string{repo, repo + "@v1", repo + "@sha256:" + digest, repo + "@v1@sha256:" + digest} {
+	for _, ref := range []string{"", repo, repo + "@v1", repo + "@sha256:" + digest, repo + "@v1@sha256:" + digest} {
 		_, err := v.VerifyV3(raw, nonce, ref)
 		require.ErrorIs(t, err, collateral.ErrNotFound, "valid pins must reach endorsement verification")
 	}
-	for _, ref := range []string{"", "/org/project", "Org/project", "org/project_name", "org/project@v1/path", "org/project@sha256:bad", "org/project@v1@v2"} {
+	for _, ref := range []string{"/org/project", "Org/project", "org/project_name", "org/project@v1/path", "org/project@sha256:bad", "org/project@v1@v2"} {
 		_, err := v.VerifyV3(raw, nonce, ref)
 		var usage *UsageError
 		require.ErrorAs(t, err, &usage, ref)

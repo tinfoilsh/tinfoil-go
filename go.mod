@@ -5,6 +5,7 @@ go 1.27.3
 require (
 	github.com/digitorus/timestamp v0.0.0-20250524132541-c45532741eea
 	github.com/google/go-tdx-guest v0.3.1
+	github.com/google/uuid v1.6.0
 	github.com/in-toto/attestation v1.2.0
 	github.com/openai/openai-go/v3 v3.80.0
 	github.com/secure-systems-lab/go-securesystemslib v0.11.0
@@ -60,7 +61,6 @@ require (
 	github.com/google/certificate-transparency-go v1.3.3 // indirect
 	github.com/google/go-containerregistry v0.21.7 // indirect
 	github.com/google/logger v1.1.2 // indirect
-	github.com/google/uuid v1.6.0 // indirect
 	github.com/grpc-ecosystem/grpc-gateway/v2 v2.29.0 // indirect
 	github.com/in-toto/in-toto-golang v0.11.0 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect

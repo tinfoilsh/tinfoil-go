@@ -82,6 +82,7 @@ func fetchRouters() ([]string, error) {
 
 // Options is copied at construction. Create a new client to change it.
 type Options struct {
+	ConfigPins verify.ConfigPins
 	// EmbeddedConfig trusts exact caller-supplied bytes instead of a config endorsement.
 	EmbeddedConfig *verify.EmbeddedConfig
 	// ConfigAuthorizer authorizes document-carried configs instead of their endorsement.
@@ -101,6 +102,7 @@ func (input *Options) verifier() (*verify.Verifier, error) {
 	opts := []verify.Option{
 		verify.WithPinnedRegisters(input.PinnedRegisters),
 		verify.WithFreshnessMaxAge(input.FreshnessMaxAge),
+		verify.WithConfigPins(input.ConfigPins),
 	}
 	if input.EmbeddedConfig != nil {
 		opts = append(opts, verify.WithEmbeddedReferences(verify.EmbeddedReferences{Config: input.EmbeddedConfig}))
@@ -113,17 +115,21 @@ func (input *Options) verifier() (*verify.Verifier, error) {
 
 // NewHandle pins a repository or registry project, org/project[@revision][@sha256:digest].
 // The document's collateral version selects verification on first use.
-// An embedded config permits an empty repo and authorizes only its exact bytes.
+// An empty repo accepts authorized registry scopes. An embedded config instead
+// authorizes only its exact bytes.
 // A ConfigAuthorizer requires an empty repo and owns config authorization.
 func NewHandle(enclave, repo string, opts *Options) (*Handle, error) {
 	customConfig := opts != nil && (opts.EmbeddedConfig != nil || opts.ConfigAuthorizer != nil)
 	if enclave == "" && customConfig {
 		return nil, &ConfigurationError{Err: fmt.Errorf("caller-authorized config requires an enclave")}
 	}
+	if enclave == "" && repo == "" {
+		return nil, &ConfigurationError{Err: fmt.Errorf("an enclave or repository pin is required")}
+	}
 	if repo != "" && opts != nil && opts.ConfigAuthorizer != nil {
 		return nil, &ConfigurationError{Err: fmt.Errorf("config authorizer requires an empty repository pin")}
 	}
-	if repo != "" || !customConfig {
+	if repo != "" {
 		if _, _, _, err := verify.ParseReference(repo); err != nil {
 			return nil, &ConfigurationError{Err: err}
 		}

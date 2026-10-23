@@ -44,7 +44,7 @@ func NewClientWithOptions(opts ...ClientOption) (*Client, error) {
 		cfg.transport = defaultTransportMode
 	}
 	customConfig := cfg.verification.EmbeddedConfig != nil || cfg.verification.ConfigAuthorizer != nil
-	if cfg.repo == "" && !customConfig {
+	if cfg.repo == "" && cfg.enclave == "" && !customConfig {
 		cfg.repo = defaultConfigRepo
 	}
 	if cfg.enclave == "" && customConfig {
