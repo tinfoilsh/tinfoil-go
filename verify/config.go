@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"time"
 
+	"golang.org/x/mod/semver"
+
 	configendorsement "github.com/tinfoilsh/tinfoil-go/endorsement/config"
 	"github.com/tinfoilsh/tinfoil-go/endorsement/freshness"
 	"github.com/tinfoilsh/tinfoil-go/verify/document"
@@ -152,7 +154,7 @@ func (v *Verifier) resolveConfig(doc *document.Document, pins endorsement.Config
 func (v *Verifier) resolveRuntime(doc *document.Document, expected collateral.RuntimeReference, now time.Time) (*runtime.Manifest, ArtifactVerification, error) {
 	if v.embedded.Runtime != nil {
 		manifest, err := runtime.ParseManifest(v.embedded.Runtime, expected)
-		return manifest, ArtifactVerification{Source: SourceEmbedded, Repo: expected.Repo, Tag: expected.Tag, Digest: expected.Digest}, err
+		return manifest, ArtifactVerification{Source: SourceEmbedded, Repo: expected.Repo, Tag: semver.Canonical(expected.Tag), Digest: expected.Digest}, err
 	}
 	material, err := doc.Runtime()
 	if err != nil {

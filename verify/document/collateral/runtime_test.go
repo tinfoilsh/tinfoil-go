@@ -16,7 +16,7 @@ func TestRuntimeReference(t *testing.T) {
 		{Repo: "other/runtime", Tag: valid.Tag, Digest: valid.Digest},
 		{Repo: valid.Repo, Tag: "0.15.0", Digest: valid.Digest},
 		{Repo: valid.Repo, Tag: "v0.15", Digest: valid.Digest},
-		{Repo: valid.Repo, Tag: "v0.15.0+build", Digest: valid.Digest},
+		{Repo: valid.Repo, Tag: "v0.15.0+mini/other", Digest: valid.Digest},
 		{Repo: valid.Repo, Tag: valid.Tag, Digest: strings.ToUpper(valid.Digest)},
 		{Repo: valid.Repo, Tag: valid.Tag, Digest: "ab"},
 	} {

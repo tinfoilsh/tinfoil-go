@@ -27,7 +27,11 @@ const (
 	freshnessDomain = "tinfoil-artifact-freshness/v1\x00"
 )
 
-const PlatformTagPrefix = "platform-"
+const (
+	PlatformTagPrefix = "platform-"
+	runtimeNamePrefix = "tinfoil-inference-"
+	runtimeNameSuffix = "-manifest.json"
+)
 
 // Artifact identifies exact release bytes, independently authenticated by the caller.
 type Artifact struct {
@@ -47,7 +51,7 @@ func (a Artifact) Validate() error {
 			return fmt.Errorf("platform freshness requires the cvmimage platform artifact")
 		}
 	case KindRuntime:
-		if a.Repo != RuntimeRepo || a.Name != RuntimeName(a.Tag) {
+		if a.Repo != RuntimeRepo || !IsRuntimeName(a.Tag, a.Name) {
 			return fmt.Errorf("runtime freshness requires the versioned runtime manifest")
 		}
 	default:
@@ -60,7 +64,12 @@ func (a Artifact) Validate() error {
 	return err
 }
 
-func RuntimeName(tag string) string { return "tinfoil-inference-" + tag + "-manifest.json" }
+func RuntimeName(tag string) string { return runtimeNamePrefix + tag + runtimeNameSuffix }
+
+func IsRuntimeName(tag, name string) bool {
+	version := strings.TrimSuffix(strings.TrimPrefix(name, runtimeNamePrefix), runtimeNameSuffix)
+	return semver.IsValid(version) && version == tag+semver.Build(version) && name == RuntimeName(version)
+}
 
 type Subject struct {
 	Name   string            `json:"name"`

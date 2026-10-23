@@ -85,11 +85,24 @@ func TestManifestRequiresCompleteSupportedMeasurements(t *testing.T) {
 
 func TestConfigRuntimePin(t *testing.T) {
 	digest := strings.Repeat("ab", sha256.Size)
-	for _, version := range []string{"0.15.0", "v0.15.0", "0.15.0-rc.1"} {
-		config := []byte("cvm-version: " + version + "@sha256:" + digest + "\ncontainers: []\n")
+	for _, test := range []struct {
+		version string
+		tag     string
+	}{
+		{"0.15.0", "v0.15.0"},
+		{"v0.15.0", "v0.15.0"},
+		{"0.15.0-rc.1", "v0.15.0-rc.1"},
+		{"0.15.0+gpu", "v0.15.0+gpu"},
+		{"v0.15.0+gpu", "v0.15.0+gpu"},
+		{"0.15.0-rc.1+gpu", "v0.15.0-rc.1+gpu"},
+		{"0.15.0+mini", "v0.15.0+mini"},
+		{"0.15.0+containers.initrd-1", "v0.15.0+containers.initrd-1"},
+		{"0.15.0+GPU", "v0.15.0+GPU"},
+	} {
+		config := []byte("cvm-version: " + test.version + "@sha256:" + digest + "\ncontainers: []\n")
 		ref, err := ConfigRuntime(config)
 		require.NoError(t, err)
-		require.Equal(t, collateral.RuntimeReference{Repo: collateral.RuntimeRepo, Tag: "v" + strings.TrimPrefix(version, "v"), Digest: digest}, ref)
+		require.Equal(t, collateral.RuntimeReference{Repo: collateral.RuntimeRepo, Tag: test.tag, Digest: digest}, ref)
 	}
 	good := "cvm-version: 0.15.0@sha256:" + digest + "\n"
 	for name, config := range map[string]string{
@@ -97,9 +110,35 @@ func TestConfigRuntimePin(t *testing.T) {
 		"duplicate":       good + good,
 		"two documents":   good + "---\n" + good,
 		"bad digest":      strings.ReplaceAll(good, digest, strings.ToUpper(digest)),
-		"build suffix":    strings.ReplaceAll(good, "0.15.0", "0.15.0+build"),
+		"path metadata":   strings.ReplaceAll(good, "0.15.0", "0.15.0+mini/other"),
+		"partial version": strings.ReplaceAll(good, "0.15.0", "0.15+gpu"),
+		"empty metadata":  strings.ReplaceAll(good, "0.15.0", "0.15.0+"),
+		"double metadata": strings.ReplaceAll(good, "0.15.0", "0.15.0+gpu+gpu"),
+		"short digest":    strings.ReplaceAll(good, digest, digest[:len(digest)-2]),
+		"extra digest":    strings.ReplaceAll(good, digest, digest+"@sha256:"+digest),
 		"missing version": "containers: []\n",
 	} {
 		t.Run(name, func(t *testing.T) { _, err := ConfigRuntime([]byte(config)); require.Error(t, err) })
 	}
+}
+
+func TestRuntimeManifestsHaveIndependentPins(t *testing.T) {
+	cpuData, cpuRef := manifestBytes(t, validManifest())
+	gpu := validManifest()
+	gpu.Version += "+gpu"
+	gpu.Measurements.SNPLaunch.Measurement = strings.Repeat("ef", MeasurementSize)
+	gpu.Measurements.TDXLaunch.MRTD = strings.Repeat("12", MeasurementSize)
+	gpuData, gpuRef := manifestBytes(t, gpu)
+	gpuRef.Tag = gpu.Version
+	parsed, err := ParseManifest(gpuData, gpuRef)
+	require.NoError(t, err)
+	require.Equal(t, gpu, *parsed)
+	require.NotEqual(t, cpuRef.Digest, gpuRef.Digest)
+	_, err = ParseManifest(cpuData, gpuRef)
+	require.ErrorContains(t, err, "digest pin")
+	_, err = ParseManifest(gpuData, cpuRef)
+	require.ErrorContains(t, err, "digest pin")
+	gpuRef.Tag = cpuRef.Tag
+	_, err = ParseManifest(gpuData, gpuRef)
+	require.ErrorContains(t, err, "version")
 }
