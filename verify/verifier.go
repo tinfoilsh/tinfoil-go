@@ -54,6 +54,7 @@ type Verifier struct {
 	endorsements      *endorsement.Client
 	configKeys        []crypto.PublicKey
 	configVerifier    *endorsement.ConfigVerifier
+	configPins        ConfigPins
 	freshnessKeys     []crypto.PublicKey
 	freshnessVerifier *endorsement.FreshnessVerifier
 
@@ -88,6 +89,9 @@ func NewVerifier(opts ...Option) (*Verifier, error) {
 	if v.configAuthorizer != nil && (v.embedded.ConfigReference != nil || v.configKeys != nil) {
 		return nil, usageError(fmt.Errorf("config authorizer conflicts with embedded config or config signing keys"))
 	}
+	if v.configPins != (ConfigPins{}) && (v.embedded.ConfigReference != nil || v.configAuthorizer != nil) {
+		return nil, usageError(fmt.Errorf("config authority pins require endorsement verification"))
+	}
 	if v.embedded.Runtime != nil && v.embedded.Platform != nil && v.freshnessKeys != nil {
 		return nil, usageError(fmt.Errorf("freshness signing keys have no endorsed artifact to verify"))
 	}
@@ -102,7 +106,11 @@ func NewVerifier(opts ...Option) (*Verifier, error) {
 	if freshnessKeys == nil {
 		freshnessKeys = publicKeys
 	}
-	v.configVerifier, err = v.endorsements.ConfigVerifier(configKeys)
+	if v.configKeys == nil {
+		v.configVerifier, err = v.endorsements.RegistryVerifier(configKeys, publicKeys)
+	} else {
+		v.configVerifier, err = v.endorsements.ConfigVerifier(configKeys)
+	}
 	if err != nil {
 		return nil, usageError(err)
 	}
@@ -125,13 +133,12 @@ func (v *Verifier) FreshnessMaxAge() time.Duration { return v.freshnessMaxAge }
 // CheckRepoVerifiability reports whether v can verify an enclave against the
 // repository pin repo, without a document or network I/O, so a caller can
 // reject a pin before fetching a document. It returns a UsageError when:
-//   - repo is not an org/project[@revision][@sha256:digest] reference, or is
-//     empty while neither an embedded config nor a config authorizer supplies
-//     the config;
+//   - repo is nonempty and is not an org/project[@revision][@sha256:digest] reference;
 //   - repo is set and v has a config authorizer, which can't authenticate a
 //     repository pin;
 //   - v has an embedded config whose name or digest repo doesn't match.
 //
+// An empty repo accepts configs authorized by the configured registry trust.
 // VerifyV3 rejects every such repo, whatever the document. It can still reject
 // a repo that passes: v3 collateral also requires the repo and revision to be
 // valid config identity components, such as lowercase slugs, and v2
@@ -158,12 +165,12 @@ func (v *Verifier) PinnedRegisters() measurement.Expected {
 
 // VerifyV3 appraises a nonce-bound v3 attestation document using its collateral
 // version. repo pins the expected repository or registry project as
-// org/project[@revision][@sha256:digest]. An embedded config permits an empty
-// repo; its exact caller-supplied bytes then provide the workload constraint.
+// org/project[@revision][@sha256:digest]. An empty repo accepts authorized registry
+// scopes. An embedded config instead authorizes its exact caller-supplied bytes.
 // A config authorizer requires an empty repo and owns config authorization.
 //
 // The caller owns both expectations that cannot come from the document: the
-// nonce it generated, and its workload constraint (repo or embedded bytes).
+// nonce it generated, and any additional workload constraints.
 // On success it must bind traffic to the returned keys and enforce any nonzero
 // FreshnessExpiresAt. With all references embedded, the caller owns renewal
 // and cache lifetime; zero is not a guarantee of unlimited evidence validity.

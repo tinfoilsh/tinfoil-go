@@ -99,9 +99,16 @@ func ValidateIdentity(identity string) error {
 		return fmt.Errorf("invalid config identity %q", identity)
 	}
 	for _, part := range parts[1:] {
-		if len(part) > maxSlugLength || !slugPattern.MatchString(part) {
-			return fmt.Errorf("invalid config identity component %q", part)
+		if err := ValidateIdentityComponent(part); err != nil {
+			return err
 		}
+	}
+	return nil
+}
+
+func ValidateIdentityComponent(part string) error {
+	if len(part) > maxSlugLength || !slugPattern.MatchString(part) {
+		return fmt.Errorf("invalid config identity component %q", part)
 	}
 	return nil
 }
@@ -119,10 +126,17 @@ func ParseName(name string) (identity, revision string, err error) {
 	if err := ValidateIdentity(identity); err != nil {
 		return "", "", err
 	}
-	if len(revision) > maxRevisionLength || !revisionPattern.MatchString(revision) {
-		return "", "", fmt.Errorf("invalid config revision %q", revision)
+	if err := ValidateRevision(revision); err != nil {
+		return "", "", err
 	}
 	return identity, revision, nil
+}
+
+func ValidateRevision(revision string) error {
+	if len(revision) > maxRevisionLength || !revisionPattern.MatchString(revision) {
+		return fmt.Errorf("invalid config revision %q", revision)
+	}
+	return nil
 }
 
 func (s *Statement) validate(requireTimestamp bool) error {

@@ -91,8 +91,9 @@ type EnclaveHTTPClient struct {
 }
 
 // NewEnclaveHTTPClient returns a client for the enclave at host, verified
-// against repo, owner/name[@tag][@sha256:digest]. An empty repo leaves config
-// authorization to opts.Verifier. It does no network I/O: the enclave is
+// against repo, owner/name[@tag][@sha256:digest]. An empty repo accepts configs
+// authorized by opts.Verifier, which defaults to Tinfoil registry trust.
+// It does no network I/O: the enclave is
 // verified on the first request, or by EnsureVerified to fail fast.
 func NewEnclaveHTTPClient(host, repo string, opts *EnclaveOptions) (*EnclaveHTTPClient, error) {
 	if host == "" {

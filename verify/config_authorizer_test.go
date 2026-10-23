@@ -25,7 +25,7 @@ func TestCheckRepoVerifiability(t *testing.T) {
 	}{
 		{"defaults with a pin", nil, "org/repo@v1", true},
 		{"defaults with a pin only v2 collateral accepts", nil, "Org/My_Repo", true},
-		{"defaults without a pin", nil, "", false},
+		{"defaults without a pin", nil, "", true},
 		{"defaults with a malformed pin", nil, "not a reference", false},
 		{"embedded config without a pin", []Option{WithEmbeddedReferences(inputs)}, "", true},
 		{"embedded config with its own pin", []Option{WithEmbeddedReferences(inputs)}, "org/project@v1", true},

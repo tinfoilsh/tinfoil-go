@@ -11,6 +11,7 @@ import (
 
 	configendorsement "github.com/tinfoilsh/tinfoil-go/endorsement/config"
 	"github.com/tinfoilsh/tinfoil-go/endorsement/freshness"
+	"github.com/tinfoilsh/tinfoil-go/endorsement/scope"
 	"github.com/tinfoilsh/tinfoil-go/internal/canonical"
 	"github.com/tinfoilsh/tinfoil-go/verify/document"
 	"github.com/tinfoilsh/tinfoil-go/verify/document/collateral"
@@ -19,6 +20,25 @@ import (
 	"github.com/tinfoilsh/tinfoil-go/verify/internal/quote"
 	"github.com/tinfoilsh/tinfoil-go/verify/internal/runtime"
 )
+
+type ConfigPins = scope.Pins
+
+// WithConfigPins narrows accepted config authorities without replacing root trust.
+func WithConfigPins(pins ConfigPins) Option {
+	return func(v *Verifier) error {
+		if err := pins.Validate(); err != nil {
+			return err
+		}
+		if pins == (ConfigPins{}) {
+			return nil
+		}
+		if v.configPins != (ConfigPins{}) {
+			return fmt.Errorf("config authority pins must be supplied together")
+		}
+		v.configPins = pins
+		return nil
+	}
+}
 
 // WithConfigAuthorizer replaces config endorsement verification with caller policy.
 // The callback receives detached, untrusted material and must reject unauthorized
@@ -64,11 +84,11 @@ func WithFreshnessSigningKeys(keys []crypto.PublicKey) Option {
 // error if VerifyV3 rejects ref whatever the document. Every check of that
 // kind belongs here, so CheckRepoVerifiability makes it too.
 func (v *Verifier) referencePins(ref string) (endorsement.ConfigPolicy, error) {
-	var pins endorsement.ConfigPolicy
+	pins := endorsement.ConfigPolicy{Scope: v.configPins}
 	if v.configAuthorizer != nil && ref != "" {
 		return pins, usageError(fmt.Errorf("config authorizer cannot authenticate repository or revision pins; enforce them in caller policy"))
 	}
-	if ref != "" || (v.embedded.ConfigReference == nil && v.configAuthorizer == nil) {
+	if ref != "" {
 		parsed, err := endorsement.ParseReference(ref)
 		if err != nil {
 			return pins, usageError(err)
@@ -130,6 +150,9 @@ func (v *Verifier) configReferences(doc *document.Document, ref string, now time
 		config:   approved,
 	}
 	result.freshnessExpiresAt = freshnessExpiration(v.freshnessMaxAge, approved.ApprovalTime, platformTrust.ApprovalTime, runtimeTrust.ApprovalTime)
+	if !approved.ScopeExpiresAt.IsZero() && (result.freshnessExpiresAt.IsZero() || approved.ScopeExpiresAt.Before(result.freshnessExpiresAt)) {
+		result.freshnessExpiresAt = approved.ScopeExpiresAt
+	}
 	return result, nil
 }
 
@@ -157,7 +180,12 @@ func (v *Verifier) resolveConfig(doc *document.Document, pins endorsement.Config
 	if len(config.Bundle) == 0 {
 		return expected, nil, fmt.Errorf("unsigned config requires a config authorizer")
 	}
-	approved, err := v.configVerifier.Verify(config.Config, config.Bundle, pins)
+	var approved *endorsement.ConfigVerified
+	if config.Scope != nil && v.configKeys == nil {
+		approved, err = v.configVerifier.VerifyScoped(config.Config, config.Bundle, *config.Scope, pins)
+	} else {
+		approved, err = v.configVerifier.Verify(config.Config, config.Bundle, pins)
+	}
 	if err != nil {
 		return expected, nil, fmt.Errorf("verifying config approval: %w", err)
 	}
@@ -175,6 +203,7 @@ func (v *Verifier) resolveConfig(doc *document.Document, pins endorsement.Config
 	return expected, &ConfigVerification{
 		Source: SourceEndorsement, Name: approved.Name, Digest: approved.Digest,
 		Reference: approved.Reference, SigningKeyHint: approved.SigningKeyHint, ApprovalTime: approved.ApprovalTime,
+		Scope: approved.Scope, ScopeExpiresAt: approved.ScopeExpiresAt,
 	}, nil
 }
 

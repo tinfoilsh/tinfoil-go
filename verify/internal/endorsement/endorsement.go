@@ -118,6 +118,11 @@ func validateEndorsementBundle(b *bundle.Bundle) error {
 	if sigs[0].GetKeyid() != "" && sigs[0].GetKeyid() != vm.GetPublicKey().GetHint() {
 		return fmt.Errorf("DSSE key ID disagrees with key hint")
 	}
+	return validateLogMaterial(b)
+}
+
+func validateLogMaterial(b *bundle.Bundle) error {
+	vm := b.GetVerificationMaterial()
 	entries := vm.GetTlogEntries()
 	if len(entries) == 0 || len(entries) > maxLogReceipts {
 		return fmt.Errorf("approval requires bounded Rekor inclusion evidence")
