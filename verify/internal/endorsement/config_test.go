@@ -77,6 +77,80 @@ func TestVerifyConfigApproval(t *testing.T) {
 	require.NoError(t, err)
 }
 
+func TestVerifyConfigDigestAndRuntime(t *testing.T) {
+	f := newFixture(t)
+	config := []byte("cvm-version: 0.15.0@sha256:" + strings.Repeat("ab", sha256.Size) + "\n")
+	s, err := configendorsement.NewDeploymentStatement(testName, config)
+	require.NoError(t, err)
+	input, err := s.TimestampInput()
+	require.NoError(t, err)
+	payload, err := s.Complete(f.Timestamp(t, input, f.Now))
+	require.NoError(t, err)
+	bundle := sigstoretest.MarshalBundle(t, f.Bundle(t, payload))
+	got, err := f.verifier(t).VerifyDigest(bundle, f.policy())
+	require.NoError(t, err)
+	digest := sha256.Sum256(config)
+	require.Equal(t, hex.EncodeToString(digest[:]), got.Digest)
+	require.Equal(t, testName, got.Name)
+	require.Equal(t, &configendorsement.RuntimeReference{
+		Repo: configendorsement.RuntimeRepo, Tag: "v0.15.0", Digest: strings.Repeat("ab", sha256.Size),
+	}, got.Runtime)
+	require.Equal(t, f.Now, got.ApprovalTime)
+	withBytes, err := f.verifier(t).Verify(config, bundle, f.policy())
+	require.NoError(t, err)
+	require.Equal(t, got, withBytes)
+
+	for name, mutate := range map[string]func(*protobundle.Bundle){
+		"signature":   func(b *protobundle.Bundle) { b.GetDsseEnvelope().Signatures[0].Sig[0] ^= 1 },
+		"missing log": func(b *protobundle.Bundle) { b.VerificationMaterial.TlogEntries = nil },
+		"unsigned runtime change": func(b *protobundle.Bundle) {
+			b.GetDsseEnvelope().Payload = bytes.Replace(payload, []byte("v0.15.0"), []byte("v0.16.0"), 1)
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			b := f.Bundle(t, payload)
+			mutate(b)
+			_, err := f.verifier(t).VerifyDigest(sigstoretest.MarshalBundle(t, b), f.policy())
+			require.Error(t, err)
+		})
+	}
+	_, err = f.verifier(t).VerifyDigest(sigstoretest.MarshalBundle(t, f.Bundle(t, f.statement(t, f.Now))), f.policy())
+	require.ErrorContains(t, err, "requires a v2")
+	wrongPin := f.policy()
+	wrongPin.Digest = strings.Repeat("cd", sha256.Size)
+	_, err = f.verifier(t).VerifyDigest(bundle, wrongPin)
+	require.ErrorContains(t, err, "pinned digest")
+	stale := f.policy()
+	stale.Now = f.Now.Add(endorsement.DefaultMaxAge + time.Second)
+	_, err = f.verifier(t).VerifyDigest(bundle, stale)
+	require.ErrorContains(t, err, "too old")
+}
+
+func TestDeploymentRuntimeRequiresApprovalAndMatchesConfig(t *testing.T) {
+	f := newFixture(t)
+	config := []byte("cvm-version: 0.15.0@sha256:" + strings.Repeat("ab", sha256.Size) + "\n")
+	s, err := configendorsement.NewDeploymentStatement(testName, config)
+	require.NoError(t, err)
+	input, err := s.TimestampInput()
+	require.NoError(t, err)
+	response := f.Timestamp(t, input, f.Now)
+	s.Predicate.Runtime.Digest = strings.Repeat("cd", sha256.Size)
+	_, err = s.Complete(response)
+	require.ErrorContains(t, err, "does not match endorsement core")
+	s.Predicate.Freshness = &configendorsement.Freshness{RFC3161Timestamp: response}
+	payload, err := json.Marshal(s)
+	require.NoError(t, err)
+	_, err = f.verifier(t).VerifyDigest(sigstoretest.MarshalBundle(t, f.Bundle(t, payload)), f.policy())
+	require.ErrorContains(t, err, "inner timestamp")
+
+	input, err = s.TimestampInput()
+	require.NoError(t, err)
+	payload, err = s.Complete(f.Timestamp(t, input, f.Now))
+	require.NoError(t, err)
+	_, err = f.verifier(t).Verify(config, sigstoretest.MarshalBundle(t, f.Bundle(t, payload)), f.policy())
+	require.ErrorContains(t, err, "config runtime does not match")
+}
+
 func TestPolicyValidatePins(t *testing.T) {
 	policy := endorsement.ConfigPolicy{Identity: testIdentity}
 	require.NoError(t, policy.ValidatePins())
