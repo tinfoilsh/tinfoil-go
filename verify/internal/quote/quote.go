@@ -16,7 +16,6 @@ import (
 	"bytes"
 	"cmp"
 	"fmt"
-	"strings"
 	"time"
 
 	tdxabi "github.com/google/go-tdx-guest/abi"
@@ -34,8 +33,8 @@ import (
 type Authenticated struct {
 	platform string
 	identity string
-	// Measurement is a detached summary of the launch measurement (SEV) or MRTD+RTMRs (TDX).
-	Measurement *measurement.Measurement
+	// Measurement is the authenticated launch measurement (SEV) or MRTD and RTMRs (TDX).
+	Measurement measurement.Measurement
 
 	// evidence is the CPU evidence that was authenticated, so Assemble can
 	// check it appraises the quote against the document it came from.
@@ -54,7 +53,8 @@ func (q *Authenticated) Identity() string { return q.identity }
 // resolved before validation runs. It captures the quote it was assembled
 // for, so it cannot be applied to any other quote.
 type AssembledPolicy struct {
-	CodeMeasurement *measurement.Measurement
+	// CodeMeasurement is the registers the release fixes on the quote's platform.
+	CodeMeasurement measurement.Expected
 	// PolicyName is the matched policy name.
 	PolicyName string
 	// PlatformMeasurementName is the resolved TDX platform configuration;
@@ -69,14 +69,14 @@ type AssembledPolicy struct {
 // ReferenceValues prepares authenticated inputs for a specific verification contract.
 // Implementations resolve all workload expectations before shared assembly.
 type ReferenceValues interface {
-	resolve(*Authenticated, *measurement.Measurement) (*resolvedValues, error)
+	resolve(*Authenticated, measurement.Expected) (*resolvedValues, error)
 }
 
 type resolvedValues struct {
 	policy                  *policy.Policy
 	policyName              string
 	platformMeasurementName string
-	code                    *measurement.Measurement
+	code                    measurement.Expected
 	registers               []string
 	hostData                string
 	configID                [tdxabi.MrConfigIDSize]byte
@@ -169,7 +169,7 @@ func Authenticate(ev document.CPUEvidence, en collateral.CPUEndorsements, now ti
 // recomputed from the caller's nonce, and q must be the quote authenticated
 // from doc's own CPU evidence: a quote cannot be appraised against another
 // document's challenge.
-func Assemble(doc *document.Document, refs ReferenceValues, pins *measurement.Measurement, q *Authenticated) (result *AssembledPolicy, err error) {
+func Assemble(doc *document.Document, refs ReferenceValues, pins measurement.Expected, q *Authenticated) (result *AssembledPolicy, err error) {
 	reportData, err := q.reportData(doc)
 	if err != nil {
 		return nil, err
@@ -192,7 +192,7 @@ func (q *Authenticated) reportData(doc *document.Document) ([64]byte, error) {
 }
 
 // assemble is Assemble against an explicit REPORT_DATA.
-func assemble(refs ReferenceValues, pins *measurement.Measurement, reportData [64]byte, q *Authenticated) (*AssembledPolicy, error) {
+func assemble(refs ReferenceValues, pins measurement.Expected, reportData [64]byte, q *Authenticated) (*AssembledPolicy, error) {
 	resolved, err := refs.resolve(q, pins)
 	if err != nil {
 		return nil, err
@@ -241,19 +241,45 @@ func resolvePolicy(endorsements *policy.Artifact, q *Authenticated) (*resolvedVa
 	return &resolvedValues{policy: p, policyName: name}, nil
 }
 
-func applyPins(registers []string, enclaveType measurement.PredicateType, pins *measurement.Measurement) ([]string, error) {
-	// NewVerifier has already validated the pins; this only fails closed.
-	if err := measurement.ValidatePins(pins); err != nil {
-		return nil, err
+// registersOf lays e out in its platform's register order, as lowercase hex
+// with "" for an unconstrained register.
+func registersOf(e measurement.Expected) []string {
+	hexOf := func(r *measurement.Register) string {
+		if r == nil {
+			return ""
+		}
+		return r.String()
 	}
+	switch e := e.(type) {
+	case measurement.ExpectedSEVSNP:
+		return []string{hexOf(e.Launch)}
+	case measurement.ExpectedTDX:
+		return []string{hexOf(e.MRTD), hexOf(e.RTMR0), hexOf(e.RTMR1), hexOf(e.RTMR2), hexOf(e.RTMR3)}
+	default:
+		return nil
+	}
+}
+
+// applyPins fills the registers the code leaves open from the pins, and
+// requires every pin the code also fixes to agree with it.
+func applyPins(registers []string, platform string, pins measurement.Expected) ([]string, error) {
 	if pins == nil {
 		return registers, nil
 	}
-	if pins.Type != enclaveType || len(pins.Registers) != len(registers) {
-		return nil, fmt.Errorf("pinned measurement is %s with %d registers, enclave is %s with %d", pins.Type, len(pins.Registers), enclaveType, len(registers))
+	var pinnedPlatform string
+	switch pins.(type) {
+	case measurement.ExpectedSEVSNP:
+		pinnedPlatform = policy.PlatformSEVSNP
+	case measurement.ExpectedTDX:
+		pinnedPlatform = policy.PlatformTDX
+	default:
+		return nil, fmt.Errorf("unsupported pinned measurement %T", pins)
 	}
-	for i, pin := range pins.Registers {
-		if pin != "" && registers[i] != "" && !strings.EqualFold(registers[i], pin) {
+	if pinnedPlatform != platform {
+		return nil, fmt.Errorf("pinned registers are for %s, but the enclave is %s", pinnedPlatform, platform)
+	}
+	for i, pin := range registersOf(pins) {
+		if pin != "" && registers[i] != "" && registers[i] != pin {
 			return nil, fmt.Errorf("pinned register %d does not match the signed release measurement", i)
 		}
 		registers[i] = cmp.Or(registers[i], pin)

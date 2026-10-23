@@ -101,7 +101,7 @@ The v3 client always requests a nonce-bound v3 document. Enclaves serving only
 legacy v2 documents must upgrade before using this verifier.
 Remove calls to `SetNoncedAttestation`; nonce binding is mandatory in v3.
 `HardwareMeasurement` is removed; the authenticated MRTD and RTMR0 are the
-first two registers of the TDX enclave measurement.
+`MRTD` and `RTMR0` fields of the `measurement.TDX` enclave measurement.
 
 The old `verifier/attestation`, `verifier/sigstore`, `verifier/github`, and
 `verifier/config` packages are removed. Measurement types now live in
@@ -120,9 +120,10 @@ adopting the v3 framework.
 ## Verification options
 
 Register pins and the freshness bound are fixed when a verifier is built and
-cannot change afterwards. Empty pin entries retain defaults; TDX order is
-`[MRTD, RTMR0, RTMR1, RTMR2, RTMR3]`. Pins cannot override release or platform
-measurements, and `FreshnessMaxAge` defaults to seven days.
+cannot change afterwards. Pins are a `measurement.ExpectedSEVSNP` or
+`measurement.ExpectedTDX`; a nil register leaves it to the release and platform.
+Pins cannot override release or platform measurements, and `FreshnessMaxAge`
+defaults to seven days.
 
 `verify.NewVerifier` takes functional options:
 
@@ -134,11 +135,12 @@ import (
     "github.com/tinfoilsh/tinfoil-go/verify/measurement"
 )
 
+rtmr3, err := measurement.ParseRegister(rtmr3Hex)
+if err != nil {
+    return err
+}
 verifier, err := verify.NewVerifier(
-    verify.WithPinnedRegisters(&measurement.Measurement{
-        Type:      measurement.TdxGuestV2,
-        Registers: []string{4: rtmr3},
-    }),
+    verify.WithPinnedRegisters(measurement.ExpectedTDX{RTMR3: &rtmr3}),
     verify.WithFreshnessMaxAge(24*time.Hour),
 )
 ```

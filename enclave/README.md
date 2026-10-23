@@ -54,14 +54,13 @@ import (
 	"github.com/tinfoilsh/tinfoil-go/verify/measurement"
 )
 
-// newPinnedHandle also requires the enclave's RTMR3 to equal rtmr3 (hex).
-func newPinnedHandle(rtmr3 string) (*enclave.Handle, error) {
-	opts := enclave.Options{
-		PinnedRegisters: &measurement.Measurement{
-			Type:      measurement.TdxGuestV2,
-			Registers: []string{4: rtmr3},
-		},
+// newPinnedHandle also requires the enclave's RTMR3 to equal rtmr3Hex.
+func newPinnedHandle(rtmr3Hex string) (*enclave.Handle, error) {
+	rtmr3, err := measurement.ParseRegister(rtmr3Hex)
+	if err != nil {
+		return nil, err
 	}
+	opts := enclave.Options{PinnedRegisters: measurement.ExpectedTDX{RTMR3: &rtmr3}}
 	return enclave.NewHandle("enclave.example.com", "org/repo", &opts)
 }
 ```

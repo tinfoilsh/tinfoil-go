@@ -261,8 +261,9 @@ func enforceSubject0Digest(result *verify.VerificationResult, expectedDigest str
 // Code is the verified content of a code-provenance bundle.
 type Code struct {
 	AuthenticatedArtifact
-	// Measurement is the attested launch measurement.
-	Measurement *measurement.Measurement
+	// SEVSNP and TDX are the registers the release fixes on each platform.
+	SEVSNP measurement.ExpectedSEVSNP
+	TDX    measurement.ExpectedTDX
 	// Shape is the VM shape the artifact declares.
 	Shape *policy.Shape
 }
@@ -277,7 +278,7 @@ func (c *Client) AuthenticateCode(bundleJSON []byte, ref Reference, tag, hexDige
 	if err != nil {
 		return nil, fmt.Errorf("verifying bundle: %w", err)
 	}
-	m, err := measurementFromStatement(result.Statement)
+	sevsnp, tdx, err := measurementsFromStatement(result.Statement)
 	if err != nil {
 		return nil, fmt.Errorf("code predicate: %w", err)
 	}
@@ -289,7 +290,7 @@ func (c *Client) AuthenticateCode(bundleJSON []byte, ref Reference, tag, hexDige
 	if err != nil {
 		return nil, err
 	}
-	return &Code{AuthenticatedArtifact: authenticated, Measurement: m, Shape: shape}, nil
+	return &Code{AuthenticatedArtifact: authenticated, SEVSNP: sevsnp, TDX: tdx, Shape: shape}, nil
 }
 
 func shapeFromPredicate(fields map[string]*structpb.Value) (*policy.Shape, error) {
@@ -321,54 +322,71 @@ func shapeFromPredicate(fields map[string]*structpb.Value) (*policy.Shape, error
 	return shape, nil
 }
 
-func measurementFromStatement(statement *in_toto.Statement) (*measurement.Measurement, error) {
+// MultiPlatformPredicateType is the code-provenance predicate fixing a
+// release's SEV-SNP launch measurement and its TDX RTMR1 and RTMR2.
+const MultiPlatformPredicateType = "https://tinfoil.sh/predicate/snp-tdx-multiplatform/v1"
+
+// measurementsFromStatement parses the multiplatform predicate into the
+// registers the release fixes on each platform.
+func measurementsFromStatement(statement *in_toto.Statement) (measurement.ExpectedSEVSNP, measurement.ExpectedTDX, error) {
+	var sevsnp measurement.ExpectedSEVSNP
+	var tdx measurement.ExpectedTDX
+	if statement.PredicateType != MultiPlatformPredicateType {
+		return sevsnp, tdx, fmt.Errorf("unsupported predicate type: %s", statement.PredicateType)
+	}
 	predicateFields := statement.Predicate.GetFields()
 
-	measurementType := measurement.PredicateType(statement.PredicateType)
-	switch measurementType {
-	case measurement.SnpTdxMultiPlatformV1:
-		tdxMeasurementField, ok := predicateFields["tdx_measurement"]
-		if !ok {
-			return nil, fmt.Errorf("invalid multiplatform measurement: no tdx measurement")
-		}
-		if tdxMeasurementField == nil {
-			return nil, fmt.Errorf("invalid multiplatform measurement: tdx measurement is nil")
-		}
-		tdxMeasurement := tdxMeasurementField.GetStructValue()
-		if tdxMeasurement == nil {
-			return nil, fmt.Errorf("invalid multiplatform measurement: tdx measurement is not a struct")
-		}
-		rtmrs := tdxMeasurement.GetFields()
-
-		snpMeasurement, ok := predicateFields["snp_measurement"]
-		if !ok {
-			return nil, fmt.Errorf("invalid multiplatform measurement: no snp measurement")
-		}
-		if snpMeasurement == nil {
-			return nil, fmt.Errorf("invalid multiplatform measurement: snp measurement is nil")
-		}
-
-		for _, rtmr := range []string{"rtmr1", "rtmr2"} {
-			v, ok := rtmrs[rtmr]
-			if !ok {
-				return nil, fmt.Errorf("invalid multiplatform measurement: no %s", rtmr)
-			}
-			if v == nil {
-				return nil, fmt.Errorf("invalid multiplatform measurement: %s is nil", rtmr)
-			}
-		}
-
-		return &measurement.Measurement{
-			Type: measurementType,
-			Registers: []string{
-				predicateFields["snp_measurement"].GetStringValue(),
-				rtmrs["rtmr1"].GetStringValue(),
-				rtmrs["rtmr2"].GetStringValue(),
-			},
-		}, nil
-	default:
-		return nil, fmt.Errorf("unsupported predicate type: %s", statement.PredicateType)
+	tdxMeasurementField, ok := predicateFields["tdx_measurement"]
+	if !ok {
+		return sevsnp, tdx, fmt.Errorf("invalid multiplatform measurement: no tdx measurement")
 	}
+	if tdxMeasurementField == nil {
+		return sevsnp, tdx, fmt.Errorf("invalid multiplatform measurement: tdx measurement is nil")
+	}
+	tdxMeasurement := tdxMeasurementField.GetStructValue()
+	if tdxMeasurement == nil {
+		return sevsnp, tdx, fmt.Errorf("invalid multiplatform measurement: tdx measurement is not a struct")
+	}
+	rtmrs := tdxMeasurement.GetFields()
+
+	snpMeasurement, ok := predicateFields["snp_measurement"]
+	if !ok {
+		return sevsnp, tdx, fmt.Errorf("invalid multiplatform measurement: no snp measurement")
+	}
+	if snpMeasurement == nil {
+		return sevsnp, tdx, fmt.Errorf("invalid multiplatform measurement: snp measurement is nil")
+	}
+
+	for _, rtmr := range []string{"rtmr1", "rtmr2"} {
+		v, ok := rtmrs[rtmr]
+		if !ok {
+			return sevsnp, tdx, fmt.Errorf("invalid multiplatform measurement: no %s", rtmr)
+		}
+		if v == nil {
+			return sevsnp, tdx, fmt.Errorf("invalid multiplatform measurement: %s is nil", rtmr)
+		}
+	}
+
+	parse := func(name string, value *structpb.Value) (*measurement.Register, error) {
+		register, err := measurement.ParseRegister(value.GetStringValue())
+		if err != nil {
+			return nil, fmt.Errorf("invalid multiplatform measurement: %s: %w", name, err)
+		}
+		return &register, nil
+	}
+	launch, err := parse("snp measurement", snpMeasurement)
+	if err != nil {
+		return sevsnp, tdx, err
+	}
+	rtmr1, err := parse("rtmr1", rtmrs["rtmr1"])
+	if err != nil {
+		return sevsnp, tdx, err
+	}
+	rtmr2, err := parse("rtmr2", rtmrs["rtmr2"])
+	if err != nil {
+		return sevsnp, tdx, err
+	}
+	return measurement.ExpectedSEVSNP{Launch: launch}, measurement.ExpectedTDX{RTMR1: rtmr1, RTMR2: rtmr2}, nil
 }
 
 // format is selected by the verification flow, independently of collateral metadata.

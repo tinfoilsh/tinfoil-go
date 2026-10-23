@@ -7,7 +7,6 @@ import (
 	"bytes"
 	"crypto/x509"
 	_ "embed"
-	"encoding/hex"
 	"encoding/pem"
 	"fmt"
 	"net/url"
@@ -141,8 +140,8 @@ func productFromReport(report *sevsnp.Report) (*sevsnp.SevProduct, error) {
 // any expected value.
 type Quote struct {
 	identity string
-	// Measurement is a detached summary of the launch measurement register.
-	Measurement *measurement.Measurement
+	// Measurement is the authenticated launch measurement.
+	Measurement measurement.SEVSNP
 
 	attestation *sevsnp.Attestation
 }
@@ -209,12 +208,14 @@ func Authenticate(ev Evidence, now time.Time, opts *Options) (result *Quote, err
 		return nil, err
 	}
 
+	launch := report.GetMeasurement()
+	// Converting a short slice to a Register panics, so check the length.
+	if len(launch) != measurement.RegisterSize {
+		return nil, fmt.Errorf("report measurement must be %d bytes, got %d", measurement.RegisterSize, len(launch))
+	}
 	return &Quote{
-		identity: identity,
-		Measurement: &measurement.Measurement{
-			Type:      measurement.SevGuestV2,
-			Registers: []string{hex.EncodeToString(report.Measurement)},
-		},
+		identity:    identity,
+		Measurement: measurement.SEVSNP{Launch: measurement.Register(launch)},
 		attestation: att,
 	}, nil
 }

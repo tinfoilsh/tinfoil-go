@@ -91,12 +91,30 @@ func TestNewVerifierAppliesOptions(t *testing.T) {
 		`"pinned_registers":{"type":"https://tinfoil.sh/predicate/tdx-guest/v2","registers":["","","","","` + register + `"]}}`)
 	require.NoError(t, err)
 	assert.Equal(t, time.Hour, verifier.inner.FreshnessMaxAge())
-	assert.Equal(t, &measurement.Measurement{Type: measurement.TdxGuestV2, Registers: []string{4: register}}, verifier.inner.PinnedRegisters())
+	rtmr3, err := measurement.ParseRegister(register)
+	require.NoError(t, err)
+	assert.Equal(t, measurement.ExpectedTDX{RTMR3: &rtmr3}, verifier.inner.PinnedRegisters())
 
 	defaults, err := NewVerifier("")
 	require.NoError(t, err)
 	assert.Equal(t, 7*24*time.Hour, defaults.inner.FreshnessMaxAge())
 	assert.Nil(t, defaults.inner.PinnedRegisters())
+}
+
+func TestNewVerifierRejectsMalformedPins(t *testing.T) {
+	register := strings.Repeat("ab", 48)
+	for name, pins := range map[string]string{
+		"unknown type": `{"type":"https://tinfoil.sh/predicate/nope/v1","registers":[""]}`,
+		"wrong count":  `{"type":"https://tinfoil.sh/predicate/tdx-guest/v2","registers":["` + register + `"]}`,
+		"not hex":      `{"type":"https://tinfoil.sh/predicate/sev-snp-guest/v2","registers":["zz"]}`,
+		"wrong length": `{"type":"https://tinfoil.sh/predicate/sev-snp-guest/v2","registers":["abcd"]}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, err := NewVerifier(`{"pinned_registers":` + pins + `}`)
+			require.Error(t, err)
+			assert.True(t, strings.HasPrefix(err.Error(), UsageErrorPrefix), err.Error())
+		})
+	}
 }
 
 // A verification that cannot authorize a request is reported as a failure, so

@@ -1,13 +1,15 @@
 package verify
 
 import (
-	"strings"
+	"os"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/tinfoilsh/tinfoil-go/internal/fetch"
+	"github.com/tinfoilsh/tinfoil-go/internal/testutil"
 	"github.com/tinfoilsh/tinfoil-go/verify/document"
 	"github.com/tinfoilsh/tinfoil-go/verify/document/collateral"
 	"github.com/tinfoilsh/tinfoil-go/verify/internal/endorsement"
@@ -42,37 +44,76 @@ func TestWithFreshnessMaxAge(t *testing.T) {
 }
 
 func TestWithPinnedRegistersCopies(t *testing.T) {
-	register := strings.Repeat("ab", 48)
-	pins := &measurement.Measurement{Type: measurement.TdxGuestV2, Registers: []string{4: register}}
-	v, err := NewVerifier(WithPinnedRegisters(pins))
+	register := measurement.Register{0xab}
+	pinned := register
+	v, err := NewVerifier(WithPinnedRegisters(measurement.ExpectedTDX{RTMR3: &pinned}))
 	require.NoError(t, err)
 
-	// Mutating the caller's measurement after construction must not reach the
+	// Changing the caller's register after construction must not reach the
 	// policy, and the accessor must hand back a copy for the same reason.
-	pins.Type = measurement.SevGuestV2
-	pins.Registers[4] = "changed"
-	assert.Equal(t, measurement.TdxGuestV2, v.PinnedRegisters().Type)
-	assert.Equal(t, register, v.PinnedRegisters().Registers[4])
-
-	v.PinnedRegisters().Registers[4] = "changed again"
-	assert.Equal(t, register, v.PinnedRegisters().Registers[4])
+	pinned[0] = 0xcd
+	got := v.PinnedRegisters().(measurement.ExpectedTDX)
+	assert.Equal(t, register, *got.RTMR3)
+	*got.RTMR3 = measurement.Register{0xef}
+	assert.Equal(t, register, *v.PinnedRegisters().(measurement.ExpectedTDX).RTMR3)
 }
 
-func TestWithPinnedRegistersRejectsInvalid(t *testing.T) {
-	for name, pins := range map[string]*measurement.Measurement{
-		"unknown type":  {Type: "https://tinfoil.sh/predicate/nope/v1", Registers: []string{""}},
-		"wrong count":   {Type: measurement.TdxGuestV2, Registers: []string{""}},
-		"not hex":       {Type: measurement.SevGuestV2, Registers: []string{"zz"}},
-		"wrong length":  {Type: measurement.SevGuestV2, Registers: []string{"abcd"}},
-		"nil registers": {Type: measurement.SevGuestV2},
+// Malformed registers cannot be constructed, so the only invalid pins are a
+// nil pointer. A non-nil pointer is accepted and stored as a value.
+func TestWithPinnedRegistersAcceptsPointers(t *testing.T) {
+	register := measurement.Register{0xab}
+	v, err := NewVerifier(WithPinnedRegisters(&measurement.ExpectedTDX{RTMR3: &register}))
+	require.NoError(t, err)
+	assert.IsType(t, measurement.ExpectedTDX{}, v.PinnedRegisters())
+	for name, pins := range map[string]measurement.Expected{
+		"nil SEV-SNP": (*measurement.ExpectedSEVSNP)(nil),
+		"nil TDX":     (*measurement.ExpectedTDX)(nil),
 	} {
 		t.Run(name, func(t *testing.T) {
 			v, err := NewVerifier(WithPinnedRegisters(pins))
 			require.Nil(t, v)
-			var usage *UsageError
-			require.ErrorAs(t, err, &usage)
+			require.ErrorAs(t, err, new(*UsageError))
 		})
 	}
+}
+
+// Pins apply only to the platform the quote proves: a register the enclave
+// really measured verifies when pinned for its platform and rejects when
+// pinned for the other one.
+func TestLivePinsForTheOtherPlatformReject(t *testing.T) {
+	const enclaveEnvVar, repoEnvVar = "TINFOIL_ENCLAVE", "TINFOIL_REPO"
+	testutil.RequireLive(t, enclaveEnvVar, repoEnvVar)
+	repo := os.Getenv(repoEnvVar)
+	nonce, err := document.RandomNonce()
+	require.NoError(t, err)
+	raw, err := fetch.Document(t.Context(), os.Getenv(enclaveEnvVar), "", nonce)
+	require.NoError(t, err)
+	verifier, err := NewVerifier()
+	require.NoError(t, err)
+	verified, err := verifier.VerifyV3(raw, nonce, repo)
+	require.NoError(t, err)
+
+	var own, other measurement.Expected
+	switch m := verified.EnclaveMeasurement.(type) {
+	case measurement.SEVSNP:
+		own, other = measurement.ExpectedSEVSNP{Launch: &m.Launch}, measurement.ExpectedTDX{MRTD: &m.Launch}
+	case measurement.TDX:
+		own, other = measurement.ExpectedTDX{MRTD: &m.MRTD}, measurement.ExpectedSEVSNP{Launch: &m.MRTD}
+	default:
+		t.Fatalf("unexpected enclave measurement %T", m)
+	}
+	pinned, err := NewVerifier(WithPinnedRegisters(own))
+	require.NoError(t, err)
+	_, err = pinned.VerifyV3(raw, nonce, repo)
+	require.NoError(t, err)
+
+	pinned, err = NewVerifier(WithPinnedRegisters(other))
+	require.NoError(t, err)
+	_, err = pinned.VerifyV3(raw, nonce, repo)
+	var rejected *VerificationError
+	require.ErrorAs(t, err, &rejected)
+	require.Equal(t, LayerPolicy, rejected.Layer)
+	require.ErrorContains(t, err, "pinned registers are for")
 }
 
 func TestVerifyV3RejectsBadRepo(t *testing.T) {

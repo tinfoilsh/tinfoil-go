@@ -5,7 +5,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
-	"strings"
 	"testing"
 	"time"
 
@@ -57,7 +56,7 @@ func TestClientFreshnessMaxAge(t *testing.T) {
 	defaultRouterURL = server.URL
 	t.Cleanup(func() { defaultRouterURL = originalURL })
 	for _, maxAge := range []time.Duration{0, 24 * time.Hour, 30 * 24 * time.Hour} {
-		opts := Options{FreshnessMaxAge: maxAge, PinnedRegisters: &measurement.Measurement{Type: measurement.TdxGuestV2, Registers: []string{4: measurement.RTMR3_ZERO}}}
+		opts := Options{FreshnessMaxAge: maxAge, PinnedRegisters: measurement.ExpectedTDX{RTMR3: &measurement.Register{}}}
 		s, err := NewDefaultHandle(&opts)
 		require.NoError(t, err)
 		require.Equal(t, "inference.tinfoil.sh", s.Enclave())
@@ -78,14 +77,14 @@ func TestLiveVerifyFreshnessExpiration(t *testing.T) {
 	require.NoError(t, err)
 	const maxAge = 30 * 24 * time.Hour
 	for _, age := range []time.Duration{0, maxAge} {
-		opts := Options{FreshnessMaxAge: age, PinnedRegisters: verified.EnclaveMeasurement}
+		opts := Options{FreshnessMaxAge: age, PinnedRegisters: exactPins(verified.EnclaveMeasurement, nil)}
 		custom, err := verifyDocument(raw, nonce, repo, &opts)
 		require.NoError(t, err)
 		require.Equal(t, verified.FreshnessExpiresAt.Add(cmp.Or(age, defaultMaxAge)-defaultMaxAge), custom.FreshnessExpiresAt)
 	}
-	badPins := cloneMeasurement(verified.EnclaveMeasurement)
-	badPins.Registers[0] = strings.Repeat("ab", 48)
-	require.NotEqual(t, verified.EnclaveMeasurement.Registers[0], badPins.Registers[0])
+	bad := measurement.Register{0xab}
+	badPins := exactPins(verified.EnclaveMeasurement, &bad)
+	require.NotEqual(t, exactPins(verified.EnclaveMeasurement, nil), badPins)
 	_, err = verifyDocument(raw, nonce, repo, &Options{PinnedRegisters: badPins})
 	var rejected *verify.VerificationError
 	require.ErrorAs(t, err, &rejected)
@@ -94,4 +93,25 @@ func TestLiveVerifyFreshnessExpiration(t *testing.T) {
 	_, err = s.Verify()
 	var attestation *AttestationError
 	require.ErrorAs(t, err, &attestation)
+}
+
+// exactPins pins every register of m, replacing its first register with first
+// when that is non-nil.
+func exactPins(m measurement.Measurement, first *measurement.Register) measurement.Expected {
+	switch m := m.(type) {
+	case measurement.SEVSNP:
+		pins := measurement.ExpectedSEVSNP{Launch: &m.Launch}
+		if first != nil {
+			pins.Launch = first
+		}
+		return pins
+	case measurement.TDX:
+		pins := measurement.ExpectedTDX{MRTD: &m.MRTD, RTMR0: &m.RTMR0, RTMR1: &m.RTMR1, RTMR2: &m.RTMR2, RTMR3: &m.RTMR3}
+		if first != nil {
+			pins.MRTD = first
+		}
+		return pins
+	default:
+		return nil
+	}
 }

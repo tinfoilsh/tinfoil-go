@@ -17,6 +17,7 @@ import (
 	"github.com/tinfoilsh/tinfoil-go/verify/document/collateral"
 	"github.com/tinfoilsh/tinfoil-go/verify/internal/policy"
 	"github.com/tinfoilsh/tinfoil-go/verify/measurement"
+	"google.golang.org/protobuf/types/known/structpb"
 )
 
 func TestSigningIdentity(t *testing.T) {
@@ -71,13 +72,12 @@ func TestLiveAuthenticateCode(t *testing.T) {
 	assert.Equal(t, tag, code.Tag)
 	assert.Equal(t, "tinfoil-deployment.json", code.SubjectName)
 	assert.Equal(t, hexDigest, code.Digest)
-	m := code.Measurement
-	assert.Equal(t, measurement.SnpTdxMultiPlatformV1, m.Type)
-	assert.Equal(t, []string{
-		"e64db4b8914b7317017cd6761f4b60c41d80865ae6e3153a4827ac2a77fe4214bcf724b4525b4b906cfc871e51a5ba7f", // SEV-SNP
-		"46658ae5655794d3ea0130e2d425aa002f224c7a47c1eb1792f656d79f808aac6006ce84d71ee24d97c3eea42c867e51", // RTMR1
-		"3aa09dae28537d875c10b95b4c07317a6ca442cdb5385a8779ed26b3c67be303055c9efdadef2494a9249932e91cb8e7", // RTMR2
-	}, m.Registers)
+	assert.Equal(t, "e64db4b8914b7317017cd6761f4b60c41d80865ae6e3153a4827ac2a77fe4214bcf724b4525b4b906cfc871e51a5ba7f", code.SEVSNP.Launch.String())
+	assert.Equal(t, "46658ae5655794d3ea0130e2d425aa002f224c7a47c1eb1792f656d79f808aac6006ce84d71ee24d97c3eea42c867e51", code.TDX.RTMR1.String())
+	assert.Equal(t, "3aa09dae28537d875c10b95b4c07317a6ca442cdb5385a8779ed26b3c67be303055c9efdadef2494a9249932e91cb8e7", code.TDX.RTMR2.String())
+	assert.Nil(t, code.TDX.MRTD, "the release leaves MRTD, RTMR0 and RTMR3 to the platform")
+	assert.Nil(t, code.TDX.RTMR0)
+	assert.Nil(t, code.TDX.RTMR3)
 	require.NotNil(t, code.Shape)
 	assert.Equal(t, 4, code.Shape.CPUs)
 	assert.Equal(t, 4096, code.Shape.MemoryMB)
@@ -110,6 +110,41 @@ func TestLiveAuthenticateCode(t *testing.T) {
 			}
 		})
 	}
+}
+
+// The multiplatform predicate fixes the SEV-SNP launch measurement and TDX
+// RTMR1 and RTMR2; each must be a well-formed register.
+func TestMeasurementsFromStatement(t *testing.T) {
+	statement := func(snp, rtmr1, rtmr2 string) *in_toto.Statement {
+		predicate, err := structpb.NewStruct(map[string]any{
+			"snp_measurement": snp,
+			"tdx_measurement": map[string]any{"rtmr1": rtmr1, "rtmr2": rtmr2},
+		})
+		require.NoError(t, err)
+		return &in_toto.Statement{PredicateType: MultiPlatformPredicateType, Predicate: predicate}
+	}
+	launch, rtmr1, rtmr2 := strings.Repeat("aa", 48), strings.Repeat("bb", 48), strings.Repeat("cc", 48)
+	sevsnp, tdx, err := measurementsFromStatement(statement(launch, rtmr1, rtmr2))
+	require.NoError(t, err)
+	assert.Equal(t, launch, sevsnp.Launch.String())
+	assert.Equal(t, measurement.ExpectedTDX{RTMR1: tdx.RTMR1, RTMR2: tdx.RTMR2}, tdx)
+	assert.Equal(t, rtmr1, tdx.RTMR1.String())
+	assert.Equal(t, rtmr2, tdx.RTMR2.String())
+
+	for name, s := range map[string]*in_toto.Statement{
+		"short launch":  statement("abcd", rtmr1, rtmr2),
+		"non-hex rtmr1": statement(launch, strings.Repeat("zz", 48), rtmr2),
+		"empty rtmr2":   statement(launch, rtmr1, ""),
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, _, err := measurementsFromStatement(s)
+			assert.ErrorContains(t, err, "invalid multiplatform measurement")
+		})
+	}
+	other := statement(launch, rtmr1, rtmr2)
+	other.PredicateType = "https://tinfoil.sh/predicate/sev-snp-guest/v2"
+	_, _, err = measurementsFromStatement(other)
+	assert.ErrorContains(t, err, "unsupported predicate type")
 }
 
 func TestParseReferenceRejectsInvalidReference(t *testing.T) {

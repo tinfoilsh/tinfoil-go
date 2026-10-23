@@ -86,8 +86,8 @@ type Options struct {
 	EmbeddedConfig *verify.EmbeddedConfig `json:"embedded_config,omitempty"`
 	// ConfigAuthorizer authorizes document-carried configs instead of their endorsement.
 	ConfigAuthorizer func(collateral.ConfigEndorsement) error `json:"-"`
-	// PinnedRegisters adds register checks; empty entries retain defaults.
-	PinnedRegisters *measurement.Measurement `json:"pinned_registers,omitempty"`
+	// PinnedRegisters adds register checks (see verify.WithPinnedRegisters).
+	PinnedRegisters measurement.Expected `json:"-"`
 	// FreshnessMaxAge defaults to seven days when zero. Negative ages are invalid.
 	FreshnessMaxAge time.Duration `json:"freshness_max_age_ns,omitempty"`
 }

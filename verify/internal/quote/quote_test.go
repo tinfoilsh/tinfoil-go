@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 	"time"
 
@@ -110,8 +109,7 @@ func TestLiveVerifySEV(t *testing.T) {
 	assert.Equal(t, policy.PlatformSEVSNP, verified.Platform())
 	assert.Equal(t, "amd-genoa-prod", assembled.PolicyName)
 	assert.NotEmpty(t, verified.Identity())
-	require.NotNil(t, verified.Measurement)
-	assert.Equal(t, measurement.SevGuestV2, verified.Measurement.Type)
+	assert.IsType(t, measurement.SEVSNP{}, verified.Measurement)
 	*verified = Authenticated{}
 	require.NoError(t, assembled.Validate(), "assembly must retain its original authenticated quote")
 
@@ -123,12 +121,14 @@ func TestLiveVerifySEV(t *testing.T) {
 
 	// A launch measurement differing from the code expectation must reject.
 	wrongMeasurement := asCode(q.Measurement)
-	wrongMeasurement.Registers[0] = strings.Repeat("ab", 48)
+	wrongMeasurement.SEVSNP.Launch = &measurement.Register{0xab}
 	_, _, err = verify(evidence, endorsements, artifact, wrongMeasurement, nil, testShape, reportData, nil)
 	assert.Error(t, err)
 
 	// SEV assembly does not consume the code artifact's VM shape.
-	_, err = assemble(LegacyReferenceValues{Endorsements: artifact, Code: asCode(q.Measurement)}, nil, reportData, q)
+	code := asCode(q.Measurement)
+	code.Endorsements = artifact
+	_, err = assemble(code, nil, reportData, q)
 	require.NoError(t, err)
 
 	// A machine absent from the artifact must reject.
@@ -176,58 +176,56 @@ func TestVerifySEVRejectsBadCRL(t *testing.T) {
 
 func TestVerifyUnknownFormat(t *testing.T) {
 	evidence := document.CPUEvidence{Format: "https://tinfoil.sh/format/unknown/v1"}
-	_, _, err := verify(evidence, collateral.CPUEndorsements{}, &policy.Artifact{}, &measurement.Measurement{}, nil, testShape, [64]byte{}, nil)
+	_, _, err := verify(evidence, collateral.CPUEndorsements{}, &policy.Artifact{}, LegacyReferenceValues{}, nil, testShape, [64]byte{}, nil)
 	assert.Error(t, err)
 	assert.Contains(t, fmt.Sprint(err), "unsupported cpu_evidence format")
 }
 
-func TestLayoutRequiresCanonicalRegisterCount(t *testing.T) {
-	register := strings.Repeat("ab", 48)
-	sev := &Authenticated{platform: policy.PlatformSEVSNP, Measurement: &measurement.Measurement{Type: measurement.SevGuestV2, Registers: []string{register}}}
-	code := &measurement.Measurement{Type: measurement.SnpTdxMultiPlatformV1, Registers: []string{register}}
-	_, err := layout(code, nil, sev)
-	assert.ErrorContains(t, err, "code measurement is https://tinfoil.sh/predicate/snp-tdx-multiplatform/v1 with 1 registers")
+func TestPinsUseAuthenticatedPlatform(t *testing.T) {
+	register := measurement.Register{0xab}
+	r := register.String()
+	tdxRelease := func() []string { return registersOf(measurement.ExpectedTDX{RTMR1: &register, RTMR2: &register}) }
+	sevRelease := func() []string { return registersOf(measurement.ExpectedSEVSNP{Launch: &register}) }
+	got, err := applyPins(tdxRelease(), policy.PlatformTDX, measurement.ExpectedTDX{RTMR3: &register})
+	require.NoError(t, err)
+	assert.Equal(t, []string{"", "", r, r, r}, got, "a pin fills a register the release leaves open")
+	got, err = applyPins(sevRelease(), policy.PlatformSEVSNP, measurement.ExpectedSEVSNP{Launch: &register})
+	require.NoError(t, err)
+	assert.Equal(t, []string{r}, got, "a pin may repeat a register the release fixes")
+	_, err = applyPins(tdxRelease(), policy.PlatformTDX, &measurement.ExpectedTDX{})
+	assert.ErrorContains(t, err, "unsupported pinned measurement", "NewVerifier stores pins as values; anything else fails closed")
+
+	// Pins for the other platform reject in both directions, even when their
+	// value equals a register the release fixes.
+	_, err = applyPins(tdxRelease(), policy.PlatformTDX, measurement.ExpectedSEVSNP{Launch: &register})
+	assert.ErrorContains(t, err, "pinned registers are for sev-snp, but the enclave is tdx")
+	_, err = applyPins(sevRelease(), policy.PlatformSEVSNP, measurement.ExpectedTDX{RTMR1: &register})
+	assert.ErrorContains(t, err, "pinned registers are for tdx, but the enclave is sev-snp")
 }
 
-func TestPinnedLayoutUsesAuthenticatedPlatform(t *testing.T) {
-	register := strings.Repeat("ab", 48)
-	code := &measurement.Measurement{Type: measurement.SnpTdxMultiPlatformV1, Registers: []string{register, register, register}}
-	q := &Authenticated{platform: policy.PlatformTDX}
-	pins := &measurement.Measurement{Type: measurement.TdxGuestV2, Registers: []string{4: register}}
-	got, err := layout(code, pins, q)
-	require.NoError(t, err, "the caller-controlled measurement summary is not an input to policy")
-	assert.Equal(t, []string{"", "", register, register, register}, got)
-	pins.Type = measurement.SevGuestV2
-	pins.Registers = []string{register}
-	_, err = layout(code, pins, q)
-	assert.ErrorContains(t, err, "pinned measurement")
-	for _, malformed := range []*measurement.Measurement{
-		{Type: "unknown"},
-		{Type: measurement.SevGuestV2, Registers: []string{}},
-		{Type: measurement.TdxGuestV2, Registers: []string{4: "bad"}},
-	} {
-		_, err = layout(code, malformed, q)
-		require.Error(t, err, "malformed pins fail closed even though NewVerifier rejects them first")
+// asCode returns the registers a release fixes for the measured guest: the
+// SEV-SNP launch measurement, or TDX RTMR1 and RTMR2.
+func asCode(m measurement.Measurement) LegacyReferenceValues {
+	switch m := m.(type) {
+	case measurement.SEVSNP:
+		return LegacyReferenceValues{SEVSNP: measurement.ExpectedSEVSNP{Launch: &m.Launch}}
+	case measurement.TDX:
+		return LegacyReferenceValues{TDX: measurement.ExpectedTDX{RTMR1: &m.RTMR1, RTMR2: &m.RTMR2}}
+	default:
+		return LegacyReferenceValues{}
 	}
-}
-
-// asCode extracts the release registers from a guest measurement.
-func asCode(m *measurement.Measurement) *measurement.Measurement {
-	if m.Type == measurement.TdxGuestV2 {
-		return &measurement.Measurement{Type: measurement.SnpTdxMultiPlatformV1, Registers: []string{"", m.Registers[2], m.Registers[3]}}
-	}
-	return &measurement.Measurement{Type: measurement.SnpTdxMultiPlatformV1, Registers: []string{m.Registers[0], "", ""}}
 }
 
 // verify composes Authenticate, assemble against an explicit REPORT_DATA, and
 // Validate at the current time, for tests whose evidence predates the v3
 // REPORT_DATA ladder. A nil opts selects the embedded vendor roots.
-func verify(ev document.CPUEvidence, en collateral.CPUEndorsements, endorsements *policy.Artifact, code, pins *measurement.Measurement, shape *policy.Shape, reportData [64]byte, opts *Options) (*AssembledPolicy, *Authenticated, error) {
+func verify(ev document.CPUEvidence, en collateral.CPUEndorsements, endorsements *policy.Artifact, code LegacyReferenceValues, pins measurement.Expected, shape *policy.Shape, reportData [64]byte, opts *Options) (*AssembledPolicy, *Authenticated, error) {
 	q, err := Authenticate(ev, en, time.Now(), opts)
 	if err != nil {
 		return nil, nil, err
 	}
-	assembled, err := assemble(LegacyReferenceValues{Endorsements: endorsements, Code: code, Shape: shape}, pins, reportData, q)
+	code.Endorsements, code.Shape = endorsements, shape
+	assembled, err := assemble(code, pins, reportData, q)
 	if err != nil {
 		return nil, nil, err
 	}

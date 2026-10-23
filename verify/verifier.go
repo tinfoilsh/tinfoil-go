@@ -43,7 +43,7 @@ import (
 // rejected once its witnesses go stale.
 type Verifier struct {
 	embedded        EmbeddedReferences
-	pinnedRegisters *measurement.Measurement
+	pinnedRegisters measurement.Expected
 	freshnessMaxAge time.Duration
 
 	configAuthorizer func(collateral.ConfigEndorsement) error
@@ -123,8 +123,11 @@ func ParseReference(ref string) (repo, tag, digest string, err error) {
 func (v *Verifier) FreshnessMaxAge() time.Duration { return v.freshnessMaxAge }
 
 // PinnedRegisters returns a copy of the configured register pins, or nil.
-func (v *Verifier) PinnedRegisters() *measurement.Measurement {
-	return cloneMeasurement(v.pinnedRegisters)
+func (v *Verifier) PinnedRegisters() measurement.Expected {
+	if v.pinnedRegisters == nil {
+		return nil
+	}
+	return v.pinnedRegisters.Clone()
 }
 
 // VerifyV3 appraises a nonce-bound v3 attestation document using its collateral
@@ -264,7 +267,7 @@ func (v *Verifier) codeReferences(doc *document.Document, repo string, appraisal
 	}
 	refs := &endorsementResult{
 		quote: quote.LegacyReferenceValues{
-			Endorsements: endorsements.Artifact, Code: code.Measurement, Shape: code.Shape,
+			Endorsements: endorsements.Artifact, SEVSNP: code.SEVSNP, TDX: code.TDX, Shape: code.Shape,
 		},
 		artifact: artifactVerification(code.AuthenticatedArtifact, time.Time{}),
 	}

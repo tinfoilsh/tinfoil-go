@@ -17,7 +17,7 @@ type ConfigReferenceValues struct {
 	Hash         [sha256.Size]byte
 }
 
-func (r ConfigReferenceValues) resolve(q *Authenticated, pins *measurement.Measurement) (*resolvedValues, error) {
+func (r ConfigReferenceValues) resolve(q *Authenticated, pins measurement.Expected) (*resolvedValues, error) {
 	if r.Runtime == nil || r.Runtime.SNPLaunch == nil || r.Runtime.TDXLaunch == nil {
 		return nil, fmt.Errorf("complete runtime endorsements are required")
 	}
@@ -31,17 +31,28 @@ func (r ConfigReferenceValues) resolve(q *Authenticated, pins *measurement.Measu
 			return nil, fmt.Errorf("config runtime cannot be combined with platform host_data")
 		}
 		resolved.hostData = hex.EncodeToString(r.Hash[:])
-		resolved.code = &measurement.Measurement{Type: measurement.SevGuestV2, Registers: []string{r.Runtime.SNPLaunch.Measurement}}
+		launch, err := measurement.ParseRegister(r.Runtime.SNPLaunch.Measurement)
+		if err != nil {
+			return nil, fmt.Errorf("runtime SNP launch measurement: %w", err)
+		}
+		resolved.code = measurement.ExpectedSEVSNP{Launch: &launch}
 	case policy.PlatformTDX:
 		if len(resolved.policy.TDX.PlatformMeasurements) != 0 {
 			return nil, fmt.Errorf("config runtime cannot be combined with platform_measurements")
 		}
 		copy(resolved.configID[:], r.Hash[:])
-		registers := r.Runtime.TDXLaunch.Registers()
-		resolved.code = &measurement.Measurement{Type: measurement.TdxGuestV2, Registers: registers[:]}
+		var registers [5]*measurement.Register
+		for i, value := range r.Runtime.TDXLaunch.Registers() {
+			register, err := measurement.ParseRegister(value)
+			if err != nil {
+				return nil, fmt.Errorf("runtime TDX register %d: %w", i, err)
+			}
+			registers[i] = &register
+		}
+		resolved.code = measurement.ExpectedTDX{MRTD: registers[0], RTMR0: registers[1], RTMR1: registers[2], RTMR2: registers[3], RTMR3: registers[4]}
 	default:
 		return nil, fmt.Errorf("unsupported platform %q", q.platform)
 	}
-	resolved.registers, err = applyPins(resolved.code.Registers, resolved.code.Type, pins)
+	resolved.registers, err = applyPins(registersOf(resolved.code), q.platform, pins)
 	return resolved, err
 }

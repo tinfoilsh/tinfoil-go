@@ -11,18 +11,26 @@ import (
 // LegacyReferenceValues prepares the legacy repository-release contract.
 type LegacyReferenceValues struct {
 	Endorsements *policy.Artifact
-	Code         *measurement.Measurement
-	Shape        *policy.Shape
+	// SEVSNP and TDX are the registers the release fixes on each platform.
+	SEVSNP measurement.ExpectedSEVSNP
+	TDX    measurement.ExpectedTDX
+	Shape  *policy.Shape
 }
 
-func (r LegacyReferenceValues) resolve(q *Authenticated, pins *measurement.Measurement) (*resolvedValues, error) {
-	code := r.Code
+func (r LegacyReferenceValues) resolve(q *Authenticated, pins measurement.Expected) (*resolvedValues, error) {
 	resolved, err := resolvePolicy(r.Endorsements, q)
 	if err != nil {
 		return nil, err
 	}
-	resolved.code = code
-	resolved.registers, err = layout(code, pins, q)
+	switch q.platform {
+	case policy.PlatformSEVSNP:
+		resolved.code = r.SEVSNP
+	case policy.PlatformTDX:
+		resolved.code = r.TDX
+	default:
+		return nil, fmt.Errorf("unsupported platform %q", q.platform)
+	}
+	resolved.registers, err = applyPins(registersOf(resolved.code), q.platform, pins)
 	if err != nil {
 		return nil, err
 	}
@@ -30,6 +38,8 @@ func (r LegacyReferenceValues) resolve(q *Authenticated, pins *measurement.Measu
 	case policy.PlatformSEVSNP:
 		resolved.hostData = resolved.policy.SEVSNP.HostData
 	case policy.PlatformTDX:
+		// The release fixes only RTMR1 and RTMR2; the platform endorsements
+		// supply MRTD and RTMR0, and an unpinned RTMR3 must be zero.
 		mrtd, rtmr0 := q.tdx.PlatformMeasurements()
 		name, m, err := r.Endorsements.ResolvePlatformMeasurement(resolved.policy.TDX, r.Shape, mrtd, rtmr0)
 		if err != nil {
@@ -38,23 +48,7 @@ func (r LegacyReferenceValues) resolve(q *Authenticated, pins *measurement.Measu
 		resolved.platformMeasurementName = name
 		resolved.registers[0] = cmp.Or(resolved.registers[0], m.MRTD)
 		resolved.registers[1] = cmp.Or(resolved.registers[1], m.RTMR0)
-		resolved.registers[4] = cmp.Or(resolved.registers[4], measurement.RTMR3_ZERO)
-	default:
-		return nil, fmt.Errorf("unsupported platform %q", q.platform)
+		resolved.registers[4] = cmp.Or(resolved.registers[4], measurement.Register{}.String())
 	}
 	return resolved, nil
-}
-
-// layout maps code and pins to enclave registers, leaving platform defaults empty.
-func layout(code, pins *measurement.Measurement, q *Authenticated) ([]string, error) {
-	if code.Type != measurement.SnpTdxMultiPlatformV1 || len(code.Registers) != 3 {
-		return nil, fmt.Errorf("code measurement is %s with %d registers, want %s with 3", code.Type, len(code.Registers), measurement.SnpTdxMultiPlatformV1)
-	}
-	registers := []string{code.Registers[0]}
-	enclaveType := measurement.SevGuestV2
-	if q.platform == policy.PlatformTDX {
-		registers = []string{"", "", code.Registers[1], code.Registers[2], ""}
-		enclaveType = measurement.TdxGuestV2
-	}
-	return applyPins(registers, enclaveType, pins)
 }

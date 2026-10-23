@@ -11,14 +11,26 @@ import (
 // which reports the first one that fails as a UsageError.
 type Option func(*Verifier) error
 
-// WithPinnedRegisters adds register checks; empty entries retain defaults.
-// The measurement is copied, so later mutation by the caller has no effect.
-// TDX order is [MRTD, RTMR0, RTMR1, RTMR2, RTMR3].
-func WithPinnedRegisters(pins *measurement.Measurement) Option {
+// WithPinnedRegisters adds register checks. Each non-nil register in pins must
+// match the enclave: it fills a register the release leaves open, and must
+// equal one the release fixes. Pins for one platform reject every enclave on
+// the other. pins is copied, so later changes by the caller have no effect.
+func WithPinnedRegisters(pins measurement.Expected) Option {
 	return func(v *Verifier) error {
-		pins = cloneMeasurement(pins)
-		if err := measurement.ValidatePins(pins); err != nil {
-			return err
+		switch p := pins.(type) {
+		case *measurement.ExpectedSEVSNP:
+			if p == nil {
+				return fmt.Errorf("pinned registers must not be a nil pointer")
+			}
+			pins = *p
+		case *measurement.ExpectedTDX:
+			if p == nil {
+				return fmt.Errorf("pinned registers must not be a nil pointer")
+			}
+			pins = *p
+		}
+		if pins != nil {
+			pins = pins.Clone()
 		}
 		v.pinnedRegisters = pins
 		return nil

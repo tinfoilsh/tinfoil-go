@@ -1,6 +1,7 @@
 package mobile
 
 import (
+	"fmt"
 	"time"
 
 	"github.com/tinfoilsh/tinfoil-go/verify"
@@ -51,10 +52,18 @@ type verificationJSON struct {
 	VerifiedAt string `json:"verified_at"`
 }
 
+// measurementJSON is a measurement in the contract: a type and its registers
+// in platform order, lowercase hex, with "" for an unconstrained register.
 type measurementJSON struct {
 	Type      string   `json:"type"`
 	Registers []string `json:"registers"`
 }
+
+// The measurement types of the contract.
+const (
+	sevSNPMeasurementType = "https://tinfoil.sh/predicate/sev-snp-guest/v2"
+	tdxMeasurementType    = "https://tinfoil.sh/predicate/tdx-guest/v2"
+)
 
 type cryptoMaterialJSON struct {
 	ID     string `json:"id"`
@@ -71,7 +80,7 @@ func toVerificationJSON(v *verify.Verification) verificationJSON {
 		ConfigRepo:         v.ConfigRepo,
 		CodeDigest:         v.CodeDigest,
 		CodeTag:            v.CodeTag,
-		CodeMeasurement:    toMeasurementJSON(v.CodeMeasurement),
+		CodeMeasurement:    toExpectedJSON(v.CodeMeasurement),
 		EnclaveMeasurement: toMeasurementJSON(v.EnclaveMeasurement),
 		CryptoMaterial:     make([]cryptoMaterialJSON, 0, len(v.CryptoMaterial)),
 		FreshnessExpiresAt: v.FreshnessExpiresAt.UTC().Format(time.RFC3339Nano),
@@ -85,9 +94,64 @@ func toVerificationJSON(v *verify.Verification) verificationJSON {
 	return out
 }
 
-func toMeasurementJSON(m *measurement.Measurement) *measurementJSON {
-	if m == nil {
+func toMeasurementJSON(m measurement.Measurement) *measurementJSON {
+	switch m := m.(type) {
+	case measurement.SEVSNP:
+		return &measurementJSON{Type: sevSNPMeasurementType, Registers: []string{m.Launch.String()}}
+	case measurement.TDX:
+		return &measurementJSON{Type: tdxMeasurementType, Registers: []string{m.MRTD.String(), m.RTMR0.String(), m.RTMR1.String(), m.RTMR2.String(), m.RTMR3.String()}}
+	default:
 		return nil
 	}
-	return &measurementJSON{Type: string(m.Type), Registers: append([]string(nil), m.Registers...)}
+}
+
+func toExpectedJSON(e measurement.Expected) *measurementJSON {
+	hexOf := func(r *measurement.Register) string {
+		if r == nil {
+			return ""
+		}
+		return r.String()
+	}
+	switch e := e.(type) {
+	case measurement.ExpectedSEVSNP:
+		return &measurementJSON{Type: sevSNPMeasurementType, Registers: []string{hexOf(e.Launch)}}
+	case measurement.ExpectedTDX:
+		return &measurementJSON{Type: tdxMeasurementType, Registers: []string{hexOf(e.MRTD), hexOf(e.RTMR0), hexOf(e.RTMR1), hexOf(e.RTMR2), hexOf(e.RTMR3)}}
+	default:
+		return nil
+	}
+}
+
+// expected parses pinned registers, where "" leaves a register unpinned. A nil
+// receiver pins nothing.
+func (j *measurementJSON) expected() (measurement.Expected, error) {
+	if j == nil {
+		return nil, nil
+	}
+	count := 1
+	switch j.Type {
+	case sevSNPMeasurementType:
+	case tdxMeasurementType:
+		count = 5
+	default:
+		return nil, fmt.Errorf("pinned registers require an SNP or TDX measurement type")
+	}
+	if len(j.Registers) != count {
+		return nil, fmt.Errorf("pinned registers require %d entries, got %d", count, len(j.Registers))
+	}
+	registers := make([]*measurement.Register, count)
+	for i, value := range j.Registers {
+		if value == "" {
+			continue
+		}
+		register, err := measurement.ParseRegister(value)
+		if err != nil {
+			return nil, fmt.Errorf("pinned register %d: %w", i, err)
+		}
+		registers[i] = &register
+	}
+	if count == 1 {
+		return measurement.ExpectedSEVSNP{Launch: registers[0]}, nil
+	}
+	return measurement.ExpectedTDX{MRTD: registers[0], RTMR0: registers[1], RTMR1: registers[2], RTMR2: registers[3], RTMR3: registers[4]}, nil
 }
