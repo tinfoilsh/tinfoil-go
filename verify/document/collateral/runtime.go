@@ -1,38 +1,22 @@
 package collateral
 
 import (
-	"crypto/sha256"
 	"encoding/json/jsontext"
 	"fmt"
 	"slices"
 
+	configendorsement "github.com/tinfoilsh/tinfoil-go/endorsement/config"
 	"github.com/tinfoilsh/tinfoil-go/internal/canonical"
-	"golang.org/x/mod/semver"
 )
 
 const (
-	RuntimeRepo     = "tinfoilsh/cvmimage"
+	RuntimeRepo     = configendorsement.RuntimeRepo
 	RuntimeID       = "runtime"
 	RuntimeV1Format = "https://tinfoil.sh/collateral/igvm-runtime/v1"
 	PlatformID      = "platform"
 )
 
-type RuntimeReference struct {
-	Repo   string `json:"repo"`
-	Tag    string `json:"tag"`
-	Digest string `json:"digest"`
-}
-
-func (r RuntimeReference) Validate() error {
-	if r.Repo != RuntimeRepo {
-		return fmt.Errorf("runtime repository must be %s", RuntimeRepo)
-	}
-	if !semver.IsValid(r.Tag) || semver.Canonical(r.Tag)+semver.Build(r.Tag) != r.Tag {
-		return fmt.Errorf("runtime tag must be a full semantic version")
-	}
-	_, err := canonical.DecodeLowerHex("runtime digest", r.Digest, sha256.Size)
-	return err
-}
+type RuntimeReference = configendorsement.RuntimeReference
 
 type runtimeCollateral struct {
 	RuntimeReference

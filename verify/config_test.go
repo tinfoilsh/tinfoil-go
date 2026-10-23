@@ -21,6 +21,7 @@ import (
 	"github.com/tinfoilsh/tinfoil-go/verify/document"
 	"github.com/tinfoilsh/tinfoil-go/verify/document/collateral"
 	"github.com/tinfoilsh/tinfoil-go/verify/internal/endorsement"
+	"github.com/tinfoilsh/tinfoil-go/verify/internal/quote"
 )
 
 func TestConfigTrustRequiresEndorsements(t *testing.T) {
@@ -39,6 +40,52 @@ func TestConfigTrustRequiresEndorsements(t *testing.T) {
 	require.NoError(t, err)
 	_, err = v.VerifyV3(raw, nonce, ref)
 	require.ErrorIs(t, err, collateral.ErrNotFound)
+}
+
+func TestDigestEndorsementBindsQuoteAndRuntimeWithoutConfig(t *testing.T) {
+	f := sigstoretest.New(t)
+	inputs := embeddedInputs(t)
+	config := inputs.Config.Bytes
+	s, err := configendorsement.NewDeploymentStatement(embeddedConfigName, config)
+	require.NoError(t, err)
+	input, err := s.TimestampInput()
+	require.NoError(t, err)
+	payload, err := s.Complete(f.Timestamp(t, input, f.Now))
+	require.NoError(t, err)
+	reference, err := configendorsement.EndorsementReference(payload)
+	require.NoError(t, err)
+	data, err := json.Marshal(map[string]any{
+		"endorsement_ref": reference,
+		"sigstore_bundle": jsontext.Value(sigstoretest.MarshalBundle(t, f.Bundle(t, payload))),
+	})
+	require.NoError(t, err)
+	raw, nonce, doc := embeddedDocument(t, collateral.FormatV3, collateral.Entry{
+		ID: collateral.ConfigID, Role: collateral.RoleReferenceValues, Format: collateral.ConfigEndorsementV2Format, Data: data,
+	})
+	inputs.Config = nil
+	v, err := NewVerifier(WithEmbeddedReferences(inputs), WithConfigSigningKeys([]crypto.PublicKey{f.Key.Public()}))
+	require.NoError(t, err)
+	v.configVerifier, err = endorsement.NewConfigVerifier(&f.Trust, []crypto.PublicKey{f.Key.Public()})
+	require.NoError(t, err)
+	refs, err := v.configReferences(doc, "org/project@v1", f.Now)
+	require.NoError(t, err)
+	values := refs.quote.(quote.ConfigReferenceValues)
+	require.Equal(t, sha256.Sum256(config), values.Hash)
+	require.Equal(t, strings.Repeat("ab", 48), values.Runtime.SNPLaunch.Measurement)
+	require.Equal(t, SourceEndorsement, refs.config.Source)
+	require.Equal(t, reference, refs.config.Reference)
+	require.Equal(t, f.Now.Add(v.freshnessMaxAge), refs.freshnessExpiresAt)
+	_, err = v.VerifyV3At(raw, nonce, "org/project@v1", f.Now)
+	requireRejectedAt(t, err, LayerQuote)
+	_, err = v.configReferences(doc, "org/other", f.Now)
+	require.ErrorContains(t, err, "pinned identity")
+	inputs.Runtime = append(inputs.Runtime, '\n')
+	v, err = NewVerifier(WithEmbeddedReferences(inputs), WithConfigSigningKeys([]crypto.PublicKey{f.Key.Public()}))
+	require.NoError(t, err)
+	v.configVerifier, err = endorsement.NewConfigVerifier(&f.Trust, []crypto.PublicKey{f.Key.Public()})
+	require.NoError(t, err)
+	_, err = v.configReferences(doc, "org/project@v1", f.Now)
+	require.ErrorContains(t, err, "digest pin")
 }
 
 func TestCollateralVersionSelectsVerification(t *testing.T) {

@@ -43,6 +43,7 @@ const (
 	// ConfigEndorsementV1Format carries an exact config and its timestamped
 	// registry approval bundle.
 	ConfigEndorsementV1Format = "https://tinfoil.sh/collateral/config-endorsement/v1"
+	ConfigEndorsementV2Format = "https://tinfoil.sh/collateral/config-endorsement/v2"
 	// ConfigV1Format carries exact config bytes authorized by caller policy.
 	ConfigV1Format = "https://tinfoil.sh/collateral/config/v1"
 )
@@ -126,8 +127,8 @@ func Decode(entries []Entry) (Set, error) {
 			set.platformCount++
 		}
 		switch {
-		case entry.ID == ConfigID || entry.Format == ConfigEndorsementV1Format || entry.Format == ConfigV1Format:
-			if entry.ID != ConfigID || (entry.Format != ConfigEndorsementV1Format && entry.Format != ConfigV1Format) || entry.Role != RoleReferenceValues {
+		case entry.ID == ConfigID || entry.Format == ConfigEndorsementV1Format || entry.Format == ConfigEndorsementV2Format || entry.Format == ConfigV1Format:
+			if entry.ID != ConfigID || (entry.Format != ConfigEndorsementV1Format && entry.Format != ConfigEndorsementV2Format && entry.Format != ConfigV1Format) || entry.Role != RoleReferenceValues {
 				return set, fmt.Errorf("conflicting collateral entry for %q", ConfigID)
 			}
 			v, err := decodeConfigEndorsement(entry)

@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	configendorsement "github.com/tinfoilsh/tinfoil-go/endorsement/config"
 	"github.com/tinfoilsh/tinfoil-go/verify/document/collateral"
 )
 
@@ -100,7 +101,7 @@ func TestConfigRuntimePin(t *testing.T) {
 		{"0.15.0+GPU", "v0.15.0+GPU"},
 	} {
 		config := []byte("cvm-version: " + test.version + "@sha256:" + digest + "\ncontainers: []\n")
-		ref, err := ConfigRuntime(config)
+		ref, err := configendorsement.RuntimeFromConfig(config)
 		require.NoError(t, err)
 		require.Equal(t, collateral.RuntimeReference{Repo: collateral.RuntimeRepo, Tag: test.tag, Digest: digest}, ref)
 	}
@@ -118,7 +119,10 @@ func TestConfigRuntimePin(t *testing.T) {
 		"extra digest":    strings.ReplaceAll(good, digest, digest+"@sha256:"+digest),
 		"missing version": "containers: []\n",
 	} {
-		t.Run(name, func(t *testing.T) { _, err := ConfigRuntime([]byte(config)); require.Error(t, err) })
+		t.Run(name, func(t *testing.T) {
+			_, err := configendorsement.RuntimeFromConfig([]byte(config))
+			require.Error(t, err)
+		})
 	}
 }
 
