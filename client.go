@@ -44,9 +44,7 @@ func NewClientWithOptions(opts ...ClientOption) (*Client, error) {
 		cfg.transport = defaultTransportMode
 	}
 	customConfig := cfg.verification.EmbeddedConfig != nil || cfg.verification.ConfigAuthorizer != nil
-	if cfg.repo == "" && cfg.enclave == "" && !customConfig {
-		cfg.repo = defaultConfigRepo
-	}
+	cfg.repo = cfg.configReference()
 	if cfg.enclave == "" && customConfig {
 		return nil, &ConfigurationError{Err: fmt.Errorf("caller-authorized config requires an enclave")}
 	}

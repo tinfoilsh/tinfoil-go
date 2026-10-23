@@ -11,10 +11,16 @@ import (
 )
 
 type configCollateral struct {
-	Reference string            `json:"endorsement_ref"`
-	Config    string            `json:"config_base64"`
-	Bundle    jsontext.Value    `json:"sigstore_bundle"`
-	Scope     *ScopeCertificate `json:"scope,omitempty"`
+	Reference string                      `json:"endorsement_ref"`
+	Config    string                      `json:"config_base64"`
+	Bundle    jsontext.Value              `json:"sigstore_bundle"`
+	Scope     *scopeCertificateCollateral `json:"scope,omitempty"`
+}
+
+type scopeCertificateCollateral struct {
+	Certificate string         `json:"certificate_der"`
+	Issuer      string         `json:"issuer_der"`
+	Bundle      jsontext.Value `json:"issuance_bundle"`
 }
 
 type ScopeCertificate struct {
@@ -61,7 +67,19 @@ func decodeConfigEndorsement(entry *Entry) (ConfigEndorsement, error) {
 		}
 	}
 	if entry.Format == ConfigEndorsementV2Format {
-		return ConfigEndorsement{Reference: c.Reference, Bundle: c.Bundle, Scope: c.Scope}, nil
+		result := ConfigEndorsement{Reference: c.Reference, Bundle: c.Bundle}
+		if c.Scope != nil {
+			certificate, err := canonical.DecodeBase64("certificate_der", c.Scope.Certificate)
+			if err != nil {
+				return ConfigEndorsement{}, err
+			}
+			issuer, err := canonical.DecodeBase64("issuer_der", c.Scope.Issuer)
+			if err != nil {
+				return ConfigEndorsement{}, err
+			}
+			result.Scope = &ScopeCertificate{Certificate: certificate, Issuer: issuer, Bundle: c.Scope.Bundle}
+		}
+		return result, nil
 	}
 	config, err := canonical.DecodeBase64("config_base64", c.Config)
 	if err != nil {

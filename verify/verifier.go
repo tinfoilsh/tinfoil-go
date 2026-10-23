@@ -92,6 +92,9 @@ func NewVerifier(opts ...Option) (*Verifier, error) {
 	if v.configPins != (ConfigPins{}) && (v.embedded.Config != nil || v.configAuthorizer != nil) {
 		return nil, usageError(fmt.Errorf("config authority pins require endorsement verification"))
 	}
+	if v.configKeys != nil && (v.configPins.OwnerKind != "" || v.configPins.OwnerID != "" || v.configPins.ScopeID != "") {
+		return nil, usageError(fmt.Errorf("owner and scope pins require registry root trust"))
+	}
 	if v.embedded.Runtime != nil && v.embedded.Platform != nil && v.freshnessKeys != nil {
 		return nil, usageError(fmt.Errorf("freshness signing keys have no endorsed artifact to verify"))
 	}
