@@ -286,3 +286,15 @@ func TestConfiguredKeysPreserveProofVerification(t *testing.T) {
 		require.ErrorContains(t, err, "pinned identity")
 	}
 }
+
+func TestOwnerPinsRequireRegistryRootTrust(t *testing.T) {
+	f := sigstoretest.New(t)
+	for _, pins := range []ConfigPins{
+		{OwnerKind: scope.Organization},
+		{OwnerID: "c5cbb595-6271-45a0-a851-65c67173ee8a"},
+		{ScopeID: "36c405e9-30df-4fe7-85d5-c1a509484541"},
+	} {
+		_, err := NewVerifier(WithConfigSigningKeys([]crypto.PublicKey{f.Key.Public()}), WithConfigPins(pins))
+		require.ErrorContains(t, err, "owner and scope pins require registry root trust")
+	}
+}

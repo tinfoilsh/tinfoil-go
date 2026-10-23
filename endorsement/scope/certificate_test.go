@@ -43,25 +43,28 @@ func TestScopeCertificateProfile(t *testing.T) {
 
 	issuer, err := scope.ParseCertificate(material.Issuer)
 	require.NoError(t, err)
-	for name, mutate := range map[string]func(*x509.Certificate){
-		"CA":                 func(c *x509.Certificate) { c.IsCA = true; c.KeyUsage |= x509.KeyUsageCertSign },
-		"TLS purpose":        func(c *x509.Certificate) { c.ExtKeyUsage = []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth} },
-		"extra key usage":    func(c *x509.Certificate) { c.KeyUsage |= x509.KeyUsageKeyEncipherment },
-		"unbounded lifetime": func(c *x509.Certificate) { c.NotAfter = f.Now.Add(scope.Validity + time.Hour) },
-		"missing scope":      func(c *x509.Certificate) { c.URIs = nil },
-		"multiple scopes":    func(c *x509.Certificate) { c.URIs = append(c.URIs, c.URIs[0]) },
-		"unknown critical extension": func(c *x509.Certificate) {
+	for name, test := range map[string]struct {
+		mutate func(*x509.Certificate)
+		want   string
+	}{
+		"CA":                 {func(c *x509.Certificate) { c.IsCA = true; c.KeyUsage |= x509.KeyUsageCertSign }, "invalid registry signing certificate profile"},
+		"TLS purpose":        {func(c *x509.Certificate) { c.ExtKeyUsage = []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth} }, "invalid registry signing certificate profile"},
+		"extra key usage":    {func(c *x509.Certificate) { c.KeyUsage |= x509.KeyUsageKeyEncipherment }, "invalid registry signing certificate profile"},
+		"unbounded lifetime": {func(c *x509.Certificate) { c.NotAfter = f.Now.Add(scope.Validity + time.Hour) }, "invalid registry signing certificate profile"},
+		"missing scope":      {func(c *x509.Certificate) { c.URIs = nil }, "requires one scope URI"},
+		"multiple scopes":    {func(c *x509.Certificate) { c.URIs = append(c.URIs, c.URIs[0]) }, "requires one scope URI"},
+		"unknown critical extension": {func(c *x509.Certificate) {
 			c.ExtraExtensions = []pkix.Extension{{Id: asn1.ObjectIdentifier{1, 2, 3, 4}, Critical: true, Value: []byte{5, 0}}}
-		},
+		}, "unhandled critical extension"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			cert, err := scope.ParseCertificate(material.Certificate)
 			require.NoError(t, err)
-			mutate(cert)
+			test.mutate(cert)
 			der, err := x509.CreateCertificate(rand.Reader, cert, issuer, leaf.Public(), f.Key)
 			require.NoError(t, err)
 			_, _, err = v.Verify(der, material.Issuer, f.Now)
-			require.Error(t, err)
+			require.ErrorContains(t, err, test.want)
 		})
 	}
 }

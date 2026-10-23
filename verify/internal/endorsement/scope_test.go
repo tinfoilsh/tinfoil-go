@@ -45,6 +45,11 @@ func TestScopedConfigApprovalAndPins(t *testing.T) {
 	require.Equal(t, identity, verified.Scope)
 	require.Equal(t, f.Now.Add(scope.Validity), verified.ScopeExpiresAt)
 	require.Equal(t, testName, verified.Name)
+	withConfig, err := v.VerifyScoped(config, bundle, material, policy)
+	require.NoError(t, err)
+	require.Equal(t, verified, withConfig)
+	_, err = v.VerifyScoped(append(append([]byte(nil), config...), '\n'), bundle, material, policy)
+	require.ErrorContains(t, err, "config bytes do not match the endorsed digest")
 	policy.Identity, policy.Revision, policy.Digest = testIdentity, "v0.0.155", verified.Digest
 	policy.Scope = scope.Pins{OwnerKind: identity.OwnerKind, OwnerID: identity.OwnerID, ScopeID: identity.ScopeID, Namespace: identity.Namespace, SigningKeyHint: verified.SigningKeyHint}
 	_, err = v.VerifyScoped(nil, bundle, material, policy)
@@ -75,27 +80,50 @@ func TestScopedConfigApprovalAndPins(t *testing.T) {
 	other.Namespace = "other"
 	wrongNamespace := f.Scope(t, leaf.Public(), other)
 	otherKey := f.Scope(t, sigstoretest.New(t).Key.Public(), identity)
-	for name, bad := range map[string]collateral.ScopeCertificate{"namespace": wrongNamespace, "key": otherKey} {
+	for name, test := range map[string]struct {
+		certificate collateral.ScopeCertificate
+		want        string
+	}{"namespace": {wrongNamespace, "does not authorize config namespace"}, "key": {otherKey, "untrusted approval signing key"}} {
 		t.Run(name+" certificate", func(t *testing.T) {
-			_, err := v.VerifyScoped(nil, bundle, bad, policy)
-			require.Error(t, err)
+			_, err := v.VerifyScoped(nil, bundle, test.certificate, policy)
+			require.ErrorContains(t, err, test.want)
 		})
 	}
-	for name, mutate := range map[string]func(*protobundle.Bundle){
-		"missing log":                       func(b *protobundle.Bundle) { b.VerificationMaterial.TlogEntries = nil },
-		"substituted certificate signature": func(b *protobundle.Bundle) { b.GetMessageSignature().Signature[0] ^= 1 },
-		"untrusted log checkpoint": func(b *protobundle.Bundle) {
+	for name, test := range map[string]struct {
+		mutate func(*protobundle.Bundle)
+		want   string
+	}{
+		"missing log":                       {func(b *protobundle.Bundle) { b.VerificationMaterial.TlogEntries = nil }, "requires bounded Rekor inclusion evidence"},
+		"substituted certificate signature": {func(b *protobundle.Bundle) { b.GetMessageSignature().Signature[0] ^= 1 }, "must contain the certificate signature"},
+		"untrusted log checkpoint": {func(b *protobundle.Bundle) {
 			b.VerificationMaterial.TlogEntries[0].InclusionProof.Checkpoint.Envelope += "invalid"
-		},
+		}, "verifying scope issuance"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			var b protobundle.Bundle
 			require.NoError(t, protojson.Unmarshal(material.Bundle, &b))
-			mutate(&b)
+			test.mutate(&b)
 			bad := material
 			bad.Bundle = sigstoretest.MarshalBundle(t, &b)
 			_, err := v.VerifyScoped(nil, bundle, bad, policy)
-			require.Error(t, err)
+			require.ErrorContains(t, err, test.want)
+		})
+	}
+	for name, test := range map[string]struct {
+		mutate func(*protobundle.Bundle)
+		want   string
+	}{
+		"missing approval log": {func(b *protobundle.Bundle) { b.VerificationMaterial.TlogEntries = nil }, "requires bounded Rekor inclusion evidence"},
+		"altered approval checkpoint": {func(b *protobundle.Bundle) {
+			b.VerificationMaterial.TlogEntries[0].InclusionProof.Checkpoint.Envelope += "invalid"
+		}, "verifying endorsement bundle"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			var b protobundle.Bundle
+			require.NoError(t, protojson.Unmarshal(bundle, &b))
+			test.mutate(&b)
+			_, err := v.VerifyScoped(nil, sigstoretest.MarshalBundle(t, &b), material, policy)
+			require.ErrorContains(t, err, test.want)
 		})
 	}
 	issuer, err := x509.ParseCertificate(material.Issuer)

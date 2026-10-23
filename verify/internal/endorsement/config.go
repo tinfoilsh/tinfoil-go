@@ -196,5 +196,8 @@ func NewRegistryVerifier(trust root.TrustedMaterial, keys, rootKeys []crypto.Pub
 		return nil, err
 	}
 	v.scopes, err = NewScopeVerifier(trust, rootKeys)
-	return v, err
+	if err != nil {
+		return nil, err
+	}
+	return v, nil
 }
