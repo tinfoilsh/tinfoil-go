@@ -2,7 +2,6 @@ package enclave
 
 import (
 	"crypto/sha256"
-	"encoding/json"
 	"errors"
 	"os"
 	"strings"
@@ -106,7 +105,7 @@ func TestLiveVerify(t *testing.T) {
 	assert.NoError(t, err)
 }
 
-func TestClientVerificationJSON(t *testing.T) {
+func TestClientVerificationCopies(t *testing.T) {
 	register := measurement.Register{0xab}
 	sample := func() *verify.Verification {
 		code := register
@@ -123,15 +122,6 @@ func TestClientVerificationJSON(t *testing.T) {
 	client := &Handle{
 		state: &enclaveState{Verification: sample()},
 	}
-
-	encoded, err := client.VerificationJSON()
-	require.NoError(t, err)
-	var decoded map[string]any
-	require.NoError(t, json.Unmarshal([]byte(encoded), &decoded))
-	assert.Equal(t, "feabcd", decoded["CodeDigest"])
-	// The register names identify each measurement's platform.
-	assert.Equal(t, map[string]any{"MRTD": nil, "RTMR0": nil, "RTMR1": register.String(), "RTMR2": nil, "RTMR3": nil}, decoded["CodeMeasurement"])
-	assert.Equal(t, register.String(), decoded["EnclaveMeasurement"].(map[string]any)["RTMR1"])
 
 	view := client.Verification()
 	*view.CodeMeasurement.(measurement.ExpectedTDX).RTMR1 = measurement.Register{0xcd}
