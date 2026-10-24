@@ -87,3 +87,15 @@ func TestNewClientWithOptionsRequiresEnclaveForCustomRepo(t *testing.T) {
 		require.ErrorContains(t, err, "requires an enclave")
 	}
 }
+
+func TestWithUserCacheSecretOption(t *testing.T) {
+	cfg := &clientConfig{}
+	WithUserCacheSecret("s1")(cfg)
+	require.Equal(t, "s1", cfg.userCacheSecret)
+	require.True(t, cfg.userCacheSecretSet)
+
+	cfg = &clientConfig{}
+	WithUserCacheSecret("")(cfg)
+	require.Empty(t, cfg.userCacheSecret)
+	require.False(t, cfg.userCacheSecretSet, "an explicit empty secret must be treated as unset")
+}

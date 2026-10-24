@@ -1,4 +1,4 @@
-package tinfoil
+package transport
 
 import (
 	"errors"

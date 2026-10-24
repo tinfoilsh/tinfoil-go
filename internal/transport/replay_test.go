@@ -1,4 +1,4 @@
-package tinfoil
+package transport
 
 import (
 	"context"
@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	"github.com/tinfoilsh/tinfoil-go/internal/errs"
 )
 
 type testKeyRejection struct{ error }
@@ -30,7 +31,7 @@ func TestRequestRecovery(t *testing.T) {
 	}{
 		{"success", testKeyRejection{first}, nil, true, false, 2},
 		{"second rejection", testKeyRejection{first}, testKeyRejection{last}, true, false, 2},
-		{"refresh failure", testKeyRejection{first}, &FetchError{Err: last}, true, false, 2},
+		{"refresh failure", testKeyRejection{first}, &errs.FetchError{Err: last}, true, false, 2},
 		{"network failure", first, nil, true, false, 1},
 		{"unreplayable", testKeyRejection{first}, nil, false, false, 1},
 		{"canceled", testKeyRejection{first}, nil, true, true, 1},
@@ -87,7 +88,7 @@ func TestRequestClientClosesIdleConnections(t *testing.T) {
 	}))
 	defer server.Close()
 	host := strings.TrimPrefix(server.URL, "https://")
-	hc, err := boundHTTPClient(server.Client(), host, "", "cache-secret")
+	hc, err := BoundHTTPClient(server.Client(), host, "", "cache-secret")
 	require.NoError(t, err)
 	hc.Transport = &recoveryTransport{transport: hc.Transport}
 	defer hc.CloseIdleConnections()
@@ -144,7 +145,7 @@ func TestPreparedRequestBodyCanReplay(t *testing.T) {
 		}
 		return newResponse(http.StatusOK, "ok"), nil
 	})}
-	hc, err := boundHTTPClient(&http.Client{Transport: transport}, "enclave.example", "", "cache-secret")
+	hc, err := BoundHTTPClient(&http.Client{Transport: transport}, "enclave.example", "", "cache-secret")
 	require.NoError(t, err)
 	req, err := http.NewRequest(http.MethodPost, "https://enclave.example/v1/chat/completions", io.NopCloser(strings.NewReader(`{"model":"gpt-oss-120b"}`)))
 	require.NoError(t, err)
