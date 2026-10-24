@@ -53,6 +53,6 @@ func (r ConfigReferenceValues) resolve(q *Authenticated, pins measurement.Expect
 	default:
 		return nil, fmt.Errorf("unsupported platform %q", q.platform)
 	}
-	resolved.registers, err = applyPins(registersOf(resolved.code), q.platform, pins)
+	resolved.expected, err = applyPins(resolved.code, q.platform, pins)
 	return resolved, err
 }

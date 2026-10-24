@@ -12,6 +12,7 @@ import (
 
 	"github.com/tinfoilsh/tinfoil-go/verify/internal/policy"
 	sevtestdata "github.com/tinfoilsh/tinfoil-go/verify/internal/testdata"
+	"github.com/tinfoilsh/tinfoil-go/verify/measurement"
 )
 
 func TestConfigBoundEnforcesConfigAndPlatformConstraints(t *testing.T) {
@@ -31,17 +32,17 @@ func TestConfigBoundEnforcesConfigAndPlatformConstraints(t *testing.T) {
 	require.NoError(t, err)
 	configHash := sha256.Sum256([]byte("approved YAML bytes"))
 	report.HostData = append([]byte(nil), configHash[:]...)
-	measurement := hex.EncodeToString(report.Measurement)
+	launch := measurement.Register(report.Measurement)
 	report.Policy = guestPolicy
 	p.SEVSNP.MinimumABIVersion = "1.51"
 	p.SEVSNP.HostData = ""
 	var reportData [64]byte
 	copy(reportData[:], report.ReportData)
-	_, err = Assemble(p.SEVSNP, q, measurement, reportData)
+	_, err = Assemble(p.SEVSNP, q, launch, reportData)
 	require.ErrorContains(t, err, "host_data")
 	resolved := *p.SEVSNP
 	resolved.HostData = hex.EncodeToString(configHash[:])
-	e, err := Assemble(&resolved, q, measurement, reportData)
+	e, err := Assemble(&resolved, q, launch, reportData)
 	require.NoError(t, err)
 	require.NoError(t, e.Validate(q))
 
@@ -71,7 +72,7 @@ func TestConfigBoundEnforcesConfigAndPlatformConstraints(t *testing.T) {
 	legacyPolicy := resolved
 	const guestSVNFloor = 1
 	legacyPolicy.MinimumGuestSVN = new(uint32(guestSVNFloor))
-	legacy, err := Assemble(&legacyPolicy, q, measurement, reportData)
+	legacy, err := Assemble(&legacyPolicy, q, launch, reportData)
 	require.NoError(t, err)
 	for _, svn := range []uint32{guestSVNFloor, guestSVNFloor + 1} {
 		report.GuestSvn = svn

@@ -183,24 +183,36 @@ func TestVerifyUnknownFormat(t *testing.T) {
 
 func TestPinsUseAuthenticatedPlatform(t *testing.T) {
 	register := measurement.Register{0xab}
-	r := register.String()
-	tdxRelease := func() []string { return registersOf(measurement.ExpectedTDX{RTMR1: &register, RTMR2: &register}) }
-	sevRelease := func() []string { return registersOf(measurement.ExpectedSEVSNP{Launch: &register}) }
-	got, err := applyPins(tdxRelease(), policy.PlatformTDX, measurement.ExpectedTDX{RTMR3: &register})
+	tdxRelease := measurement.ExpectedTDX{RTMR1: &register, RTMR2: &register}
+	sevRelease := measurement.ExpectedSEVSNP{Launch: &register}
+	got, err := applyPins(tdxRelease, policy.PlatformTDX, measurement.ExpectedTDX{RTMR3: &register})
 	require.NoError(t, err)
-	assert.Equal(t, []string{"", "", r, r, r}, got, "a pin fills a register the release leaves open")
-	got, err = applyPins(sevRelease(), policy.PlatformSEVSNP, measurement.ExpectedSEVSNP{Launch: &register})
+	assert.Equal(t, measurement.ExpectedTDX{RTMR1: &register, RTMR2: &register, RTMR3: &register}, got, "a pin fills a register the release leaves open")
+	got, err = applyPins(sevRelease, policy.PlatformSEVSNP, measurement.ExpectedSEVSNP{Launch: &register})
 	require.NoError(t, err)
-	assert.Equal(t, []string{r}, got, "a pin may repeat a register the release fixes")
-	_, err = applyPins(tdxRelease(), policy.PlatformTDX, &measurement.ExpectedTDX{})
+	assert.Equal(t, sevRelease, got, "a pin may repeat a register the release fixes")
+	_, err = applyPins(tdxRelease, policy.PlatformTDX, &measurement.ExpectedTDX{})
 	assert.ErrorContains(t, err, "unsupported pinned measurement", "NewVerifier stores pins as values; anything else fails closed")
 
 	// Pins for the other platform reject in both directions, even when their
 	// value equals a register the release fixes.
-	_, err = applyPins(tdxRelease(), policy.PlatformTDX, measurement.ExpectedSEVSNP{Launch: &register})
+	_, err = applyPins(tdxRelease, policy.PlatformTDX, measurement.ExpectedSEVSNP{Launch: &register})
 	assert.ErrorContains(t, err, "pinned registers are for sev-snp, but the enclave is tdx")
-	_, err = applyPins(sevRelease(), policy.PlatformSEVSNP, measurement.ExpectedTDX{RTMR1: &register})
+	_, err = applyPins(sevRelease, policy.PlatformSEVSNP, measurement.ExpectedTDX{RTMR1: &register})
 	assert.ErrorContains(t, err, "pinned registers are for tdx, but the enclave is sev-snp")
+}
+
+// Assembly needs a value for every register, so one that nothing fixed is an
+// error rather than an unchecked register.
+func TestCompleteRequiresEveryRegister(t *testing.T) {
+	r := measurement.Register{0xab}
+	full, err := complete(measurement.ExpectedTDX{MRTD: &r, RTMR0: &r, RTMR1: &r, RTMR2: &r, RTMR3: &r})
+	require.NoError(t, err)
+	assert.Equal(t, measurement.TDX{MRTD: r, RTMR0: r, RTMR1: r, RTMR2: r, RTMR3: r}, full)
+	_, err = complete(measurement.ExpectedTDX{RTMR1: &r, RTMR2: &r})
+	assert.ErrorContains(t, err, "nothing fixes the expected MRTD, RTMR0, RTMR3")
+	_, err = complete(measurement.ExpectedSEVSNP{})
+	assert.ErrorContains(t, err, "nothing fixes the expected launch measurement")
 }
 
 // asCode returns the registers a release fixes for the measured guest: the

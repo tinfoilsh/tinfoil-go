@@ -30,7 +30,7 @@ func (r LegacyReferenceValues) resolve(q *Authenticated, pins measurement.Expect
 	default:
 		return nil, fmt.Errorf("unsupported platform %q", q.platform)
 	}
-	resolved.registers, err = applyPins(registersOf(resolved.code), q.platform, pins)
+	resolved.expected, err = applyPins(resolved.code, q.platform, pins)
 	if err != nil {
 		return nil, err
 	}
@@ -46,9 +46,22 @@ func (r LegacyReferenceValues) resolve(q *Authenticated, pins measurement.Expect
 			return nil, err
 		}
 		resolved.platformMeasurementName = name
-		resolved.registers[0] = cmp.Or(resolved.registers[0], m.MRTD)
-		resolved.registers[1] = cmp.Or(resolved.registers[1], m.RTMR0)
-		resolved.registers[4] = cmp.Or(resolved.registers[4], measurement.Register{}.String())
+		platformMRTD, err := measurement.ParseRegister(m.MRTD)
+		if err != nil {
+			return nil, fmt.Errorf("platform measurement %q MRTD: %w", name, err)
+		}
+		platformRTMR0, err := measurement.ParseRegister(m.RTMR0)
+		if err != nil {
+			return nil, fmt.Errorf("platform measurement %q RTMR0: %w", name, err)
+		}
+		e, ok := resolved.expected.(measurement.ExpectedTDX)
+		if !ok {
+			return nil, fmt.Errorf("expected a TDX measurement, got %T", resolved.expected)
+		}
+		e.MRTD = cmp.Or(e.MRTD, &platformMRTD)
+		e.RTMR0 = cmp.Or(e.RTMR0, &platformRTMR0)
+		e.RTMR3 = cmp.Or(e.RTMR3, &measurement.Register{})
+		resolved.expected = e
 	}
 	return resolved, nil
 }

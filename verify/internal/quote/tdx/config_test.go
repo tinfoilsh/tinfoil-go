@@ -3,7 +3,6 @@ package tdx
 import (
 	"crypto/sha256"
 	"encoding/hex"
-	"strings"
 	"testing"
 
 	tdxabi "github.com/google/go-tdx-guest/abi"
@@ -13,7 +12,7 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/tinfoilsh/tinfoil-go/verify/internal/policy"
-	"github.com/tinfoilsh/tinfoil-go/verify/internal/runtime"
+	"github.com/tinfoilsh/tinfoil-go/verify/measurement"
 )
 
 func TestConfigBoundEnforcesConfigPaddingAndEveryRuntimeRegister(t *testing.T) {
@@ -29,8 +28,8 @@ func TestConfigBoundEnforcesConfigPaddingAndEveryRuntimeRegister(t *testing.T) {
 	for i := range body.Rtmrs {
 		body.Rtmrs[i] = make([]byte, tdxabi.RtmrSize)
 	}
-	zero := strings.Repeat("0", tdxabi.RtmrSize*2)
-	runtime := &runtime.TDXLaunch{MRTD: hex.EncodeToString(body.MrTd), RTMR0: zero, RTMR1: zero, RTMR2: zero, RTMR3: zero}
+	// A config runtime fixes MRTD and zero RTMRs.
+	expected := measurement.TDX{MRTD: measurement.Register(body.MrTd)}
 	minimum := 5
 	p := &policy.TDXPolicy{
 		QEVendorID: hex.EncodeToString(q.quote.Header.QeVendorId), MinimumTEETCBSVN: hex.EncodeToString(body.TeeTcbSvn),
@@ -41,7 +40,7 @@ func TestConfigBoundEnforcesConfigPaddingAndEveryRuntimeRegister(t *testing.T) {
 	copy(reportData[:], body.ReportData)
 	var configID [tdxabi.MrConfigIDSize]byte
 	copy(configID[:], configHash[:])
-	e, err := Assemble(p, q, runtime.Registers(), reportData, configID)
+	e, err := Assemble(p, q, expected, reportData, configID)
 	require.NoError(t, err)
 	require.NoError(t, e.Validate(q))
 	require.Empty(t, p.PlatformMeasurements)
@@ -68,6 +67,6 @@ func TestConfigBoundEnforcesConfigPaddingAndEveryRuntimeRegister(t *testing.T) {
 	bad.tcbEvaluationDataNumber = minimum - 1
 	require.ErrorContains(t, e.Validate(&bad), "below the policy minimum")
 	configID[0] ^= 1
-	runtime.MRTD = zero
+	expected.MRTD = measurement.Register{}
 	require.NoError(t, e.Validate(q), "assembled expectations must not alias the config binding")
 }

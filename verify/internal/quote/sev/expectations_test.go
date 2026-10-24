@@ -14,6 +14,7 @@ import (
 
 	"github.com/tinfoilsh/tinfoil-go/verify/internal/policy"
 	sevtestdata "github.com/tinfoilsh/tinfoil-go/verify/internal/testdata"
+	"github.com/tinfoilsh/tinfoil-go/verify/measurement"
 )
 
 const (
@@ -183,7 +184,7 @@ func TestValidateBox2TurinAttestation(t *testing.T) {
 	a := loadFixture(t)
 	_, p, err := a.PolicyFor(identity, policy.PlatformSEVSNP)
 	require.NoError(t, err)
-	expectations, err := Assemble(p.SEVSNP, q, hex.EncodeToString(report.GetMeasurement()), reportData)
+	expectations, err := Assemble(p.SEVSNP, q, measurement.Register(report.GetMeasurement()), reportData)
 	require.NoError(t, err)
 	require.NoError(t, expectations.Validate(q))
 	reportData[0] ^= 0xff
