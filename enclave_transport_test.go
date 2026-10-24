@@ -108,8 +108,9 @@ func TestWithEnclaveURLPreservesAdmissionAndProxyHeader(t *testing.T) {
 	require.ErrorIs(t, err, admissionFailure, "keep the bound transport's admission errors")
 	require.Empty(t, seen, "failed admission must not reach the proxy")
 
-	// Every request, including retries and requests after re-verification,
-	// keeps routing to the client's enclave.
+	// Every request, including retries, keeps routing to the client's enclave.
+	// The header sits above the bound transport, so re-verification, which only
+	// rebuilds the transport below it, can't drop it.
 	transport := withEnclaveURL(http.DefaultTransport, "enclave.example", proxy.URL)
 	for range 2 {
 		req, err := http.NewRequest(http.MethodGet, proxy.URL, nil)

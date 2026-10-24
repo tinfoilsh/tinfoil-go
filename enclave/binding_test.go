@@ -41,20 +41,22 @@ func TestEHBPBindingRequiresHPKEKey(t *testing.T) {
 	_, err := EHBP.Transport(&verify.Verification{})
 	var attestation *AttestationError
 	require.ErrorAs(t, err, &attestation)
-	require.ErrorContains(t, err, "WithTransport(TransportTLS)")
+	require.ErrorContains(t, err, "use the TLS binding")
 
 	_, err = EHBP.Transport(hpkeVerification(""))
 	require.ErrorAs(t, err, &attestation)
 	require.ErrorContains(t, err, "HPKE public key")
 }
 
-func TestEHBPBindingSealsToEachAttestedKey(t *testing.T) {
+func TestEHBPBindingBuildsTransportForEachAttestedKey(t *testing.T) {
 	for _, key := range []string{strings.Repeat("01", 32), strings.Repeat("02", 32)} {
 		transport, err := EHBP.Transport(hpkeVerification(key))
 		require.NoError(t, err)
 		require.NotNil(t, transport)
 	}
+}
 
+func TestEHBPBindingRecognizesKeyConfigErrors(t *testing.T) {
 	require.True(t, EHBP.KeyRejected(ehbpidentity.NewKeyConfigError(errors.New("rotated"))))
 	require.False(t, EHBP.KeyRejected(errors.New("connection reset")))
 }

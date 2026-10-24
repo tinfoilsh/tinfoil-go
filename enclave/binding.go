@@ -46,7 +46,7 @@ type ehbpBinding struct{}
 func (ehbpBinding) Transport(v *verify.Verification) (http.RoundTripper, error) {
 	key, ok := v.HPKEPublicKey()
 	if !ok {
-		return nil, &AttestationError{Err: errors.New("document endorses no HPKE key; cannot use the EHBP transport (use WithTransport(TransportTLS))")}
+		return nil, &AttestationError{Err: errors.New("document endorses no HPKE key; cannot use the EHBP binding (use the TLS binding)")}
 	}
 	identity, err := ehbpidentity.FromPublicKeyHex(key)
 	if err != nil {
