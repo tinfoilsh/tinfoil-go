@@ -7,6 +7,7 @@ import (
 	tdxvalidate "github.com/google/go-tdx-guest/validate"
 
 	"github.com/tinfoilsh/tinfoil-go/verify/internal/policy"
+	"github.com/tinfoilsh/tinfoil-go/verify/measurement"
 )
 
 // Expectations is the fully translated TDX expected state, resolved at
@@ -18,21 +19,14 @@ type Expectations struct {
 }
 
 // Assemble translates complete reference values into vendor validation options.
-func Assemble(p *policy.TDXPolicy, q *Quote, registers [5]string, reportData [64]byte, configID [tdxabi.MrConfigIDSize]byte) (result *Expectations, err error) {
+func Assemble(p *policy.TDXPolicy, q *Quote, m measurement.TDX, reportData [64]byte, configID [tdxabi.MrConfigIDSize]byte) (result *Expectations, err error) {
 	opts, err := options(p)
 	if err != nil {
 		return nil, err
 	}
 	copy(opts.TdQuoteBodyOptions.MrConfigID, configID[:])
-	var decoded [5][]byte
-	registerSizes := [5]int{tdxabi.MrTdSize, tdxabi.RtmrSize, tdxabi.RtmrSize, tdxabi.RtmrSize, tdxabi.RtmrSize}
-	for i, label := range [5]string{"mrtd", "rtmr0", "rtmr1", "rtmr2", "rtmr3"} {
-		if decoded[i], err = policy.DecodeHex(label, registers[i], registerSizes[i]); err != nil {
-			return nil, err
-		}
-	}
-	opts.TdQuoteBodyOptions.MrTd = decoded[0]
-	opts.TdQuoteBodyOptions.Rtmrs = decoded[1:]
+	opts.TdQuoteBodyOptions.MrTd = m.MRTD[:]
+	opts.TdQuoteBodyOptions.Rtmrs = [][]byte{m.RTMR0[:], m.RTMR1[:], m.RTMR2[:], m.RTMR3[:]}
 	opts.TdQuoteBodyOptions.ReportData = reportData[:]
 
 	return &Expectations{

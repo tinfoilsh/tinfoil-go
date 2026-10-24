@@ -15,6 +15,7 @@ import (
 	"github.com/tinfoilsh/go-sev-guest/verify"
 
 	"github.com/tinfoilsh/tinfoil-go/verify/internal/policy"
+	"github.com/tinfoilsh/tinfoil-go/verify/measurement"
 )
 
 // These snapshots came from successfully verified v3 documents. The component
@@ -70,7 +71,7 @@ func TestProductionTurinFixtures(t *testing.T) {
 			}, expectedPlatformInfo(fixture.Policy.SEVSNP))
 			var reportData [64]byte
 			copy(reportData[:], report.ReportData)
-			expected, err := Assemble(fixture.Policy.SEVSNP, q, hex.EncodeToString(report.Measurement), reportData)
+			expected, err := Assemble(fixture.Policy.SEVSNP, q, measurement.Register(report.Measurement), reportData)
 			require.NoError(t, err)
 			require.NoError(t, expected.Validate(q))
 
@@ -78,7 +79,7 @@ func TestProductionTurinFixtures(t *testing.T) {
 			// reject that expectation: this bit is exact policy, not a permission.
 			wrongPolicy := *fixture.Policy.SEVSNP
 			wrongPolicy.PlatformInfo.ECCEnabled = false
-			expected, err = Assemble(&wrongPolicy, q, hex.EncodeToString(report.Measurement), reportData)
+			expected, err = Assemble(&wrongPolicy, q, measurement.Register(report.Measurement), reportData)
 			require.NoError(t, err)
 			require.Error(t, expected.Validate(q))
 		})

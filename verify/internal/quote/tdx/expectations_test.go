@@ -67,7 +67,10 @@ func TestValidate(t *testing.T) {
 	var reportData [64]byte
 	copy(reportData[:], body.GetReportData())
 	rtmrs := body.GetRtmrs()
-	code := [5]string{hex.EncodeToString(body.GetMrTd()), hex.EncodeToString(rtmrs[0]), hex.EncodeToString(rtmrs[1]), hex.EncodeToString(rtmrs[2]), hex.EncodeToString(rtmrs[3])}
+	code := measurement.TDX{
+		MRTD: measurement.Register(body.GetMrTd()), RTMR0: measurement.Register(rtmrs[0]),
+		RTMR1: measurement.Register(rtmrs[1]), RTMR2: measurement.Register(rtmrs[2]), RTMR3: measurement.Register(rtmrs[3]),
+	}
 	quote := &Quote{quote: proto, tcbEvaluationDataNumber: 5}
 
 	minTCBEval := 5
@@ -113,18 +116,14 @@ func TestValidate(t *testing.T) {
 
 	// A platform register differing from the resolved reference value rejects.
 	badCode := code
-	badMRTD := mustHex(t, code[0])
-	badMRTD[0] ^= 1
-	badCode[0] = hex.EncodeToString(badMRTD)
+	badCode.MRTD[0] ^= 1
 	e, err := Assemble(matching, quote, badCode, reportData, [tdxabi.MrConfigIDSize]byte{})
 	require.NoError(t, err)
 	assert.Error(t, e.Validate(quote))
 
 	// A workload register differing from code provenance must reject.
 	badCode = code
-	badRTMR1 := mustHex(t, code[2])
-	badRTMR1[0] ^= 1
-	badCode[2] = hex.EncodeToString(badRTMR1)
+	badCode.RTMR1[0] ^= 1
 	e, err = Assemble(matching, quote, badCode, reportData, [tdxabi.MrConfigIDSize]byte{})
 	require.NoError(t, err)
 	assert.Error(t, e.Validate(quote))
@@ -137,9 +136,7 @@ func TestValidate(t *testing.T) {
 	assert.Error(t, e.Validate(quote))
 
 	e = assemble(matching)
-	for i := range code {
-		code[i] = strings.Repeat("ff", 48)
-	}
+	code = measurement.TDX{}
 	require.NoError(t, e.Validate(quote), "caller mutation must not change assembled expectations")
 }
 

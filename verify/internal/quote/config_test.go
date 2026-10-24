@@ -16,15 +16,13 @@ import (
 
 func TestConfigBoundRuntimePinsCannotOverrideMeasurements(t *testing.T) {
 	register, other := measurement.Register{0xab}, measurement.Register{0xcd}
-	measured := func() []string {
-		return registersOf(measurement.ExpectedTDX{MRTD: &register, RTMR0: &register, RTMR1: &register, RTMR2: &register, RTMR3: &register})
-	}
-	got, err := applyPins(measured(), policy.PlatformTDX, measurement.ExpectedTDX{RTMR1: &register})
+	measured := measurement.ExpectedTDX{MRTD: &register, RTMR0: &register, RTMR1: &register, RTMR2: &register, RTMR3: &register}
+	got, err := applyPins(measured, policy.PlatformTDX, measurement.ExpectedTDX{RTMR1: &register})
 	require.NoError(t, err)
-	require.Equal(t, measured(), got)
-	_, err = applyPins(measured(), policy.PlatformTDX, measurement.ExpectedTDX{RTMR1: &other})
-	require.ErrorContains(t, err, "does not match")
-	_, err = applyPins(measured(), policy.PlatformTDX, measurement.ExpectedSEVSNP{Launch: &register})
+	require.Equal(t, measured, got)
+	_, err = applyPins(measured, policy.PlatformTDX, measurement.ExpectedTDX{RTMR1: &other})
+	require.ErrorContains(t, err, "pinned RTMR1 does not match")
+	_, err = applyPins(measured, policy.PlatformTDX, measurement.ExpectedSEVSNP{Launch: &register})
 	require.Error(t, err)
 }
 
@@ -67,16 +65,21 @@ func TestConfigPreparationResolvesRuntimeAndHash(t *testing.T) {
 			}
 			resolved, err := refs.resolve(q, nil)
 			require.NoError(t, err)
+			fixed, err := measurement.ParseRegister(register)
+			require.NoError(t, err)
+			var want measurement.Expected
 			if platform == policy.PlatformSEVSNP {
 				require.Equal(t, hex.EncodeToString(hash[:]), resolved.hostData)
-				require.Equal(t, []string{register}, resolved.registers)
+				want = measurement.ExpectedSEVSNP{Launch: &fixed}
 				require.Empty(t, p.SEVSNP.HostData, "preparation must not modify platform endorsements")
 			} else {
 				require.Equal(t, hash[:], resolved.configID[:sha256.Size])
 				require.Equal(t, make([]byte, len(resolved.configID)-sha256.Size), resolved.configID[sha256.Size:])
-				require.Equal(t, []string{register, zero, zero, zero, zero}, resolved.registers)
+				zeroRegister := measurement.Register{}
+				want = measurement.ExpectedTDX{MRTD: &fixed, RTMR0: &zeroRegister, RTMR1: &zeroRegister, RTMR2: &zeroRegister, RTMR3: &zeroRegister}
 			}
-			require.Equal(t, registersOf(resolved.code), resolved.registers, "the runtime fixes every register")
+			require.Equal(t, want, resolved.expected)
+			require.Equal(t, resolved.code, resolved.expected, "the runtime fixes every register")
 			other := measurement.Register{0xcd}
 			var pins measurement.Expected = measurement.ExpectedSEVSNP{Launch: &other}
 			if platform == policy.PlatformTDX {
@@ -86,7 +89,7 @@ func TestConfigPreparationResolvesRuntimeAndHash(t *testing.T) {
 			require.ErrorContains(t, err, "does not match")
 			refs.Runtime.SNPLaunch.Measurement = "changed"
 			refs.Runtime.TDXLaunch.MRTD = "changed"
-			require.Equal(t, register, resolved.registers[0])
+			require.Equal(t, want, resolved.expected)
 		})
 	}
 }

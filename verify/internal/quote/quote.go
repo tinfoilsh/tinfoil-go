@@ -14,8 +14,8 @@ package quote
 
 import (
 	"bytes"
-	"cmp"
 	"fmt"
+	"strings"
 	"time"
 
 	tdxabi "github.com/google/go-tdx-guest/abi"
@@ -76,8 +76,8 @@ type resolvedValues struct {
 	policy                  *policy.Policy
 	policyName              string
 	platformMeasurementName string
-	code                    measurement.Expected
-	registers               []string
+	code                    measurement.Expected // the registers the release fixes
+	expected                measurement.Expected // code plus pins and, for legacy TDX, platform registers
 	hostData                string
 	configID                [tdxabi.MrConfigIDSize]byte
 }
@@ -197,22 +197,29 @@ func assemble(refs ReferenceValues, pins measurement.Expected, reportData [64]by
 	if err != nil {
 		return nil, err
 	}
-	registers := resolved.registers
+	expected, err := complete(resolved.expected)
+	if err != nil {
+		return nil, err
+	}
 	assembled := &AssembledPolicy{
 		CodeMeasurement:         resolved.code,
 		PolicyName:              resolved.policyName,
 		PlatformMeasurementName: resolved.platformMeasurementName,
 		quote:                   *q,
 	}
-	switch q.platform {
-	case policy.PlatformSEVSNP:
+	switch m := expected.(type) {
+	case measurement.SEVSNP:
+		if q.platform != policy.PlatformSEVSNP {
+			return nil, fmt.Errorf("expected an SEV-SNP measurement for a %s quote", q.platform)
+		}
 		p := *resolved.policy.SEVSNP
 		p.HostData = resolved.hostData
-		assembled.sev, err = sev.Assemble(&p, q.sev, registers[0], reportData)
-	case policy.PlatformTDX:
-		assembled.tdx, err = tdx.Assemble(resolved.policy.TDX, q.tdx, [5]string(registers), reportData, resolved.configID)
-	default:
-		return nil, fmt.Errorf("unsupported platform %q", q.platform)
+		assembled.sev, err = sev.Assemble(&p, q.sev, m.Launch, reportData)
+	case measurement.TDX:
+		if q.platform != policy.PlatformTDX {
+			return nil, fmt.Errorf("expected a TDX measurement for a %s quote", q.platform)
+		}
+		assembled.tdx, err = tdx.Assemble(resolved.policy.TDX, q.tdx, m, reportData, resolved.configID)
 	}
 	if err != nil {
 		return nil, err
@@ -241,48 +248,82 @@ func resolvePolicy(endorsements *policy.Artifact, q *Authenticated) (*resolvedVa
 	return &resolvedValues{policy: p, policyName: name}, nil
 }
 
-// registersOf lays e out in its platform's register order, as lowercase hex
-// with "" for an unconstrained register.
-func registersOf(e measurement.Expected) []string {
-	hexOf := func(r *measurement.Register) string {
-		if r == nil {
-			return ""
-		}
-		return r.String()
-	}
-	switch e := e.(type) {
-	case measurement.ExpectedSEVSNP:
-		return []string{hexOf(e.Launch)}
-	case measurement.ExpectedTDX:
-		return []string{hexOf(e.MRTD), hexOf(e.RTMR0), hexOf(e.RTMR1), hexOf(e.RTMR2), hexOf(e.RTMR3)}
-	default:
-		return nil
-	}
-}
-
 // applyPins fills the registers the code leaves open from the pins, and
-// requires every pin the code also fixes to agree with it.
-func applyPins(registers []string, platform string, pins measurement.Expected) ([]string, error) {
+// requires every pin the code also fixes to agree with it. code is for the
+// enclave's platform, and pins for the other platform reject.
+func applyPins(code measurement.Expected, platform string, pins measurement.Expected) (measurement.Expected, error) {
 	if pins == nil {
-		return registers, nil
+		return code, nil
 	}
-	var pinnedPlatform string
-	switch pins.(type) {
+	var err error
+	fill := func(name string, fixed, pin *measurement.Register) *measurement.Register {
+		switch {
+		case pin == nil:
+			return fixed
+		case fixed == nil:
+			return pin
+		case *fixed != *pin && err == nil:
+			err = fmt.Errorf("pinned %s does not match the signed release measurement", name)
+		}
+		return fixed
+	}
+	var merged measurement.Expected
+	switch p := pins.(type) {
 	case measurement.ExpectedSEVSNP:
-		pinnedPlatform = policy.PlatformSEVSNP
+		c, ok := code.(measurement.ExpectedSEVSNP)
+		if !ok {
+			return nil, fmt.Errorf("pinned registers are for %s, but the enclave is %s", policy.PlatformSEVSNP, platform)
+		}
+		merged = measurement.ExpectedSEVSNP{Launch: fill("launch measurement", c.Launch, p.Launch)}
 	case measurement.ExpectedTDX:
-		pinnedPlatform = policy.PlatformTDX
+		c, ok := code.(measurement.ExpectedTDX)
+		if !ok {
+			return nil, fmt.Errorf("pinned registers are for %s, but the enclave is %s", policy.PlatformTDX, platform)
+		}
+		merged = measurement.ExpectedTDX{
+			MRTD:  fill("MRTD", c.MRTD, p.MRTD),
+			RTMR0: fill("RTMR0", c.RTMR0, p.RTMR0),
+			RTMR1: fill("RTMR1", c.RTMR1, p.RTMR1),
+			RTMR2: fill("RTMR2", c.RTMR2, p.RTMR2),
+			RTMR3: fill("RTMR3", c.RTMR3, p.RTMR3),
+		}
 	default:
 		return nil, fmt.Errorf("unsupported pinned measurement %T", pins)
 	}
-	if pinnedPlatform != platform {
-		return nil, fmt.Errorf("pinned registers are for %s, but the enclave is %s", pinnedPlatform, platform)
+	if err != nil {
+		return nil, err
 	}
-	for i, pin := range registersOf(pins) {
-		if pin != "" && registers[i] != "" && registers[i] != pin {
-			return nil, fmt.Errorf("pinned register %d does not match the signed release measurement", i)
+	return merged, nil
+}
+
+// complete returns the measurement e requires, failing if any register is
+// still unconstrained: assembly never leaves a register unchecked.
+func complete(e measurement.Expected) (measurement.Measurement, error) {
+	var missing []string
+	get := func(name string, r *measurement.Register) measurement.Register {
+		if r == nil {
+			missing = append(missing, name)
+			return measurement.Register{}
 		}
-		registers[i] = cmp.Or(registers[i], pin)
+		return *r
 	}
-	return registers, nil
+	var m measurement.Measurement
+	switch e := e.(type) {
+	case measurement.ExpectedSEVSNP:
+		m = measurement.SEVSNP{Launch: get("launch measurement", e.Launch)}
+	case measurement.ExpectedTDX:
+		m = measurement.TDX{
+			MRTD:  get("MRTD", e.MRTD),
+			RTMR0: get("RTMR0", e.RTMR0),
+			RTMR1: get("RTMR1", e.RTMR1),
+			RTMR2: get("RTMR2", e.RTMR2),
+			RTMR3: get("RTMR3", e.RTMR3),
+		}
+	default:
+		return nil, fmt.Errorf("unsupported expected measurement %T", e)
+	}
+	if len(missing) > 0 {
+		return nil, fmt.Errorf("nothing fixes the expected %s", strings.Join(missing, ", "))
+	}
+	return m, nil
 }
