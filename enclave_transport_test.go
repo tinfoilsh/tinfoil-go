@@ -9,18 +9,13 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
-	"strings"
 	"testing"
 
 	"github.com/openai/openai-go/v3"
 	"github.com/openai/openai-go/v3/option"
 	"github.com/stretchr/testify/require"
-	ehbpidentity "github.com/tinfoilsh/encrypted-http-body-protocol/identity"
 	"github.com/tinfoilsh/tinfoil-go/enclave"
 	"github.com/tinfoilsh/tinfoil-go/internal/testutil"
-	"github.com/tinfoilsh/tinfoil-go/internal/verifytest"
-	"github.com/tinfoilsh/tinfoil-go/verify"
-	"github.com/tinfoilsh/tinfoil-go/verify/document"
 )
 
 type roundTripFunc func(*http.Request) (*http.Response, error)
@@ -97,61 +92,27 @@ func TestEnclaveURLHeaderTransportInjectsHeader(t *testing.T) {
 	require.Empty(t, req.Header.Get(enclaveURLHeader), "the original request must not be mutated")
 }
 
-func TestBuildEHBPTransportRequiresKey(t *testing.T) {
-	_, err := buildEHBPTransport("")
-	require.Error(t, err)
-	require.Contains(t, err.Error(), "HPKE public key")
-}
-
-type transportVerifierFunc func(func(*verify.Verification) (http.RoundTripper, error), func(error) bool) (http.RoundTripper, error)
-
-func (f transportVerifierFunc) NewTransport(build func(*verify.Verification) (http.RoundTripper, error), isKeyError func(error) bool) (http.RoundTripper, error) {
-	return f(build, isKeyError)
-}
-
-func TestEHBPTransportWithoutHPKEKeyIsAttestationError(t *testing.T) {
-	var build func(*verify.Verification) (http.RoundTripper, error)
-	verifier := transportVerifierFunc(func(b func(*verify.Verification) (http.RoundTripper, error), _ func(error) bool) (http.RoundTripper, error) {
-		build = b
-		return roundTripFunc(func(*http.Request) (*http.Response, error) {
-			return nil, errors.New("unused")
-		}), nil
-	})
-	_, err := ehbpHTTPClient(verifier, "enclave.example", "https://enclave.example")
-	require.NoError(t, err)
-	_, err = build(&verify.Verification{})
-	var attestation *enclave.AttestationError
-	require.ErrorAs(t, err, &attestation)
-	require.ErrorContains(t, err, "WithTransport(TransportTLS)")
-}
-
-func TestEHBPClientPreservesAdmissionAndProxyHeader(t *testing.T) {
-	admissionFailure := &enclave.AttestationError{Err: errors.New("expired witnesses")}
+func TestWithEnclaveURLPreservesAdmissionAndProxyHeader(t *testing.T) {
 	seen := make(chan string, 2)
 	proxy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		seen <- r.Header.Get(enclaveURLHeader)
 		w.WriteHeader(http.StatusNoContent)
 	}))
 	defer proxy.Close()
-	var rebuild func(*verify.Verification) (http.RoundTripper, error)
-	verifier := transportVerifierFunc(func(build func(*verify.Verification) (http.RoundTripper, error), isKeyError func(error) bool) (http.RoundTripper, error) {
-		rebuild = build
-		require.True(t, isKeyError(ehbpidentity.NewKeyConfigError(errors.New("rotated"))))
-		return roundTripFunc(func(*http.Request) (*http.Response, error) {
-			return nil, admissionFailure
-		}), nil
-	})
-	hc, err := ehbpHTTPClient(verifier, "enclave.example", proxy.URL)
-	require.NoError(t, err)
-	_, err = hc.Get(proxy.URL)
-	require.ErrorIs(t, err, admissionFailure, "keep the verifier's admission layer around EHBP")
+
+	admissionFailure := &enclave.AttestationError{Err: errors.New("expired witnesses")}
+	hc := &http.Client{Transport: withEnclaveURL(roundTripFunc(func(*http.Request) (*http.Response, error) {
+		return nil, admissionFailure
+	}), "enclave.example", proxy.URL)}
+	_, err := hc.Get(proxy.URL)
+	require.ErrorIs(t, err, admissionFailure, "keep the bound transport's admission errors")
 	require.Empty(t, seen, "failed admission must not reach the proxy")
 
-	// Every transport rebuilt after re-verification, here for a rotated key,
-	// keeps routing to the client's enclave.
-	for _, key := range []string{strings.Repeat("01", 32), strings.Repeat("02", 32)} {
-		transport, err := rebuild(verifytest.New(verifytest.Fields{CryptoMaterial: []document.CryptoMaterialItem{{ID: document.CryptoMaterialIDHPKE, Format: document.KeyX25519HPKEV1Format, Data: key}}}))
-		require.NoError(t, err)
+	// Every request, including retries, keeps routing to the client's enclave.
+	// The header sits above the bound transport, so re-verification, which only
+	// rebuilds the transport below it, can't drop it.
+	transport := withEnclaveURL(http.DefaultTransport, "enclave.example", proxy.URL)
+	for range 2 {
 		req, err := http.NewRequest(http.MethodGet, proxy.URL, nil)
 		require.NoError(t, err)
 		resp, err := transport.RoundTrip(req)
@@ -160,6 +121,9 @@ func TestEHBPClientPreservesAdmissionAndProxyHeader(t *testing.T) {
 		require.Equal(t, "https://enclave.example", <-seen)
 		require.Empty(t, req.Header.Get(enclaveURLHeader), "do not mutate the caller's request")
 	}
+
+	_, wrapped := withEnclaveURL(http.DefaultTransport, "enclave.example", "https://enclave.example/v1/").(*enclaveURLHeaderTransport)
+	require.False(t, wrapped, "a base URL on the enclave's origin needs no header")
 }
 
 func TestLiveClientIntegration_TransportModesWithCacheSecret(t *testing.T) {

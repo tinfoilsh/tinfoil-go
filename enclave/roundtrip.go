@@ -1,16 +1,14 @@
 package enclave
 
 import (
-	"crypto/sha256"
 	"crypto/tls"
-	"crypto/x509"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"net/http"
 	"sync"
 
 	"github.com/tinfoilsh/tinfoil-go/internal/errs"
+	"github.com/tinfoilsh/tinfoil-go/verify"
 )
 
 var (
@@ -53,7 +51,7 @@ func (t *TLSBoundRoundTripper) getTransport() (*http.Transport, error) {
 				}
 			}
 
-			certFP, err := ConnectionCertFP(state)
+			certFP, err := verify.ConnectionCertFP(state)
 			if err != nil {
 				return &AttestationError{Err: err}
 			}
@@ -93,27 +91,4 @@ func (t *TLSBoundRoundTripper) CloseIdleConnections() {
 	if transport, err := t.getTransport(); err == nil {
 		transport.CloseIdleConnections()
 	}
-}
-
-// CertPubkeyFP returns the SPKI SHA-256 fingerprint of a certificate's
-// public key (any key type).
-func CertPubkeyFP(cert *x509.Certificate) (string, error) {
-	if cert == nil {
-		return "", fmt.Errorf("no certificate")
-	}
-	spki, err := x509.MarshalPKIXPublicKey(cert.PublicKey)
-	if err != nil {
-		return "", fmt.Errorf("marshaling public key: %w", err)
-	}
-	hash := sha256.Sum256(spki)
-	return hex.EncodeToString(hash[:]), nil
-}
-
-// ConnectionCertFP gets the KeyFP of the public key of a TLS connection state
-func ConnectionCertFP(c tls.ConnectionState) (string, error) {
-	if len(c.PeerCertificates) == 0 {
-		return "", fmt.Errorf("no peer certificates")
-	}
-	cert := c.PeerCertificates[0]
-	return CertPubkeyFP(cert)
 }

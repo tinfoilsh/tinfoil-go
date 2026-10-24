@@ -190,13 +190,7 @@ func (s *Handle) Verification() *verify.Verification {
 func (s *Handle) HTTPClient() (*http.Client, error) {
 	s.stateMu.Lock()
 	if s.tlsTransport == nil {
-		s.tlsTransport = &clientTransport{client: s, build: func(verified *verify.Verification) (http.RoundTripper, error) {
-			key, ok := verified.TLSPublicKeyFP()
-			if !ok {
-				return nil, &AttestationError{Err: errNoTLSKey}
-			}
-			return &TLSBoundRoundTripper{ExpectedPublicKey: key}, nil
-		}, isKeyError: isCertificateError}
+		s.tlsTransport = &clientTransport{client: s, binding: TLS}
 	}
 	transport := s.tlsTransport
 	s.stateMu.Unlock()

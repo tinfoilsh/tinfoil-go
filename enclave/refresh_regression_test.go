@@ -22,7 +22,7 @@ func TestTransportDiscardsSnapshotRefreshedDuringBuild(t *testing.T) {
 		finished := make(chan error, 1)
 		go func() {
 			var err error
-			transport, err = s.NewTransport(func(verified *verify.Verification) (http.RoundTripper, error) {
+			transport, err = bindTransport(s, func(verified *verify.Verification) (http.RoundTripper, error) {
 				built = append(built, verified.CodeTag())
 				if verified.CodeTag() == "old" {
 					<-release
@@ -66,7 +66,7 @@ func TestRefreshPublishesVerificationAndTransportTogether(t *testing.T) {
 					return testState(time.Now().Add(time.Hour), "new"), nil
 				}}
 				release := make(chan struct{})
-				transport, err := s.NewTransport(func(verified *verify.Verification) (http.RoundTripper, error) {
+				transport, err := bindTransport(s, func(verified *verify.Verification) (http.RoundTripper, error) {
 					if verified.CodeTag() == "new" {
 						<-release
 						if buildErr != nil {
@@ -118,7 +118,7 @@ func TestRefreshRejectsExpiryBeforeTransportConstruction(t *testing.T) {
 		return testState(time.Now().Add(-time.Second), "expired"), nil
 	}}
 	var builds int
-	_, err := s.NewTransport(func(*verify.Verification) (http.RoundTripper, error) {
+	_, err := bindTransport(s, func(*verify.Verification) (http.RoundTripper, error) {
 		builds++
 		return roundTripFunc(func(*http.Request) (*http.Response, error) { return testResponse(), nil }), nil
 	}, nil)
@@ -137,7 +137,7 @@ func TestLateRejectionDoesNotInvalidateReplacement(t *testing.T) {
 			return testState(time.Now().Add(time.Hour), "new"), nil
 		}}
 		release := make(chan struct{})
-		transport, err := s.NewTransport(func(verified *verify.Verification) (http.RoundTripper, error) {
+		transport, err := bindTransport(s, func(verified *verify.Verification) (http.RoundTripper, error) {
 			return roundTripFunc(func(*http.Request) (*http.Response, error) {
 				if verified.CodeTag() == "old" {
 					<-release
