@@ -80,12 +80,12 @@ func NewGateway(baseURL string, catalog func() Catalog, opts GatewayOptions) (*G
 				return nil, err
 			}
 			secure = secure.ViaRelay(base.Host)
-			httpClient, err := ehbpHTTPClient(secure, r.host, baseURL)
+			transport, err := enclave.NewTransport(secure, enclave.EHBP)
 			if err != nil {
 				return nil, err
 			}
 			return &verifiedReplicaTransport{
-				recoveryTransport: &recoveryTransport{transport: httpClient.Transport},
+				recoveryTransport: &recoveryTransport{transport: withEnclaveURL(transport, r.host, baseURL)},
 				verification:      secure.Verification,
 			}, nil
 		},

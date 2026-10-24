@@ -27,6 +27,20 @@ type roundTripFunc func(*http.Request) (*http.Response, error)
 
 func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
 
+// bindingFuncs is a Binding built from a transport builder and an optional
+// key-rejection test.
+type bindingFuncs struct {
+	build      func(*verify.Verification) (http.RoundTripper, error)
+	isKeyError func(error) bool
+}
+
+func (b bindingFuncs) Transport(v *verify.Verification) (http.RoundTripper, error) { return b.build(v) }
+func (b bindingFuncs) KeyRejected(err error) bool                                  { return b.isKeyError != nil && b.isKeyError(err) }
+
+func bindTransport(s *Handle, build func(*verify.Verification) (http.RoundTripper, error), isKeyError func(error) bool) (http.RoundTripper, error) {
+	return NewTransport(s, bindingFuncs{build: build, isKeyError: isKeyError})
+}
+
 func testState(deadline time.Time, key string) *verify.Verification {
 	return verifytest.New(verifytest.Fields{
 		CodeTag: key, FreshnessExpiresAt: deadline,
@@ -56,7 +70,7 @@ func TestTransportExpirationAndUnchangedWitness(t *testing.T) {
 			verifications++
 			return testState(witnessedAt.Add(s.verifier.FreshnessMaxAge()), "key"), nil
 		}
-		transport, err := s.NewTransport(func(*verify.Verification) (http.RoundTripper, error) {
+		transport, err := bindTransport(s, func(*verify.Verification) (http.RoundTripper, error) {
 			return roundTripFunc(func(*http.Request) (*http.Response, error) {
 				requests++
 				return testResponse(), nil
@@ -93,7 +107,7 @@ func TestRefreshCoalescesRequestsAndExplicitVerify(t *testing.T) {
 					<-release
 					return testState(time.Now().Add(time.Hour), "new"), refreshErr
 				}
-				transport, err := s.NewTransport(func(verified *verify.Verification) (http.RoundTripper, error) {
+				transport, err := bindTransport(s, func(verified *verify.Verification) (http.RoundTripper, error) {
 					return roundTripFunc(func(*http.Request) (*http.Response, error) {
 						requests.Add(1)
 						if verified.CryptoMaterial()[0].Data != "new" {
@@ -222,9 +236,9 @@ func TestPreviouslyReturnedTransportsUseExplicitVerification(t *testing.T) {
 			return resp, nil
 		}), nil
 	}
-	first, err := s.NewTransport(build, nil)
+	first, err := bindTransport(s, build, nil)
 	require.NoError(t, err)
-	second, err := s.NewTransport(build, nil)
+	second, err := bindTransport(s, build, nil)
 	require.NoError(t, err)
 	verified, err := s.Verify()
 	require.NoError(t, err)
@@ -256,7 +270,7 @@ func TestKeyRejectionInvalidatesWithoutReplay(t *testing.T) {
 				refreshes++
 				return testState(time.Now().Add(time.Hour), "new"), nil
 			}}
-			transport, err := s.NewTransport(func(*verify.Verification) (http.RoundTripper, error) {
+			transport, err := bindTransport(s, func(*verify.Verification) (http.RoundTripper, error) {
 				return roundTripFunc(func(req *http.Request) (*http.Response, error) {
 					req.Body.Close()
 					sends++
@@ -300,7 +314,7 @@ func TestExpirationDoesNotInterruptStream(t *testing.T) {
 			return testState(deadline, "key"), nil
 		}}
 		reader, writer := io.Pipe()
-		transport, err := s.NewTransport(func(*verify.Verification) (http.RoundTripper, error) {
+		transport, err := bindTransport(s, func(*verify.Verification) (http.RoundTripper, error) {
 			return roundTripFunc(func(*http.Request) (*http.Response, error) {
 				resp := testResponse()
 				resp.Body = reader
@@ -329,7 +343,7 @@ func TestRedirectChecksExpiration(t *testing.T) {
 		s := &Handle{state: testEnclaveState(deadline, "key"), verify: func() (*verify.Verification, error) {
 			return testState(deadline, "key"), nil
 		}}
-		transport, err := s.NewTransport(func(*verify.Verification) (http.RoundTripper, error) {
+		transport, err := bindTransport(s, func(*verify.Verification) (http.RoundTripper, error) {
 			return roundTripFunc(func(*http.Request) (*http.Response, error) {
 				sends++
 				resp := testResponse()
@@ -364,7 +378,7 @@ func TestHTTPClientChecksExpirationOnReusedTLSConnections(t *testing.T) {
 			defer target.Close()
 			roots := x509.NewCertPool()
 			roots.AddCert(target.Certificate())
-			key, err := CertPubkeyFP(target.Certificate())
+			key, err := verify.CertPubkeyFP(target.Certificate())
 			require.NoError(t, err)
 			s := &Handle{state: testEnclaveState(time.Now().Add(time.Hour), key), verify: func() (*verify.Verification, error) {
 				return testState(time.Now().Add(-time.Second), key), nil
@@ -481,7 +495,7 @@ func TestCallersCannotReplaceCachedVerification(t *testing.T) {
 	require.NoError(t, err)
 	*verified = *testState(time.Now().Add(time.Hour), "other")
 	*s.Verification() = *testState(time.Now().Add(time.Hour), "other")
-	_, err = s.NewTransport(func(v *verify.Verification) (http.RoundTripper, error) {
+	_, err = bindTransport(s, func(v *verify.Verification) (http.RoundTripper, error) {
 		*v = *testState(time.Now().Add(time.Hour), "other")
 		return roundTripFunc(func(*http.Request) (*http.Response, error) { return testResponse(), nil }), nil
 	}, nil)

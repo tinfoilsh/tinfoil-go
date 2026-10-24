@@ -11,20 +11,17 @@ import (
 	"github.com/tinfoilsh/tinfoil-go/verify"
 )
 
-// NewTransport admits requests only with unexpired verification. build must
-// bind its transport to the supplied attested keys. isKeyError identifies a
-// rejection before application processing; nil disables key-rejection detection.
-// Rejection invalidates the affected state and is reported through IsKeyRejection.
-// Request replay belongs to the caller.
-// All transports from this client share its verification and refresh state.
-// build receives a detached result and must only construct its bound transport;
-// it must not call the client's verification, transport setup, or request methods.
-func (s *Handle) NewTransport(build func(*verify.Verification) (http.RoundTripper, error), isKeyError func(error) bool) (http.RoundTripper, error) {
-	if build == nil {
-		return nil, &ConfigurationError{Err: fmt.Errorf("transport builder is required")}
+// NewTransport admits requests through h only with unexpired verification and
+// sends them over the transport b builds for it. Key rejection invalidates the
+// affected state and is reported through IsKeyRejection. Request replay belongs
+// to the caller. All transports from one handle share its verification and
+// refresh state.
+func NewTransport(h *Handle, b Binding) (http.RoundTripper, error) {
+	if b == nil {
+		return nil, &ConfigurationError{Err: fmt.Errorf("transport binding is required")}
 	}
-	t := &clientTransport{client: s, build: build, isKeyError: isKeyError}
-	if err := s.registerTransport(t); err != nil {
+	t := &clientTransport{client: h, binding: b}
+	if err := h.registerTransport(t); err != nil {
 		return nil, err
 	}
 	return t, nil
@@ -76,15 +73,14 @@ func (s *Handle) registerTransport(t *clientTransport) error {
 }
 
 type clientTransport struct {
-	client     *Handle
-	build      func(*verify.Verification) (http.RoundTripper, error)
-	isKeyError func(error) bool
+	client  *Handle
+	binding Binding
 }
 
 func (t *clientTransport) buildTransport(verified *verify.Verification) (http.RoundTripper, error) {
-	transport, err := t.build(detached(verified))
+	transport, err := t.binding.Transport(detached(verified))
 	if transport == nil && err == nil {
-		err = fmt.Errorf("transport builder returned nil")
+		err = fmt.Errorf("transport binding returned nil")
 	}
 	if err != nil {
 		closeIdleConnections(transport)
@@ -118,7 +114,7 @@ func (t *clientTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 		return nil, err
 	}
 	resp, err := transport.RoundTrip(req)
-	if err == nil || t.isKeyError == nil || !t.isKeyError(err) {
+	if err == nil || !t.binding.KeyRejected(err) {
 		return resp, err
 	}
 	t.client.invalidate(state)
