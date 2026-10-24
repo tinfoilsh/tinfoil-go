@@ -1,4 +1,4 @@
-package tinfoil
+package transport
 
 import (
 	"encoding/json"
@@ -9,6 +9,8 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	"github.com/tinfoilsh/tinfoil-go/internal/verifytest"
+	"github.com/tinfoilsh/tinfoil-go/verify"
 )
 
 const (
@@ -16,8 +18,8 @@ const (
 	sealTestInitial = "initial.example"
 )
 
-func sealTestTransport(build func(host string) (http.RoundTripper, error)) *sealTransport {
-	return &sealTransport{
+func sealTestTransport(build func(host string) (http.RoundTripper, error)) *Gateway {
+	return &Gateway{
 		build: func(r replica) (http.RoundTripper, error) { return build(r.host) },
 		catalog: func() Catalog {
 			return Catalog{sealTestModel: {Repo: "tinfoilsh/test", Hosts: []string{sealTestInitial}}}
@@ -195,4 +197,18 @@ func TestSealJSONRoutingPreservesInjectedBodyAcrossRetries(t *testing.T) {
 			require.Empty(t, req.Header.Get(sealHeader))
 		})
 	}
+}
+
+func TestGatewayVerificationsNameReplicaHosts(t *testing.T) {
+	seal := &Gateway{}
+	for _, host := range []string{"b.example", "a.example"} {
+		verified := verifytest.New(verifytest.Fields{ConfigRepo: "tinfoilsh/model"})
+		seal.enclaves.Store(replica{host: host, ref: "tinfoilsh/model"}, &verifiedReplicaTransport{
+			verification: func() *verify.Verification { return verified },
+		})
+	}
+	got := seal.Verifications()
+	require.Len(t, got, 2)
+	require.Equal(t, "a.example", got[0].Host)
+	require.Equal(t, "b.example", got[1].Host)
 }

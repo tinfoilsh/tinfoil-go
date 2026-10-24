@@ -8,6 +8,7 @@ import (
 	"github.com/openai/openai-go/v3"
 	"github.com/openai/openai-go/v3/option"
 	"github.com/tinfoilsh/tinfoil-go/enclave"
+	"github.com/tinfoilsh/tinfoil-go/internal/transport"
 	"github.com/tinfoilsh/tinfoil-go/verify"
 )
 
@@ -25,7 +26,7 @@ func NewClient(openaiOpts ...option.RequestOption) (*Client, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to create enclave handle: %w", err)
 	}
-	return createClientFromHandle(handle, defaultTransportMode, "", resolveUserCacheSecret("", false), openaiOpts...)
+	return createClientFromHandle(handle, defaultTransportMode, "", transport.ResolveUserCacheSecret("", false), openaiOpts...)
 }
 
 // NewClientWithOptions creates a secure OpenAI client configured through
@@ -54,7 +55,7 @@ func NewClientWithOptions(opts ...ClientOption) (*Client, error) {
 		return nil, &ConfigurationError{Err: fmt.Errorf("unknown transport mode: %q", cfg.transport)}
 	}
 	if cfg.baseURLSet {
-		origin, err := originOf(cfg.baseURL)
+		origin, err := transport.OriginOf(cfg.baseURL)
 		if err != nil {
 			return nil, &ConfigurationError{Err: fmt.Errorf("invalid base URL: %w", err)}
 		}
@@ -78,7 +79,7 @@ func NewClientWithOptions(opts ...ClientOption) (*Client, error) {
 	}
 
 	return createClientFromHandle(handle, cfg.transport, cfg.baseURL,
-		resolveUserCacheSecret(cfg.userCacheSecret, cfg.userCacheSecretSet), cfg.openaiOpts...)
+		transport.ResolveUserCacheSecret(cfg.userCacheSecret, cfg.userCacheSecretSet), cfg.openaiOpts...)
 }
 
 func createClientFromHandle(handle *enclave.Handle, mode TransportMode, baseURL, userCacheSecret string, openaiOpts ...option.RequestOption) (*Client, error) {

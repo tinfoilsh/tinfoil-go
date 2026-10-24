@@ -5,14 +5,10 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
-	"slices"
-	"strings"
-	"sync"
 
 	"github.com/openai/openai-go/v3"
 	"github.com/openai/openai-go/v3/option"
-	"github.com/tinfoilsh/tinfoil-go/enclave"
-	"github.com/tinfoilsh/tinfoil-go/verify"
+	"github.com/tinfoilsh/tinfoil-go/internal/transport"
 )
 
 // Gateway is an OpenAI client that seals each request to a verified replica
@@ -20,7 +16,7 @@ import (
 type Gateway struct {
 	*openai.Client
 	httpClient *http.Client
-	seal       *sealTransport
+	seal       *transport.Gateway
 }
 
 type GatewayOptions struct {
@@ -34,10 +30,7 @@ type GatewayOptions struct {
 // ModelPin pins a model to tinfoilsh/name[@tag][@sha256:digest].
 // Nil Verification inherits gateway defaults; non-nil replaces them.
 // Zero FreshnessMaxAge in a replacement uses the SDK's seven-day default.
-type ModelPin struct {
-	Repo         string
-	Verification *enclave.Options
-}
+type ModelPin = transport.ModelPin
 
 // NewGateway copies opts and reads catalog on every request; nil fetches it once.
 // Catalog callbacks must return immutable maps safe for concurrent readers.
@@ -56,41 +49,19 @@ func NewGateway(baseURL string, catalog func() Catalog, opts GatewayOptions) (*G
 	if err != nil || base.Scheme != "https" || base.Host == "" {
 		return nil, &ConfigurationError{Err: fmt.Errorf("gateway base URL must be an absolute HTTPS URL: %q", baseURL)}
 	}
-	policy, err := newGatewayPolicy(opts, cfg.verification)
+	seal, err := transport.NewGateway(transport.GatewayConfig{
+		BaseURL:          baseURL,
+		Relay:            base.Host,
+		Catalog:          catalog,
+		ModelPins:        opts.ModelPins,
+		PinnedModelsOnly: opts.PinnedModelsOnly,
+		Defaults:         cfg.verification,
+		UserCacheSecret:  cfg.userCacheSecret,
+	})
 	if err != nil {
-		return nil, &ConfigurationError{Err: err}
+		return nil, err
 	}
-	if catalog == nil {
-		fetched, err := FetchCatalog(base.Host)
-		if err != nil {
-			return nil, err
-		}
-		catalog = func() Catalog { return fetched }
-	}
-	seal := &sealTransport{
-		catalog: catalog,
-		policy:  policy,
-		secret:  resolveUserCacheSecret(cfg.userCacheSecret, cfg.userCacheSecretSet),
-		build: func(r replica) (http.RoundTripper, error) {
-			secure, pinned := policy.pins[r.model]
-			var err error
-			if pinned {
-				secure = secure.ForEnclave(r.host)
-			} else if secure, err = enclave.NewHandle(r.host, r.ref, &policy.defaults); err != nil {
-				return nil, err
-			}
-			secure = secure.ViaRelay(base.Host)
-			transport, err := enclave.NewTransport(secure, enclave.EHBP)
-			if err != nil {
-				return nil, err
-			}
-			return &verifiedReplicaTransport{
-				recoveryTransport: &recoveryTransport{transport: withEnclaveURL(transport, r.host, baseURL)},
-				verification:      secure.Verification,
-			}, nil
-		},
-	}
-	httpClient, err := boundHTTPClient(&http.Client{Transport: seal}, "", baseURL, "")
+	httpClient, err := transport.BoundHTTPClient(&http.Client{Transport: seal}, "", baseURL, "")
 	if err != nil {
 		return nil, err
 	}
@@ -104,57 +75,15 @@ func (g *Gateway) HTTPClient() *http.Client {
 }
 
 // GatewayVerification holds a replica's last successful verification.
-type GatewayVerification struct {
-	// Host is the replica the verification is for.
-	Host string
-	// Request model names, not attested identities.
-	Models       []string
-	Reference    string
-	PinnedModel  string
-	Verification *verify.Verification
-}
+type GatewayVerification = transport.ReplicaVerification
 
 // Verifications returns cached results without re-verifying them.
 // Results may be expired or invalidated.
 func (g *Gateway) Verifications() []GatewayVerification {
-	results := []GatewayVerification{}
-	g.seal.enclaves.Range(func(key, value any) bool {
-		r := key.(replica)
-		transport, ok := value.(*verifiedReplicaTransport)
-		if !ok {
-			return true
-		}
-		if verified := transport.verification(); verified != nil {
-			models := []string{}
-			transport.models.Range(func(model, _ any) bool {
-				models = append(models, model.(string))
-				return true
-			})
-			slices.Sort(models)
-			results = append(results, GatewayVerification{Host: r.host, Models: models, Reference: r.ref, PinnedModel: r.model, Verification: verified})
-		}
-		return true
-	})
-	slices.SortFunc(results, func(a, b GatewayVerification) int {
-		return cmp.Or(strings.Compare(a.Host, b.Host),
-			strings.Compare(a.Reference, b.Reference), strings.Compare(a.PinnedModel, b.PinnedModel))
-	})
-	return results
-}
-
-type verifiedReplicaTransport struct {
-	*recoveryTransport
-	verification func() *verify.Verification
-	models       sync.Map
-}
-
-func (t *verifiedReplicaTransport) RoundTrip(req *http.Request) (*http.Response, error) {
-	t.models.Store(req.Header.Get(modelHeader), struct{}{})
-	return t.recoveryTransport.RoundTrip(req)
+	return g.seal.Verifications()
 }
 
 // Serves checks the current catalog against the gateway policy without verifying replicas.
 func (g *Gateway) Serves(model string) bool {
-	_, _, err := g.seal.policy.resolve(model, g.seal.catalog())
-	return err == nil
+	return g.seal.Serves(model)
 }

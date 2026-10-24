@@ -1,4 +1,4 @@
-package tinfoil
+package transport
 
 import (
 	"net/http"
@@ -20,7 +20,7 @@ func TestOriginOfNormalizesDefaultPorts(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.rawURL, func(t *testing.T) {
-			origin, err := originOf(tt.rawURL)
+			origin, err := OriginOf(tt.rawURL)
 			require.NoError(t, err)
 			require.Equal(t, tt.want, origin)
 		})

@@ -1,4 +1,4 @@
-package tinfoil
+package transport
 
 import (
 	"bytes"
@@ -62,10 +62,10 @@ var userCacheSecretPaths = []string{
 	"/responses",
 }
 
-// resolveUserCacheSecret resolves the client-level secret: the explicit option
+// ResolveUserCacheSecret resolves the client-level secret: the explicit option
 // wins when non-empty, then a non-empty environment value, then the persisted
 // (or generated) secret.
-func resolveUserCacheSecret(explicit string, explicitSet bool) string {
+func ResolveUserCacheSecret(explicit string, explicitSet bool) string {
 	if explicitSet && explicit != "" {
 		return explicit
 	}
