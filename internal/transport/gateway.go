@@ -11,6 +11,7 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"math/rand/v2"
@@ -46,6 +47,10 @@ type gatewayPolicy struct {
 	verifier   *verify.Verifier // for unpinned models
 }
 
+// errCallerAuthorizedConfig rejects a policy whose config the caller supplies
+// or authorizes: gateway replicas are verified against repository pins.
+var errCallerAuthorizedConfig = errors.New("caller-authorized config requires a direct enclave client")
+
 func newGatewayPolicy(modelPins map[string]ModelPin, pinnedOnly bool, v *verify.Verifier) (gatewayPolicy, error) {
 	if pinnedOnly && len(modelPins) == 0 {
 		return gatewayPolicy{}, fmt.Errorf("pinned-only mode requires at least one model pin")
@@ -56,8 +61,14 @@ func newGatewayPolicy(modelPins map[string]ModelPin, pinnedOnly bool, v *verify.
 			return gatewayPolicy{}, fmt.Errorf("gateway verification options: %w", err)
 		}
 	}
+	if v.CallerAuthorizesConfig() {
+		return gatewayPolicy{}, errCallerAuthorizedConfig
+	}
 	p := gatewayPolicy{pins: make(map[string]ModelPin), pinnedOnly: pinnedOnly, verifier: v}
 	for model, pin := range modelPins {
+		if pin.Verifier != nil && pin.Verifier.CallerAuthorizesConfig() {
+			return gatewayPolicy{}, fmt.Errorf("model %q: %w", model, errCallerAuthorizedConfig)
+		}
 		if strings.TrimSpace(model) == "" || !strings.HasPrefix(pin.Repo, trustedRepoOwner) {
 			return gatewayPolicy{}, fmt.Errorf("model pin %q repository %q must belong to %s", model, pin.Repo, trustedRepoOwner)
 		}

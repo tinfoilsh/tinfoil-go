@@ -46,6 +46,8 @@ type EnclaveOptions struct {
 	// BaseURL is a path on the enclave's own HTTPS origin, or an HTTPS proxy on
 	// another origin, which requires BindingEHBP. Requests to a proxy carry
 	// X-Tinfoil-Enclave-Url so it can forward them to the enclave.
+	// DiscoverRouter requires BindingEHBP for any BaseURL, because the router's
+	// origin isn't known before discovery.
 	BaseURL string
 	// Verifier is the verification policy; nil selects the defaults.
 	Verifier *verify.Verifier
@@ -87,11 +89,6 @@ func NewEnclaveHTTPClient(host, repo string, opts *EnclaveOptions) (*EnclaveHTTP
 			return nil, err
 		}
 	}
-	if binding == enclave.TLS {
-		if err := transport.ValidateTLSBaseURL(opts.BaseURL, host); err != nil {
-			return nil, &ConfigurationError{Err: err}
-		}
-	}
 	handle, err := enclave.NewHandleWithVerifier(host, repo, opts.Verifier)
 	if err != nil {
 		return nil, err
@@ -115,9 +112,20 @@ func DiscoverRouter(ctx context.Context, opts *EnclaveOptions) (*EnclaveHTTPClie
 		if err := validateBaseURL(opts.BaseURL); err != nil {
 			return nil, err
 		}
+		if binding == enclave.TLS {
+			return nil, &ConfigurationError{Err: errors.New("a base URL requires BindingEHBP when discovering the router")}
+		}
+	}
+	if opts.Verifier != nil && opts.Verifier.CallerAuthorizesConfig() {
+		return nil, &ConfigurationError{Err: errors.New("caller-authorized config requires an explicit enclave")}
 	}
 	handle, err := enclave.DiscoverRouter(ctx, opts.Verifier)
 	if err != nil {
+		return nil, err
+	}
+	// Discovery leaves the fallback unverified; verify it under ctx rather
+	// than while building the client.
+	if _, err := handle.EnsureVerified(ctx); err != nil {
 		return nil, err
 	}
 	return newEnclaveHTTPClient(handle, binding, opts)

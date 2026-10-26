@@ -10,14 +10,14 @@ import (
 )
 
 func secureHTTPClient(handle *enclave.Handle, binding enclave.Binding, baseURL, userCacheSecret string) (*http.Client, error) {
-	rt, err := transport.Enclave(handle, binding, baseURL)
-	if err != nil {
-		return nil, err
-	}
 	if binding == enclave.TLS {
 		if err := transport.ValidateTLSBaseURL(baseURL, handle.Enclave()); err != nil {
 			return nil, &ConfigurationError{Err: err}
 		}
+	}
+	rt, err := transport.Enclave(handle, binding, baseURL)
+	if err != nil {
+		return nil, err
 	}
 	return transport.BoundHTTPClient(&http.Client{Transport: rt}, handle.Enclave(), baseURL, userCacheSecret)
 }
