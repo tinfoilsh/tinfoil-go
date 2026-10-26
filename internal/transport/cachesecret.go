@@ -37,9 +37,9 @@ import (
 // body, so the secret is only ever visible to the verified enclave.
 
 const (
-	// userCacheSecretField is the router-only request-body field. A non-empty
+	// UserCacheSecretField is the router-only request-body field. A non-empty
 	// string scopes the prompt cache to that secret.
-	userCacheSecretField = "user_cache_secret"
+	UserCacheSecretField = "user_cache_secret"
 
 	// userCacheSecretEnv provisions the secret via the environment.
 	userCacheSecretEnv = "TINFOIL_USER_CACHE_SECRET"
@@ -242,7 +242,7 @@ func (t *userCacheSecretTransport) CloseIdleConnections() {
 }
 
 func (t *userCacheSecretTransport) RoundTrip(req *http.Request) (*http.Response, error) {
-	if t.secret == "" || !userCacheSecretPathEligible(req) {
+	if t.secret == "" || !UserCacheSecretPathEligible(req) {
 		return t.transport.RoundTrip(req)
 	}
 
@@ -272,9 +272,9 @@ func (t *userCacheSecretTransport) RoundTrip(req *http.Request) (*http.Response,
 	return t.transport.RoundTrip(out)
 }
 
-// userCacheSecretPathEligible reports whether the request can carry the field:
+// UserCacheSecretPathEligible reports whether the request can carry the field:
 // a POST with a body to one of the supported endpoints.
-func userCacheSecretPathEligible(req *http.Request) bool {
+func UserCacheSecretPathEligible(req *http.Request) bool {
 	if req.Method != http.MethodPost || req.Body == nil || req.Body == http.NoBody {
 		return false
 	}
@@ -317,7 +317,7 @@ func injectUserCacheSecret(raw []byte, secret string) ([]byte, bool) {
 			return nil, false
 		}
 		body[key] = value
-		if key == userCacheSecretField {
+		if key == UserCacheSecretField {
 			fieldCount++
 		}
 	}
@@ -325,13 +325,13 @@ func injectUserCacheSecret(raw []byte, secret string) ([]byte, bool) {
 	if err != nil || end != json.Delim('}') || !decodeConsumedAll(dec) {
 		return nil, false
 	}
-	if existing, ok := body[userCacheSecretField]; ok {
+	if existing, ok := body[UserCacheSecretField]; ok {
 		value, isString := existing.(string)
 		if fieldCount != 1 || !isString || value != "" {
 			return nil, false
 		}
 	}
-	body[userCacheSecretField] = secret
+	body[UserCacheSecretField] = secret
 	newBody, err := json.Marshal(body)
 	if err != nil {
 		return nil, false

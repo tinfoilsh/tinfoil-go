@@ -111,11 +111,11 @@ func TestRequestClientClosesIdleConnections(t *testing.T) {
 
 func TestRequestRecoveryDiscardsErrorResponses(t *testing.T) {
 	for _, replayable := range []bool{false, true} {
-		var bodies []*sealTestBody
+		var bodies []*closeCountingBody
 		cause := errors.New("rejected")
 		transport := &recoveryTransport{transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
 			req.Body.Close()
-			body := &sealTestBody{Reader: strings.NewReader("failure")}
+			body := &closeCountingBody{Reader: strings.NewReader("failure")}
 			bodies = append(bodies, body)
 			return &http.Response{StatusCode: http.StatusBadRequest, Body: body}, testKeyRejection{cause}
 		})}
@@ -158,5 +158,21 @@ func TestPreparedRequestBodyCanReplay(t *testing.T) {
 	require.Equal(t, bodies[0], bodies[1])
 	var fields map[string]any
 	require.NoError(t, json.Unmarshal([]byte(bodies[1]), &fields))
-	require.Equal(t, "cache-secret", fields[userCacheSecretField])
+	require.Equal(t, "cache-secret", fields[UserCacheSecretField])
+}
+
+// closeCountingBody counts the reads and closes of a response body.
+type closeCountingBody struct {
+	io.Reader
+	reads, closes int
+}
+
+func (b *closeCountingBody) Read(p []byte) (int, error) {
+	b.reads++
+	return b.Reader.Read(p)
+}
+
+func (b *closeCountingBody) Close() error {
+	b.closes++
+	return nil
 }

@@ -1,3 +1,6 @@
+// Package transport holds the request wrappers every route stacks around an
+// enclave's bound transport: replay after a key rejection, the proxy header,
+// the origin guard and prompt-cache scoping.
 package transport
 
 import (
@@ -16,7 +19,7 @@ const enclaveURLHeader = "X-Tinfoil-Enclave-Url"
 // for binding b, the proxy header when baseURL is a proxy on another origin,
 // and one replay after a key rejection. It does no network I/O.
 func Enclave(h *enclave.Handle, b enclave.Binding, baseURL string) (*EnclaveTransport, error) {
-	bound, err := enclave.NewTransport(h, b)
+	bound, err := enclave.NewBoundTransport(h, b)
 	if err != nil {
 		return nil, err
 	}
@@ -29,7 +32,7 @@ func Enclave(h *enclave.Handle, b enclave.Binding, baseURL string) (*EnclaveTran
 // EnclaveTransport is the stack Enclave builds.
 type EnclaveTransport struct {
 	http.RoundTripper
-	bound *enclave.Transport
+	bound *enclave.BoundTransport
 }
 
 // EnsureVerified returns a state that is valid now, with the binding's

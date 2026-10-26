@@ -12,7 +12,7 @@ import (
 	"github.com/tinfoilsh/tinfoil-go/verify"
 )
 
-func TestTransportDiscardsSnapshotRefreshedDuringBuild(t *testing.T) {
+func TestBoundTransportDiscardsSnapshotRefreshedDuringBuild(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		s := &Handle{state: testEnclaveState(time.Now().Add(time.Hour), "old"), verify: func() (*verify.Verification, error) {
 			return testState(time.Now().Add(time.Hour), "new"), nil
@@ -82,7 +82,7 @@ func TestBindingsFailIndependently(t *testing.T) {
 	require.Equal(t, 1, verifications, "a binding failure leaves the shared verification valid")
 }
 
-func TestTransportRejectsSupersededState(t *testing.T) {
+func TestBoundTransportRejectsSupersededState(t *testing.T) {
 	s := &Handle{verify: func() (*verify.Verification, error) {
 		return testState(time.Now().Add(time.Hour), "key"), nil
 	}}
@@ -158,7 +158,7 @@ func TestLateRejectionDoesNotInvalidateReplacement(t *testing.T) {
 	})
 }
 
-func TestTransportRechecksStateAfterSlowBuild(t *testing.T) {
+func TestBoundTransportRechecksStateAfterSlowBuild(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		s := &Handle{state: testEnclaveState(time.Now().Add(time.Minute), "old"), verify: func() (*verify.Verification, error) {
 			return testState(time.Now().Add(time.Hour), "new"), nil

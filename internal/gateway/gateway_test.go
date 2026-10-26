@@ -1,4 +1,4 @@
-package transport
+package gateway
 
 import (
 	"context"
@@ -11,9 +11,18 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	"github.com/tinfoilsh/tinfoil-go/internal/transport"
 	"github.com/tinfoilsh/tinfoil-go/internal/verifytest"
 	"github.com/tinfoilsh/tinfoil-go/verify"
 )
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) { return f(req) }
+
+func newResponse(status int, body string) *http.Response {
+	return &http.Response{StatusCode: status, Body: io.NopCloser(strings.NewReader(body)), Header: make(http.Header)}
+}
 
 const (
 	sealTestModel   = "test-model"
@@ -23,8 +32,8 @@ const (
 // sealTestTransport serves each replica through the transport connect returns
 // for its host. Like a handle verifying, a replica calls connect until it
 // succeeds, then reuses the result.
-func sealTestTransport(connect func(host string) (http.RoundTripper, error)) *Gateway {
-	return &Gateway{
+func sealTestTransport(connect func(host string) (http.RoundTripper, error)) *Transport {
+	return &Transport{
 		build: func(r replica) (*verifiedReplicaTransport, error) {
 			var mu sync.Mutex
 			var verified http.RoundTripper
@@ -215,7 +224,7 @@ func TestSealJSONRoutingPreservesInjectedBodyAcrossRetries(t *testing.T) {
 			require.Equal(t, bodies[0], bodies[1])
 			var fields map[string]json.RawMessage
 			require.NoError(t, json.Unmarshal([]byte(bodies[0]), &fields))
-			require.NotContains(t, fields, userCacheSecretField)
+			require.NotContains(t, fields, transport.UserCacheSecretField)
 			require.JSONEq(t, `"12hdflC67PPzpyBnEpYOB30yhkOMQuxLixo9xB48s6A"`, string(fields[cacheSaltField]))
 			require.Equal(t, "ca60642ff6701647124356235d2c925e34117bc73a99b477d4e280c5f0c03527", prefixes[0])
 			require.Equal(t, prefixes[0], prefixes[1])
@@ -277,7 +286,7 @@ func TestSealPerRequestCacheSecretOverridesClientSecret(t *testing.T) {
 		resp, err := seal.RoundTrip(req)
 		require.NoError(t, err)
 		resp.Body.Close()
-		require.NotContains(t, fields, userCacheSecretField, "the secret never leaves the client")
+		require.NotContains(t, fields, transport.UserCacheSecretField, "the secret never leaves the client")
 		return fields[cacheSaltField], prefix
 	}
 	gotSalt, gotPrefix := salt("client-secret", `{"model":"test-model","user_cache_secret":"end-user"}`)
@@ -289,7 +298,7 @@ func TestSealPerRequestCacheSecretOverridesClientSecret(t *testing.T) {
 }
 
 func TestGatewayVerificationsNameReplicaHosts(t *testing.T) {
-	seal := &Gateway{}
+	seal := &Transport{}
 	for _, host := range []string{"b.example", "a.example"} {
 		verified := verifytest.New(verifytest.Fields{ConfigRepo: "tinfoilsh/model"})
 		seal.enclaves.Store(replica{host: host, ref: "tinfoilsh/model"}, &verifiedReplicaTransport{
@@ -309,8 +318,8 @@ func TestGatewayEnsureVerifiedFallsOver(t *testing.T) {
 	order := rank(hosts, sealTestModel, "")
 	buildFails, expired := order[0], order[1]
 	catalog := func() Catalog { return Catalog{sealTestModel: {Repo: "tinfoilsh/test", Hosts: hosts}} }
-	newGateway := func(attempts *[]string, build func(replica) (*verifiedReplicaTransport, error)) *Gateway {
-		return &Gateway{catalog: catalog, build: func(r replica) (*verifiedReplicaTransport, error) {
+	newGateway := func(attempts *[]string, build func(replica) (*verifiedReplicaTransport, error)) *Transport {
+		return &Transport{catalog: catalog, build: func(r replica) (*verifiedReplicaTransport, error) {
 			*attempts = append(*attempts, r.host)
 			return build(r)
 		}}
@@ -347,7 +356,7 @@ func TestGatewayEnsureVerifiedFallsOver(t *testing.T) {
 
 func TestGatewayKeepsOneTransportPerReplica(t *testing.T) {
 	arrived, proceed := make(chan struct{}, 2), make(chan struct{})
-	seal := &Gateway{build: func(replica) (*verifiedReplicaTransport, error) {
+	seal := &Transport{build: func(replica) (*verifiedReplicaTransport, error) {
 		arrived <- struct{}{}
 		<-proceed
 		return &verifiedReplicaTransport{}, nil

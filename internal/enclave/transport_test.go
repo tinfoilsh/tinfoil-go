@@ -37,8 +37,8 @@ type bindingFuncs struct {
 func (b bindingFuncs) Transport(v *verify.Verification) (http.RoundTripper, error) { return b.build(v) }
 func (b bindingFuncs) KeyRejected(err error) bool                                  { return b.isKeyError != nil && b.isKeyError(err) }
 
-func bindTransport(s *Handle, build func(*verify.Verification) (http.RoundTripper, error), isKeyError func(error) bool) (*Transport, error) {
-	return NewTransport(s, bindingFuncs{build: build, isKeyError: isKeyError})
+func bindTransport(s *Handle, build func(*verify.Verification) (http.RoundTripper, error), isKeyError func(error) bool) (*BoundTransport, error) {
+	return NewBoundTransport(s, bindingFuncs{build: build, isKeyError: isKeyError})
 }
 
 // verifyNow verifies s again and returns the caller's copy.
@@ -61,7 +61,7 @@ func current(s *Handle) *verify.Verification {
 // tlsClient is an HTTP client pinned through s.
 func tlsClient(t *testing.T, s *Handle) *http.Client {
 	t.Helper()
-	transport, err := NewTransport(s, TLS)
+	transport, err := NewBoundTransport(s, TLS)
 	require.NoError(t, err)
 	return &http.Client{Transport: transport}
 }
@@ -414,9 +414,9 @@ func TestHTTPClientChecksExpirationOnReusedTLSConnections(t *testing.T) {
 			}}
 			hc := tlsClient(t, s)
 			defer hc.CloseIdleConnections()
-			_, err = hc.Transport.(*Transport).EnsureVerified(context.Background())
+			_, err = hc.Transport.(*BoundTransport).EnsureVerified(context.Background())
 			require.NoError(t, err)
-			base, err := hc.Transport.(*Transport).inner.(*TLSBoundRoundTripper).getTransport()
+			base, err := hc.Transport.(*BoundTransport).inner.(*TLSBoundRoundTripper).getTransport()
 			require.NoError(t, err)
 			base.Proxy = nil
 			base.TLSClientConfig.RootCAs = roots

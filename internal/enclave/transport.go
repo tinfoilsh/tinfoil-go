@@ -10,21 +10,22 @@ import (
 	"sync"
 )
 
-// NewTransport sends each request over the transport b builds for a state h
-// ensures is valid. It does no network I/O: the first request or
+// NewBoundTransport sends each request over the transport b builds for a
+// state h ensures is valid. It does no network I/O: the first request or
 // EnsureVerified verifies. Key rejection invalidates the state the request was
 // sent under and is reported through IsKeyRejection; request replay belongs to
 // the caller. Transports from one handle share its verification and refresh.
-func NewTransport(h *Handle, b Binding) (*Transport, error) {
+func NewBoundTransport(h *Handle, b Binding) (*BoundTransport, error) {
 	if b == nil {
 		return nil, &ConfigurationError{Err: fmt.Errorf("transport binding is required")}
 	}
-	return &Transport{handle: h, binding: b}, nil
+	return &BoundTransport{handle: h, binding: b}, nil
 }
 
-// Transport binds requests to the keys of a handle's current state. It builds
-// its binding's transport once per state, on the first request under it.
-type Transport struct {
+// BoundTransport binds requests to the keys of a handle's current state. It
+// builds its binding's transport once per state, on the first request under
+// it.
+type BoundTransport struct {
 	handle  *Handle
 	binding Binding
 
@@ -39,12 +40,12 @@ var errSuperseded = errors.New("verification superseded")
 
 // EnsureVerified returns a state that is valid now, with the binding's
 // transport built for it, verifying first only if needed.
-func (t *Transport) EnsureVerified(ctx context.Context) (*State, error) {
+func (t *BoundTransport) EnsureVerified(ctx context.Context) (*State, error) {
 	_, state, err := t.admit(ctx)
 	return state, err
 }
 
-func (t *Transport) admit(ctx context.Context) (http.RoundTripper, *State, error) {
+func (t *BoundTransport) admit(ctx context.Context) (http.RoundTripper, *State, error) {
 	for {
 		state, err := t.handle.verifiedState(ctx, false, verificationRetries)
 		if err != nil {
@@ -71,7 +72,7 @@ func (t *Transport) admit(ctx context.Context) (http.RoundTripper, *State, error
 
 // innerFor returns the binding's transport for state, building it when state
 // is newer than the one the current transport was built for.
-func (t *Transport) innerFor(state *State) (http.RoundTripper, error) {
+func (t *BoundTransport) innerFor(state *State) (http.RoundTripper, error) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	switch {
@@ -95,7 +96,7 @@ func (t *Transport) innerFor(state *State) (http.RoundTripper, error) {
 	return inner, nil
 }
 
-func (t *Transport) RoundTrip(req *http.Request) (*http.Response, error) {
+func (t *BoundTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	inner, state, err := t.admit(req.Context())
 	if err != nil {
 		closeRequestBody(req)
@@ -109,7 +110,7 @@ func (t *Transport) RoundTrip(req *http.Request) (*http.Response, error) {
 	return resp, &keyRejectionError{err}
 }
 
-func (t *Transport) CloseIdleConnections() {
+func (t *BoundTransport) CloseIdleConnections() {
 	t.mu.Lock()
 	inner := t.inner
 	t.mu.Unlock()

@@ -321,7 +321,7 @@ func TestUserCacheSecretTransportInjects(t *testing.T) {
 
 			var body map[string]any
 			require.NoError(t, json.Unmarshal(got, &body))
-			require.Equal(t, "s1", body[userCacheSecretField])
+			require.Equal(t, "s1", body[UserCacheSecretField])
 
 			// Length metadata and the replayable body must describe the
 			// injected bytes: retries below this layer (EHBP key rotation)
@@ -428,7 +428,7 @@ func TestUserCacheSecretTransportReplacesEmptyPerRequestSecret(t *testing.T) {
 			decoder := json.NewDecoder(bytes.NewReader(got))
 			decoder.UseNumber()
 			require.NoError(t, decoder.Decode(&body))
-			require.Equal(t, "client-level", body[userCacheSecretField])
+			require.Equal(t, "client-level", body[UserCacheSecretField])
 			if seed, ok := body["seed"]; ok {
 				require.Equal(t, json.Number("9007199254740993"), seed)
 			}
@@ -499,7 +499,7 @@ func TestUserCacheSecretTransportAllowsTrailingWhitespace(t *testing.T) {
 
 	var body map[string]any
 	require.NoError(t, json.Unmarshal(got, &body))
-	require.Equal(t, "s1", body[userCacheSecretField])
+	require.Equal(t, "s1", body[UserCacheSecretField])
 }
 
 func TestUserCacheSecretTransportPreservesNumberPrecision(t *testing.T) {
@@ -543,17 +543,17 @@ func TestUserCacheSecretThroughOpenAIClient(t *testing.T) {
 
 	_, err := oai.Chat.Completions.New(context.Background(), params)
 	require.NoError(t, err)
-	require.Equal(t, "client-level", received[userCacheSecretField])
+	require.Equal(t, "client-level", received[UserCacheSecretField])
 
 	_, err = oai.Chat.Completions.New(context.Background(), params,
-		option.WithJSONSet(userCacheSecretField, "end-user-7"))
+		option.WithJSONSet(UserCacheSecretField, "end-user-7"))
 	require.NoError(t, err)
-	require.Equal(t, "end-user-7", received[userCacheSecretField],
+	require.Equal(t, "end-user-7", received[UserCacheSecretField],
 		"a per-request field must win over the client-level secret")
 
 	_, err = oai.Chat.Completions.New(context.Background(), params,
-		option.WithJSONSet(userCacheSecretField, ""))
+		option.WithJSONSet(UserCacheSecretField, ""))
 	require.NoError(t, err)
-	require.Equal(t, "client-level", received[userCacheSecretField],
+	require.Equal(t, "client-level", received[UserCacheSecretField],
 		"an empty per-request field must be replaced with the client-level secret")
 }
