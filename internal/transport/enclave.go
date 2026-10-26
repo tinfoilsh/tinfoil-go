@@ -1,6 +1,7 @@
 package transport
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 
@@ -13,13 +14,32 @@ const enclaveURLHeader = "X-Tinfoil-Enclave-Url"
 
 // Enclave is the stack every route puts in front of one enclave: h's transport
 // for binding b, the proxy header when baseURL is a proxy on another origin,
-// and one replay after a key rejection.
-func Enclave(h *enclave.Handle, b enclave.Binding, baseURL string) (http.RoundTripper, error) {
+// and one replay after a key rejection. It does no network I/O.
+func Enclave(h *enclave.Handle, b enclave.Binding, baseURL string) (*EnclaveTransport, error) {
 	bound, err := enclave.NewTransport(h, b)
 	if err != nil {
 		return nil, err
 	}
-	return &recoveryTransport{transport: withEnclaveURL(bound, h.Enclave(), baseURL)}, nil
+	return &EnclaveTransport{
+		RoundTripper: &recoveryTransport{transport: withEnclaveURL(bound, h.Enclave(), baseURL)},
+		bound:        bound,
+	}, nil
+}
+
+// EnclaveTransport is the stack Enclave builds.
+type EnclaveTransport struct {
+	http.RoundTripper
+	bound *enclave.Transport
+}
+
+// EnsureVerified returns a state that is valid now, with the binding's
+// transport built for it, verifying first only if needed.
+func (t *EnclaveTransport) EnsureVerified(ctx context.Context) (*enclave.State, error) {
+	return t.bound.EnsureVerified(ctx)
+}
+
+func (t *EnclaveTransport) CloseIdleConnections() {
+	closeIdleConnections(t.RoundTripper)
 }
 
 // withEnclaveURL adds the X-Tinfoil-Enclave-Url header when baseURL is a proxy

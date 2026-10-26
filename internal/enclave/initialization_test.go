@@ -1,6 +1,7 @@
 package enclave
 
 import (
+	"context"
 	"errors"
 	"io"
 	"net/http"
@@ -27,10 +28,10 @@ func TestDefaultClientProbesOncePerDiscovery(t *testing.T) {
 			}
 			return nil, cause
 		})}
-		s, err := NewDefaultHandle(nil)
+		s, err := DiscoverRouter(context.Background(), nil)
 		if err == nil {
 			// Complete initialization if the constructor returned a lazy fallback.
-			_, err = s.Verify()
+			_, err = verifyNow(s)
 		}
 		require.ErrorIs(t, err, cause)
 		require.Positive(t, requests["atc.tinfoil.sh"])
@@ -60,14 +61,14 @@ func TestInitializationRecovery(t *testing.T) {
 				var attempts int
 				s.verify = func() (*verify.Verification, error) {
 					attempts++
-					assert.Nil(t, s.Verification(), "failed attempts must not publish state")
+					assert.Nil(t, current(s), "failed attempts must not publish state")
 					if attempts == 1 {
 						return testState(time.Now().Add(time.Hour), "rejected"), tc.first
 					}
 					return testState(time.Now().Add(time.Hour), "fresh"), tc.last
 				}
 				start := time.Now()
-				verified, err := s.Verify()
+				verified, err := verifyNow(s)
 				require.Equal(t, tc.attempts, attempts)
 				require.Equal(t, time.Duration(attempts-1)*time.Second, time.Since(start))
 				if attempts == 2 && tc.last == nil {
@@ -78,7 +79,7 @@ func TestInitializationRecovery(t *testing.T) {
 					if tc.last != nil {
 						require.ErrorIs(t, err, lastCause)
 					}
-					require.Nil(t, s.Verification())
+					require.Nil(t, current(s))
 				}
 			})
 		})
@@ -99,7 +100,7 @@ func TestInitializationRetryIsShared(t *testing.T) {
 		}}
 		results := make(chan error, 8)
 		for range cap(results) {
-			go func() { _, err := s.Verify(); results <- err }()
+			go func() { _, err := verifyNow(s); results <- err }()
 		}
 		synctest.Wait()
 		close(release)
@@ -127,5 +128,5 @@ func TestRefreshRejectsExpiredPublication(t *testing.T) {
 	<-call.done
 	require.ErrorIs(t, call.err, errFreshnessExpired)
 	require.Nil(t, call.state)
-	require.Nil(t, s.Verification())
+	require.Nil(t, current(s))
 }

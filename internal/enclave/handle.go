@@ -1,6 +1,6 @@
 // Package enclave connects to attested enclaves. A Handle fetches and verifies
-// one enclave's attestation, keeps the result until it expires, and binds HTTP
-// traffic to the keys the enclave endorses.
+// one enclave's attestation and keeps the result until it expires or is
+// invalidated; a Transport binds HTTP traffic to the keys it endorses.
 package enclave
 
 import (
@@ -13,26 +13,22 @@ import (
 	"time"
 
 	"github.com/tinfoilsh/tinfoil-go/verify"
-	"github.com/tinfoilsh/tinfoil-go/verify/document/collateral"
-	"github.com/tinfoilsh/tinfoil-go/verify/measurement"
 )
 
 // Handle is the client-side handle for one attested enclave. It verifies the
-// enclave's attestation on first use, verifies again when the result expires or
-// the enclave rejects its keys, and hands out HTTP clients and transports bound
-// to the verified keys. Everything it hands out shares one verification and one
-// refresh.
+// enclave's attestation on first use, and again when the result expires or is
+// invalidated. Transports built on it bind traffic to the keys of the State it
+// ensures is valid; they all share one verification and one refresh.
 type Handle struct {
 	enclave, repo, relay string
-	// verifier is the immutable verification policy, shared by every handle
-	// derived from this one.
+	// verifier is the immutable verification policy, shareable across handles.
 	verifier *verify.Verifier
 
-	stateMu      sync.RWMutex
-	state        *enclaveState
-	refreshing   *verificationCall
-	tlsTransport *clientTransport
-	verify       func() (*verify.Verification, error)
+	stateMu    sync.RWMutex
+	state      *State
+	generation uint64
+	refreshing *verificationCall
+	verify     func() (*verify.Verification, error)
 }
 
 var (
@@ -79,109 +75,56 @@ func fetchRouters(ctx context.Context) ([]string, error) {
 	return routers, nil
 }
 
-// Options is copied at construction. Create a new client to change it.
-type Options struct {
-	// EmbeddedConfig trusts exact caller-supplied bytes instead of a config endorsement.
-	EmbeddedConfig *verify.EmbeddedConfig
-	// ConfigAuthorizer authorizes document-carried configs instead of their endorsement.
-	ConfigAuthorizer func(collateral.ConfigEndorsement) error
-	// PinnedRegisters adds register checks (see verify.WithPinnedRegisters).
-	PinnedRegisters measurement.Expected
-	// FreshnessMaxAge defaults to seven days when zero. Negative ages are invalid.
-	FreshnessMaxAge time.Duration
+// Config describes the enclave a Handle verifies.
+type Config struct {
+	// Host is the enclave, a host with an optional port.
+	Host string
+	// Relay, when set, is a host that fetches attestation from the enclave on
+	// the client's behalf.
+	Relay string
+	// Repo pins a repository or registry project,
+	// org/project[@revision][@sha256:digest].
+	Repo string
+	// Verifier is the policy, which several handles can share; nil selects the
+	// defaults, which require Repo.
+	Verifier *verify.Verifier
 }
 
-// Verifier builds the immutable policy these options describe, validating
-// them once. A nil receiver selects the defaults.
-func (input *Options) Verifier() (*verify.Verifier, error) {
-	if input == nil {
-		return verify.NewVerifier()
-	}
-	opts := []verify.Option{
-		verify.WithPinnedRegisters(input.PinnedRegisters),
-		verify.WithFreshnessMaxAge(input.FreshnessMaxAge),
-	}
-	if input.EmbeddedConfig != nil {
-		opts = append(opts, verify.WithEmbeddedReferences(verify.EmbeddedReferences{Config: input.EmbeddedConfig}))
-	}
-	if input.ConfigAuthorizer != nil {
-		opts = append(opts, verify.WithConfigAuthorizer(input.ConfigAuthorizer))
-	}
-	return verify.NewVerifier(opts...)
-}
-
-// NewHandle pins a repository or registry project, org/project[@revision][@sha256:digest].
-// The document's collateral version selects verification on first use.
-// An embedded config permits an empty repo and authorizes only its exact bytes.
-// A ConfigAuthorizer requires an empty repo and owns config authorization.
-func NewHandle(enclave, repo string, opts *Options) (*Handle, error) {
-	customConfig := opts != nil && (opts.EmbeddedConfig != nil || opts.ConfigAuthorizer != nil)
-	if enclave == "" && customConfig {
-		return nil, &ConfigurationError{Err: fmt.Errorf("caller-authorized config requires an enclave")}
-	}
-	if repo != "" && opts != nil && opts.ConfigAuthorizer != nil {
-		return nil, &ConfigurationError{Err: fmt.Errorf("config authorizer requires an empty repository pin")}
-	}
-	if repo != "" || !customConfig {
-		if _, _, _, err := verify.ParseReference(repo); err != nil {
-			return nil, &ConfigurationError{Err: err}
-		}
-	}
-	verifier, err := opts.Verifier()
-	if err != nil {
-		return nil, fromVerify(err)
-	}
-	return &Handle{enclave: enclave, repo: repo, verifier: verifier}, nil
-}
-
-// NewHandleWithVerifier is NewHandle with a policy the caller built, which
-// several handles can share; nil selects the defaults, which require a
-// repository pin. A caller-authorized config used with a repository pin is
+// NewHandle checks c and does no network I/O; the enclave is verified on
+// first use. A caller-authorized config used with a repository pin is
 // reported when verifying.
-func NewHandleWithVerifier(enclave, repo string, v *verify.Verifier) (*Handle, error) {
-	if repo == "" && v == nil {
+func NewHandle(c Config) (*Handle, error) {
+	if c.Repo == "" && c.Verifier == nil {
 		return nil, &ConfigurationError{Err: fmt.Errorf("the default verification policy requires a repository pin")}
 	}
-	if repo != "" {
-		if _, _, _, err := verify.ParseReference(repo); err != nil {
+	if c.Repo != "" {
+		if _, _, _, err := verify.ParseReference(c.Repo); err != nil {
 			return nil, &ConfigurationError{Err: err}
 		}
 	}
+	v := c.Verifier
 	if v == nil {
 		var err error
 		if v, err = verify.NewVerifier(); err != nil {
 			return nil, fromVerify(err)
 		}
 	}
-	return &Handle{enclave: enclave, repo: repo, verifier: v}, nil
-}
-
-// NewDefaultHandle applies opts to every discovered router and fallback.
-func NewDefaultHandle(opts *Options) (*Handle, error) {
-	if opts != nil && (opts.EmbeddedConfig != nil || opts.ConfigAuthorizer != nil) {
-		return nil, &ConfigurationError{Err: fmt.Errorf("caller-authorized config requires an explicit enclave")}
-	}
-	verifier, err := opts.Verifier()
-	if err != nil {
-		return nil, fromVerify(err)
-	}
-	return DiscoverRouter(context.Background(), verifier)
+	return &Handle{enclave: c.Host, repo: c.Repo, relay: c.Relay, verifier: v}, nil
 }
 
 // DiscoverRouter returns a handle for the first router from Tinfoil's router
 // list that verifies under v, and otherwise for inference.tinfoil.sh, which it
 // leaves to be verified on first use. nil v selects the default policy.
 func DiscoverRouter(ctx context.Context, v *verify.Verifier) (*Handle, error) {
-	fallback, err := NewHandleWithVerifier("inference.tinfoil.sh", defaultRouterRepo, v)
+	fallback, err := NewHandle(Config{Host: "inference.tinfoil.sh", Repo: defaultRouterRepo, Verifier: v})
 	if err != nil {
 		return nil, err
 	}
 	routers, _ := fetchRouters(ctx)
-	for _, routerURL := range routers {
-		client := fallback.ForEnclave(routerURL)
-		_, err := client.verifiedState(ctx, true, candidateVerificationRetries)
-		if err == nil {
-			return client, nil
+	for _, router := range routers {
+		candidate := &Handle{enclave: router, repo: fallback.repo, verifier: fallback.verifier}
+		if _, err := candidate.verifiedState(ctx, true, candidateVerificationRetries); err == nil {
+			return candidate, nil
 		}
 	}
 	if err := ctx.Err(); err != nil {
@@ -190,17 +133,7 @@ func DiscoverRouter(ctx context.Context, v *verify.Verifier) (*Handle, error) {
 	return fallback, nil
 }
 
-// ForEnclave keeps the repository reference and verification options.
-func (s *Handle) ForEnclave(enclave string) *Handle {
-	return &Handle{enclave: enclave, repo: s.repo, verifier: s.verifier}
-}
-
-// ViaRelay fetches attestation through relay, which forwards it to the enclave.
-func (s *Handle) ViaRelay(relay string) *Handle {
-	return &Handle{enclave: s.enclave, repo: s.repo, relay: relay, verifier: s.verifier}
-}
-
-// Enclave returns the enclave URL
+// Enclave returns the enclave host.
 func (s *Handle) Enclave() string {
 	return s.enclave
 }
@@ -210,26 +143,11 @@ func (s *Handle) Repo() string {
 	return s.repo
 }
 
-// Verification returns a copy of the last verification, or nil before the first.
-func (s *Handle) Verification() *verify.Verification {
+// Current returns the last successful verification without checking it, or
+// nil before the first. It may have expired or been invalidated; use
+// EnsureVerified for one that is valid.
+func (s *Handle) Current() *State {
 	s.stateMu.RLock()
 	defer s.stateMu.RUnlock()
-	if s.state == nil {
-		return nil
-	}
-	return detached(s.state.Verification)
-}
-
-// HTTPClient returns an HTTP client that only accepts TLS connections to the verified enclave
-func (s *Handle) HTTPClient() (*http.Client, error) {
-	s.stateMu.Lock()
-	if s.tlsTransport == nil {
-		s.tlsTransport = &clientTransport{client: s, binding: TLS}
-	}
-	transport := s.tlsTransport
-	s.stateMu.Unlock()
-	if err := s.registerTransport(transport); err != nil {
-		return nil, err
-	}
-	return &http.Client{Transport: transport}, nil
+	return s.state
 }

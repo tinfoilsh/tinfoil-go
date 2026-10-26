@@ -9,17 +9,23 @@ import (
 	"github.com/tinfoilsh/tinfoil-go/internal/transport"
 )
 
-func secureHTTPClient(handle *enclave.Handle, binding enclave.Binding, baseURL, userCacheSecret string) (*http.Client, error) {
+// secureHTTPClient returns the client a route sends through and the enclave
+// transport inside it, which verifies on demand. It does no network I/O.
+func secureHTTPClient(handle *enclave.Handle, binding enclave.Binding, baseURL, userCacheSecret string) (*http.Client, *transport.EnclaveTransport, error) {
 	if binding == enclave.TLS {
 		if err := transport.ValidateTLSBaseURL(baseURL, handle.Enclave()); err != nil {
-			return nil, &ConfigurationError{Err: err}
+			return nil, nil, &ConfigurationError{Err: err}
 		}
 	}
-	rt, err := transport.Enclave(handle, binding, baseURL)
+	bound, err := transport.Enclave(handle, binding, baseURL)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	return transport.BoundHTTPClient(&http.Client{Transport: rt}, handle.Enclave(), baseURL, userCacheSecret)
+	secure, err := transport.BoundHTTPClient(&http.Client{Transport: bound}, handle.Enclave(), baseURL, userCacheSecret)
+	if err != nil {
+		return nil, nil, err
+	}
+	return secure, bound, nil
 }
 
 // validateBaseURL requires an absolute HTTPS URL, which keeps request headers

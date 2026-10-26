@@ -64,6 +64,7 @@ type EnclaveOptions struct {
 type EnclaveHTTPClient struct {
 	*http.Client
 	handle *enclave.Handle
+	bound  *transport.EnclaveTransport
 	// secure is the client OpenAI clients use, which changes to the embedded
 	// client can't reach.
 	secure             *http.Client
@@ -89,11 +90,11 @@ func NewEnclaveHTTPClient(host, repo string, opts *EnclaveOptions) (*EnclaveHTTP
 			return nil, err
 		}
 	}
-	handle, err := enclave.NewHandleWithVerifier(host, repo, opts.Verifier)
+	handle, err := enclave.NewHandle(enclave.Config{Host: host, Repo: repo, Verifier: opts.Verifier})
 	if err != nil {
 		return nil, err
 	}
-	return newEnclaveHTTPClient(handle, binding, opts)
+	return newEnclaveHTTPClient(context.Background(), handle, binding, opts)
 }
 
 // DiscoverRouter returns a client for the first router from Tinfoil's router
@@ -123,23 +124,24 @@ func DiscoverRouter(ctx context.Context, opts *EnclaveOptions) (*EnclaveHTTPClie
 	if err != nil {
 		return nil, err
 	}
-	// Discovery leaves the fallback unverified; verify it under ctx rather
-	// than while building the client.
-	if _, err := handle.EnsureVerified(ctx); err != nil {
-		return nil, err
-	}
-	return newEnclaveHTTPClient(handle, binding, opts)
+	return newEnclaveHTTPClient(ctx, handle, binding, opts)
 }
 
-func newEnclaveHTTPClient(handle *enclave.Handle, binding enclave.Binding, opts *EnclaveOptions) (*EnclaveHTTPClient, error) {
-	secure, err := secureHTTPClient(handle, binding, opts.BaseURL,
+// newEnclaveHTTPClient verifies under ctx before returning, which discovery
+// leaves undone for its fallback.
+func newEnclaveHTTPClient(ctx context.Context, handle *enclave.Handle, binding enclave.Binding, opts *EnclaveOptions) (*EnclaveHTTPClient, error) {
+	secure, bound, err := secureHTTPClient(handle, binding, opts.BaseURL,
 		transport.ResolveUserCacheSecret(opts.UserCacheSecret, opts.UserCacheSecret != ""))
 	if err != nil {
+		return nil, err
+	}
+	if _, err := bound.EnsureVerified(ctx); err != nil {
 		return nil, err
 	}
 	return &EnclaveHTTPClient{
 		Client:    &http.Client{Transport: secure.Transport},
 		handle:    handle,
+		bound:     bound,
 		secure:    secure,
 		baseURL:   cmp.Or(opts.BaseURL, "https://"+handle.Enclave()+"/"),
 		openAIURL: cmp.Or(opts.BaseURL, "https://"+handle.Enclave()+"/v1/"),
@@ -153,19 +155,31 @@ func (c *EnclaveHTTPClient) BaseURL() string {
 }
 
 // EnsureVerified returns a verification that is valid now, verifying first
-// only if the cached one has expired or been rejected.
+// only if the cached one has expired or been rejected. It also prepares the
+// binding for it, so a nil error means requests can be sent.
 func (c *EnclaveHTTPClient) EnsureVerified(ctx context.Context) (*verify.Verification, error) {
-	return c.handle.EnsureVerified(ctx)
+	state, err := c.bound.EnsureVerified(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return state.Verification(), nil
 }
 
 // Reverify verifies again even if the cached verification is still valid.
 func (c *EnclaveHTTPClient) Reverify(ctx context.Context) (*verify.Verification, error) {
-	return c.handle.Reverify(ctx)
+	state, err := c.handle.Reverify(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return state.Verification(), nil
 }
 
 // Current returns the last successful verification without checking it. It
 // may have expired or been rejected; use EnsureVerified for one that is
 // valid.
 func (c *EnclaveHTTPClient) Current() *verify.Verification {
-	return c.handle.Verification()
+	if state := c.handle.Current(); state != nil {
+		return state.Verification()
+	}
+	return nil
 }

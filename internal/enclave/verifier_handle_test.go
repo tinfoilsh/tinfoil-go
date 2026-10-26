@@ -10,7 +10,7 @@ import (
 )
 
 func TestEnsureVerifiedReusesValidVerification(t *testing.T) {
-	s, err := NewHandleWithVerifier("enclave.example", "org/repo", nil)
+	s, err := NewHandle(Config{Host: "enclave.example", Repo: "org/repo"})
 	require.NoError(t, err)
 	var verifications int
 	s.verify = func() (*verify.Verification, error) {
@@ -26,16 +26,4 @@ func TestEnsureVerifiedReusesValidVerification(t *testing.T) {
 	_, err = s.Reverify(context.Background())
 	require.NoError(t, err)
 	require.Equal(t, 2, verifications, "Reverify always verifies")
-}
-
-func TestNewHandleWithVerifierChecksRepository(t *testing.T) {
-	_, err := NewHandleWithVerifier("enclave.example", "not a reference", nil)
-	var config *ConfigurationError
-	require.ErrorAs(t, err, &config)
-
-	v, err := verify.NewVerifier(verify.WithFreshnessMaxAge(time.Hour))
-	require.NoError(t, err)
-	s, err := NewHandleWithVerifier("enclave.example", "", v)
-	require.NoError(t, err)
-	require.Same(t, v, s.verifier, "handles share the caller's verifier")
 }

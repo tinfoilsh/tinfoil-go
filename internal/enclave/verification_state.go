@@ -3,7 +3,6 @@ package enclave
 import (
 	"context"
 	"errors"
-	"net/http"
 	"time"
 
 	"github.com/tinfoilsh/tinfoil-go/verify"
@@ -18,20 +17,29 @@ const (
 	verificationRetryDelay       = time.Second
 )
 
-type enclaveState struct {
-	*verify.Verification
-	rejected   bool
-	transports map[*clientTransport]http.RoundTripper
+// State is one successful verification. Transports build per State, and
+// Invalidate targets a State.
+type State struct {
+	verification *verify.Verification
+	// generation orders the states a handle publishes.
+	generation uint64
+	// rejected is guarded by the handle's stateMu.
+	rejected bool
+}
+
+// Verification returns a copy of the verification for the caller to keep.
+func (state *State) Verification() *verify.Verification {
+	return detached(state.verification)
 }
 
 type verificationCall struct {
 	done  chan struct{}
-	state *enclaveState
+	state *State
 	err   error
 }
 
 // verifiedState shares one refresh (including its failure) across all waiters.
-func (s *Handle) verifiedState(ctx context.Context, force bool, retries int) (*enclaveState, error) {
+func (s *Handle) verifiedState(ctx context.Context, force bool, retries int) (*State, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -62,9 +70,6 @@ func (s *Handle) verifiedState(ctx context.Context, force bool, retries int) (*e
 }
 
 func (s *Handle) refresh(call *verificationCall, retries int) {
-	s.stateMu.RLock()
-	previous := s.state
-	s.stateMu.RUnlock()
 	fetch := s.verify
 	if fetch == nil {
 		fetch = s.fetchVerification
@@ -84,50 +89,32 @@ func (s *Handle) refresh(call *verificationCall, retries int) {
 		firstErr = err
 		time.Sleep(verificationRetryDelay)
 	}
-	state := &enclaveState{Verification: verified, transports: make(map[*clientTransport]http.RoundTripper)}
-	if err == nil && previous != nil {
-		for adapter := range previous.transports {
-			transport, buildErr := adapter.buildTransport(verified)
-			if buildErr != nil {
-				err = buildErr
-				break
-			}
-			state.transports[adapter] = transport
-		}
-	}
 	s.stateMu.Lock()
-	if err == nil && !time.Now().Before(state.FreshnessExpiresAt()) {
+	if err == nil && !time.Now().Before(verified.FreshnessExpiresAt()) {
 		err = &AttestationError{Err: errFreshnessExpired}
 	}
 	if err != nil && firstErr != nil {
 		err = errors.Join(err, firstErr)
 	}
 	if err == nil {
-		s.state = state
-		call.state = state
+		s.generation++
+		s.state = &State{verification: verified, generation: s.generation}
+		call.state = s.state
 	}
 	call.err = err
 	s.refreshing = nil
 	close(call.done)
 	s.stateMu.Unlock()
-	if err != nil {
-		state.closeIdleConnections()
-	} else if previous != nil {
-		previous.closeIdleConnections()
-	}
 }
 
-func (state *enclaveState) closeIdleConnections() {
-	for _, transport := range state.transports {
-		closeIdleConnections(transport)
-	}
+// valid is called with the handle's stateMu held.
+func (state *State) valid() bool {
+	return !state.rejected && time.Now().Before(state.verification.FreshnessExpiresAt())
 }
 
-func (state *enclaveState) valid() bool {
-	return !state.rejected && time.Now().Before(state.FreshnessExpiresAt())
-}
-
-func (s *Handle) invalidate(state *enclaveState) {
+// Invalidate marks state rejected, so the next EnsureVerified verifies again.
+// Invalidating a superseded state leaves the current one valid.
+func (s *Handle) Invalidate(state *State) {
 	s.stateMu.Lock()
 	defer s.stateMu.Unlock()
 	state.rejected = true

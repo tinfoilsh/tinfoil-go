@@ -59,29 +59,16 @@ func (s *Handle) fetchVerification() (*verify.Verification, error) {
 	return verified, nil
 }
 
-// Verify refreshes the client's verified measurements and keys.
-func (s *Handle) Verify() (*verify.Verification, error) {
-	return s.Reverify(context.Background())
+// EnsureVerified returns a state that is valid now, verifying first only if
+// the current one has expired or been invalidated. Concurrent callers share
+// one verification.
+func (s *Handle) EnsureVerified(ctx context.Context) (*State, error) {
+	return s.verifiedState(ctx, false, verificationRetries)
 }
 
-// EnsureVerified returns a verification that is valid now, verifying first
-// only if the cached one has expired or been rejected. Concurrent callers
-// share one verification.
-func (s *Handle) EnsureVerified(ctx context.Context) (*verify.Verification, error) {
-	state, err := s.verifiedState(ctx, false, verificationRetries)
-	if err != nil {
-		return nil, err
-	}
-	return detached(state.Verification), nil
-}
-
-// Reverify verifies again even if the cached verification is still valid.
-func (s *Handle) Reverify(ctx context.Context) (*verify.Verification, error) {
-	state, err := s.verifiedState(ctx, true, verificationRetries)
-	if err != nil {
-		return nil, err
-	}
-	return detached(state.Verification), nil
+// Reverify verifies again even if the current state is still valid.
+func (s *Handle) Reverify(ctx context.Context) (*State, error) {
+	return s.verifiedState(ctx, true, verificationRetries)
 }
 
 // detached returns a copy of v for a caller to keep. Its fields cannot be
