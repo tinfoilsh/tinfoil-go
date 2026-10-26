@@ -1,8 +1,10 @@
 package transport
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"maps"
 	"net/http"
 	"strings"
@@ -15,6 +17,7 @@ import (
 const (
 	catalogPath         = "/catalog"
 	catalogFetchTimeout = 10 * time.Second
+	maxCatalogBytes     = 2 << 20
 	trustedRepoOwner    = "tinfoilsh/"
 )
 
@@ -37,8 +40,23 @@ func FetchCatalog(host string) (Catalog, error) {
 	if resp.StatusCode != http.StatusOK {
 		return nil, &errs.FetchError{Err: fmt.Errorf("fetching gateway catalog: %s", resp.Status)}
 	}
+	return readCatalog(resp.Body)
+}
+
+// readCatalog decodes at most maxCatalogBytes of an untrusted gateway's
+// catalog, so an oversized one can't exhaust memory.
+func readCatalog(r io.Reader) (Catalog, error) {
+	// LimitReader truncates silently. Reading one byte past the limit tells an
+	// oversized catalog apart from one of exactly the maximum size.
+	body, err := io.ReadAll(io.LimitReader(r, maxCatalogBytes+1))
+	if err != nil {
+		return nil, &errs.FetchError{Err: fmt.Errorf("reading gateway catalog: %w", err)}
+	}
+	if len(body) > maxCatalogBytes {
+		return nil, &errs.FetchError{Err: fmt.Errorf("gateway catalog exceeds %d bytes", maxCatalogBytes)}
+	}
 	var catalog Catalog
-	if err := json.NewDecoder(resp.Body).Decode(&catalog); err != nil {
+	if err := json.NewDecoder(bytes.NewReader(body)).Decode(&catalog); err != nil {
 		return nil, &errs.FetchError{Err: fmt.Errorf("decoding gateway catalog: %w", err)}
 	}
 	maps.DeleteFunc(catalog, func(_ string, entry CatalogEntry) bool { return !entry.trusted() })
