@@ -21,7 +21,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/tinfoilsh/tinfoil-go/enclave"
+	"github.com/tinfoilsh/tinfoil-go/internal/enclave"
 	"github.com/tinfoilsh/tinfoil-go/internal/errs"
 	"github.com/tinfoilsh/tinfoil-go/verify"
 )
@@ -216,12 +216,6 @@ func (t *Gateway) Verifications() []ReplicaVerification {
 	return results
 }
 
-// Serves checks the current catalog against the gateway policy without verifying replicas.
-func (t *Gateway) Serves(model string) bool {
-	_, _, err := t.policy.resolve(model, t.catalog())
-	return err == nil
-}
-
 // Models returns the catalog's models that the policy serves, sorted, without
 // verifying replicas.
 func (t *Gateway) Models() []string {
@@ -353,7 +347,7 @@ func (t *Gateway) RoundTrip(req *http.Request) (*http.Response, error) {
 		}
 		resp.Body.Close()
 		if redirects == maxSealRedirects {
-			return nil, &errs.FetchError{Err: fmt.Errorf("gateway kept routing away from the enclave the request was sealed to (last: %s)", routed)}
+			return nil, &errs.NetworkError{Err: fmt.Errorf("gateway kept routing away from the enclave the request was sealed to (last: %s)", routed)}
 		}
 		r.host = routed
 		if transport, err = t.enclave(r); err != nil {

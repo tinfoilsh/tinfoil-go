@@ -1,7 +1,10 @@
 package enclave
 
 import (
+	"bytes"
 	"encoding/json"
+	"io"
+	"net/http"
 	"os"
 	"testing"
 
@@ -60,21 +63,23 @@ func TestLiveBasicChatCompletion(t *testing.T) {
 	requestBody, err := json.Marshal(request)
 	require.NoError(t, err)
 
-	// Make the request
-	headers := map[string]string{
-		"Content-Type":  "application/json",
-		"Authorization": "Bearer " + apiKey,
-	}
-
-	headersJSON, err := json.Marshal(headers)
+	// Make the request over the pinned TLS client
+	hc, err := client.HTTPClient()
 	require.NoError(t, err)
-	resp, err := client.Request("POST", "/v1/chat/completions", string(headersJSON), requestBody)
+	req, err := http.NewRequest(http.MethodPost, "https://"+enclave+"/v1/chat/completions", bytes.NewReader(requestBody))
 	require.NoError(t, err)
-	require.Equal(t, 200, resp.StatusCode, "Expected successful response, got: %s", string(resp.Body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+apiKey)
+	resp, err := hc.Do(req)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	require.NoError(t, err)
+	require.Equal(t, 200, resp.StatusCode, "Expected successful response, got: %s", string(body))
 
 	// Parse response
 	var chatResponse ChatCompletionResponse
-	err = json.Unmarshal(resp.Body, &chatResponse)
+	err = json.Unmarshal(body, &chatResponse)
 	require.NoError(t, err)
 
 	// Verify response contains non-empty content

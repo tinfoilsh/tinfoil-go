@@ -31,3 +31,20 @@ func ConnectionCertFP(c tls.ConnectionState) (string, error) {
 	}
 	return CertPubkeyFP(c.PeerCertificates[0])
 }
+
+// PinTLSKey returns a tls.Config VerifyConnection callback that accepts only a
+// connection whose leaf certificate carries the public key fingerprint fp, in
+// the form TLSPublicKeyFP reports. It adds to the certificate checks the
+// tls.Config performs; it doesn't replace them.
+func PinTLSKey(fp string) func(tls.ConnectionState) error {
+	return func(c tls.ConnectionState) error {
+		got, err := ConnectionCertFP(c)
+		if err != nil {
+			return err
+		}
+		if got != fp {
+			return &VerificationError{Layer: LayerPolicy, Err: fmt.Errorf("TLS key %s does not match the attested key %s", got, fp)}
+		}
+		return nil
+	}
+}

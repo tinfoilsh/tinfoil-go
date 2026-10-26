@@ -11,7 +11,7 @@ import (
 type (
 	Error              = errs.Error
 	ConfigurationError = errs.ConfigurationError
-	FetchError         = errs.FetchError
+	NetworkError       = errs.NetworkError
 	AttestationError   = errs.AttestationError
 )
 

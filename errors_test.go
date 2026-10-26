@@ -10,7 +10,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 	tinfoil "github.com/tinfoilsh/tinfoil-go"
-	"github.com/tinfoilsh/tinfoil-go/enclave"
+	"github.com/tinfoilsh/tinfoil-go/internal/enclave"
 	"github.com/tinfoilsh/tinfoil-go/internal/errs"
 	"github.com/tinfoilsh/tinfoil-go/internal/fetch"
 	"github.com/tinfoilsh/tinfoil-go/verify"
@@ -26,7 +26,7 @@ func TestErrorContract(t *testing.T) {
 		target any
 	}{
 		{"configuration", &tinfoil.ConfigurationError{Err: cause}, new(*tinfoil.ConfigurationError)},
-		{"fetch", errs.WrapFetch(cause), new(*tinfoil.FetchError)},
+		{"network", errs.WrapNetwork(cause), new(*tinfoil.NetworkError)},
 		{"attestation", errs.WrapAttestation(cause), new(*tinfoil.AttestationError)},
 	} {
 		t.Run(tc.prefix, func(t *testing.T) {
@@ -39,7 +39,7 @@ func TestErrorContract(t *testing.T) {
 			require.Same(t, cause, networkError)
 			require.ErrorIs(t, err, context.DeadlineExceeded)
 			require.Equal(t, tc.prefix+" error: "+cause.Error(), err.Error(), "gomobile prefix contract")
-			for _, wrap := range []func(error) error{errs.WrapFetch, errs.WrapAttestation} {
+			for _, wrap := range []func(error) error{errs.WrapNetwork, errs.WrapAttestation} {
 				require.Nil(t, wrap(nil))
 				for _, classified := range []error{err, fmt.Errorf("context: %w", err), errors.Join(err, context.Canceled)} {
 					require.Same(t, classified, wrap(classified), "do not reclassify or double-wrap SDK errors")
@@ -51,7 +51,7 @@ func TestErrorContract(t *testing.T) {
 
 func TestPublicInputErrors(t *testing.T) {
 	var config *tinfoil.ConfigurationError
-	_, err := tinfoil.NewClientWithOptions(tinfoil.WithTransport("invalid"))
+	_, err := tinfoil.NewEnclaveClient("enclave.example", "org/repo", &tinfoil.EnclaveOptions{Binding: "invalid"})
 	require.ErrorAs(t, err, &config)
 	var usage *verify.UsageError
 	verifier, err := verify.NewVerifier()
@@ -60,20 +60,16 @@ func TestPublicInputErrors(t *testing.T) {
 	require.ErrorAs(t, err, &usage)
 	_, err = verifier.VerifyV3(nil, nil, "org/repo")
 	require.ErrorAs(t, err, &usage)
-	_, err = enclave.NewHandle("enclave.example", "", nil)
+	_, err = tinfoil.NewEnclaveClient("enclave.example", "", nil)
 	require.ErrorAs(t, err, &config, "reject missing trust configuration before fetching")
 	for _, repo := range []string{"owner", "owner/repo/extra", "owner/repo@sha256:bad"} {
-		_, err = enclave.NewHandle("enclave.example", repo, nil)
+		_, err = tinfoil.NewEnclaveClient("enclave.example", repo, nil)
 		require.ErrorAs(t, err, &config)
 		_, err = verifier.VerifyV3(nil, nil, repo)
 		require.ErrorAs(t, err, &usage)
 	}
-	_, err = enclave.NewHandle("enclave.example", "org/repo@v1@sha256:"+strings.Repeat("a", 64), nil)
+	_, err = enclave.NewHandleWithVerifier("enclave.example", "org/repo@v1@sha256:"+strings.Repeat("a", 64), nil)
 	require.NoError(t, err)
-	s, err := enclave.NewHandle("enclave.example", "org/repo", nil)
-	require.NoError(t, err)
-	_, err = s.Request("GET", "://", "", nil)
-	require.ErrorAs(t, err, &config)
 	_, err = fetch.Document(t.Context(), "", "", make([]byte, document.NonceSize))
 	require.ErrorAs(t, err, &config)
 	var verified *verify.Verification
@@ -85,7 +81,7 @@ func TestPublicInputErrors(t *testing.T) {
 	require.ErrorAs(t, err, &rejected, "malformed evidence is not a usage error")
 }
 
-func TestMalformedPinsAreConfigurationErrors(t *testing.T) {
+func TestMalformedPinsAreRejectedBeforeAnyClient(t *testing.T) {
 	// Registers are parsed when pins are built, so a pointer is the only
 	// malformed pin the API can express.
 	register := measurement.Register{0xab}
@@ -94,13 +90,7 @@ func TestMalformedPinsAreConfigurationErrors(t *testing.T) {
 		(*measurement.ExpectedTDX)(nil),
 		&measurement.ExpectedTDX{RTMR3: &register},
 	} {
-		opts := &enclave.Options{PinnedRegisters: pins}
-		_, err := enclave.NewHandle("enclave.example", "org/repo", opts)
-		var config *tinfoil.ConfigurationError
-		require.ErrorAs(t, err, &config)
-		_, err = enclave.NewDefaultHandle(opts)
-		require.ErrorAs(t, err, &config, "reject malformed pins before discovery")
-		_, err = verify.NewVerifier(verify.WithPinnedRegisters(pins))
+		_, err := verify.NewVerifier(verify.WithPinnedRegisters(pins))
 		var usage *verify.UsageError
 		require.ErrorAs(t, err, &usage)
 	}
@@ -108,7 +98,7 @@ func TestMalformedPinsAreConfigurationErrors(t *testing.T) {
 		measurement.ExpectedSEVSNP{Launch: &register},
 		measurement.ExpectedTDX{RTMR3: &register},
 	} {
-		_, err := enclave.NewHandle("enclave.example", "org/repo", &enclave.Options{PinnedRegisters: pins})
+		_, err := verify.NewVerifier(verify.WithPinnedRegisters(pins))
 		require.NoError(t, err, "sparse pins remain supported")
 	}
 }

@@ -43,7 +43,7 @@ func TestTLSBindingUnsupportedDefaultTransport(t *testing.T) {
 	}
 }
 
-func TestRequestPreservesTLSCategory(t *testing.T) {
+func TestTLSClientPreservesTLSCategory(t *testing.T) {
 	for _, trustCertificate := range []bool{true, false} {
 		name := "untrusted certificate"
 		if trustCertificate {
@@ -69,7 +69,9 @@ func TestRequestPreservesTLSCategory(t *testing.T) {
 				refreshes++
 				return testState(time.Now().Add(time.Hour), "wrong-pin"), nil
 			}
-			_, err := s.Request(http.MethodGet, server.URL, "", nil)
+			hc, err := s.HTTPClient()
+			require.NoError(t, err)
+			_, err = hc.Get(server.URL)
 			var attestation *AttestationError
 			require.ErrorAs(t, err, &attestation)
 			var httpError *url.Error

@@ -4,7 +4,6 @@
 package enclave
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -136,9 +135,13 @@ func NewHandle(enclave, repo string, opts *Options) (*Handle, error) {
 }
 
 // NewHandleWithVerifier is NewHandle with a policy the caller built, which
-// several handles can share; nil selects the defaults. A caller-authorized
-// config used with a repository pin is reported when verifying.
+// several handles can share; nil selects the defaults, which require a
+// repository pin. A caller-authorized config used with a repository pin is
+// reported when verifying.
 func NewHandleWithVerifier(enclave, repo string, v *verify.Verifier) (*Handle, error) {
+	if repo == "" && v == nil {
+		return nil, &ConfigurationError{Err: fmt.Errorf("the default verification policy requires a repository pin")}
+	}
 	if repo != "" {
 		if _, _, _, err := verify.ParseReference(repo); err != nil {
 			return nil, &ConfigurationError{Err: err}
@@ -227,42 +230,4 @@ func (s *Handle) HTTPClient() (*http.Client, error) {
 		return nil, err
 	}
 	return &http.Client{Transport: transport}, nil
-}
-
-// Request sends an HTTPS request. headersJSON is a JSON object or empty.
-func (s *Handle) Request(method, url, headersJSON string, body []byte) (*Response, error) {
-	req, err := http.NewRequest(method, url, bytes.NewReader(body))
-	if err != nil {
-		return nil, &ConfigurationError{Err: err}
-	}
-	if headersJSON != "" {
-		var headers map[string]string
-		if err := json.Unmarshal([]byte(headersJSON), &headers); err != nil {
-			return nil, &ConfigurationError{Err: fmt.Errorf("failed to parse headers JSON: %w", err)}
-		}
-		for k, v := range headers {
-			req.Header.Set(k, v)
-		}
-	}
-	httpClient, err := s.HTTPClient()
-	if err != nil {
-		return nil, err
-	}
-
-	if req.URL.Host == "" {
-		req.URL.Scheme = "https"
-		req.URL.Host = s.Enclave()
-	}
-
-	// Request headers (which may carry the API key) are not encrypted, so never
-	// send them over a plaintext connection.
-	if req.URL.Scheme != "https" {
-		return nil, &ConfigurationError{Err: fmt.Errorf("refusing to send request over non-https URL %q", req.URL.String())}
-	}
-
-	resp, err := httpClient.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	return toResponse(resp)
 }

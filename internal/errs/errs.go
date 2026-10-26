@@ -3,7 +3,7 @@
 //
 // The categories live in this leaf package so that internal/fetch can classify
 // its errors without importing enclave, which imports it in turn. Callers
-// should use the aliases re-exported from tinfoil and enclave. Package verify
+// should use the aliases re-exported from tinfoil. Package verify
 // has error types of its own, which enclave reports in these categories.
 package errs
 
@@ -26,12 +26,14 @@ func (e *ConfigurationError) Error() string { return fmt.Sprintf("configuration 
 func (e *ConfigurationError) Unwrap() error { return e.Err }
 func (*ConfigurationError) tinfoilError()   {}
 
-// FetchError reports failure to fetch attestation material.
-type FetchError struct{ Err error }
+// NetworkError reports that the client couldn't reach what it needed: a network
+// failure, a timeout or an HTTP error status while fetching attestation
+// material, or a gateway that keeps routing a request away from its enclave.
+type NetworkError struct{ Err error }
 
-func (e *FetchError) Error() string { return fmt.Sprintf("fetch error: %v", e.Err) }
-func (e *FetchError) Unwrap() error { return e.Err }
-func (*FetchError) tinfoilError()   {}
+func (e *NetworkError) Error() string { return fmt.Sprintf("network error: %v", e.Err) }
+func (e *NetworkError) Unwrap() error { return e.Err }
+func (*NetworkError) tinfoilError()   {}
 
 // AttestationError reports rejected evidence, policy, or channel binding.
 type AttestationError struct{ Err error }
@@ -40,12 +42,12 @@ func (e *AttestationError) Error() string { return fmt.Sprintf("attestation erro
 func (e *AttestationError) Unwrap() error { return e.Err }
 func (*AttestationError) tinfoilError()   {}
 
-// WrapFetch wraps err unless it is nil or already contains an SDK error.
-func WrapFetch(err error) error {
+// WrapNetwork wraps err unless it is nil or already contains an SDK error.
+func WrapNetwork(err error) error {
 	if err == nil || classified(err) {
 		return err
 	}
-	return &FetchError{Err: err}
+	return &NetworkError{Err: err}
 }
 
 // WrapAttestation wraps err unless it is nil or already contains an SDK error.

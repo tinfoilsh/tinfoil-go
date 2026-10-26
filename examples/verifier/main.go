@@ -1,12 +1,13 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"log/slog"
 	"os"
 
-	"github.com/tinfoilsh/tinfoil-go/enclave"
+	"github.com/tinfoilsh/tinfoil-go"
 )
 
 var (
@@ -18,12 +19,12 @@ func main() {
 	flag.Parse()
 
 	slog.Info("verifying enclave", "enclave", *host, "repo", *repo)
-	c, err := enclave.NewHandle(*host, *repo, nil)
+	c, err := tinfoil.NewEnclaveClient(*host, *repo, nil)
 	if err != nil {
 		slog.Error("creating client", "error", err)
 		os.Exit(1)
 	}
-	verified, err := c.Verify()
+	verified, err := c.EnsureVerified(context.Background())
 	if err != nil {
 		slog.Error("verification failed", "error", err)
 		os.Exit(1)
