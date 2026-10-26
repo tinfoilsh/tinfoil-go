@@ -364,5 +364,7 @@ func TestGatewayKeepsOneTransportPerReplica(t *testing.T) {
 	close(proceed)
 	first, second := <-results, <-results
 	require.NotNil(t, first)
-	require.Same(t, first, second, "concurrent first uses share one replica transport, and so one verification")
+	// One transport means one handle, whose refresh concurrent requests share;
+	// internal/enclave tests that.
+	require.Same(t, first, second, "concurrent first uses share one replica transport")
 }

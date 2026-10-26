@@ -80,6 +80,9 @@ func (t *Transport) innerFor(state *State) (http.RoundTripper, error) {
 	case t.state != nil && state.generation < t.state.generation:
 		return nil, errSuperseded
 	}
+	// Idle connections of the current transport are bound to keys a newer
+	// state replaced, whether or not its transport builds.
+	closeIdleConnections(t.inner)
 	inner, err := t.binding.Transport(state.Verification())
 	if inner == nil && err == nil {
 		err = fmt.Errorf("transport binding returned nil")
@@ -88,8 +91,6 @@ func (t *Transport) innerFor(state *State) (http.RoundTripper, error) {
 		closeIdleConnections(inner)
 		return nil, err
 	}
-	// Idle connections of the previous transport are bound to its keys.
-	closeIdleConnections(t.inner)
 	t.state, t.inner = state, inner
 	return inner, nil
 }

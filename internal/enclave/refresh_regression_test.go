@@ -180,3 +180,35 @@ func TestTransportRechecksStateAfterSlowBuild(t *testing.T) {
 		require.Equal(t, []string{"new"}, sent, "a state that expired during the build never authorizes a request")
 	})
 }
+
+// idleCountingTransport counts CloseIdleConnections calls.
+type idleCountingTransport struct {
+	http.RoundTripper
+	closes int
+}
+
+func (t *idleCountingTransport) CloseIdleConnections() { t.closes++ }
+
+func TestFailedRebuildClosesSupersededConnections(t *testing.T) {
+	s := &Handle{verify: func() (*verify.Verification, error) {
+		return testState(time.Now().Add(time.Hour), "key"), nil
+	}}
+	buildErr := errors.New("the new verification endorses no key for this binding")
+	first := &idleCountingTransport{RoundTripper: roundTripFunc(func(*http.Request) (*http.Response, error) { return testResponse(), nil })}
+	builds := 0
+	transport, err := bindTransport(s, func(*verify.Verification) (http.RoundTripper, error) {
+		builds++
+		if builds > 1 {
+			return nil, buildErr
+		}
+		return first, nil
+	}, nil)
+	require.NoError(t, err)
+	_, err = transport.EnsureVerified(context.Background())
+	require.NoError(t, err)
+	_, err = s.Reverify(context.Background())
+	require.NoError(t, err)
+	_, err = transport.EnsureVerified(context.Background())
+	require.ErrorIs(t, err, buildErr)
+	require.Equal(t, 1, first.closes, "connections bound to the superseded keys are closed even though no replacement was built")
+}
