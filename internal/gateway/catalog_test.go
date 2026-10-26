@@ -1,4 +1,4 @@
-package transport
+package gateway
 
 import (
 	"strings"

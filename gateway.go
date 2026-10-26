@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/url"
 
+	"github.com/tinfoilsh/tinfoil-go/internal/gateway"
 	"github.com/tinfoilsh/tinfoil-go/internal/transport"
 	"github.com/tinfoilsh/tinfoil-go/verify"
 )
@@ -43,7 +44,7 @@ type ModelPin struct {
 }
 
 // ReplicaVerification holds a gateway replica's last successful verification.
-type ReplicaVerification = transport.ReplicaVerification
+type ReplicaVerification = gateway.ReplicaVerification
 
 // GatewayHTTPClient is an *http.Client for Tinfoil inference through the gateway.
 // Each request is sealed to a verified replica of the model it names.
@@ -53,7 +54,7 @@ type GatewayHTTPClient struct {
 	// client can't reach.
 	secure  *http.Client
 	baseURL string
-	seal    *transport.Gateway
+	seal    *gateway.Transport
 }
 
 // NewGatewayHTTPClient copies opts, and fetches the gateway's catalog unless
@@ -67,11 +68,11 @@ func NewGatewayHTTPClient(opts *GatewayOptions) (*GatewayHTTPClient, error) {
 	if err != nil || base.Scheme != "https" || base.Host == "" {
 		return nil, &ConfigurationError{Err: fmt.Errorf("gateway base URL must be an absolute HTTPS URL: %q", baseURL)}
 	}
-	pins := make(map[string]transport.ModelPin, len(opts.ModelPins))
+	pins := make(map[string]gateway.ModelPin, len(opts.ModelPins))
 	for model, pin := range opts.ModelPins {
-		pins[model] = transport.ModelPin{Repo: pin.Repo, Verifier: pin.Verifier}
+		pins[model] = gateway.ModelPin{Repo: pin.Repo, Verifier: pin.Verifier}
 	}
-	seal, err := transport.NewGateway(transport.GatewayConfig{
+	seal, err := gateway.NewTransport(gateway.Config{
 		BaseURL:          baseURL,
 		Relay:            base.Host,
 		Catalog:          opts.Catalog,

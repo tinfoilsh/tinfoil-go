@@ -1,6 +1,6 @@
 // Package enclave connects to attested enclaves. A Handle fetches and verifies
 // one enclave's attestation and keeps the result until it expires or is
-// invalidated; a Transport binds HTTP traffic to the keys it endorses.
+// invalidated; a BoundTransport binds HTTP traffic to the keys it endorses.
 package enclave
 
 import (

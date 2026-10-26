@@ -1,4 +1,6 @@
-package transport
+// Package gateway routes requests through Tinfoil's inference gateway, sealing
+// each to a verified replica of the model it names.
+package gateway
 
 import (
 	"bytes"
@@ -24,6 +26,7 @@ import (
 
 	"github.com/tinfoilsh/tinfoil-go/internal/enclave"
 	"github.com/tinfoilsh/tinfoil-go/internal/errs"
+	"github.com/tinfoilsh/tinfoil-go/internal/transport"
 	"github.com/tinfoilsh/tinfoil-go/verify"
 )
 
@@ -115,8 +118,8 @@ type ModelPin struct {
 	Verifier *verify.Verifier
 }
 
-// GatewayConfig configures a Gateway.
-type GatewayConfig struct {
+// Config configures a Transport.
+type Config struct {
 	// BaseURL is where requests are sent, and Relay is the gateway host that
 	// attestation is fetched through.
 	BaseURL, Relay string
@@ -131,8 +134,8 @@ type GatewayConfig struct {
 	UserCacheSecret string
 }
 
-// NewGateway copies the policy in c. Replicas are verified on first use.
-func NewGateway(c GatewayConfig) (*Gateway, error) {
+// NewTransport copies the policy in c. Replicas are verified on first use.
+func NewTransport(c Config) (*Transport, error) {
 	policy, err := newGatewayPolicy(c.ModelPins, c.PinnedModelsOnly, c.Verifier)
 	if err != nil {
 		return nil, &errs.ConfigurationError{Err: err}
@@ -145,21 +148,21 @@ func NewGateway(c GatewayConfig) (*Gateway, error) {
 		}
 		catalog = func() Catalog { return fetched }
 	}
-	return &Gateway{
+	return &Transport{
 		catalog: catalog,
 		policy:  policy,
-		secret:  ResolveUserCacheSecret(c.UserCacheSecret, c.UserCacheSecret != ""),
+		secret:  transport.ResolveUserCacheSecret(c.UserCacheSecret, c.UserCacheSecret != ""),
 		build: func(r replica) (*verifiedReplicaTransport, error) {
 			h, err := enclave.NewHandle(enclave.Config{Host: r.host, Relay: c.Relay, Repo: r.ref, Verifier: policy.verifierFor(r)})
 			if err != nil {
 				return nil, err
 			}
-			transport, err := Enclave(h, enclave.EHBP, c.BaseURL)
+			stack, err := transport.Enclave(h, enclave.EHBP, c.BaseURL)
 			if err != nil {
 				return nil, err
 			}
 			return &verifiedReplicaTransport{
-				transport: transport,
+				transport: stack,
 				verification: func() *verify.Verification {
 					if state := h.Current(); state != nil {
 						return state.Verification()
@@ -167,7 +170,7 @@ func NewGateway(c GatewayConfig) (*Gateway, error) {
 					return nil
 				},
 				ensureVerified: func(ctx context.Context) (*verify.Verification, error) {
-					state, err := transport.EnsureVerified(ctx)
+					state, err := stack.EnsureVerified(ctx)
 					if err != nil {
 						return nil, err
 					}
@@ -178,9 +181,9 @@ func NewGateway(c GatewayConfig) (*Gateway, error) {
 	}, nil
 }
 
-// Gateway seals each request to a verified replica of the model it names.
+// Transport seals each request to a verified replica of the model it names.
 // Cache prefixes keep conversations on the same replica across requests.
-type Gateway struct {
+type Transport struct {
 	build    func(replica) (*verifiedReplicaTransport, error)
 	catalog  func() Catalog
 	policy   gatewayPolicy
@@ -190,7 +193,7 @@ type Gateway struct {
 	rerouted map[string]string // cache prefix to host
 }
 
-func (t *Gateway) enclave(r replica) (*verifiedReplicaTransport, error) {
+func (t *Transport) enclave(r replica) (*verifiedReplicaTransport, error) {
 	if rt, ok := t.enclaves.Load(r); ok {
 		return rt.(*verifiedReplicaTransport), nil
 	}
@@ -204,7 +207,7 @@ func (t *Gateway) enclave(r replica) (*verifiedReplicaTransport, error) {
 
 // verified returns r's transport once r's replica verifies under ctx, so a
 // caller can fall over to another replica before sealing anything to it.
-func (t *Gateway) verified(ctx context.Context, r replica) (*verifiedReplicaTransport, *verify.Verification, error) {
+func (t *Transport) verified(ctx context.Context, r replica) (*verifiedReplicaTransport, *verify.Verification, error) {
 	rt, err := t.enclave(r)
 	if err != nil {
 		return nil, nil, err
@@ -229,14 +232,14 @@ type ReplicaVerification struct {
 
 // Verifications returns cached results without re-verifying them.
 // Results may be expired or invalidated.
-func (t *Gateway) Verifications() []ReplicaVerification {
+func (t *Transport) Verifications() []ReplicaVerification {
 	results := []ReplicaVerification{}
 	t.enclaves.Range(func(key, value any) bool {
 		r := key.(replica)
-		transport := value.(*verifiedReplicaTransport)
-		if verified := transport.verification(); verified != nil {
+		rt := value.(*verifiedReplicaTransport)
+		if verified := rt.verification(); verified != nil {
 			models := []string{}
-			transport.models.Range(func(model, _ any) bool {
+			rt.models.Range(func(model, _ any) bool {
 				models = append(models, model.(string))
 				return true
 			})
@@ -254,7 +257,7 @@ func (t *Gateway) Verifications() []ReplicaVerification {
 
 // Models returns the catalog's models that the policy serves, sorted, without
 // verifying replicas.
-func (t *Gateway) Models() []string {
+func (t *Transport) Models() []string {
 	catalog := t.catalog()
 	models := []string{}
 	for model := range catalog {
@@ -269,7 +272,7 @@ func (t *Gateway) Models() []string {
 // EnsureVerified returns a valid verification of a replica serving model. It
 // tries replicas in a fixed order for the model, so repeated calls verify the
 // same replica while it stays valid, and stops once ctx is done.
-func (t *Gateway) EnsureVerified(ctx context.Context, model string) (*verify.Verification, error) {
+func (t *Transport) EnsureVerified(ctx context.Context, model string) (*verify.Verification, error) {
 	hosts, r, err := t.policy.resolve(model, t.catalog())
 	if err != nil {
 		return nil, err
@@ -302,13 +305,13 @@ func (t *verifiedReplicaTransport) CloseIdleConnections() {
 	closeIdleConnections(t.transport)
 }
 
-func (t *Gateway) reroutedHost(prefix string) string {
+func (t *Transport) reroutedHost(prefix string) string {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	return t.rerouted[prefix]
 }
 
-func (t *Gateway) remember(prefix, host string) {
+func (t *Transport) remember(prefix, host string) {
 	if prefix == "" {
 		return
 	}
@@ -339,7 +342,7 @@ func rank(hosts []string, prefix, first string) []string {
 	return hosts
 }
 
-func (t *Gateway) RoundTrip(req *http.Request) (*http.Response, error) {
+func (t *Transport) RoundTrip(req *http.Request) (*http.Response, error) {
 	req = req.Clone(req.Context())
 	if err := t.prepare(req); err != nil {
 		return nil, err
@@ -352,10 +355,10 @@ func (t *Gateway) RoundTrip(req *http.Request) (*http.Response, error) {
 	}
 	hasBody := req.Body != nil && req.Body != http.NoBody
 	replayable := !hasBody || req.GetBody != nil
-	var transport *verifiedReplicaTransport
+	var rt *verifiedReplicaTransport
 	prefix := req.Header.Get(cachePrefixHeader)
 	for _, r.host = range rank(hosts, prefix, t.reroutedHost(prefix)) {
-		if transport, _, err = t.verified(req.Context(), r); err == nil {
+		if rt, _, err = t.verified(req.Context(), r); err == nil {
 			break
 		}
 	}
@@ -373,7 +376,7 @@ func (t *Gateway) RoundTrip(req *http.Request) (*http.Response, error) {
 				return nil, fmt.Errorf("replaying request after enclave reroute: %w", err)
 			}
 		}
-		resp, err := transport.RoundTrip(out)
+		resp, err := rt.RoundTrip(out)
 		if err != nil {
 			return nil, err
 		}
@@ -386,14 +389,14 @@ func (t *Gateway) RoundTrip(req *http.Request) (*http.Response, error) {
 			return nil, &errs.NetworkError{Err: fmt.Errorf("gateway kept routing away from the enclave the request was sealed to (last: %s)", routed)}
 		}
 		r.host = routed
-		if transport, _, err = t.verified(req.Context(), r); err != nil {
+		if rt, _, err = t.verified(req.Context(), r); err != nil {
 			return nil, fmt.Errorf("following gateway route to enclave %s: %w", routed, err)
 		}
 		t.remember(prefix, routed)
 	}
 }
 
-func (t *Gateway) prepare(req *http.Request) error {
+func (t *Transport) prepare(req *http.Request) error {
 	if req.Method != http.MethodPost || req.Body == nil || req.Body == http.NoBody {
 		return nil
 	}
@@ -411,7 +414,7 @@ func (t *Gateway) prepare(req *http.Request) error {
 	if mediaType != "application/json" {
 		return nil
 	}
-	scoped := userCacheSecretPathEligible(req)
+	scoped := transport.UserCacheSecretPathEligible(req)
 	body, err := io.ReadAll(req.Body)
 	req.Body.Close()
 	if err != nil {
@@ -466,9 +469,9 @@ func prepareMultipart(req *http.Request, boundary string) error {
 }
 
 // The engine only needs the salt; the secret itself never leaves the client.
-func (t *Gateway) scopeCache(h http.Header, fields map[string]json.RawMessage, body []byte) ([]byte, error) {
+func (t *Transport) scopeCache(h http.Header, fields map[string]json.RawMessage, body []byte) ([]byte, error) {
 	var secret string
-	json.Unmarshal(fields[userCacheSecretField], &secret)
+	json.Unmarshal(fields[transport.UserCacheSecretField], &secret)
 	if secret = cmp.Or(secret, t.secret); secret == "" {
 		return body, nil
 	}
@@ -482,7 +485,7 @@ func (t *Gateway) scopeCache(h http.Header, fields map[string]json.RawMessage, b
 		mac.Write(head)
 		h.Set(cachePrefixHeader, hex.EncodeToString(mac.Sum(nil)))
 	}
-	delete(fields, userCacheSecretField)
+	delete(fields, transport.UserCacheSecretField)
 	fields[cacheSaltField], _ = json.Marshal(base64.RawURLEncoding.EncodeToString(key[:sha256.Size]))
 	return json.Marshal(fields)
 }
@@ -507,4 +510,16 @@ func promptHead(fields map[string]json.RawMessage) json.RawMessage {
 		}
 	}
 	return nil
+}
+
+func closeIdleConnections(rt http.RoundTripper) {
+	if closer, ok := rt.(interface{ CloseIdleConnections() }); ok {
+		closer.CloseIdleConnections()
+	}
+}
+
+func closeRequestBody(req *http.Request) {
+	if req.Body != nil {
+		req.Body.Close()
+	}
 }
