@@ -3,7 +3,6 @@ package tinfoil
 import (
 	"fmt"
 	"net/http"
-	"strings"
 
 	"github.com/openai/openai-go/v3"
 	"github.com/openai/openai-go/v3/option"
@@ -18,6 +17,7 @@ type Client struct {
 	secure     *enclave.Handle
 	httpClient *http.Client
 	transport  TransportMode
+	baseURL    string
 }
 
 // NewClient creates a new secure OpenAI client using default parameters
@@ -32,6 +32,9 @@ func NewClient(openaiOpts ...option.RequestOption) (*Client, error) {
 // NewClientWithOptions creates a secure OpenAI client configured through
 // functional options. By default it selects a router automatically, verifies
 // against the default config repository, and uses the EHBP transport.
+//
+// Deprecated: use NewEnclaveClient, or DiscoverRouter for a router, and their
+// OpenAI method.
 func NewClientWithOptions(opts ...ClientOption) (*Client, error) {
 	cfg := &clientConfig{
 		transport: defaultTransportMode,
@@ -55,12 +58,8 @@ func NewClientWithOptions(opts ...ClientOption) (*Client, error) {
 		return nil, &ConfigurationError{Err: fmt.Errorf("unknown transport mode: %q", cfg.transport)}
 	}
 	if cfg.baseURLSet {
-		origin, err := transport.OriginOf(cfg.baseURL)
-		if err != nil {
-			return nil, &ConfigurationError{Err: fmt.Errorf("invalid base URL: %w", err)}
-		}
-		if !strings.HasPrefix(origin, "https://") {
-			return nil, &ConfigurationError{Err: fmt.Errorf("invalid base URL: HTTPS is required to protect request headers")}
+		if err := validateBaseURL(cfg.baseURL); err != nil {
+			return nil, err
 		}
 	}
 	if cfg.enclave == "" && cfg.repo != defaultConfigRepo {
@@ -83,7 +82,11 @@ func NewClientWithOptions(opts ...ClientOption) (*Client, error) {
 }
 
 func createClientFromHandle(handle *enclave.Handle, mode TransportMode, baseURL, userCacheSecret string, openaiOpts ...option.RequestOption) (*Client, error) {
-	httpClient, err := secureHTTPClient(handle, mode, baseURL, userCacheSecret)
+	binding := enclave.EHBP
+	if mode == TransportTLS {
+		binding = enclave.TLS
+	}
+	httpClient, err := secureHTTPClient(handle, binding, baseURL, userCacheSecret)
 	if err != nil {
 		return nil, err
 	}
@@ -105,28 +108,37 @@ func createClientFromHandle(handle *enclave.Handle, mode TransportMode, baseURL,
 		secure:     handle,
 		httpClient: httpClient,
 		transport:  mode,
+		baseURL:    resolvedBaseURL,
 	}, nil
 }
 
+// Deprecated: use an EnclaveClient, which the caller builds for its enclave.
 func (c *Client) Enclave() string {
 	return c.secure.Enclave()
 }
 
+// Deprecated: use an EnclaveClient, which the caller builds for its repository.
 func (c *Client) Repo() string {
 	return c.secure.Repo()
 }
 
 // Transport returns the transport mode used to secure traffic to the enclave.
+//
+// Deprecated: EnclaveOptions takes a Binding.
 func (c *Client) Transport() TransportMode {
 	return c.transport
 }
 
 // Verify refreshes attestation and returns the verified state.
+//
+// Deprecated: use EnclaveClient.Reverify.
 func (c *Client) Verify() (*verify.Verification, error) {
 	return c.secure.Verify()
 }
 
 // Verification returns a copy of the last successful verification.
+//
+// Deprecated: use EnclaveClient.Current.
 func (c *Client) Verification() *verify.Verification {
 	return c.secure.Verification()
 }
@@ -138,4 +150,10 @@ func (c *Client) Verification() *verify.Verification {
 // headers. This can be used for secure, direct HTTP requests to the enclave.
 func (c *Client) HTTPClient() *http.Client {
 	return c.httpClient
+}
+
+// BaseURL returns the URL the client sends requests to on the route it chose.
+// Build raw request URLs for HTTPClient from it so they follow the route.
+func (c *Client) BaseURL() string {
+	return c.baseURL
 }

@@ -1,6 +1,7 @@
 package transport
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
@@ -211,4 +212,28 @@ func TestGatewayVerificationsNameReplicaHosts(t *testing.T) {
 	require.Len(t, got, 2)
 	require.Equal(t, "a.example", got[0].Host)
 	require.Equal(t, "b.example", got[1].Host)
+}
+
+func TestGatewayEnsureVerifiedFallsOver(t *testing.T) {
+	verified := verifytest.New(verifytest.Fields{ConfigRepo: "tinfoilsh/test"})
+	failure := errors.New("verification failed")
+	catalog := func() Catalog {
+		return Catalog{sealTestModel: {Repo: "tinfoilsh/test", Hosts: []string{"build-fails.example", "expired.example", "valid.example"}}}
+	}
+	seal := &Gateway{catalog: catalog, build: func(r replica) (http.RoundTripper, error) {
+		switch r.host {
+		case "build-fails.example":
+			return nil, failure
+		case "expired.example":
+			return &verifiedReplicaTransport{ensureVerified: func(context.Context) (*verify.Verification, error) { return nil, failure }}, nil
+		}
+		return &verifiedReplicaTransport{ensureVerified: func(context.Context) (*verify.Verification, error) { return verified, nil }}, nil
+	}}
+	got, err := seal.EnsureVerified(context.Background(), sealTestModel)
+	require.NoError(t, err)
+	require.Same(t, verified, got)
+
+	unreachable := &Gateway{catalog: catalog, build: func(replica) (http.RoundTripper, error) { return nil, failure }}
+	_, err = unreachable.EnsureVerified(context.Background(), sealTestModel)
+	require.ErrorIs(t, err, failure)
 }

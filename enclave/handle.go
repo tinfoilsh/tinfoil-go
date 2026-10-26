@@ -92,9 +92,9 @@ type Options struct {
 	FreshnessMaxAge time.Duration
 }
 
-// verifier builds the immutable policy these options describe, validating
+// Verifier builds the immutable policy these options describe, validating
 // them once. A nil receiver selects the defaults.
-func (input *Options) verifier() (*verify.Verifier, error) {
+func (input *Options) Verifier() (*verify.Verifier, error) {
 	if input == nil {
 		return verify.NewVerifier()
 	}
@@ -128,11 +128,29 @@ func NewHandle(enclave, repo string, opts *Options) (*Handle, error) {
 			return nil, &ConfigurationError{Err: err}
 		}
 	}
-	verifier, err := opts.verifier()
+	verifier, err := opts.Verifier()
 	if err != nil {
 		return nil, fromVerify(err)
 	}
 	return &Handle{enclave: enclave, repo: repo, verifier: verifier}, nil
+}
+
+// NewHandleWithVerifier is NewHandle with a policy the caller built, which
+// several handles can share; nil selects the defaults. A caller-authorized
+// config used with a repository pin is reported when verifying.
+func NewHandleWithVerifier(enclave, repo string, v *verify.Verifier) (*Handle, error) {
+	if repo != "" {
+		if _, _, _, err := verify.ParseReference(repo); err != nil {
+			return nil, &ConfigurationError{Err: err}
+		}
+	}
+	if v == nil {
+		var err error
+		if v, err = verify.NewVerifier(); err != nil {
+			return nil, fromVerify(err)
+		}
+	}
+	return &Handle{enclave: enclave, repo: repo, verifier: v}, nil
 }
 
 // NewDefaultHandle applies opts to every discovered router and fallback.
@@ -140,14 +158,25 @@ func NewDefaultHandle(opts *Options) (*Handle, error) {
 	if opts != nil && (opts.EmbeddedConfig != nil || opts.ConfigAuthorizer != nil) {
 		return nil, &ConfigurationError{Err: fmt.Errorf("caller-authorized config requires an explicit enclave")}
 	}
-	fallback, err := NewHandle("inference.tinfoil.sh", defaultRouterRepo, opts)
+	verifier, err := opts.Verifier()
+	if err != nil {
+		return nil, fromVerify(err)
+	}
+	return DiscoverRouter(context.Background(), verifier)
+}
+
+// DiscoverRouter returns a handle for the first router from Tinfoil's router
+// list that verifies under v, and otherwise for inference.tinfoil.sh, which it
+// leaves to be verified on first use. nil v selects the default policy.
+func DiscoverRouter(ctx context.Context, v *verify.Verifier) (*Handle, error) {
+	fallback, err := NewHandleWithVerifier("inference.tinfoil.sh", defaultRouterRepo, v)
 	if err != nil {
 		return nil, err
 	}
 	routers, _ := fetchRouters()
 	for _, routerURL := range routers {
 		client := fallback.ForEnclave(routerURL)
-		_, err := client.verifiedState(context.Background(), true, candidateVerificationRetries)
+		_, err := client.verifiedState(ctx, true, candidateVerificationRetries)
 		if err == nil {
 			return client, nil
 		}

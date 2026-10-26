@@ -23,27 +23,37 @@ type clientConfig struct {
 }
 
 // ClientOption configures a Client created with NewClientWithOptions.
+//
+// Deprecated: use EnclaveOptions with NewEnclaveClient or DiscoverRouter.
 type ClientOption func(*clientConfig)
 
 // WithEnclave sets the enclave host to verify and connect to. When unset, a
 // router is selected automatically.
+//
+// Deprecated: use NewEnclaveClient.
 func WithEnclave(enclave string) ClientOption {
 	return func(c *clientConfig) { c.enclave = enclave }
 }
 
 // WithRepo sets the trusted repository reference, owner/name[@tag][@sha256:digest].
 // A reference other than the default repository requires WithEnclave.
+//
+// Deprecated: use NewEnclaveClient.
 func WithRepo(repo string) ClientOption {
 	return func(c *clientConfig) { c.repo = repo }
 }
 
 // WithVerificationOptions sets the policy applied to enclave verification.
 // The client copies opts and its pins at construction, including for router discovery.
+//
+// Deprecated: use EnclaveOptions.Verifier.
 func WithVerificationOptions(opts enclave.Options) ClientOption {
 	return func(c *clientConfig) { c.verification = opts }
 }
 
 // WithTransport selects the transport mode. Defaults to TransportEHBP.
+//
+// Deprecated: use EnclaveOptions.Binding.
 func WithTransport(mode TransportMode) ClientOption {
 	return func(c *clientConfig) { c.transport = mode }
 }
@@ -55,6 +65,8 @@ func WithTransport(mode TransportMode) ClientOption {
 // the proxy can forward the encrypted request to the right enclave. Only
 // supported with the EHBP transport unless it uses the verified enclave's
 // HTTPS origin.
+//
+// Deprecated: use EnclaveOptions.BaseURL.
 func WithBaseURL(baseURL string) ClientOption {
 	return func(c *clientConfig) {
 		c.baseURL = baseURL
@@ -63,6 +75,8 @@ func WithBaseURL(baseURL string) ClientOption {
 }
 
 // WithOpenAIOptions appends options passed through to the underlying OpenAI client.
+//
+// Deprecated: pass OpenAI options to EnclaveClient.OpenAI.
 func WithOpenAIOptions(opts ...option.RequestOption) ClientOption {
 	return func(c *clientConfig) { c.openaiOpts = append(c.openaiOpts, opts...) }
 }
@@ -78,6 +92,8 @@ func WithOpenAIOptions(opts ...option.RequestOption) ClientOption {
 //
 // An empty string is treated as unset and falls through to the environment or
 // generated secret.
+//
+// Deprecated: use EnclaveOptions.UserCacheSecret.
 func WithUserCacheSecret(secret string) ClientOption {
 	return func(c *clientConfig) {
 		c.userCacheSecret = secret
