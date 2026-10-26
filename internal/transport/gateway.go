@@ -1,4 +1,4 @@
-package tinfoil
+package transport
 
 import (
 	"bytes"
@@ -21,6 +21,7 @@ import (
 	"sync"
 
 	"github.com/tinfoilsh/tinfoil-go/enclave"
+	"github.com/tinfoilsh/tinfoil-go/internal/errs"
 	"github.com/tinfoilsh/tinfoil-go/verify"
 )
 
@@ -44,11 +45,11 @@ type gatewayPolicy struct {
 	defaults   enclave.Options
 }
 
-func newGatewayPolicy(opts GatewayOptions, defaults enclave.Options) (gatewayPolicy, error) {
+func newGatewayPolicy(modelPins map[string]ModelPin, pinnedOnly bool, defaults enclave.Options) (gatewayPolicy, error) {
 	if defaults.EmbeddedConfig != nil || defaults.ConfigAuthorizer != nil {
 		return gatewayPolicy{}, fmt.Errorf("caller-authorized config requires a direct enclave client")
 	}
-	if opts.PinnedModelsOnly && len(opts.ModelPins) == 0 {
+	if pinnedOnly && len(modelPins) == 0 {
 		return gatewayPolicy{}, fmt.Errorf("pinned-only mode requires at least one model pin")
 	}
 	v, err := verify.NewVerifier(verify.WithPinnedRegisters(defaults.PinnedRegisters), verify.WithFreshnessMaxAge(defaults.FreshnessMaxAge))
@@ -57,10 +58,10 @@ func newGatewayPolicy(opts GatewayOptions, defaults enclave.Options) (gatewayPol
 	}
 	p := gatewayPolicy{
 		pins:       make(map[string]*enclave.Handle),
-		pinnedOnly: opts.PinnedModelsOnly,
+		pinnedOnly: pinnedOnly,
 		defaults:   enclave.Options{PinnedRegisters: v.PinnedRegisters(), FreshnessMaxAge: v.FreshnessMaxAge()},
 	}
-	for model, pin := range opts.ModelPins {
+	for model, pin := range modelPins {
 		if strings.TrimSpace(model) == "" || !strings.HasPrefix(pin.Repo, trustedRepoOwner) {
 			return gatewayPolicy{}, fmt.Errorf("model pin %q repository %q must belong to %s", model, pin.Repo, trustedRepoOwner)
 		}
@@ -76,15 +77,15 @@ func newGatewayPolicy(opts GatewayOptions, defaults enclave.Options) (gatewayPol
 func (p *gatewayPolicy) resolve(model string, catalog Catalog) ([]string, replica, error) {
 	pin, pinned := p.pins[model]
 	if p.pinnedOnly && !pinned {
-		return nil, replica{}, &ConfigurationError{Err: fmt.Errorf("model %q is not pinned", model)}
+		return nil, replica{}, &errs.ConfigurationError{Err: fmt.Errorf("model %q is not pinned", model)}
 	}
 	entry := catalog[model]
 	if !entry.trusted() {
-		return nil, replica{}, &ConfigurationError{Err: fmt.Errorf("model %q has no valid bare %s repository with replicas in the gateway catalog", model, trustedRepoOwner)}
+		return nil, replica{}, &errs.ConfigurationError{Err: fmt.Errorf("model %q has no valid bare %s repository with replicas in the gateway catalog", model, trustedRepoOwner)}
 	}
 	if pinned {
 		if repo, _, _ := strings.Cut(pin.Repo(), "@"); entry.Repo != repo {
-			return nil, replica{}, &AttestationError{Err: fmt.Errorf("model %q: expected repository %q, gateway offered %q", model, repo, entry.Repo)}
+			return nil, replica{}, &errs.AttestationError{Err: fmt.Errorf("model %q: expected repository %q, gateway offered %q", model, repo, entry.Repo)}
 		}
 		return entry.Hosts, replica{ref: pin.Repo(), model: model}, nil
 	}
@@ -93,8 +94,68 @@ func (p *gatewayPolicy) resolve(model string, catalog Catalog) ([]string, replic
 
 type replica struct{ host, ref, model string }
 
+// ModelPin pins a model to tinfoilsh/name[@tag][@sha256:digest].
+// Nil Verification inherits gateway defaults; non-nil replaces them.
+// Zero FreshnessMaxAge in a replacement uses the SDK's seven-day default.
+type ModelPin struct {
+	Repo         string
+	Verification *enclave.Options
+}
+
+// GatewayConfig configures a Gateway.
+type GatewayConfig struct {
+	// BaseURL is where requests are sent, and Relay is the gateway host that
+	// attestation is fetched through.
+	BaseURL, Relay string
+	// Catalog is read on every request; nil fetches it once from Relay.
+	Catalog          func() Catalog
+	ModelPins        map[string]ModelPin
+	PinnedModelsOnly bool
+	Defaults         enclave.Options
+	// UserCacheSecret is the explicit secret; empty resolves it from the
+	// environment or the persisted file.
+	UserCacheSecret string
+}
+
+// NewGateway copies the policy in c. Replicas are verified on first use.
+func NewGateway(c GatewayConfig) (*Gateway, error) {
+	policy, err := newGatewayPolicy(c.ModelPins, c.PinnedModelsOnly, c.Defaults)
+	if err != nil {
+		return nil, &errs.ConfigurationError{Err: err}
+	}
+	catalog := c.Catalog
+	if catalog == nil {
+		fetched, err := FetchCatalog(c.Relay)
+		if err != nil {
+			return nil, err
+		}
+		catalog = func() Catalog { return fetched }
+	}
+	return &Gateway{
+		catalog: catalog,
+		policy:  policy,
+		secret:  ResolveUserCacheSecret(c.UserCacheSecret, c.UserCacheSecret != ""),
+		build: func(r replica) (http.RoundTripper, error) {
+			secure, pinned := policy.pins[r.model]
+			var err error
+			if pinned {
+				secure = secure.ForEnclave(r.host)
+			} else if secure, err = enclave.NewHandle(r.host, r.ref, &policy.defaults); err != nil {
+				return nil, err
+			}
+			secure = secure.ViaRelay(c.Relay)
+			transport, err := Enclave(secure, enclave.EHBP, c.BaseURL)
+			if err != nil {
+				return nil, err
+			}
+			return &verifiedReplicaTransport{transport: transport, verification: secure.Verification}, nil
+		},
+	}, nil
+}
+
+// Gateway seals each request to a verified replica of the model it names.
 // Cache prefixes keep conversations on the same replica across requests.
-type sealTransport struct {
+type Gateway struct {
 	build    func(replica) (http.RoundTripper, error)
 	catalog  func() Catalog
 	policy   gatewayPolicy
@@ -104,7 +165,7 @@ type sealTransport struct {
 	rerouted map[string]string // cache prefix to host
 }
 
-func (t *sealTransport) enclave(r replica) (http.RoundTripper, error) {
+func (t *Gateway) enclave(r replica) (http.RoundTripper, error) {
 	if rt, ok := t.enclaves.Load(r); ok {
 		return rt.(http.RoundTripper), nil
 	}
@@ -116,13 +177,73 @@ func (t *sealTransport) enclave(r replica) (http.RoundTripper, error) {
 	return rt, nil
 }
 
-func (t *sealTransport) reroutedHost(prefix string) string {
+// ReplicaVerification holds a replica's last successful verification.
+type ReplicaVerification struct {
+	// Host is the replica the verification is for.
+	Host string
+	// Request model names, not attested identities.
+	Models       []string
+	Reference    string
+	PinnedModel  string
+	Verification *verify.Verification
+}
+
+// Verifications returns cached results without re-verifying them.
+// Results may be expired or invalidated.
+func (t *Gateway) Verifications() []ReplicaVerification {
+	results := []ReplicaVerification{}
+	t.enclaves.Range(func(key, value any) bool {
+		r := key.(replica)
+		transport, ok := value.(*verifiedReplicaTransport)
+		if !ok {
+			return true
+		}
+		if verified := transport.verification(); verified != nil {
+			models := []string{}
+			transport.models.Range(func(model, _ any) bool {
+				models = append(models, model.(string))
+				return true
+			})
+			slices.Sort(models)
+			results = append(results, ReplicaVerification{Host: r.host, Models: models, Reference: r.ref, PinnedModel: r.model, Verification: verified})
+		}
+		return true
+	})
+	slices.SortFunc(results, func(a, b ReplicaVerification) int {
+		return cmp.Or(strings.Compare(a.Host, b.Host),
+			strings.Compare(a.Reference, b.Reference), strings.Compare(a.PinnedModel, b.PinnedModel))
+	})
+	return results
+}
+
+// Serves checks the current catalog against the gateway policy without verifying replicas.
+func (t *Gateway) Serves(model string) bool {
+	_, _, err := t.policy.resolve(model, t.catalog())
+	return err == nil
+}
+
+type verifiedReplicaTransport struct {
+	transport    http.RoundTripper
+	verification func() *verify.Verification
+	models       sync.Map
+}
+
+func (t *verifiedReplicaTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	t.models.Store(req.Header.Get(modelHeader), struct{}{})
+	return t.transport.RoundTrip(req)
+}
+
+func (t *verifiedReplicaTransport) CloseIdleConnections() {
+	closeIdleConnections(t.transport)
+}
+
+func (t *Gateway) reroutedHost(prefix string) string {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	return t.rerouted[prefix]
 }
 
-func (t *sealTransport) remember(prefix, host string) {
+func (t *Gateway) remember(prefix, host string) {
 	if prefix == "" {
 		return
 	}
@@ -153,7 +274,7 @@ func rank(hosts []string, prefix, first string) []string {
 	return hosts
 }
 
-func (t *sealTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+func (t *Gateway) RoundTrip(req *http.Request) (*http.Response, error) {
 	req = req.Clone(req.Context())
 	if err := t.prepare(req); err != nil {
 		return nil, err
@@ -197,7 +318,7 @@ func (t *sealTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 		}
 		resp.Body.Close()
 		if redirects == maxSealRedirects {
-			return nil, &FetchError{Err: fmt.Errorf("gateway kept routing away from the enclave the request was sealed to (last: %s)", routed)}
+			return nil, &errs.FetchError{Err: fmt.Errorf("gateway kept routing away from the enclave the request was sealed to (last: %s)", routed)}
 		}
 		r.host = routed
 		if transport, err = t.enclave(r); err != nil {
@@ -207,7 +328,7 @@ func (t *sealTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	}
 }
 
-func (t *sealTransport) prepare(req *http.Request) error {
+func (t *Gateway) prepare(req *http.Request) error {
 	if req.Method != http.MethodPost || req.Body == nil || req.Body == http.NoBody {
 		return nil
 	}
@@ -259,7 +380,7 @@ func setGatewayBody(req *http.Request, body []byte) {
 func prepareMultipart(req *http.Request, boundary string) error {
 	defer req.Body.Close()
 	if boundary == "" {
-		return &ConfigurationError{Err: fmt.Errorf("multipart upload is missing its boundary")}
+		return &errs.ConfigurationError{Err: fmt.Errorf("multipart upload is missing its boundary")}
 	}
 	body, err := io.ReadAll(http.MaxBytesReader(nil, req.Body, maxMultipartBodySize))
 	if err != nil {
@@ -267,12 +388,12 @@ func prepareMultipart(req *http.Request, boundary string) error {
 	}
 	form, err := multipart.NewReader(bytes.NewReader(body), boundary).ReadForm(maxMultipartBodySize)
 	if err != nil {
-		return &ConfigurationError{Err: fmt.Errorf("invalid multipart upload: %w", err)}
+		return &errs.ConfigurationError{Err: fmt.Errorf("invalid multipart upload: %w", err)}
 	}
 	defer form.RemoveAll()
 	models := form.Value["model"]
 	if len(models) != 1 || strings.TrimSpace(models[0]) == "" || form.File["model"] != nil {
-		return &ConfigurationError{Err: fmt.Errorf("multipart upload must contain exactly one non-empty model field")}
+		return &errs.ConfigurationError{Err: fmt.Errorf("multipart upload must contain exactly one non-empty model field")}
 	}
 	req.Header.Set(modelHeader, models[0])
 	setGatewayBody(req, body)
@@ -280,7 +401,7 @@ func prepareMultipart(req *http.Request, boundary string) error {
 }
 
 // The engine only needs the salt; the secret itself never leaves the client.
-func (t *sealTransport) scopeCache(h http.Header, fields map[string]json.RawMessage, body []byte) ([]byte, error) {
+func (t *Gateway) scopeCache(h http.Header, fields map[string]json.RawMessage, body []byte) ([]byte, error) {
 	var secret string
 	json.Unmarshal(fields[userCacheSecretField], &secret)
 	if secret = cmp.Or(secret, t.secret); secret == "" {

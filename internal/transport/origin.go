@@ -1,4 +1,4 @@
-package tinfoil
+package transport
 
 import (
 	"fmt"
@@ -6,13 +6,15 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+
+	"github.com/tinfoilsh/tinfoil-go/internal/errs"
 )
 
-// boundHTTPClient wraps httpClient's secure transport in place: first with
+// BoundHTTPClient wraps httpClient's secure transport in place: first with
 // user_cache_secret injection (skipped when userCacheSecret is empty), then
 // with a hostBoundTransport that refuses origins other than the enclave and
 // baseURL. Either may be empty; the gateway passes only its base URL.
-func boundHTTPClient(httpClient *http.Client, enclave, baseURL, userCacheSecret string) (*http.Client, error) {
+func BoundHTTPClient(httpClient *http.Client, enclave, baseURL, userCacheSecret string) (*http.Client, error) {
 	// The cache-secret layer sits above the sealing transport, so the field it
 	// injects is encrypted with the rest of the body (EHBP) or sent over the
 	// pinned connection (TLS).
@@ -26,7 +28,7 @@ func boundHTTPClient(httpClient *http.Client, enclave, baseURL, userCacheSecret 
 
 	origins, err := allowedOrigins(enclave, baseURL)
 	if err != nil {
-		return nil, &ConfigurationError{Err: fmt.Errorf("failed to determine allowed request origins: %w", err)}
+		return nil, &errs.ConfigurationError{Err: fmt.Errorf("failed to determine allowed request origins: %w", err)}
 	}
 	httpClient.Transport = &hostBoundTransport{
 		allowedOrigins: origins,
@@ -39,14 +41,14 @@ func boundHTTPClient(httpClient *http.Client, enclave, baseURL, userCacheSecret 
 func allowedOrigins(enclave, baseURL string) (map[string]struct{}, error) {
 	origins := make(map[string]struct{}, 2)
 	if enclave != "" {
-		origin, err := originOf("https://" + enclave)
+		origin, err := OriginOf("https://" + enclave)
 		if err != nil {
 			return nil, err
 		}
 		origins[origin] = struct{}{}
 	}
 	if baseURL != "" {
-		origin, err := originOf(baseURL)
+		origin, err := OriginOf(baseURL)
 		if err != nil {
 			return nil, err
 		}
@@ -72,12 +74,13 @@ func (t *hostBoundTransport) CloseIdleConnections() {
 func (t *hostBoundTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	origin := normalizedOrigin(req.URL)
 	if _, ok := t.allowedOrigins[origin]; !ok {
-		return nil, &ConfigurationError{Err: fmt.Errorf("refusing to send request to %q: client is bound to enclave %q", origin, t.enclave)}
+		return nil, &errs.ConfigurationError{Err: fmt.Errorf("refusing to send request to %q: client is bound to enclave %q", origin, t.enclave)}
 	}
 	return t.transport.RoundTrip(req)
 }
 
-func originOf(rawURL string) (string, error) {
+// OriginOf returns the normalized origin of an absolute http or https URL.
+func OriginOf(rawURL string) (string, error) {
 	u, err := url.Parse(rawURL)
 	if err != nil {
 		return "", err

@@ -48,7 +48,7 @@ func TestLiveClientStreamingChat(t *testing.T) {
 
 func TestLiveHTTPClient(t *testing.T) {
 	testutil.RequireLive(t)
-	t.Setenv(userCacheSecretEnv, "test-secret")
+	t.Setenv("TINFOIL_USER_CACHE_SECRET", "test-secret")
 	client, err := NewClient()
 	require.NoError(t, err)
 
