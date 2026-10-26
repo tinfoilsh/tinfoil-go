@@ -23,7 +23,7 @@ import (
 // Otherwise, the request is made to the relay URL. The fetch stops when ctx is
 // done or after 30 seconds, whichever comes first.
 func Document(ctx context.Context, host, relay string, nonce []byte) (result []byte, err error) {
-	defer func() { err = errs.WrapFetch(err) }()
+	defer func() { err = errs.WrapNetwork(err) }()
 	target, err := URL(host, relay, nonce)
 	if err != nil {
 		return nil, &errs.ConfigurationError{Err: err}

@@ -34,11 +34,11 @@ type Catalog map[string]CatalogEntry
 func FetchCatalog(host string) (Catalog, error) {
 	resp, err := (&http.Client{Timeout: catalogFetchTimeout}).Get("https://" + host + catalogPath)
 	if err != nil {
-		return nil, &errs.FetchError{Err: err}
+		return nil, &errs.NetworkError{Err: err}
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return nil, &errs.FetchError{Err: fmt.Errorf("fetching gateway catalog: %s", resp.Status)}
+		return nil, &errs.NetworkError{Err: fmt.Errorf("fetching gateway catalog: %s", resp.Status)}
 	}
 	return readCatalog(resp.Body)
 }
@@ -50,14 +50,14 @@ func readCatalog(r io.Reader) (Catalog, error) {
 	// oversized catalog apart from one of exactly the maximum size.
 	body, err := io.ReadAll(io.LimitReader(r, maxCatalogBytes+1))
 	if err != nil {
-		return nil, &errs.FetchError{Err: fmt.Errorf("reading gateway catalog: %w", err)}
+		return nil, &errs.NetworkError{Err: fmt.Errorf("reading gateway catalog: %w", err)}
 	}
 	if len(body) > maxCatalogBytes {
-		return nil, &errs.FetchError{Err: fmt.Errorf("gateway catalog exceeds %d bytes", maxCatalogBytes)}
+		return nil, &errs.NetworkError{Err: fmt.Errorf("gateway catalog exceeds %d bytes", maxCatalogBytes)}
 	}
 	var catalog Catalog
 	if err := json.NewDecoder(bytes.NewReader(body)).Decode(&catalog); err != nil {
-		return nil, &errs.FetchError{Err: fmt.Errorf("decoding gateway catalog: %w", err)}
+		return nil, &errs.NetworkError{Err: fmt.Errorf("decoding gateway catalog: %w", err)}
 	}
 	maps.DeleteFunc(catalog, func(_ string, entry CatalogEntry) bool { return !entry.trusted() })
 	return catalog, nil

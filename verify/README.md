@@ -5,7 +5,7 @@ Portable remote-attestation verifier for enclave-backed services.
 [![Build Status](https://github.com/tinfoilsh/tinfoil-go/actions/workflows/sdk-test.yml/badge.svg)](https://github.com/tinfoilsh/tinfoil-go/actions)
 
 ## Overview
-Tinfoil Verifier is a Go library that verifies the integrity of remote enclaves (AMD SEV-SNP & Intel TDX). The [enclave handle](../enclave/README.md) fetches documents, caches verifications and binds TLS connections to them.
+Tinfoil Verifier is a Go library that verifies the integrity of remote enclaves (AMD SEV-SNP & Intel TDX). The SDK's clients, such as [`tinfoil.EnclaveHTTPClient`](../README.md), fetch documents, cache verifications and bind connections to them.
 
 ## Features
 - **Hardware-rooted remote attestation** for AMD SEV-SNP & Intel TDX
@@ -41,13 +41,12 @@ collateral. Verification then runs offline using the embedded trust roots:
    when selecting EHBP. A TLS-only enclave may omit HPKE material.
 
 Code and platform witnesses have a seven-day maximum age by default; the
-earliest authenticated expiry is exposed by `VerifyV3` and the enclave
-handle's `Verify` as `FreshnessExpiresAt`.
+earliest authenticated expiry is exposed by `VerifyV3` and the clients'
+`EnsureVerified` as `FreshnessExpiresAt`.
 Callers using these APIs must retain the deadline and stop authorizing new
 requests at or after it, then verify again before accepting more requests.
-Re-verifying unchanged witnesses does not extend their deadline. The
-[enclave handle](../enclave/README.md#pinning-and-refresh) enforces this deadline
-for its own requests.
+Re-verifying unchanged witnesses does not extend their deadline. The SDK's
+clients enforce this deadline for their own requests.
 
 ### Verifying a document you already hold
 
@@ -95,8 +94,7 @@ accessors return copies. Only verification creates one, so a `Verification`
 that holds data always came from `VerifyV3` or `VerifyV3At`. To test code that
 takes one, verify a captured document with `VerifyV3At` at its capture time.
 
-[`enclave.Handle`](../enclave/README.md) adds fetching, caching and
-transport binding on top.
+The SDK's clients add fetching, caching and transport binding on top.
 
 ### Migration from v2
 
@@ -154,8 +152,8 @@ verifier, err := verify.NewVerifier(
 )
 ```
 
-The enclave handle takes the same policy as a
-[struct](../enclave/README.md#verification-options).
+The SDK's clients take this verifier as their policy, through
+`EnclaveOptions.Verifier` and `GatewayOptions.Verifier`.
 
 ## JavaScript / TypeScript / WASM
 
@@ -182,12 +180,12 @@ See the [tinfoil-js documentation](https://github.com/tinfoilsh/tinfoil-js) for 
 - CPU authentication and expectation enforcement: `internal/quote/sev/` and
   `internal/quote/tdx/`.
 - End-to-end verification: `verifier.go`.
-- Fetching, caching, freshness enforcement and TLS pinning: see the
-  [enclave handle](../enclave/README.md#auditing-the-handle-code).
+- Fetching, caching, freshness enforcement and TLS pinning: the SDK's
+  `internal/enclave` package.
 
 ## Arbitrary endorsed material
 
-A successful `VerifyV3` or `Verify` result retains every endorsed
+A successful `VerifyV3` or `EnsureVerified` result retains every endorsed
 `CryptoMaterial` item. Select by exact ID and format:
 
 ```go

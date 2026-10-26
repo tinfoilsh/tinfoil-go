@@ -6,6 +6,6 @@ import "github.com/tinfoilsh/tinfoil-go/internal/errs"
 type (
 	Error              = errs.Error
 	ConfigurationError = errs.ConfigurationError
-	FetchError         = errs.FetchError
+	NetworkError       = errs.NetworkError
 	AttestationError   = errs.AttestationError
 )

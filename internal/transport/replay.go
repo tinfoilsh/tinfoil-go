@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"net/http"
 
-	"github.com/tinfoilsh/tinfoil-go/enclave"
+	"github.com/tinfoilsh/tinfoil-go/internal/enclave"
 )
 
 // recoveryTransport owns one application replay. Its underlying transport

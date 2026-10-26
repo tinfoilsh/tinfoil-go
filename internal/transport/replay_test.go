@@ -31,7 +31,7 @@ func TestRequestRecovery(t *testing.T) {
 	}{
 		{"success", testKeyRejection{first}, nil, true, false, 2},
 		{"second rejection", testKeyRejection{first}, testKeyRejection{last}, true, false, 2},
-		{"refresh failure", testKeyRejection{first}, &errs.FetchError{Err: last}, true, false, 2},
+		{"refresh failure", testKeyRejection{first}, &errs.NetworkError{Err: last}, true, false, 2},
 		{"network failure", first, nil, true, false, 1},
 		{"unreplayable", testKeyRejection{first}, nil, false, false, 1},
 		{"canceled", testKeyRejection{first}, nil, true, true, 1},
