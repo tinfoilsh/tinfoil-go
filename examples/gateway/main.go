@@ -13,17 +13,16 @@ import (
 
 func main() {
 	const model = "gpt-oss-120b"
-	gateway, err := tinfoil.NewGateway("https://inference-gateway.tinfoil.sh/v1/", nil, tinfoil.GatewayOptions{
-		ClientOptions: []tinfoil.ClientOption{tinfoil.WithOpenAIOptions(option.WithAPIKey(os.Getenv("TINFOIL_API_KEY")))},
+	client, err := tinfoil.NewGatewayOpenAIClient(&tinfoil.GatewayOptions{
 		ModelPins: map[string]tinfoil.ModelPin{
 			model: {Repo: os.Getenv("TINFOIL_MODEL_REF")},
 		},
 		PinnedModelsOnly: true,
-	})
+	}, option.WithAPIKey(os.Getenv("TINFOIL_API_KEY")))
 	if err != nil {
 		log.Fatal(err)
 	}
-	completion, err := gateway.Chat.Completions.New(context.Background(), openai.ChatCompletionNewParams{
+	completion, err := client.Chat.Completions.New(context.Background(), openai.ChatCompletionNewParams{
 		Model:    model,
 		Messages: []openai.ChatCompletionMessageParamUnion{openai.UserMessage("Say this is a test")},
 	})

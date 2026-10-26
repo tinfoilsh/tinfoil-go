@@ -1,6 +1,7 @@
 package transport
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
@@ -199,6 +200,37 @@ func TestSealJSONRoutingPreservesInjectedBodyAcrossRetries(t *testing.T) {
 	}
 }
 
+func TestSealPerRequestCacheSecretOverridesClientSecret(t *testing.T) {
+	salt := func(clientSecret, body string) (json.RawMessage, string) {
+		var fields map[string]json.RawMessage
+		var prefix string
+		seal := sealTestTransport(func(string) (http.RoundTripper, error) {
+			return roundTripFunc(func(req *http.Request) (*http.Response, error) {
+				defer req.Body.Close()
+				require.NoError(t, json.NewDecoder(req.Body).Decode(&fields))
+				prefix = req.Header.Get(cachePrefixHeader)
+				return newResponse(http.StatusNoContent, ""), nil
+			}), nil
+		})
+		seal.secret = clientSecret
+		req, err := http.NewRequest(http.MethodPost, "https://gateway.example/v1/chat/completions", strings.NewReader(body))
+		require.NoError(t, err)
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Authorization", "Bearer test-api-key")
+		resp, err := seal.RoundTrip(req)
+		require.NoError(t, err)
+		resp.Body.Close()
+		require.NotContains(t, fields, userCacheSecretField, "the secret never leaves the client")
+		return fields[cacheSaltField], prefix
+	}
+	gotSalt, gotPrefix := salt("client-secret", `{"model":"test-model","user_cache_secret":"end-user"}`)
+	wantSalt, wantPrefix := salt("end-user", `{"model":"test-model"}`)
+	require.Equal(t, wantSalt, gotSalt)
+	require.Equal(t, wantPrefix, gotPrefix)
+	clientSalt, _ := salt("client-secret", `{"model":"test-model"}`)
+	require.NotEqual(t, clientSalt, gotSalt)
+}
+
 func TestGatewayVerificationsNameReplicaHosts(t *testing.T) {
 	seal := &Gateway{}
 	for _, host := range []string{"b.example", "a.example"} {
@@ -211,4 +243,47 @@ func TestGatewayVerificationsNameReplicaHosts(t *testing.T) {
 	require.Len(t, got, 2)
 	require.Equal(t, "a.example", got[0].Host)
 	require.Equal(t, "b.example", got[1].Host)
+}
+
+func TestGatewayEnsureVerifiedFallsOver(t *testing.T) {
+	verified := verifytest.New(verifytest.Fields{ConfigRepo: "tinfoilsh/test"})
+	failure := errors.New("verification failed")
+	hosts := []string{"a.example", "b.example", "c.example"}
+	order := rank(hosts, sealTestModel, "")
+	buildFails, expired := order[0], order[1]
+	catalog := func() Catalog { return Catalog{sealTestModel: {Repo: "tinfoilsh/test", Hosts: hosts}} }
+	newGateway := func(attempts *[]string, build func(replica) (http.RoundTripper, error)) *Gateway {
+		return &Gateway{catalog: catalog, build: func(r replica) (http.RoundTripper, error) {
+			*attempts = append(*attempts, r.host)
+			return build(r)
+		}}
+	}
+
+	var attempts []string
+	seal := newGateway(&attempts, func(r replica) (http.RoundTripper, error) {
+		switch r.host {
+		case buildFails:
+			return nil, failure
+		case expired:
+			return &verifiedReplicaTransport{ensureVerified: func(context.Context) (*verify.Verification, error) { return nil, failure }}, nil
+		}
+		return &verifiedReplicaTransport{ensureVerified: func(context.Context) (*verify.Verification, error) { return verified, nil }}, nil
+	})
+	got, err := seal.EnsureVerified(context.Background(), sealTestModel)
+	require.NoError(t, err)
+	require.Same(t, verified, got)
+	require.Equal(t, order, attempts, "replicas are tried in the model's fixed order until one verifies")
+
+	attempts = nil
+	unreachable := newGateway(&attempts, func(replica) (http.RoundTripper, error) { return nil, failure })
+	_, err = unreachable.EnsureVerified(context.Background(), sealTestModel)
+	require.ErrorIs(t, err, failure)
+	require.Equal(t, order, attempts)
+
+	attempts = nil
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, err = newGateway(&attempts, func(replica) (http.RoundTripper, error) { return nil, failure }).EnsureVerified(ctx, sealTestModel)
+	require.ErrorIs(t, err, context.Canceled)
+	require.Empty(t, attempts, "a done context stops before any replica is built")
 }

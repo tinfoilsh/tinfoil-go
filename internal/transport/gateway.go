@@ -3,6 +3,7 @@ package transport
 import (
 	"bytes"
 	"cmp"
+	"context"
 	"crypto/hkdf"
 	"crypto/hmac"
 	"crypto/sha256"
@@ -10,6 +11,7 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"math/rand/v2"
@@ -20,7 +22,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/tinfoilsh/tinfoil-go/enclave"
+	"github.com/tinfoilsh/tinfoil-go/internal/enclave"
 	"github.com/tinfoilsh/tinfoil-go/internal/errs"
 	"github.com/tinfoilsh/tinfoil-go/verify"
 )
@@ -40,36 +42,40 @@ const (
 )
 
 type gatewayPolicy struct {
-	pins       map[string]*enclave.Handle
+	pins       map[string]ModelPin
 	pinnedOnly bool
-	defaults   enclave.Options
+	verifier   *verify.Verifier // for unpinned models
 }
 
-func newGatewayPolicy(modelPins map[string]ModelPin, pinnedOnly bool, defaults enclave.Options) (gatewayPolicy, error) {
-	if defaults.EmbeddedConfig != nil || defaults.ConfigAuthorizer != nil {
-		return gatewayPolicy{}, fmt.Errorf("caller-authorized config requires a direct enclave client")
-	}
+// errCallerAuthorizedConfig rejects a policy whose config the caller supplies
+// or authorizes: gateway replicas are verified against repository pins.
+var errCallerAuthorizedConfig = errors.New("caller-authorized config requires a direct enclave client")
+
+func newGatewayPolicy(modelPins map[string]ModelPin, pinnedOnly bool, v *verify.Verifier) (gatewayPolicy, error) {
 	if pinnedOnly && len(modelPins) == 0 {
 		return gatewayPolicy{}, fmt.Errorf("pinned-only mode requires at least one model pin")
 	}
-	v, err := verify.NewVerifier(verify.WithPinnedRegisters(defaults.PinnedRegisters), verify.WithFreshnessMaxAge(defaults.FreshnessMaxAge))
-	if err != nil {
-		return gatewayPolicy{}, fmt.Errorf("gateway verification options: %w", err)
+	if v == nil {
+		var err error
+		if v, err = verify.NewVerifier(); err != nil {
+			return gatewayPolicy{}, fmt.Errorf("gateway verification options: %w", err)
+		}
 	}
-	p := gatewayPolicy{
-		pins:       make(map[string]*enclave.Handle),
-		pinnedOnly: pinnedOnly,
-		defaults:   enclave.Options{PinnedRegisters: v.PinnedRegisters(), FreshnessMaxAge: v.FreshnessMaxAge()},
+	if v.CallerAuthorizesConfig() {
+		return gatewayPolicy{}, errCallerAuthorizedConfig
 	}
+	p := gatewayPolicy{pins: make(map[string]ModelPin), pinnedOnly: pinnedOnly, verifier: v}
 	for model, pin := range modelPins {
+		if pin.Verifier != nil && pin.Verifier.CallerAuthorizesConfig() {
+			return gatewayPolicy{}, fmt.Errorf("model %q: %w", model, errCallerAuthorizedConfig)
+		}
 		if strings.TrimSpace(model) == "" || !strings.HasPrefix(pin.Repo, trustedRepoOwner) {
 			return gatewayPolicy{}, fmt.Errorf("model pin %q repository %q must belong to %s", model, pin.Repo, trustedRepoOwner)
 		}
-		enclaveHandle, err := enclave.NewHandle("", pin.Repo, cmp.Or(pin.Verification, &p.defaults))
-		if err != nil {
-			return gatewayPolicy{}, fmt.Errorf("model %q: %w", model, err)
+		if _, _, _, err := verify.ParseReference(pin.Repo); err != nil {
+			return gatewayPolicy{}, fmt.Errorf("model %q: %w", model, &errs.ConfigurationError{Err: err})
 		}
-		p.pins[model] = enclaveHandle
+		p.pins[model] = ModelPin{Repo: pin.Repo, Verifier: cmp.Or(pin.Verifier, v)}
 	}
 	return p, nil
 }
@@ -84,22 +90,29 @@ func (p *gatewayPolicy) resolve(model string, catalog Catalog) ([]string, replic
 		return nil, replica{}, &errs.ConfigurationError{Err: fmt.Errorf("model %q has no valid bare %s repository with replicas in the gateway catalog", model, trustedRepoOwner)}
 	}
 	if pinned {
-		if repo, _, _ := strings.Cut(pin.Repo(), "@"); entry.Repo != repo {
+		if repo, _, _ := strings.Cut(pin.Repo, "@"); entry.Repo != repo {
 			return nil, replica{}, &errs.AttestationError{Err: fmt.Errorf("model %q: expected repository %q, gateway offered %q", model, repo, entry.Repo)}
 		}
-		return entry.Hosts, replica{ref: pin.Repo(), model: model}, nil
+		return entry.Hosts, replica{ref: pin.Repo, model: model}, nil
 	}
 	return entry.Hosts, replica{ref: entry.Repo}, nil
 }
 
+// verifierFor returns the policy a replica of r is verified under.
+func (p *gatewayPolicy) verifierFor(r replica) *verify.Verifier {
+	if pin, pinned := p.pins[r.model]; pinned {
+		return pin.Verifier
+	}
+	return p.verifier
+}
+
 type replica struct{ host, ref, model string }
 
-// ModelPin pins a model to tinfoilsh/name[@tag][@sha256:digest].
-// Nil Verification inherits gateway defaults; non-nil replaces them.
-// Zero FreshnessMaxAge in a replacement uses the SDK's seven-day default.
+// ModelPin pins a model to tinfoilsh/name[@tag][@sha256:digest]. A nil
+// Verifier inherits the gateway's; a non-nil one replaces it.
 type ModelPin struct {
-	Repo         string
-	Verification *enclave.Options
+	Repo     string
+	Verifier *verify.Verifier
 }
 
 // GatewayConfig configures a Gateway.
@@ -111,7 +124,8 @@ type GatewayConfig struct {
 	Catalog          func() Catalog
 	ModelPins        map[string]ModelPin
 	PinnedModelsOnly bool
-	Defaults         enclave.Options
+	// Verifier is the policy for unpinned models; nil selects the defaults.
+	Verifier *verify.Verifier
 	// UserCacheSecret is the explicit secret; empty resolves it from the
 	// environment or the persisted file.
 	UserCacheSecret string
@@ -119,7 +133,7 @@ type GatewayConfig struct {
 
 // NewGateway copies the policy in c. Replicas are verified on first use.
 func NewGateway(c GatewayConfig) (*Gateway, error) {
-	policy, err := newGatewayPolicy(c.ModelPins, c.PinnedModelsOnly, c.Defaults)
+	policy, err := newGatewayPolicy(c.ModelPins, c.PinnedModelsOnly, c.Verifier)
 	if err != nil {
 		return nil, &errs.ConfigurationError{Err: err}
 	}
@@ -136,11 +150,8 @@ func NewGateway(c GatewayConfig) (*Gateway, error) {
 		policy:  policy,
 		secret:  ResolveUserCacheSecret(c.UserCacheSecret, c.UserCacheSecret != ""),
 		build: func(r replica) (http.RoundTripper, error) {
-			secure, pinned := policy.pins[r.model]
-			var err error
-			if pinned {
-				secure = secure.ForEnclave(r.host)
-			} else if secure, err = enclave.NewHandle(r.host, r.ref, &policy.defaults); err != nil {
+			secure, err := enclave.NewHandleWithVerifier(r.host, r.ref, policy.verifierFor(r))
+			if err != nil {
 				return nil, err
 			}
 			secure = secure.ViaRelay(c.Relay)
@@ -148,7 +159,7 @@ func NewGateway(c GatewayConfig) (*Gateway, error) {
 			if err != nil {
 				return nil, err
 			}
-			return &verifiedReplicaTransport{transport: transport, verification: secure.Verification}, nil
+			return &verifiedReplicaTransport{transport: transport, verification: secure.Verification, ensureVerified: secure.EnsureVerified}, nil
 		},
 	}, nil
 }
@@ -216,16 +227,49 @@ func (t *Gateway) Verifications() []ReplicaVerification {
 	return results
 }
 
-// Serves checks the current catalog against the gateway policy without verifying replicas.
-func (t *Gateway) Serves(model string) bool {
-	_, _, err := t.policy.resolve(model, t.catalog())
-	return err == nil
+// Models returns the catalog's models that the policy serves, sorted, without
+// verifying replicas.
+func (t *Gateway) Models() []string {
+	catalog := t.catalog()
+	models := []string{}
+	for model := range catalog {
+		if _, _, err := t.policy.resolve(model, catalog); err == nil {
+			models = append(models, model)
+		}
+	}
+	slices.Sort(models)
+	return models
+}
+
+// EnsureVerified returns a valid verification of a replica serving model. It
+// tries replicas in a fixed order for the model, so repeated calls verify the
+// same replica while it stays valid, and stops once ctx is done.
+func (t *Gateway) EnsureVerified(ctx context.Context, model string) (*verify.Verification, error) {
+	hosts, r, err := t.policy.resolve(model, t.catalog())
+	if err != nil {
+		return nil, err
+	}
+	for _, r.host = range rank(hosts, model, "") {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return nil, ctxErr
+		}
+		var transport http.RoundTripper
+		if transport, err = t.enclave(r); err != nil {
+			continue
+		}
+		var verified *verify.Verification
+		if verified, err = transport.(*verifiedReplicaTransport).ensureVerified(ctx); err == nil {
+			return verified, nil
+		}
+	}
+	return nil, err
 }
 
 type verifiedReplicaTransport struct {
-	transport    http.RoundTripper
-	verification func() *verify.Verification
-	models       sync.Map
+	transport      http.RoundTripper
+	verification   func() *verify.Verification
+	ensureVerified func(context.Context) (*verify.Verification, error)
+	models         sync.Map
 }
 
 func (t *verifiedReplicaTransport) RoundTrip(req *http.Request) (*http.Response, error) {
@@ -318,7 +362,7 @@ func (t *Gateway) RoundTrip(req *http.Request) (*http.Response, error) {
 		}
 		resp.Body.Close()
 		if redirects == maxSealRedirects {
-			return nil, &errs.FetchError{Err: fmt.Errorf("gateway kept routing away from the enclave the request was sealed to (last: %s)", routed)}
+			return nil, &errs.NetworkError{Err: fmt.Errorf("gateway kept routing away from the enclave the request was sealed to (last: %s)", routed)}
 		}
 		r.host = routed
 		if transport, err = t.enclave(r); err != nil {

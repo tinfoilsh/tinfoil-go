@@ -2,88 +2,116 @@ package tinfoil
 
 import (
 	"cmp"
+	"context"
 	"fmt"
 	"net/http"
 	"net/url"
 
-	"github.com/openai/openai-go/v3"
-	"github.com/openai/openai-go/v3/option"
 	"github.com/tinfoilsh/tinfoil-go/internal/transport"
+	"github.com/tinfoilsh/tinfoil-go/verify"
 )
 
-// Gateway is an OpenAI client that seals each request to a verified replica
-// of the model it names.
-type Gateway struct {
-	*openai.Client
-	httpClient *http.Client
-	seal       *transport.Gateway
-}
+const defaultGatewayURL = "https://inference-gateway.tinfoil.sh/v1/"
 
+// GatewayOptions configures a GatewayHTTPClient.
 type GatewayOptions struct {
-	// Routing overrides and non-EHBP transports are rejected.
-	ClientOptions []ClientOption
-	ModelPins     map[string]ModelPin
-	// Requires at least one pin.
+	// ModelPins pins models to repositories. With PinnedModelsOnly, only pinned
+	// models are served, which requires at least one pin.
+	ModelPins        map[string]ModelPin
 	PinnedModelsOnly bool
+	// Verifier is the policy for unpinned models; nil selects the defaults.
+	Verifier *verify.Verifier
+	// UserCacheSecret is the default prompt-cache scope for the client's
+	// requests; empty resolves it from TINFOIL_USER_CACHE_SECRET or
+	// ~/.tinfoil/user_cache_secret. A non-empty user_cache_secret string in a
+	// request's JSON body overrides it, so a server can scope the cache to each
+	// end user, for example with option.WithJSONSet("user_cache_secret", s).
+	UserCacheSecret string
+	// URL is the gateway's base URL; empty selects Tinfoil's gateway.
+	URL string
+	// Catalog is read on every request and must return an immutable map safe
+	// for concurrent readers; nil fetches the gateway's catalog once.
+	Catalog func() Catalog
 }
 
 // ModelPin pins a model to tinfoilsh/name[@tag][@sha256:digest].
-// Nil Verification inherits gateway defaults; non-nil replaces them.
-// Zero FreshnessMaxAge in a replacement uses the SDK's seven-day default.
-type ModelPin = transport.ModelPin
+type ModelPin struct {
+	Repo string
+	// Verifier is the pin's policy: nil inherits GatewayOptions.Verifier;
+	// non-nil replaces it.
+	Verifier *verify.Verifier
+}
 
-// NewGateway copies opts and reads catalog on every request; nil fetches it once.
-// Catalog callbacks must return immutable maps safe for concurrent readers.
-// Replicas are verified on first use.
-func NewGateway(baseURL string, catalog func() Catalog, opts GatewayOptions) (*Gateway, error) {
-	cfg := &clientConfig{}
-	for _, opt := range opts.ClientOptions {
-		if opt != nil {
-			opt(cfg)
-		}
+// ReplicaVerification holds a gateway replica's last successful verification.
+type ReplicaVerification = transport.ReplicaVerification
+
+// GatewayHTTPClient is an *http.Client for Tinfoil inference through the gateway.
+// Each request is sealed to a verified replica of the model it names.
+type GatewayHTTPClient struct {
+	*http.Client
+	// secure is the client OpenAI clients use, which changes to the embedded
+	// client can't reach.
+	secure  *http.Client
+	baseURL string
+	seal    *transport.Gateway
+}
+
+// NewGatewayHTTPClient copies opts, and fetches the gateway's catalog unless
+// opts.Catalog supplies it. Replicas are verified on first use.
+func NewGatewayHTTPClient(opts *GatewayOptions) (*GatewayHTTPClient, error) {
+	if opts == nil {
+		opts = &GatewayOptions{}
 	}
-	if cfg.enclave != "" || cfg.repo != "" || cmp.Or(cfg.transport, TransportEHBP) != TransportEHBP || cfg.baseURLSet {
-		return nil, &ConfigurationError{Err: fmt.Errorf("a gateway takes its enclaves and repositories from its catalog and uses the EHBP transport")}
-	}
+	baseURL := cmp.Or(opts.URL, defaultGatewayURL)
 	base, err := url.Parse(baseURL)
 	if err != nil || base.Scheme != "https" || base.Host == "" {
 		return nil, &ConfigurationError{Err: fmt.Errorf("gateway base URL must be an absolute HTTPS URL: %q", baseURL)}
 	}
+	pins := make(map[string]transport.ModelPin, len(opts.ModelPins))
+	for model, pin := range opts.ModelPins {
+		pins[model] = transport.ModelPin{Repo: pin.Repo, Verifier: pin.Verifier}
+	}
 	seal, err := transport.NewGateway(transport.GatewayConfig{
 		BaseURL:          baseURL,
 		Relay:            base.Host,
-		Catalog:          catalog,
-		ModelPins:        opts.ModelPins,
+		Catalog:          opts.Catalog,
+		ModelPins:        pins,
 		PinnedModelsOnly: opts.PinnedModelsOnly,
-		Defaults:         cfg.verification,
-		UserCacheSecret:  cfg.userCacheSecret,
+		Verifier:         opts.Verifier,
+		UserCacheSecret:  opts.UserCacheSecret,
 	})
 	if err != nil {
 		return nil, err
 	}
-	httpClient, err := transport.BoundHTTPClient(&http.Client{Transport: seal}, "", baseURL, "")
+	secure, err := transport.BoundHTTPClient(&http.Client{Transport: seal}, "", baseURL, "")
 	if err != nil {
 		return nil, err
 	}
-	openaiClient := openai.NewClient(append(cfg.openaiOpts, option.WithHTTPClient(httpClient), option.WithBaseURL(baseURL))...)
-	return &Gateway{Client: &openaiClient, httpClient: httpClient, seal: seal}, nil
+	return &GatewayHTTPClient{Client: &http.Client{Transport: secure.Transport}, secure: secure, baseURL: baseURL, seal: seal}, nil
 }
 
-// HTTPClient seals requests to a replica of the model named in their body.
-func (g *Gateway) HTTPClient() *http.Client {
-	return g.httpClient
+// BaseURL returns the gateway's base URL, which requests are sent to.
+func (c *GatewayHTTPClient) BaseURL() string {
+	return c.baseURL
 }
 
-// GatewayVerification holds a replica's last successful verification.
-type GatewayVerification = transport.ReplicaVerification
-
-// Verifications returns cached results without re-verifying them.
-// Results may be expired or invalidated.
-func (g *Gateway) Verifications() []GatewayVerification {
-	return g.seal.Verifications()
+// Models returns the catalog's models that the client's policy serves,
+// sorted, without verifying replicas.
+func (c *GatewayHTTPClient) Models(ctx context.Context) ([]string, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	return c.seal.Models(), nil
 }
 
-// Serves checks the current catalog against the gateway policy without verifying replicas.
-func (g *Gateway) Serves(model string) bool {
-	return g.seal.Serves(model)
+// EnsureVerified returns a verification that is valid now of a replica
+// serving model, verifying replicas only if needed.
+func (c *GatewayHTTPClient) EnsureVerified(ctx context.Context, model string) (*verify.Verification, error) {
+	return c.seal.EnsureVerified(ctx, model)
+}
+
+// Current returns the last successful verification of each replica used so
+// far, without checking them. They may have expired or been rejected.
+func (c *GatewayHTTPClient) Current() []ReplicaVerification {
+	return c.seal.Verifications()
 }

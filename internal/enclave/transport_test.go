@@ -191,9 +191,9 @@ func TestVerificationFetchStillTimesOut(t *testing.T) {
 		require.NoError(t, err)
 		_, err = client.Verify()
 		require.ErrorIs(t, err, context.DeadlineExceeded)
-		var fetch *FetchError
+		var fetch *NetworkError
 		require.ErrorAs(t, err, &fetch)
-		require.True(t, strings.HasPrefix(err.Error(), "fetch error: "), "verification fetch retains its SDK category prefix")
+		require.True(t, strings.HasPrefix(err.Error(), "network error: "), "verification fetch retains its SDK category prefix")
 		require.Equal(t, 2, requests)
 		require.Equal(t, 61*time.Second, time.Since(start), "two bounded 30-second fetches and one recovery delay")
 	})

@@ -122,6 +122,13 @@ func ParseReference(ref string) (repo, tag, digest string, err error) {
 // FreshnessMaxAge reports the configured witness age bound.
 func (v *Verifier) FreshnessMaxAge() time.Duration { return v.freshnessMaxAge }
 
+// CallerAuthorizesConfig reports whether the caller supplies the config, with
+// an embedded config, or authorizes it, with a config authorizer, instead of
+// a repository pin authenticating it.
+func (v *Verifier) CallerAuthorizesConfig() bool {
+	return v.embedded.Config != nil || v.configAuthorizer != nil
+}
+
 // PinnedRegisters returns a copy of the configured register pins, or nil.
 func (v *Verifier) PinnedRegisters() measurement.Expected {
 	if v.pinnedRegisters == nil {

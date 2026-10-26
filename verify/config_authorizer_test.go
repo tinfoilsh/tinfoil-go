@@ -14,6 +14,28 @@ import (
 	"github.com/tinfoilsh/tinfoil-go/verify/internal/quote"
 )
 
+func TestCallerAuthorizesConfig(t *testing.T) {
+	inputs := embeddedInputs(t)
+	withoutConfig := inputs
+	withoutConfig.Config = nil
+	for _, tc := range []struct {
+		name string
+		opts []Option
+		want bool
+	}{
+		{"defaults", nil, false},
+		{"embedded runtime and platform", []Option{WithEmbeddedReferences(withoutConfig)}, false},
+		{"embedded config", []Option{WithEmbeddedReferences(inputs)}, true},
+		{"config authorizer", []Option{WithConfigAuthorizer(func(collateral.ConfigEndorsement) error { return nil })}, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			v, err := NewVerifier(tc.opts...)
+			require.NoError(t, err)
+			require.Equal(t, tc.want, v.CallerAuthorizesConfig())
+		})
+	}
+}
+
 // A config authorizer's error is the cause of a VerificationError. It never
 // chooses verify's error type, even when it is one of verify's own types.
 func TestConfigAuthorizerErrorNeverChoosesTheType(t *testing.T) {

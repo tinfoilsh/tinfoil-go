@@ -143,7 +143,7 @@ func retryableVerification(err error) bool {
 		causes := joined.Unwrap()
 		return len(causes) > 0 && retryableVerification(causes[0])
 	}
-	var fetch *FetchError
+	var fetch *NetworkError
 	var attestation *AttestationError
 	return errors.As(err, &fetch) || errors.As(err, &attestation)
 }

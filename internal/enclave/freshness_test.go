@@ -27,7 +27,7 @@ func defaultFreshnessMaxAge(t *testing.T) time.Duration {
 
 // verifyDocument verifies raw with the verifier a Handle builds from opts.
 func verifyDocument(raw, nonce []byte, repo string, opts *Options) (*verify.Verification, error) {
-	verifier, err := opts.verifier()
+	verifier, err := opts.Verifier()
 	if err != nil {
 		return nil, err
 	}

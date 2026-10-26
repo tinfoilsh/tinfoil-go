@@ -120,7 +120,7 @@ func TestLiveNewDefaultHandle(t *testing.T) {
 
 func TestLiveClientFetchRouters(t *testing.T) {
 	testutil.RequireLive(t)
-	routers, err := fetchRouters()
+	routers, err := fetchRouters(t.Context())
 	require.NoError(t, err)
 	require.NotEmpty(t, routers)
 	assert.True(t, strings.HasSuffix(routers[0], ".tinfoil.sh"))

@@ -28,7 +28,7 @@ import (
 // Resolution order, mirroring the other Tinfoil clients:
 //
 //  1. a non-empty explicit per-request `user_cache_secret` field in the body,
-//  2. WithUserCacheSecret,
+//  2. the client's UserCacheSecret option,
 //  3. the TINFOIL_USER_CACHE_SECRET environment variable,
 //  4. a generated secret persisted at ~/.tinfoil/user_cache_secret (0600),
 //     shared with other Tinfoil SDKs using the same home directory.

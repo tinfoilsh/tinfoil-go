@@ -16,7 +16,7 @@ func TestReadCatalogRejectsOversizedCatalog(t *testing.T) {
 	require.Contains(t, catalog, "m")
 
 	_, err = readCatalog(strings.NewReader(maximal + " "))
-	var fetch *errs.FetchError
+	var fetch *errs.NetworkError
 	require.ErrorAs(t, err, &fetch)
 	require.ErrorContains(t, err, "exceeds")
 }
