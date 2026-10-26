@@ -18,11 +18,12 @@ func TestNewEnclaveClientRejectsInvalidOptions(t *testing.T) {
 		host, repo string
 		opts       *EnclaveOptions
 	}{
-		"no host":            {"", "org/repo", nil},
-		"unknown binding":    {"enclave.example", "org/repo", &EnclaveOptions{Binding: "quic"}},
-		"plaintext base URL": {"enclave.example", "org/repo", &EnclaveOptions{BaseURL: "http://proxy.example/v1/"}},
-		"relative base URL":  {"enclave.example", "org/repo", &EnclaveOptions{BaseURL: "/v1/"}},
-		"invalid repository": {"enclave.example", "not a reference", nil},
+		"no host":             {"", "org/repo", nil},
+		"unknown binding":     {"enclave.example", "org/repo", &EnclaveOptions{Binding: "quic"}},
+		"plaintext base URL":  {"enclave.example", "org/repo", &EnclaveOptions{BaseURL: "http://proxy.example/v1/"}},
+		"relative base URL":   {"enclave.example", "org/repo", &EnclaveOptions{BaseURL: "/v1/"}},
+		"TLS through a proxy": {"enclave.example", "org/repo", &EnclaveOptions{BaseURL: "https://proxy.example/v1/"}},
+		"invalid repository":  {"enclave.example", "not a reference", nil},
 	} {
 		t.Run(name, func(t *testing.T) {
 			c, err := NewEnclaveClient(tc.host, tc.repo, tc.opts)

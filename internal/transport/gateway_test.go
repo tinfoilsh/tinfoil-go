@@ -217,23 +217,42 @@ func TestGatewayVerificationsNameReplicaHosts(t *testing.T) {
 func TestGatewayEnsureVerifiedFallsOver(t *testing.T) {
 	verified := verifytest.New(verifytest.Fields{ConfigRepo: "tinfoilsh/test"})
 	failure := errors.New("verification failed")
-	catalog := func() Catalog {
-		return Catalog{sealTestModel: {Repo: "tinfoilsh/test", Hosts: []string{"build-fails.example", "expired.example", "valid.example"}}}
+	hosts := []string{"a.example", "b.example", "c.example"}
+	order := rank(hosts, sealTestModel, "")
+	buildFails, expired := order[0], order[1]
+	catalog := func() Catalog { return Catalog{sealTestModel: {Repo: "tinfoilsh/test", Hosts: hosts}} }
+	newGateway := func(attempts *[]string, build func(replica) (http.RoundTripper, error)) *Gateway {
+		return &Gateway{catalog: catalog, build: func(r replica) (http.RoundTripper, error) {
+			*attempts = append(*attempts, r.host)
+			return build(r)
+		}}
 	}
-	seal := &Gateway{catalog: catalog, build: func(r replica) (http.RoundTripper, error) {
+
+	var attempts []string
+	seal := newGateway(&attempts, func(r replica) (http.RoundTripper, error) {
 		switch r.host {
-		case "build-fails.example":
+		case buildFails:
 			return nil, failure
-		case "expired.example":
+		case expired:
 			return &verifiedReplicaTransport{ensureVerified: func(context.Context) (*verify.Verification, error) { return nil, failure }}, nil
 		}
 		return &verifiedReplicaTransport{ensureVerified: func(context.Context) (*verify.Verification, error) { return verified, nil }}, nil
-	}}
+	})
 	got, err := seal.EnsureVerified(context.Background(), sealTestModel)
 	require.NoError(t, err)
 	require.Same(t, verified, got)
+	require.Equal(t, order, attempts, "replicas are tried in the model's fixed order until one verifies")
 
-	unreachable := &Gateway{catalog: catalog, build: func(replica) (http.RoundTripper, error) { return nil, failure }}
+	attempts = nil
+	unreachable := newGateway(&attempts, func(replica) (http.RoundTripper, error) { return nil, failure })
 	_, err = unreachable.EnsureVerified(context.Background(), sealTestModel)
 	require.ErrorIs(t, err, failure)
+	require.Equal(t, order, attempts)
+
+	attempts = nil
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, err = newGateway(&attempts, func(replica) (http.RoundTripper, error) { return nil, failure }).EnsureVerified(ctx, sealTestModel)
+	require.ErrorIs(t, err, context.Canceled)
+	require.Empty(t, attempts, "a done context stops before any replica is built")
 }

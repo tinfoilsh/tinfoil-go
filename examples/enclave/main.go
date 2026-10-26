@@ -35,6 +35,9 @@ func main() {
 	if err != nil {
 		log.Fatalf("reading response: %v", err)
 	}
+	if resp.StatusCode != http.StatusOK {
+		log.Fatalf("request failed: %s: %s", resp.Status, response)
+	}
 
 	log.Printf("Response: %s", response)
 }

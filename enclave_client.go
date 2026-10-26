@@ -90,6 +90,11 @@ func NewEnclaveClient(host, repo string, opts *EnclaveOptions) (*EnclaveClient, 
 			return nil, err
 		}
 	}
+	if binding == enclave.TLS {
+		if err := transport.ValidateTLSBaseURL(opts.BaseURL, host); err != nil {
+			return nil, &ConfigurationError{Err: err}
+		}
+	}
 	handle, err := enclave.NewHandleWithVerifier(host, repo, opts.Verifier)
 	if err != nil {
 		return nil, err

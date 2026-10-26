@@ -230,14 +230,18 @@ func (t *Gateway) Models() []string {
 	return models
 }
 
-// EnsureVerified returns a valid verification of a replica serving model,
-// trying replicas in random order as a request without a cache prefix does.
+// EnsureVerified returns a valid verification of a replica serving model. It
+// tries replicas in a fixed order for the model, so repeated calls verify the
+// same replica while it stays valid, and stops once ctx is done.
 func (t *Gateway) EnsureVerified(ctx context.Context, model string) (*verify.Verification, error) {
 	hosts, r, err := t.policy.resolve(model, t.catalog())
 	if err != nil {
 		return nil, err
 	}
-	for _, r.host = range rank(hosts, "", "") {
+	for _, r.host = range rank(hosts, model, "") {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return nil, ctxErr
+		}
 		var transport http.RoundTripper
 		if transport, err = t.enclave(r); err != nil {
 			continue

@@ -48,8 +48,8 @@ const (
 // fetchRouters is bounded the same way attestation fetching is: discovery runs
 // before anything is verified, so an unresponsive or oversized reply must not
 // stall client construction or exhaust memory.
-func fetchRouters() ([]string, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), routerFetchTimeout)
+func fetchRouters(ctx context.Context) ([]string, error) {
+	ctx, cancel := context.WithTimeout(ctx, routerFetchTimeout)
 	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, defaultRouterURL, nil)
 	if err != nil {
@@ -176,7 +176,7 @@ func DiscoverRouter(ctx context.Context, v *verify.Verifier) (*Handle, error) {
 	if err != nil {
 		return nil, err
 	}
-	routers, _ := fetchRouters()
+	routers, _ := fetchRouters(ctx)
 	for _, routerURL := range routers {
 		client := fallback.ForEnclave(routerURL)
 		_, err := client.verifiedState(ctx, true, candidateVerificationRetries)
@@ -184,7 +184,9 @@ func DiscoverRouter(ctx context.Context, v *verify.Verifier) (*Handle, error) {
 			return client, nil
 		}
 	}
-
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	return fallback, nil
 }
 
