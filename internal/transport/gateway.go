@@ -149,17 +149,31 @@ func NewGateway(c GatewayConfig) (*Gateway, error) {
 		catalog: catalog,
 		policy:  policy,
 		secret:  ResolveUserCacheSecret(c.UserCacheSecret, c.UserCacheSecret != ""),
-		build: func(r replica) (http.RoundTripper, error) {
-			secure, err := enclave.NewHandleWithVerifier(r.host, r.ref, policy.verifierFor(r))
+		build: func(r replica) (*verifiedReplicaTransport, error) {
+			h, err := enclave.NewHandle(enclave.Config{Host: r.host, Relay: c.Relay, Repo: r.ref, Verifier: policy.verifierFor(r)})
 			if err != nil {
 				return nil, err
 			}
-			secure = secure.ViaRelay(c.Relay)
-			transport, err := Enclave(secure, enclave.EHBP, c.BaseURL)
+			transport, err := Enclave(h, enclave.EHBP, c.BaseURL)
 			if err != nil {
 				return nil, err
 			}
-			return &verifiedReplicaTransport{transport: transport, verification: secure.Verification, ensureVerified: secure.EnsureVerified}, nil
+			return &verifiedReplicaTransport{
+				transport: transport,
+				verification: func() *verify.Verification {
+					if state := h.Current(); state != nil {
+						return state.Verification()
+					}
+					return nil
+				},
+				ensureVerified: func(ctx context.Context) (*verify.Verification, error) {
+					state, err := transport.EnsureVerified(ctx)
+					if err != nil {
+						return nil, err
+					}
+					return state.Verification(), nil
+				},
+			}, nil
 		},
 	}, nil
 }
@@ -167,25 +181,39 @@ func NewGateway(c GatewayConfig) (*Gateway, error) {
 // Gateway seals each request to a verified replica of the model it names.
 // Cache prefixes keep conversations on the same replica across requests.
 type Gateway struct {
-	build    func(replica) (http.RoundTripper, error)
+	build    func(replica) (*verifiedReplicaTransport, error)
 	catalog  func() Catalog
 	policy   gatewayPolicy
 	secret   string
-	enclaves sync.Map // replica to http.RoundTripper
+	enclaves sync.Map // replica to *verifiedReplicaTransport
 	mu       sync.Mutex
 	rerouted map[string]string // cache prefix to host
 }
 
-func (t *Gateway) enclave(r replica) (http.RoundTripper, error) {
+func (t *Gateway) enclave(r replica) (*verifiedReplicaTransport, error) {
 	if rt, ok := t.enclaves.Load(r); ok {
-		return rt.(http.RoundTripper), nil
+		return rt.(*verifiedReplicaTransport), nil
 	}
 	rt, err := t.build(r)
 	if err != nil {
 		return nil, err
 	}
-	t.enclaves.Store(r, rt)
-	return rt, nil
+	actual, _ := t.enclaves.LoadOrStore(r, rt)
+	return actual.(*verifiedReplicaTransport), nil
+}
+
+// verified returns r's transport once r's replica verifies under ctx, so a
+// caller can fall over to another replica before sealing anything to it.
+func (t *Gateway) verified(ctx context.Context, r replica) (*verifiedReplicaTransport, *verify.Verification, error) {
+	rt, err := t.enclave(r)
+	if err != nil {
+		return nil, nil, err
+	}
+	verified, err := rt.ensureVerified(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
+	return rt, verified, nil
 }
 
 // ReplicaVerification holds a replica's last successful verification.
@@ -205,10 +233,7 @@ func (t *Gateway) Verifications() []ReplicaVerification {
 	results := []ReplicaVerification{}
 	t.enclaves.Range(func(key, value any) bool {
 		r := key.(replica)
-		transport, ok := value.(*verifiedReplicaTransport)
-		if !ok {
-			return true
-		}
+		transport := value.(*verifiedReplicaTransport)
 		if verified := transport.verification(); verified != nil {
 			models := []string{}
 			transport.models.Range(func(model, _ any) bool {
@@ -253,12 +278,8 @@ func (t *Gateway) EnsureVerified(ctx context.Context, model string) (*verify.Ver
 		if ctxErr := ctx.Err(); ctxErr != nil {
 			return nil, ctxErr
 		}
-		var transport http.RoundTripper
-		if transport, err = t.enclave(r); err != nil {
-			continue
-		}
 		var verified *verify.Verification
-		if verified, err = transport.(*verifiedReplicaTransport).ensureVerified(ctx); err == nil {
+		if _, verified, err = t.verified(ctx, r); err == nil {
 			return verified, nil
 		}
 	}
@@ -331,10 +352,10 @@ func (t *Gateway) RoundTrip(req *http.Request) (*http.Response, error) {
 	}
 	hasBody := req.Body != nil && req.Body != http.NoBody
 	replayable := !hasBody || req.GetBody != nil
-	var transport http.RoundTripper
+	var transport *verifiedReplicaTransport
 	prefix := req.Header.Get(cachePrefixHeader)
 	for _, r.host = range rank(hosts, prefix, t.reroutedHost(prefix)) {
-		if transport, err = t.enclave(r); err == nil {
+		if transport, _, err = t.verified(req.Context(), r); err == nil {
 			break
 		}
 	}
@@ -365,7 +386,7 @@ func (t *Gateway) RoundTrip(req *http.Request) (*http.Response, error) {
 			return nil, &errs.NetworkError{Err: fmt.Errorf("gateway kept routing away from the enclave the request was sealed to (last: %s)", routed)}
 		}
 		r.host = routed
-		if transport, err = t.enclave(r); err != nil {
+		if transport, _, err = t.verified(req.Context(), r); err != nil {
 			return nil, fmt.Errorf("following gateway route to enclave %s: %w", routed, err)
 		}
 		t.remember(prefix, routed)

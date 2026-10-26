@@ -69,9 +69,7 @@ func TestTLSClientPreservesTLSCategory(t *testing.T) {
 				refreshes++
 				return testState(time.Now().Add(time.Hour), "wrong-pin"), nil
 			}
-			hc, err := s.HTTPClient()
-			require.NoError(t, err)
-			_, err = hc.Get(server.URL)
+			_, err := tlsClient(t, s).Get(server.URL)
 			var attestation *AttestationError
 			require.ErrorAs(t, err, &attestation)
 			var httpError *url.Error

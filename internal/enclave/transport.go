@@ -7,125 +7,113 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-
-	"github.com/tinfoilsh/tinfoil-go/verify"
+	"sync"
 )
 
-// NewTransport admits requests through h only with unexpired verification and
-// sends them over the transport b builds for it. Key rejection invalidates the
-// affected state and is reported through IsKeyRejection. Request replay belongs
-// to the caller. All transports from one handle share its verification and
-// refresh state.
-func NewTransport(h *Handle, b Binding) (http.RoundTripper, error) {
+// NewTransport sends each request over the transport b builds for a state h
+// ensures is valid. It does no network I/O: the first request or
+// EnsureVerified verifies. Key rejection invalidates the state the request was
+// sent under and is reported through IsKeyRejection; request replay belongs to
+// the caller. Transports from one handle share its verification and refresh.
+func NewTransport(h *Handle, b Binding) (*Transport, error) {
 	if b == nil {
 		return nil, &ConfigurationError{Err: fmt.Errorf("transport binding is required")}
 	}
-	t := &clientTransport{client: h, binding: b}
-	if err := h.registerTransport(t); err != nil {
-		return nil, err
-	}
-	return t, nil
+	return &Transport{handle: h, binding: b}, nil
 }
 
-func (s *Handle) registerTransport(t *clientTransport) error {
-	for {
-		state, err := s.verifiedState(context.Background(), false, verificationRetries)
-		if err != nil {
-			return err
-		}
-		s.stateMu.RLock()
-		valid := state.valid()
-		registered := state.transports[t] != nil
-		s.stateMu.RUnlock()
-		if !valid {
-			continue
-		}
-		if registered {
-			return nil
-		}
-		transport, err := t.buildTransport(state.Verification)
-		if err != nil {
-			return err
-		}
-		s.stateMu.Lock()
-		call := s.refreshing
-		if s.state == state && call == nil && state.valid() {
-			if state.transports == nil {
-				state.transports = make(map[*clientTransport]http.RoundTripper)
-			}
-			if existing := state.transports[t]; existing != nil {
-				s.stateMu.Unlock()
-				closeIdleConnections(transport)
-				return nil
-			}
-			state.transports[t] = transport
-			s.stateMu.Unlock()
-			return nil
-		}
-		s.stateMu.Unlock()
-		closeIdleConnections(transport)
-		// Register only against the completed refresh, so every later refresh
-		// includes this transport in the state it publishes.
-		if call != nil {
-			<-call.done
-		}
-	}
-}
-
-type clientTransport struct {
-	client  *Handle
+// Transport binds requests to the keys of a handle's current state. It builds
+// its binding's transport once per state, on the first request under it.
+type Transport struct {
+	handle  *Handle
 	binding Binding
+
+	mu    sync.Mutex
+	state *State // the state inner was built for
+	inner http.RoundTripper
 }
 
-func (t *clientTransport) buildTransport(verified *verify.Verification) (http.RoundTripper, error) {
-	transport, err := t.binding.Transport(detached(verified))
-	if transport == nil && err == nil {
-		err = fmt.Errorf("transport binding returned nil")
-	}
-	if err != nil {
-		closeIdleConnections(transport)
-	}
-	return transport, err
+// errSuperseded reports a state that a newer one replaced after the request
+// was admitted under it.
+var errSuperseded = errors.New("verification superseded")
+
+// EnsureVerified returns a state that is valid now, with the binding's
+// transport built for it, verifying first only if needed.
+func (t *Transport) EnsureVerified(ctx context.Context) (*State, error) {
+	_, state, err := t.admit(ctx)
+	return state, err
 }
 
-func (t *clientTransport) admit(ctx context.Context) (http.RoundTripper, *enclaveState, error) {
+func (t *Transport) admit(ctx context.Context) (http.RoundTripper, *State, error) {
 	for {
-		state, err := t.client.verifiedState(ctx, false, verificationRetries)
+		state, err := t.handle.verifiedState(ctx, false, verificationRetries)
 		if err != nil {
 			return nil, nil, err
 		}
 		if err := ctx.Err(); err != nil {
 			return nil, nil, err
 		}
-		t.client.stateMu.RLock()
-		transport := state.transports[t]
+		inner, err := t.innerFor(state)
+		if errors.Is(err, errSuperseded) {
+			continue
+		}
+		if err != nil {
+			return nil, nil, err
+		}
+		t.handle.stateMu.RLock()
 		valid := state.valid()
-		t.client.stateMu.RUnlock()
+		t.handle.stateMu.RUnlock()
 		if valid {
-			return transport, state, nil
+			return inner, state, nil
 		}
 	}
 }
 
-func (t *clientTransport) RoundTrip(req *http.Request) (*http.Response, error) {
-	transport, state, err := t.admit(req.Context())
+// innerFor returns the binding's transport for state, building it when state
+// is newer than the one the current transport was built for.
+func (t *Transport) innerFor(state *State) (http.RoundTripper, error) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	switch {
+	case state == t.state:
+		return t.inner, nil
+	case t.state != nil && state.generation < t.state.generation:
+		return nil, errSuperseded
+	}
+	// Idle connections of the current transport are bound to keys a newer
+	// state replaced, whether or not its transport builds.
+	closeIdleConnections(t.inner)
+	inner, err := t.binding.Transport(state.Verification())
+	if inner == nil && err == nil {
+		err = fmt.Errorf("transport binding returned nil")
+	}
+	if err != nil {
+		closeIdleConnections(inner)
+		return nil, err
+	}
+	t.state, t.inner = state, inner
+	return inner, nil
+}
+
+func (t *Transport) RoundTrip(req *http.Request) (*http.Response, error) {
+	inner, state, err := t.admit(req.Context())
 	if err != nil {
 		closeRequestBody(req)
 		return nil, err
 	}
-	resp, err := transport.RoundTrip(req)
+	resp, err := inner.RoundTrip(req)
 	if err == nil || !t.binding.KeyRejected(err) {
 		return resp, err
 	}
-	t.client.invalidate(state)
+	t.handle.Invalidate(state)
 	return resp, &keyRejectionError{err}
 }
 
-func (t *clientTransport) CloseIdleConnections() {
-	t.client.stateMu.RLock()
-	transport := t.client.state.transports[t]
-	t.client.stateMu.RUnlock()
-	closeIdleConnections(transport)
+func (t *Transport) CloseIdleConnections() {
+	t.mu.Lock()
+	inner := t.inner
+	t.mu.Unlock()
+	closeIdleConnections(inner)
 }
 
 func closeIdleConnections(transport http.RoundTripper) {

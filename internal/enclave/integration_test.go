@@ -46,7 +46,7 @@ func TestLiveBasicChatCompletion(t *testing.T) {
 	enclave, repo, apiKey := os.Getenv(enclaveEnvVar), os.Getenv(repoEnvVar), os.Getenv(apiKeyEnvVar)
 
 	// Create the enclave handle
-	client, err := NewHandle(enclave, repo, nil)
+	client, err := NewHandle(Config{Host: enclave, Repo: repo})
 	require.NoError(t, err)
 
 	// Prepare chat completion request
@@ -64,8 +64,7 @@ func TestLiveBasicChatCompletion(t *testing.T) {
 	require.NoError(t, err)
 
 	// Make the request over the pinned TLS client
-	hc, err := client.HTTPClient()
-	require.NoError(t, err)
+	hc := tlsClient(t, client)
 	req, err := http.NewRequest(http.MethodPost, "https://"+enclave+"/v1/chat/completions", bytes.NewReader(requestBody))
 	require.NoError(t, err)
 	req.Header.Set("Content-Type", "application/json")

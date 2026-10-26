@@ -2,8 +2,6 @@ package enclave
 
 import (
 	"cmp"
-	"net/http"
-	"net/http/httptest"
 	"os"
 	"testing"
 	"time"
@@ -25,44 +23,13 @@ func defaultFreshnessMaxAge(t *testing.T) time.Duration {
 	return verifier.FreshnessMaxAge()
 }
 
-// verifyDocument verifies raw with the verifier a Handle builds from opts.
-func verifyDocument(raw, nonce []byte, repo string, opts *Options) (*verify.Verification, error) {
-	verifier, err := opts.Verifier()
+// verifyDocument verifies raw with a verifier built from opts.
+func verifyDocument(raw, nonce []byte, repo string, opts ...verify.Option) (*verify.Verification, error) {
+	verifier, err := verify.NewVerifier(opts...)
 	if err != nil {
 		return nil, err
 	}
 	return verifier.VerifyV3(raw, nonce, repo)
-}
-
-func TestClientFreshnessMaxAge(t *testing.T) {
-	defaultMaxAge := defaultFreshnessMaxAge(t)
-	defaults, err := NewHandle("enclave.example", "org/repo", nil)
-	require.NoError(t, err)
-	require.Equal(t, defaultMaxAge, defaults.verifier.FreshnessMaxAge())
-	for _, maxAge := range []time.Duration{-time.Nanosecond, -time.Hour} {
-		opts := Options{FreshnessMaxAge: maxAge}
-		s, err := NewHandle("enclave.example", "org/repo", &opts)
-		require.Nil(t, s)
-		require.ErrorContains(t, err, "freshness maximum age must not be negative")
-		s, err = NewDefaultHandle(&opts)
-		require.Nil(t, s)
-		require.ErrorContains(t, err, "freshness maximum age must not be negative")
-		_, err = verifyDocument(nil, nil, "org/repo", &opts)
-		require.ErrorContains(t, err, "freshness maximum age must not be negative")
-	}
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte("[]")) }))
-	defer server.Close()
-	originalURL := defaultRouterURL
-	defaultRouterURL = server.URL
-	t.Cleanup(func() { defaultRouterURL = originalURL })
-	for _, maxAge := range []time.Duration{0, 24 * time.Hour, 30 * 24 * time.Hour} {
-		opts := Options{FreshnessMaxAge: maxAge, PinnedRegisters: measurement.ExpectedTDX{RTMR3: &measurement.Register{}}}
-		s, err := NewDefaultHandle(&opts)
-		require.NoError(t, err)
-		require.Equal(t, "inference.tinfoil.sh", s.Enclave())
-		require.Equal(t, cmp.Or(maxAge, defaultMaxAge), s.verifier.FreshnessMaxAge())
-		require.Equal(t, opts.PinnedRegisters, s.verifier.PinnedRegisters())
-	}
 }
 
 func TestLiveVerifyFreshnessExpiration(t *testing.T) {
@@ -73,24 +40,25 @@ func TestLiveVerifyFreshnessExpiration(t *testing.T) {
 	require.NoError(t, err)
 	raw, err := fetch.Document(t.Context(), host, "", nonce)
 	require.NoError(t, err)
-	verified, err := verifyDocument(raw, nonce, repo, nil)
+	verified, err := verifyDocument(raw, nonce, repo)
 	require.NoError(t, err)
 	const maxAge = 30 * 24 * time.Hour
 	for _, age := range []time.Duration{0, maxAge} {
-		opts := Options{FreshnessMaxAge: age, PinnedRegisters: exactPins(verified.EnclaveMeasurement(), nil)}
-		custom, err := verifyDocument(raw, nonce, repo, &opts)
+		custom, err := verifyDocument(raw, nonce, repo, verify.WithFreshnessMaxAge(age), verify.WithPinnedRegisters(exactPins(verified.EnclaveMeasurement(), nil)))
 		require.NoError(t, err)
 		require.Equal(t, verified.FreshnessExpiresAt().Add(cmp.Or(age, defaultMaxAge)-defaultMaxAge), custom.FreshnessExpiresAt())
 	}
 	bad := measurement.Register{0xab}
 	badPins := exactPins(verified.EnclaveMeasurement(), &bad)
 	require.NotEqual(t, exactPins(verified.EnclaveMeasurement(), nil), badPins)
-	_, err = verifyDocument(raw, nonce, repo, &Options{PinnedRegisters: badPins})
+	_, err = verifyDocument(raw, nonce, repo, verify.WithPinnedRegisters(badPins))
 	var rejected *verify.VerificationError
 	require.ErrorAs(t, err, &rejected)
-	s, err := NewDefaultHandle(&Options{PinnedRegisters: badPins, FreshnessMaxAge: maxAge})
+	v, err := verify.NewVerifier(verify.WithPinnedRegisters(badPins), verify.WithFreshnessMaxAge(maxAge))
 	require.NoError(t, err)
-	_, err = s.Verify()
+	s, err := DiscoverRouter(t.Context(), v)
+	require.NoError(t, err)
+	_, err = s.EnsureVerified(t.Context())
 	var attestation *AttestationError
 	require.ErrorAs(t, err, &attestation)
 }

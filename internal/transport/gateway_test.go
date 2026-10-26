@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -19,9 +20,34 @@ const (
 	sealTestInitial = "initial.example"
 )
 
-func sealTestTransport(build func(host string) (http.RoundTripper, error)) *Gateway {
+// sealTestTransport serves each replica through the transport connect returns
+// for its host. Like a handle verifying, a replica calls connect until it
+// succeeds, then reuses the result.
+func sealTestTransport(connect func(host string) (http.RoundTripper, error)) *Gateway {
 	return &Gateway{
-		build: func(r replica) (http.RoundTripper, error) { return build(r.host) },
+		build: func(r replica) (*verifiedReplicaTransport, error) {
+			var mu sync.Mutex
+			var verified http.RoundTripper
+			return &verifiedReplicaTransport{
+				transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+					mu.Lock()
+					defer mu.Unlock()
+					return verified.RoundTrip(req)
+				}),
+				ensureVerified: func(context.Context) (*verify.Verification, error) {
+					mu.Lock()
+					defer mu.Unlock()
+					if verified == nil {
+						transport, err := connect(r.host)
+						if err != nil {
+							return nil, err
+						}
+						verified = transport
+					}
+					return nil, nil
+				},
+			}, nil
+		},
 		catalog: func() Catalog {
 			return Catalog{sealTestModel: {Repo: "tinfoilsh/test", Hosts: []string{sealTestInitial}}}
 		},
@@ -200,6 +226,37 @@ func TestSealJSONRoutingPreservesInjectedBodyAcrossRetries(t *testing.T) {
 	}
 }
 
+func TestSealFallsOverToAReplicaThatVerifies(t *testing.T) {
+	// The cache prefix of the request below, as TestSealJSONRoutingPreservesInjectedBodyAcrossRetries pins it.
+	const prefix = "ca60642ff6701647124356235d2c925e34117bc73a99b477d4e280c5f0c03527"
+	hosts := []string{"a.example", "b.example", "c.example"}
+	order := rank(hosts, prefix, "")
+	failure := errors.New("verification failed")
+	var verified, sent []string
+	seal := sealTestTransport(func(host string) (http.RoundTripper, error) {
+		verified = append(verified, host)
+		if host != order[2] {
+			return nil, failure
+		}
+		return roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			req.Body.Close()
+			sent = append(sent, req.Header.Get(sealHeader))
+			return newResponse(http.StatusNoContent, ""), nil
+		}), nil
+	})
+	seal.catalog = func() Catalog { return Catalog{sealTestModel: {Repo: "tinfoilsh/test", Hosts: hosts}} }
+	seal.secret = "test-secret"
+	req, err := http.NewRequest(http.MethodPost, "https://gateway.example/v1/chat/completions", strings.NewReader(`{"model":"test-model","messages":[{"role":"user","content":"hello"}]}`))
+	require.NoError(t, err)
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer test-api-key")
+	resp, err := seal.RoundTrip(req)
+	require.NoError(t, err)
+	resp.Body.Close()
+	require.Equal(t, order, verified, "replicas are verified in rank order until one passes")
+	require.Equal(t, []string{order[2]}, sent, "the request is sealed only to a replica that verified")
+}
+
 func TestSealPerRequestCacheSecretOverridesClientSecret(t *testing.T) {
 	salt := func(clientSecret, body string) (json.RawMessage, string) {
 		var fields map[string]json.RawMessage
@@ -252,15 +309,15 @@ func TestGatewayEnsureVerifiedFallsOver(t *testing.T) {
 	order := rank(hosts, sealTestModel, "")
 	buildFails, expired := order[0], order[1]
 	catalog := func() Catalog { return Catalog{sealTestModel: {Repo: "tinfoilsh/test", Hosts: hosts}} }
-	newGateway := func(attempts *[]string, build func(replica) (http.RoundTripper, error)) *Gateway {
-		return &Gateway{catalog: catalog, build: func(r replica) (http.RoundTripper, error) {
+	newGateway := func(attempts *[]string, build func(replica) (*verifiedReplicaTransport, error)) *Gateway {
+		return &Gateway{catalog: catalog, build: func(r replica) (*verifiedReplicaTransport, error) {
 			*attempts = append(*attempts, r.host)
 			return build(r)
 		}}
 	}
 
 	var attempts []string
-	seal := newGateway(&attempts, func(r replica) (http.RoundTripper, error) {
+	seal := newGateway(&attempts, func(r replica) (*verifiedReplicaTransport, error) {
 		switch r.host {
 		case buildFails:
 			return nil, failure
@@ -275,7 +332,7 @@ func TestGatewayEnsureVerifiedFallsOver(t *testing.T) {
 	require.Equal(t, order, attempts, "replicas are tried in the model's fixed order until one verifies")
 
 	attempts = nil
-	unreachable := newGateway(&attempts, func(replica) (http.RoundTripper, error) { return nil, failure })
+	unreachable := newGateway(&attempts, func(replica) (*verifiedReplicaTransport, error) { return nil, failure })
 	_, err = unreachable.EnsureVerified(context.Background(), sealTestModel)
 	require.ErrorIs(t, err, failure)
 	require.Equal(t, order, attempts)
@@ -283,7 +340,31 @@ func TestGatewayEnsureVerifiedFallsOver(t *testing.T) {
 	attempts = nil
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	_, err = newGateway(&attempts, func(replica) (http.RoundTripper, error) { return nil, failure }).EnsureVerified(ctx, sealTestModel)
+	_, err = newGateway(&attempts, func(replica) (*verifiedReplicaTransport, error) { return nil, failure }).EnsureVerified(ctx, sealTestModel)
 	require.ErrorIs(t, err, context.Canceled)
 	require.Empty(t, attempts, "a done context stops before any replica is built")
+}
+
+func TestGatewayKeepsOneTransportPerReplica(t *testing.T) {
+	arrived, proceed := make(chan struct{}, 2), make(chan struct{})
+	seal := &Gateway{build: func(replica) (*verifiedReplicaTransport, error) {
+		arrived <- struct{}{}
+		<-proceed
+		return &verifiedReplicaTransport{}, nil
+	}}
+	results := make(chan *verifiedReplicaTransport, 2)
+	for range 2 {
+		go func() {
+			rt, _ := seal.enclave(replica{host: "a.example"})
+			results <- rt
+		}()
+	}
+	<-arrived
+	<-arrived
+	close(proceed)
+	first, second := <-results, <-results
+	require.NotNil(t, first)
+	// One transport means one handle, whose refresh concurrent requests share;
+	// internal/enclave tests that.
+	require.Same(t, first, second, "concurrent first uses share one replica transport")
 }
