@@ -97,6 +97,10 @@ func (t *BoundTransport) innerFor(state *State) (http.RoundTripper, error) {
 }
 
 func (t *BoundTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	if err := t.binding.Check(req); err != nil {
+		closeRequestBody(req)
+		return nil, err
+	}
 	inner, state, err := t.admit(req.Context())
 	if err != nil {
 		closeRequestBody(req)

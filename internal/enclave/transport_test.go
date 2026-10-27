@@ -36,6 +36,7 @@ type bindingFuncs struct {
 
 func (b bindingFuncs) Transport(v *verify.Verification) (http.RoundTripper, error) { return b.build(v) }
 func (b bindingFuncs) KeyRejected(err error) bool                                  { return b.isKeyError != nil && b.isKeyError(err) }
+func (bindingFuncs) Check(*http.Request) error                                     { return nil }
 
 func bindTransport(s *Handle, build func(*verify.Verification) (http.RoundTripper, error), isKeyError func(error) bool) (*BoundTransport, error) {
 	return NewBoundTransport(s, bindingFuncs{build: build, isKeyError: isKeyError})

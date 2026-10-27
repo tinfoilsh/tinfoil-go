@@ -2,6 +2,8 @@ package enclave
 
 import (
 	"errors"
+	"io"
+	"net/http"
 	"strings"
 	"testing"
 
@@ -53,6 +55,75 @@ func TestEHBPBindingBuildsTransportForEachAttestedKey(t *testing.T) {
 		transport, err := EHBP.Transport(hpkeVerification(key))
 		require.NoError(t, err)
 		require.NotNil(t, transport)
+	}
+}
+
+type closeTrackingBody struct{ closed bool }
+
+func (*closeTrackingBody) Read([]byte) (int, error) { return 0, io.EOF }
+func (b *closeTrackingBody) Close() error           { b.closed = true; return nil }
+
+func newRequest(t *testing.T, method, url string, body io.Reader) *http.Request {
+	t.Helper()
+	req, err := http.NewRequest(method, url, body)
+	require.NoError(t, err)
+	return req
+}
+
+func websocketUpgrade(t *testing.T, url string) *http.Request {
+	req := newRequest(t, http.MethodGet, url, nil)
+	req.Header.Set("Connection", "Upgrade")
+	req.Header.Set("Upgrade", "websocket")
+	return req
+}
+
+func TestBindingsRefuseRequestsTheyCantProtect(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		binding Binding
+		req     *http.Request
+		refused error
+	}{
+		{"EHBP WebSocket upgrade", EHBP, websocketUpgrade(t, "https://enclave.example/v1/realtime"), errEHBPTunnel},
+		{"EHBP CONNECT tunnel", EHBP, newRequest(t, http.MethodConnect, "https://enclave.example/", nil), errEHBPTunnel},
+		{"EHBP request without a body", EHBP, newRequest(t, http.MethodGet, "https://enclave.example/v1/models", nil), nil},
+		{"EHBP request with a body", EHBP, newRequest(t, http.MethodPost, "https://enclave.example/v1/chat/completions", strings.NewReader("{}")), nil},
+		{"TLS WebSocket upgrade", TLS, websocketUpgrade(t, "https://enclave.example/v1/realtime"), nil},
+		{"TLS plaintext request", TLS, newRequest(t, http.MethodGet, "http://enclave.example/v1/models", nil), errNoTLS},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			err := tc.binding.Check(tc.req)
+			if tc.refused == nil {
+				require.NoError(t, err)
+				return
+			}
+			var config *ConfigurationError
+			require.ErrorAs(t, err, &config)
+			require.ErrorIs(t, err, tc.refused)
+		})
+	}
+}
+
+func TestBoundTransportChecksBeforeVerifying(t *testing.T) {
+	h := &Handle{verify: func() (*verify.Verification, error) {
+		t.Error("verified for a request the binding refuses")
+		return nil, errors.New("unreachable")
+	}}
+	for _, tc := range []struct {
+		binding Binding
+		req     *http.Request
+		refused error
+	}{
+		{EHBP, websocketUpgrade(t, "https://enclave.example/v1/realtime"), errEHBPTunnel},
+		{TLS, newRequest(t, http.MethodGet, "http://enclave.example/v1/models", nil), errNoTLS},
+	} {
+		bound, err := NewBoundTransport(h, tc.binding)
+		require.NoError(t, err)
+		body := &closeTrackingBody{}
+		tc.req.Body = body
+		_, err = bound.RoundTrip(tc.req)
+		require.ErrorIs(t, err, tc.refused)
+		require.True(t, body.closed, "a refused request's body is closed")
 	}
 }
 

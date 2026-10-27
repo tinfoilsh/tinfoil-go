@@ -21,8 +21,10 @@ const (
 	// whole request and response, and needs a direct connection.
 	BindingTLS Binding = "tls"
 	// BindingEHBP seals request and response bodies to the attested HPKE key,
-	// so they stay private through a proxy. Requests without a body aren't
-	// sealed.
+	// so they stay private through a proxy. The method, URL and headers aren't
+	// sealed, and neither is a request without a body or its response. It
+	// refuses protocol upgrades, such as WebSockets, and CONNECT tunnels,
+	// because nothing after the handshake would be sealed.
 	BindingEHBP Binding = "ehbp"
 )
 

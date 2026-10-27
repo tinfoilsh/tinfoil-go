@@ -49,7 +49,9 @@ type ModelPin struct {
 type ReplicaVerification = gateway.ReplicaVerification
 
 // GatewayHTTPClient is an *http.Client for Tinfoil inference through the gateway.
-// Each request is sealed to a verified replica of the model it names.
+// Each request is sealed to a verified replica of the model it names, as with
+// BindingEHBP: the gateway sees the method, URL and headers, and WebSocket
+// upgrades are refused.
 type GatewayHTTPClient struct {
 	*http.Client
 	// secure is the client OpenAI clients use, which changes to the embedded
