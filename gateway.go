@@ -31,7 +31,7 @@ type GatewayOptions struct {
 	// URL is the gateway's base URL; empty selects Tinfoil's gateway.
 	URL string
 	// Catalog is read on every request and must return an immutable map safe
-	// for concurrent readers; nil fetches the gateway's catalog once.
+	// for concurrent readers; nil fetches the gateway's catalog on first use.
 	Catalog func() Catalog
 }
 
@@ -57,8 +57,8 @@ type GatewayHTTPClient struct {
 	seal    *gateway.Transport
 }
 
-// NewGatewayHTTPClient copies opts, and fetches the gateway's catalog unless
-// opts.Catalog supplies it. Replicas are verified on first use.
+// NewGatewayHTTPClient copies opts and does no network I/O: the catalog is
+// fetched and replicas are verified on first use.
 func NewGatewayHTTPClient(opts *GatewayOptions) (*GatewayHTTPClient, error) {
 	if opts == nil {
 		opts = &GatewayOptions{}
@@ -99,10 +99,7 @@ func (c *GatewayHTTPClient) BaseURL() string {
 // Models returns the catalog's models that the client's policy serves,
 // sorted, without verifying replicas.
 func (c *GatewayHTTPClient) Models(ctx context.Context) ([]string, error) {
-	if err := ctx.Err(); err != nil {
-		return nil, err
-	}
-	return c.seal.Models(), nil
+	return c.seal.Models(ctx)
 }
 
 // EnsureVerified returns a verification that is valid now of a replica

@@ -123,7 +123,8 @@ type Config struct {
 	// BaseURL is where requests are sent, and Relay is the gateway host that
 	// attestation is fetched through.
 	BaseURL, Relay string
-	// Catalog is read on every request; nil fetches it once from Relay.
+	// Catalog is read on every request; nil fetches it from Relay on first
+	// use.
 	Catalog          func() Catalog
 	ModelPins        map[string]ModelPin
 	PinnedModelsOnly bool
@@ -134,19 +135,16 @@ type Config struct {
 	UserCacheSecret string
 }
 
-// NewTransport copies the policy in c. Replicas are verified on first use.
+// NewTransport copies the policy in c and does no network I/O: the catalog is
+// fetched and replicas are verified on first use.
 func NewTransport(c Config) (*Transport, error) {
 	policy, err := newGatewayPolicy(c.ModelPins, c.PinnedModelsOnly, c.Verifier)
 	if err != nil {
 		return nil, &errs.ConfigurationError{Err: err}
 	}
-	catalog := c.Catalog
-	if catalog == nil {
-		fetched, err := FetchCatalog(c.Relay)
-		if err != nil {
-			return nil, err
-		}
-		catalog = func() Catalog { return fetched }
+	catalog := func(context.Context) (Catalog, error) { return c.Catalog(), nil }
+	if c.Catalog == nil {
+		catalog = (&lazyCatalog{fetch: func(ctx context.Context) (Catalog, error) { return fetchCatalog(ctx, c.Relay) }}).get
 	}
 	return &Transport{
 		catalog: catalog,
@@ -185,7 +183,7 @@ func NewTransport(c Config) (*Transport, error) {
 // Cache prefixes keep conversations on the same replica across requests.
 type Transport struct {
 	build    func(replica) (*verifiedReplicaTransport, error)
-	catalog  func() Catalog
+	catalog  func(context.Context) (Catalog, error)
 	policy   gatewayPolicy
 	secret   string
 	enclaves sync.Map // replica to *verifiedReplicaTransport
@@ -257,8 +255,14 @@ func (t *Transport) Verifications() []ReplicaVerification {
 
 // Models returns the catalog's models that the policy serves, sorted, without
 // verifying replicas.
-func (t *Transport) Models() []string {
-	catalog := t.catalog()
+func (t *Transport) Models(ctx context.Context) ([]string, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	catalog, err := t.catalog(ctx)
+	if err != nil {
+		return nil, err
+	}
 	models := []string{}
 	for model := range catalog {
 		if _, _, err := t.policy.resolve(model, catalog); err == nil {
@@ -266,14 +270,18 @@ func (t *Transport) Models() []string {
 		}
 	}
 	slices.Sort(models)
-	return models
+	return models, nil
 }
 
 // EnsureVerified returns a valid verification of a replica serving model. It
 // tries replicas in a fixed order for the model, so repeated calls verify the
 // same replica while it stays valid, and stops once ctx is done.
 func (t *Transport) EnsureVerified(ctx context.Context, model string) (*verify.Verification, error) {
-	hosts, r, err := t.policy.resolve(model, t.catalog())
+	catalog, err := t.catalog(ctx)
+	if err != nil {
+		return nil, err
+	}
+	hosts, r, err := t.policy.resolve(model, catalog)
 	if err != nil {
 		return nil, err
 	}
@@ -348,7 +356,12 @@ func (t *Transport) RoundTrip(req *http.Request) (*http.Response, error) {
 		return nil, err
 	}
 	model := req.Header.Get(modelHeader)
-	hosts, r, err := t.policy.resolve(model, t.catalog())
+	catalog, err := t.catalog(req.Context())
+	if err != nil {
+		closeRequestBody(req)
+		return nil, err
+	}
+	hosts, r, err := t.policy.resolve(model, catalog)
 	if err != nil {
 		closeRequestBody(req)
 		return nil, err

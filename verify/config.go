@@ -59,21 +59,50 @@ func WithFreshnessSigningKeys(keys []crypto.PublicKey) Option {
 	}
 }
 
-func (v *Verifier) configReferences(doc *document.Document, ref string, now time.Time) (*endorsementResult, error) {
+// referencePins returns the config pins ref sets under v's policy, or a usage
+// error if VerifyV3 rejects ref whatever the document. Every check of that
+// kind belongs here, so CheckRepoVerifiability makes it too.
+func (v *Verifier) referencePins(ref string) (endorsement.ConfigPolicy, error) {
+	var pins endorsement.ConfigPolicy
 	if v.configAuthorizer != nil && ref != "" {
-		return nil, usageError(fmt.Errorf("config authorizer cannot authenticate repository or revision pins; enforce them in caller policy"))
+		return pins, usageError(fmt.Errorf("config authorizer cannot authenticate repository or revision pins; enforce them in caller policy"))
 	}
-	pins := endorsement.ConfigPolicy{Now: now, MaxAge: v.freshnessMaxAge}
 	if ref != "" || (v.embedded.Config == nil && v.configAuthorizer == nil) {
 		parsed, err := endorsement.ParseReference(ref)
 		if err != nil {
-			return nil, usageError(err)
+			return pins, usageError(err)
 		}
 		pins.Identity, pins.Revision, pins.Digest = "/"+parsed.Repo, parsed.Tag, parsed.Digest
+	}
+	if embedded := v.embedded.Config; embedded != nil {
+		var identity, revision string
+		if embedded.Name != "" {
+			var err error
+			if identity, revision, err = configendorsement.ParseName(embedded.Name); err != nil {
+				return pins, usageError(err)
+			}
+		}
+		digest := sha256.Sum256(embedded.Bytes)
+		if (pins.Identity != "" && pins.Identity != identity) || (pins.Revision != "" && pins.Revision != revision) || (pins.Digest != "" && pins.Digest != hex.EncodeToString(digest[:])) {
+			return pins, usageError(fmt.Errorf("embedded config does not match the caller's pins"))
+		}
+	}
+	return pins, nil
+}
+
+func (v *Verifier) configReferences(doc *document.Document, ref string, now time.Time) (*endorsementResult, error) {
+	pins, err := v.referencePins(ref)
+	if err != nil {
+		return nil, err
+	}
+	// Config identities and revisions are stricter than the repository
+	// references v2 collateral accepts, so only v3 collateral checks them.
+	if pins.Identity != "" {
 		if err := pins.ValidatePins(); err != nil {
 			return nil, usageError(err)
 		}
 	}
+	pins.Now, pins.MaxAge = now, v.freshnessMaxAge
 	config, approved, err := v.resolveConfig(doc, pins)
 	if err != nil {
 		return nil, err
@@ -106,20 +135,9 @@ func (v *Verifier) configReferences(doc *document.Document, ref string, now time
 
 func (v *Verifier) resolveConfig(doc *document.Document, pins endorsement.ConfigPolicy) ([]byte, *ConfigVerification, error) {
 	if embedded := v.embedded.Config; embedded != nil {
-		var identity, revision string
-		if embedded.Name != "" {
-			var err error
-			identity, revision, err = configendorsement.ParseName(embedded.Name)
-			if err != nil {
-				return nil, nil, err
-			}
-		}
+		// referencePins matched the pins against it.
 		digest := sha256.Sum256(embedded.Bytes)
-		hexDigest := hex.EncodeToString(digest[:])
-		if (pins.Identity != "" && pins.Identity != identity) || (pins.Revision != "" && pins.Revision != revision) || (pins.Digest != "" && pins.Digest != hexDigest) {
-			return nil, nil, usageError(fmt.Errorf("embedded config does not match the caller's pins"))
-		}
-		return embedded.Bytes, &ConfigVerification{Source: SourceEmbedded, Name: embedded.Name, Digest: hexDigest}, nil
+		return embedded.Bytes, &ConfigVerification{Source: SourceEmbedded, Name: embedded.Name, Digest: hex.EncodeToString(digest[:])}, nil
 	}
 	config, err := doc.ConfigEndorsement()
 	if err != nil {

@@ -122,6 +122,25 @@ func ParseReference(ref string) (repo, tag, digest string, err error) {
 // FreshnessMaxAge reports the configured witness age bound.
 func (v *Verifier) FreshnessMaxAge() time.Duration { return v.freshnessMaxAge }
 
+// CheckRepoVerifiability reports whether v can verify an enclave against the
+// repository pin repo, without a document or network I/O, so a caller can
+// reject a pin before fetching a document. It returns a UsageError when:
+//   - repo is not an org/project[@revision][@sha256:digest] reference, or is
+//     empty while neither an embedded config nor a config authorizer supplies
+//     the config;
+//   - repo is set and v has a config authorizer, which can't authenticate a
+//     repository pin;
+//   - v has an embedded config whose name or digest repo doesn't match.
+//
+// VerifyV3 rejects every such repo, whatever the document. It can still reject
+// a repo that passes: v3 collateral also requires the repo and revision to be
+// valid config identity components, such as lowercase slugs, and v2
+// collateral doesn't, so that check waits for the document.
+func (v *Verifier) CheckRepoVerifiability(repo string) error {
+	_, err := v.referencePins(repo)
+	return err
+}
+
 // CallerAuthorizesConfig reports whether the caller supplies the config, with
 // an embedded config, or authorizes it, with a config authorizer, instead of
 // a repository pin authenticating it.

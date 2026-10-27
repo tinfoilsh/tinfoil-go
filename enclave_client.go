@@ -71,9 +71,10 @@ type EnclaveHTTPClient struct {
 	baseURL, openAIURL string
 }
 
-// NewEnclaveHTTPClient verifies the enclave at host against repo,
-// owner/name[@tag][@sha256:digest]. An empty repo leaves config
-// authorization to opts.Verifier.
+// NewEnclaveHTTPClient returns a client for the enclave at host, verified
+// against repo, owner/name[@tag][@sha256:digest]. An empty repo leaves config
+// authorization to opts.Verifier. It does no network I/O: the enclave is
+// verified on the first request, or by EnsureVerified to fail fast.
 func NewEnclaveHTTPClient(host, repo string, opts *EnclaveOptions) (*EnclaveHTTPClient, error) {
 	if host == "" {
 		return nil, &ConfigurationError{Err: errors.New("enclave host is required")}
@@ -94,7 +95,7 @@ func NewEnclaveHTTPClient(host, repo string, opts *EnclaveOptions) (*EnclaveHTTP
 	if err != nil {
 		return nil, err
 	}
-	return newEnclaveHTTPClient(context.Background(), handle, binding, opts)
+	return newEnclaveHTTPClient(handle, binding, opts)
 }
 
 // DiscoverRouter returns a client for the first router from Tinfoil's router
@@ -124,18 +125,21 @@ func DiscoverRouter(ctx context.Context, opts *EnclaveOptions) (*EnclaveHTTPClie
 	if err != nil {
 		return nil, err
 	}
-	return newEnclaveHTTPClient(ctx, handle, binding, opts)
-}
-
-// newEnclaveHTTPClient verifies under ctx before returning, which discovery
-// leaves undone for its fallback.
-func newEnclaveHTTPClient(ctx context.Context, handle *enclave.Handle, binding enclave.Binding, opts *EnclaveOptions) (*EnclaveHTTPClient, error) {
-	secure, bound, err := secureHTTPClient(handle, binding, opts.BaseURL,
-		transport.ResolveUserCacheSecret(opts.UserCacheSecret, opts.UserCacheSecret != ""))
+	client, err := newEnclaveHTTPClient(handle, binding, opts)
 	if err != nil {
 		return nil, err
 	}
-	if _, err := bound.EnsureVerified(ctx); err != nil {
+	// Discovery leaves its fallback unverified.
+	if _, err := client.EnsureVerified(ctx); err != nil {
+		return nil, err
+	}
+	return client, nil
+}
+
+func newEnclaveHTTPClient(handle *enclave.Handle, binding enclave.Binding, opts *EnclaveOptions) (*EnclaveHTTPClient, error) {
+	secure, bound, err := secureHTTPClient(handle, binding, opts.BaseURL,
+		transport.ResolveUserCacheSecret(opts.UserCacheSecret, opts.UserCacheSecret != ""))
+	if err != nil {
 		return nil, err
 	}
 	return &EnclaveHTTPClient{
