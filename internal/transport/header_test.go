@@ -9,14 +9,8 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
-	"github.com/tinfoilsh/tinfoil-go/internal/enclave"
+	"github.com/tinfoilsh/tinfoil-go/internal/errs"
 )
-
-type roundTripFunc func(*http.Request) (*http.Response, error)
-
-func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
-	return f(req)
-}
 
 func newResponse(status int, body string) *http.Response {
 	return &http.Response{
@@ -24,20 +18,6 @@ func newResponse(status int, body string) *http.Response {
 		Body:       io.NopCloser(bytes.NewBufferString(body)),
 		Header:     make(http.Header),
 	}
-}
-
-func TestValidateTLSBaseURL(t *testing.T) {
-	require.NoError(t, ValidateTLSBaseURL("", "enclave.example.com"))
-	require.NoError(t, ValidateTLSBaseURL("https://enclave.example.com/custom/v1", "enclave.example.com"))
-	require.NoError(t, ValidateTLSBaseURL("https://enclave.example.com:443/custom/v1", "enclave.example.com"))
-
-	err := ValidateTLSBaseURL("https://proxy.example.com/v1", "enclave.example.com")
-	require.Error(t, err)
-	require.Contains(t, err.Error(), "verified enclave origin")
-
-	err = ValidateTLSBaseURL("http://enclave.example.com/v1", "enclave.example.com")
-	require.Error(t, err)
-	require.Contains(t, err.Error(), "verified enclave origin")
 }
 
 func TestEnclaveURLHeaderValue(t *testing.T) {
@@ -94,8 +74,8 @@ func TestWithEnclaveURLPreservesAdmissionAndProxyHeader(t *testing.T) {
 	}))
 	defer proxy.Close()
 
-	admissionFailure := &enclave.AttestationError{Err: errors.New("expired witnesses")}
-	hc := &http.Client{Transport: withEnclaveURL(roundTripFunc(func(*http.Request) (*http.Response, error) {
+	admissionFailure := &errs.AttestationError{Err: errors.New("expired witnesses")}
+	hc := &http.Client{Transport: WithEnclaveURL(roundTripFunc(func(*http.Request) (*http.Response, error) {
 		return nil, admissionFailure
 	}), "enclave.example", proxy.URL)}
 	_, err := hc.Get(proxy.URL)
@@ -105,7 +85,7 @@ func TestWithEnclaveURLPreservesAdmissionAndProxyHeader(t *testing.T) {
 	// Every request, including retries, keeps routing to the client's enclave.
 	// The header sits above the bound transport, so re-verification, which only
 	// rebuilds the transport below it, can't drop it.
-	transport := withEnclaveURL(http.DefaultTransport, "enclave.example", proxy.URL)
+	transport := WithEnclaveURL(http.DefaultTransport, "enclave.example", proxy.URL)
 	for range 2 {
 		req, err := http.NewRequest(http.MethodGet, proxy.URL, nil)
 		require.NoError(t, err)
@@ -116,6 +96,6 @@ func TestWithEnclaveURLPreservesAdmissionAndProxyHeader(t *testing.T) {
 		require.Empty(t, req.Header.Get(enclaveURLHeader), "do not mutate the caller's request")
 	}
 
-	_, wrapped := withEnclaveURL(http.DefaultTransport, "enclave.example", "https://enclave.example/v1/").(*enclaveURLHeaderTransport)
+	_, wrapped := WithEnclaveURL(http.DefaultTransport, "enclave.example", "https://enclave.example/v1/").(*enclaveURLHeaderTransport)
 	require.False(t, wrapped, "a base URL on the enclave's origin needs no header")
 }

@@ -6,8 +6,11 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 
+	"github.com/tinfoilsh/tinfoil-go/internal/cachesecret"
 	"github.com/tinfoilsh/tinfoil-go/internal/enclave"
+	"github.com/tinfoilsh/tinfoil-go/internal/router"
 	"github.com/tinfoilsh/tinfoil-go/internal/transport"
 	"github.com/tinfoilsh/tinfoil-go/verify"
 )
@@ -28,16 +31,15 @@ const (
 	BindingEHBP Binding = "ehbp"
 )
 
-func (b Binding) enclaveBinding(routeDefault enclave.Binding) (enclave.Binding, error) {
+// resolve returns b, or routeDefault for the zero value.
+func (b Binding) resolve(routeDefault Binding) (Binding, error) {
 	switch b {
 	case "":
 		return routeDefault, nil
-	case BindingTLS:
-		return enclave.TLS, nil
-	case BindingEHBP:
-		return enclave.EHBP, nil
+	case BindingTLS, BindingEHBP:
+		return b, nil
 	}
-	return nil, &ConfigurationError{Err: fmt.Errorf("unknown binding %q", b)}
+	return "", &ConfigurationError{Err: fmt.Errorf("unknown binding %q", b)}
 }
 
 // EnclaveOptions configures an EnclaveHTTPClient.
@@ -66,7 +68,7 @@ type EnclaveOptions struct {
 type EnclaveHTTPClient struct {
 	*http.Client
 	handle *enclave.Handle
-	bound  *transport.EnclaveTransport
+	keyed  *transport.Transport
 	// secure is the client OpenAI clients use, which changes to the embedded
 	// client can't reach.
 	secure             *http.Client
@@ -84,7 +86,7 @@ func NewEnclaveHTTPClient(host, repo string, opts *EnclaveOptions) (*EnclaveHTTP
 	if opts == nil {
 		opts = &EnclaveOptions{}
 	}
-	binding, err := opts.Binding.enclaveBinding(enclave.TLS)
+	binding, err := opts.Binding.resolve(BindingTLS)
 	if err != nil {
 		return nil, err
 	}
@@ -108,7 +110,7 @@ func DiscoverRouter(ctx context.Context, opts *EnclaveOptions) (*EnclaveHTTPClie
 	if opts == nil {
 		opts = &EnclaveOptions{}
 	}
-	binding, err := opts.Binding.enclaveBinding(enclave.EHBP)
+	binding, err := opts.Binding.resolve(BindingEHBP)
 	if err != nil {
 		return nil, err
 	}
@@ -116,14 +118,14 @@ func DiscoverRouter(ctx context.Context, opts *EnclaveOptions) (*EnclaveHTTPClie
 		if err := validateBaseURL(opts.BaseURL); err != nil {
 			return nil, err
 		}
-		if binding == enclave.TLS {
+		if binding == BindingTLS {
 			return nil, &ConfigurationError{Err: errors.New("a base URL requires BindingEHBP when discovering the router")}
 		}
 	}
 	if opts.Verifier != nil && opts.Verifier.CallerAuthorizesConfig() {
 		return nil, &ConfigurationError{Err: errors.New("caller-authorized config requires an explicit enclave")}
 	}
-	handle, err := enclave.DiscoverRouter(ctx, opts.Verifier)
+	handle, err := router.Discover(ctx, opts.Verifier)
 	if err != nil {
 		return nil, err
 	}
@@ -138,20 +140,48 @@ func DiscoverRouter(ctx context.Context, opts *EnclaveOptions) (*EnclaveHTTPClie
 	return client, nil
 }
 
-func newEnclaveHTTPClient(handle *enclave.Handle, binding enclave.Binding, opts *EnclaveOptions) (*EnclaveHTTPClient, error) {
-	secure, bound, err := secureHTTPClient(handle, binding, opts.BaseURL,
-		transport.ResolveUserCacheSecret(opts.UserCacheSecret, opts.UserCacheSecret != ""))
+func newEnclaveHTTPClient(handle *enclave.Handle, binding Binding, opts *EnclaveOptions) (*EnclaveHTTPClient, error) {
+	if binding == BindingTLS {
+		if err := validateTLSBaseURL(opts.BaseURL, handle.Enclave()); err != nil {
+			return nil, &ConfigurationError{Err: err}
+		}
+	}
+	keyed := keyedTransport(binding, handle)
+	rt, err := enclaveChain(keyed, handle.Enclave(), opts.BaseURL,
+		cachesecret.Resolve(opts.UserCacheSecret, opts.UserCacheSecret != ""))
 	if err != nil {
 		return nil, err
 	}
+	secure := &http.Client{Transport: rt}
 	return &EnclaveHTTPClient{
 		Client:    &http.Client{Transport: secure.Transport},
 		handle:    handle,
-		bound:     bound,
+		keyed:     keyed,
 		secure:    secure,
 		baseURL:   cmp.Or(opts.BaseURL, "https://"+handle.Enclave()+"/"),
 		openAIURL: cmp.Or(opts.BaseURL, "https://"+handle.Enclave()+"/v1/"),
 	}, nil
+}
+
+// keyedTransport returns the transport that ties binding's traffic to the keys
+// handle verifies.
+func keyedTransport(binding Binding, handle *enclave.Handle) *transport.Transport {
+	if binding == BindingTLS {
+		return transport.TLS(handle)
+	}
+	return transport.WithEHBP(nil, handle)
+}
+
+// enclaveChain stacks what an enclave client sends through around keyed, from
+// the inside out: the proxy header, one replay after a key rejection, the
+// cache secret, and origin pinning. The cache secret sits above keyed, so the
+// field it adds is sealed with the rest of the body (EHBP) or sent over the
+// pinned connection (TLS).
+func enclaveChain(keyed http.RoundTripper, host, baseURL, secret string) (http.RoundTripper, error) {
+	rt := transport.WithEnclaveURL(keyed, host, baseURL)
+	rt = transport.WithReplay(rt, transport.IsKeyRejection)
+	rt = transport.WithCacheSecret(rt, secret)
+	return transport.WithOriginRestriction(rt, host, baseURL)
 }
 
 // BaseURL returns the URL requests are sent to: EnclaveOptions.BaseURL, or the
@@ -164,7 +194,7 @@ func (c *EnclaveHTTPClient) BaseURL() string {
 // only if the cached one has expired or been rejected. It also prepares the
 // binding for it, so a nil error means requests can be sent.
 func (c *EnclaveHTTPClient) EnsureVerified(ctx context.Context) (*verify.Verification, error) {
-	state, err := c.bound.EnsureVerified(ctx)
+	state, err := c.keyed.EnsureVerified(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -186,6 +216,40 @@ func (c *EnclaveHTTPClient) Reverify(ctx context.Context) (*verify.Verification,
 func (c *EnclaveHTTPClient) Current() *verify.Verification {
 	if state := c.handle.Current(); state != nil {
 		return state.Verification()
+	}
+	return nil
+}
+
+// validateBaseURL requires an absolute HTTPS URL, which keeps request headers
+// private on the way to the enclave or proxy.
+func validateBaseURL(baseURL string) error {
+	origin, err := transport.OriginOf(baseURL)
+	if err != nil {
+		return &ConfigurationError{Err: fmt.Errorf("invalid base URL: %w", err)}
+	}
+	if !strings.HasPrefix(origin, "https://") {
+		return &ConfigurationError{Err: fmt.Errorf("invalid base URL: HTTPS is required to protect request headers")}
+	}
+	return nil
+}
+
+// validateTLSBaseURL requires a TLS base URL to use the enclave's own origin,
+// since a pinned connection can't pass through a proxy.
+func validateTLSBaseURL(baseURL, enclave string) error {
+	if baseURL == "" {
+		return nil
+	}
+
+	baseOrigin, err := transport.OriginOf(baseURL)
+	if err != nil {
+		return fmt.Errorf("invalid base URL: %w", err)
+	}
+	enclaveOrigin, err := transport.OriginOf("https://" + enclave)
+	if err != nil {
+		return err
+	}
+	if baseOrigin != enclaveOrigin {
+		return fmt.Errorf("TLS base URL must use the verified enclave origin %q", enclaveOrigin)
 	}
 	return nil
 }

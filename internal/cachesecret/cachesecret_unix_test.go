@@ -1,4 +1,4 @@
-package transport
+package cachesecret
 
 import (
 	"os"
@@ -22,7 +22,7 @@ func TestUserCacheSecretRejectsSymlinksWithoutTouchingTargets(t *testing.T) {
 		t.Skipf("symlinks are unavailable: %v", err)
 	}
 
-	require.NotEqual(t, string(targetContents), ResolveUserCacheSecret("", false))
+	require.NotEqual(t, string(targetContents), Resolve("", false))
 	got, err := os.ReadFile(target)
 	require.NoError(t, err)
 	require.Equal(t, targetContents, got)
@@ -42,7 +42,7 @@ func TestUserCacheSecretRejectsSymlinkDirectoryWithoutTouchingTarget(t *testing.
 		t.Skipf("symlinks are unavailable: %v", err)
 	}
 
-	require.NotEmpty(t, ResolveUserCacheSecret("", false))
+	require.NotEmpty(t, Resolve("", false))
 	requireFileMode(t, target, 0o755)
 	got, err := os.ReadFile(marker)
 	require.NoError(t, err)
@@ -60,6 +60,6 @@ func TestUserCacheSecretRejectsNonRegularFilesWithoutChmod(t *testing.T) {
 	nonRegular := filepath.Join(dir, userCacheSecretFileName)
 	require.NoError(t, os.Mkdir(nonRegular, 0o755))
 
-	require.NotEmpty(t, ResolveUserCacheSecret("", false))
+	require.NotEmpty(t, Resolve("", false))
 	requireFileMode(t, nonRegular, 0o755)
 }

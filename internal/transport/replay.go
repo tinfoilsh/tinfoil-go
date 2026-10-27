@@ -4,19 +4,25 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-
-	"github.com/tinfoilsh/tinfoil-go/internal/enclave"
 )
 
-// recoveryTransport owns one application replay. Its underlying transport
-// admits each attempt through the selected enclave handle's current state.
-type recoveryTransport struct {
-	transport http.RoundTripper
+// WithReplay re-sends a request once when next fails with an error retryable
+// accepts, if the request's body can be read again. The routes pass
+// IsKeyRejection: the rejection has already invalidated the verification, so
+// the replay goes out under a fresh one.
+func WithReplay(next http.RoundTripper, retryable func(error) bool) http.RoundTripper {
+	return &replayTransport{transport: next, retryable: retryable}
 }
 
-func (t *recoveryTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+// replayTransport owns one application replay.
+type replayTransport struct {
+	transport http.RoundTripper
+	retryable func(error) bool
+}
+
+func (t *replayTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	resp, err := t.transport.RoundTrip(req)
-	if !enclave.IsKeyRejection(err) {
+	if !t.retryable(err) {
 		return resp, err
 	}
 	if resp != nil && resp.Body != nil {
@@ -40,20 +46,8 @@ func (t *recoveryTransport) RoundTrip(req *http.Request) (*http.Response, error)
 	return resp, nil
 }
 
-func (t *recoveryTransport) CloseIdleConnections() {
+func (t *replayTransport) CloseIdleConnections() {
 	closeIdleConnections(t.transport)
-}
-
-func closeIdleConnections(transport http.RoundTripper) {
-	if closer, ok := transport.(interface{ CloseIdleConnections() }); ok {
-		closer.CloseIdleConnections()
-	}
-}
-
-func closeRequestBody(req *http.Request) {
-	if req.Body != nil {
-		req.Body.Close()
-	}
 }
 
 func resetRequestBody(req *http.Request) (*http.Request, error) {

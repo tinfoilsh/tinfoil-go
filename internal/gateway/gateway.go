@@ -24,6 +24,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/tinfoilsh/tinfoil-go/internal/cachesecret"
 	"github.com/tinfoilsh/tinfoil-go/internal/enclave"
 	"github.com/tinfoilsh/tinfoil-go/internal/errs"
 	"github.com/tinfoilsh/tinfoil-go/internal/transport"
@@ -149,18 +150,15 @@ func NewTransport(c Config) (*Transport, error) {
 	return &Transport{
 		catalog: catalog,
 		policy:  policy,
-		secret:  transport.ResolveUserCacheSecret(c.UserCacheSecret, c.UserCacheSecret != ""),
+		secret:  cachesecret.Resolve(c.UserCacheSecret, c.UserCacheSecret != ""),
 		build: func(r replica) (*verifiedReplicaTransport, error) {
 			h, err := enclave.NewHandle(enclave.Config{Host: r.host, Relay: c.Relay, Repo: r.ref, Verifier: policy.verifierFor(r)})
 			if err != nil {
 				return nil, err
 			}
-			stack, err := transport.Enclave(h, enclave.EHBP, c.BaseURL)
-			if err != nil {
-				return nil, err
-			}
+			keyed := transport.WithEHBP(nil, h)
 			return &verifiedReplicaTransport{
-				transport: stack,
+				transport: replicaChain(keyed, h.Enclave(), c.BaseURL),
 				verification: func() *verify.Verification {
 					if state := h.Current(); state != nil {
 						return state.Verification()
@@ -168,7 +166,7 @@ func NewTransport(c Config) (*Transport, error) {
 					return nil
 				},
 				ensureVerified: func(ctx context.Context) (*verify.Verification, error) {
-					state, err := stack.EnsureVerified(ctx)
+					state, err := keyed.EnsureVerified(ctx)
 					if err != nil {
 						return nil, err
 					}
@@ -177,6 +175,12 @@ func NewTransport(c Config) (*Transport, error) {
 			}, nil
 		},
 	}, nil
+}
+
+// replicaChain stacks what a replica's requests go through around keyed, from
+// the inside out: the proxy header, then one replay after a key rejection.
+func replicaChain(keyed http.RoundTripper, host, baseURL string) http.RoundTripper {
+	return transport.WithReplay(transport.WithEnclaveURL(keyed, host, baseURL), transport.IsKeyRejection)
 }
 
 // Transport seals each request to a verified replica of the model it names.
@@ -354,7 +358,7 @@ func rank(hosts []string, prefix, first string) []string {
 func (t *Transport) RoundTrip(req *http.Request) (*http.Response, error) {
 	// Each replica's binding makes the same check; making it here refuses a
 	// request before the catalog is read or a replica verified.
-	if err := enclave.EHBP.Check(req); err != nil {
+	if err := transport.CheckEHBP(req); err != nil {
 		closeRequestBody(req)
 		return nil, err
 	}
@@ -434,7 +438,7 @@ func (t *Transport) prepare(req *http.Request) error {
 	if mediaType != "application/json" {
 		return nil
 	}
-	scoped := transport.UserCacheSecretPathEligible(req)
+	scoped := cachesecret.PathEligible(req)
 	body, err := io.ReadAll(req.Body)
 	req.Body.Close()
 	if err != nil {
@@ -491,7 +495,7 @@ func prepareMultipart(req *http.Request, boundary string) error {
 // The engine only needs the salt; the secret itself never leaves the client.
 func (t *Transport) scopeCache(h http.Header, fields map[string]json.RawMessage, body []byte) ([]byte, error) {
 	var secret string
-	json.Unmarshal(fields[transport.UserCacheSecretField], &secret)
+	json.Unmarshal(fields[cachesecret.Field], &secret)
 	if secret = cmp.Or(secret, t.secret); secret == "" {
 		return body, nil
 	}
@@ -505,7 +509,7 @@ func (t *Transport) scopeCache(h http.Header, fields map[string]json.RawMessage,
 		mac.Write(head)
 		h.Set(cachePrefixHeader, hex.EncodeToString(mac.Sum(nil)))
 	}
-	delete(fields, transport.UserCacheSecretField)
+	delete(fields, cachesecret.Field)
 	fields[cacheSaltField], _ = json.Marshal(base64.RawURLEncoding.EncodeToString(key[:sha256.Size]))
 	return json.Marshal(fields)
 }

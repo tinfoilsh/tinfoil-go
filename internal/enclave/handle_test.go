@@ -2,7 +2,6 @@ package enclave
 
 import (
 	"os"
-	"strings"
 	"testing"
 	"time"
 
@@ -38,30 +37,5 @@ func TestLiveVerify(t *testing.T) {
 	client, err := NewHandle(Config{Host: os.Getenv(enclaveEnvVar), Repo: os.Getenv(repoEnvVar)})
 	require.NoError(t, err)
 	_, err = client.Reverify(t.Context())
-	assert.NoError(t, err)
-}
-
-func TestLiveDiscoverRouter(t *testing.T) {
-	testutil.RequireLive(t)
-	client, err := DiscoverRouter(t.Context(), nil)
-	require.NoError(t, err)
-	assert.NotEmpty(t, client.Enclave())
-	_, err = client.Reverify(t.Context())
-	assert.NoError(t, err)
-}
-
-func TestLiveClientFetchRouters(t *testing.T) {
-	testutil.RequireLive(t)
-	routers, err := fetchRouters(t.Context())
-	require.NoError(t, err)
-	require.NotEmpty(t, routers)
-	assert.True(t, strings.HasSuffix(routers[0], ".tinfoil.sh"))
-}
-
-func TestLiveClientFallbackEnclave(t *testing.T) {
-	testutil.RequireLive(t)
-	defaultClient, err := NewHandle(Config{Host: "inference.tinfoil.sh", Repo: defaultRouterRepo})
-	require.NoError(t, err)
-	_, err = defaultClient.Reverify(t.Context())
 	assert.NoError(t, err)
 }

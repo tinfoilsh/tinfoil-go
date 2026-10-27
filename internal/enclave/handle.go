@@ -1,16 +1,11 @@
-// Package enclave connects to attested enclaves. A Handle fetches and verifies
-// one enclave's attestation and keeps the result until it expires or is
-// invalidated; a BoundTransport binds HTTP traffic to the keys it endorses.
+// Package enclave manages an attested enclave's verification state. A Handle
+// fetches and verifies one enclave's attestation and keeps the result until it
+// expires or is invalidated; package transport ties HTTP traffic to the keys
+// it endorses.
 package enclave
 
 import (
-	"context"
-	"encoding/json"
-	"fmt"
-	"io"
-	"net/http"
 	"sync"
-	"time"
 
 	"github.com/tinfoilsh/tinfoil-go/verify"
 )
@@ -31,50 +26,6 @@ type Handle struct {
 	verify     func() (*verify.Verification, error)
 }
 
-var (
-	defaultRouterRepo = "tinfoilsh/confidential-model-router"
-	defaultRouterURL  = "https://atc.tinfoil.sh/routers"
-)
-
-const (
-	routerFetchTimeout = 30 * time.Second
-	maxRouterBytes     = 32 << 20
-)
-
-// fetchRouters is bounded the same way attestation fetching is: discovery runs
-// before anything is verified, so an unresponsive or oversized reply must not
-// stall client construction or exhaust memory.
-func fetchRouters(ctx context.Context) ([]string, error) {
-	ctx, cancel := context.WithTimeout(ctx, routerFetchTimeout)
-	defer cancel()
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, defaultRouterURL, nil)
-	if err != nil {
-		return nil, err
-	}
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode > 299 {
-		return nil, fmt.Errorf("fetching routers from %s: %d %s", defaultRouterURL, resp.StatusCode, resp.Status)
-	}
-	body, err := io.ReadAll(io.LimitReader(resp.Body, maxRouterBytes+1))
-	if err != nil {
-		return nil, err
-	}
-	if len(body) > maxRouterBytes {
-		return nil, fmt.Errorf("router list from %s exceeds %d bytes", defaultRouterURL, maxRouterBytes)
-	}
-
-	var routers []string
-	if err := json.Unmarshal(body, &routers); err != nil {
-		return nil, err
-	}
-
-	return routers, nil
-}
-
 // Config describes the enclave a Handle verifies.
 type Config struct {
 	// Host is the enclave, a host with an optional port.
@@ -88,6 +39,17 @@ type Config struct {
 	// Verifier is the policy, which several handles can share; nil selects the
 	// defaults, which require Repo.
 	Verifier *verify.Verifier
+}
+
+// NewTestHandle returns a handle for host that starts from initial, unless it
+// is nil, and verifies by calling fetch instead of fetching and verifying a
+// document. It is for the tests of packages built on enclave.
+func NewTestHandle(host string, initial *verify.Verification, fetch func() (*verify.Verification, error)) *Handle {
+	s := &Handle{enclave: host, verify: fetch}
+	if initial != nil {
+		s.state = &State{verification: initial}
+	}
+	return s
 }
 
 // NewHandle checks c.Repo against the verifier's rules for a repository pin
@@ -106,27 +68,6 @@ func NewHandle(c Config) (*Handle, error) {
 	return &Handle{enclave: c.Host, repo: c.Repo, relay: c.Relay, verifier: v}, nil
 }
 
-// DiscoverRouter returns a handle for the first router from Tinfoil's router
-// list that verifies under v, and otherwise for inference.tinfoil.sh, which it
-// leaves to be verified on first use. nil v selects the default policy.
-func DiscoverRouter(ctx context.Context, v *verify.Verifier) (*Handle, error) {
-	fallback, err := NewHandle(Config{Host: "inference.tinfoil.sh", Repo: defaultRouterRepo, Verifier: v})
-	if err != nil {
-		return nil, err
-	}
-	routers, _ := fetchRouters(ctx)
-	for _, router := range routers {
-		candidate := &Handle{enclave: router, repo: fallback.repo, verifier: fallback.verifier}
-		if _, err := candidate.verifiedState(ctx, true, candidateVerificationRetries); err == nil {
-			return candidate, nil
-		}
-	}
-	if err := ctx.Err(); err != nil {
-		return nil, err
-	}
-	return fallback, nil
-}
-
 // Enclave returns the enclave host.
 func (s *Handle) Enclave() string {
 	return s.enclave
@@ -135,6 +76,11 @@ func (s *Handle) Enclave() string {
 // Repo returns the trusted repository or registry reference, including version and digest pins.
 func (s *Handle) Repo() string {
 	return s.repo
+}
+
+// Verifier returns the verification policy, which several handles can share.
+func (s *Handle) Verifier() *verify.Verifier {
+	return s.verifier
 }
 
 // Current returns the last successful verification without checking it, or
