@@ -5,8 +5,10 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"io/fs"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"testing/synctest"
@@ -69,6 +71,41 @@ func TestConstructorsDoNoNetworkIO(t *testing.T) {
 	gatewayClient, err := NewGatewayHTTPClient(&GatewayOptions{URL: "https://gateway.example/v1/"})
 	require.NoError(t, err)
 	require.Empty(t, gatewayClient.Current())
+}
+
+// unsetCacheSecretSources points the cache-secret lookup at an empty home
+// and no environment value, and returns where it would persist the secret.
+func unsetCacheSecretSources(t *testing.T) string {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("TINFOIL_USER_CACHE_SECRET", "")
+	return filepath.Join(home, ".tinfoil", "user_cache_secret")
+}
+
+func TestNewEnclaveHTTPClientResolvesNoCacheSecret(t *testing.T) {
+	path := unsetCacheSecretSources(t)
+	_, err := NewEnclaveHTTPClient("enclave.example", "org/repo", nil)
+	require.NoError(t, err)
+	_, err = os.Stat(filepath.Dir(path))
+	require.ErrorIs(t, err, fs.ErrNotExist, "only Tinfoil's inference routes provision the shared secret")
+}
+
+func TestDiscoverRouterResolvesTheCacheSecret(t *testing.T) {
+	path := unsetCacheSecretSources(t)
+	original := http.DefaultClient
+	defer func() { http.DefaultClient = original }()
+	synctest.Test(t, func(t *testing.T) {
+		http.DefaultClient = &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			if req.URL.Host == "atc.tinfoil.sh" {
+				return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader("[]")), Request: req}, nil
+			}
+			return nil, errors.New("no network in this test")
+		})}
+		_, err := DiscoverRouter(context.Background(), nil)
+		require.Error(t, err, "the fallback can't be verified")
+	})
+	_, err := os.Stat(path)
+	require.NoError(t, err, "the router route provisions the shared secret")
 }
 
 func TestDiscoverRouterRejectsInvalidOptionsBeforeDiscovery(t *testing.T) {
