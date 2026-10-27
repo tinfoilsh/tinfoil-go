@@ -56,10 +56,12 @@ type EnclaveOptions struct {
 	// Verifier is the verification policy; nil selects the defaults.
 	Verifier *verify.Verifier
 	// UserCacheSecret is the default prompt-cache scope for the client's
-	// requests; empty resolves it from TINFOIL_USER_CACHE_SECRET or
-	// ~/.tinfoil/user_cache_secret. A non-empty user_cache_secret string in a
-	// request's JSON body overrides it, so a server can scope the cache to each
-	// end user, for example with option.WithJSONSet("user_cache_secret", s).
+	// requests. Only Tinfoil's router reads it, so NewEnclaveHTTPClient sends
+	// it only when set, while DiscoverRouter resolves an empty one from
+	// TINFOIL_USER_CACHE_SECRET or ~/.tinfoil/user_cache_secret. A non-empty
+	// user_cache_secret string in a request's JSON body overrides it, so a
+	// server can scope the cache to each end user, for example with
+	// option.WithJSONSet("user_cache_secret", s).
 	UserCacheSecret string
 }
 
@@ -99,7 +101,7 @@ func NewEnclaveHTTPClient(host, repo string, opts *EnclaveOptions) (*EnclaveHTTP
 	if err != nil {
 		return nil, err
 	}
-	return newEnclaveHTTPClient(handle, binding, opts)
+	return newEnclaveHTTPClient(handle, binding, opts.BaseURL, opts.UserCacheSecret)
 }
 
 // DiscoverRouter returns a client for the first router from Tinfoil's router
@@ -130,7 +132,8 @@ func DiscoverRouter(ctx context.Context, opts *EnclaveOptions) (*EnclaveHTTPClie
 	if err != nil {
 		return nil, err
 	}
-	client, err := newEnclaveHTTPClient(handle, binding, opts)
+	secret := cachesecret.Resolve(opts.UserCacheSecret, opts.UserCacheSecret != "")
+	client, err := newEnclaveHTTPClient(handle, binding, opts.BaseURL, secret)
 	if err != nil {
 		return nil, err
 	}
@@ -141,15 +144,14 @@ func DiscoverRouter(ctx context.Context, opts *EnclaveOptions) (*EnclaveHTTPClie
 	return client, nil
 }
 
-func newEnclaveHTTPClient(handle *enclave.Handle, binding Binding, opts *EnclaveOptions) (*EnclaveHTTPClient, error) {
+func newEnclaveHTTPClient(handle *enclave.Handle, binding Binding, baseURL, secret string) (*EnclaveHTTPClient, error) {
 	if binding == BindingTLS {
-		if err := validateTLSBaseURL(opts.BaseURL, handle.Enclave()); err != nil {
+		if err := validateTLSBaseURL(baseURL, handle.Enclave()); err != nil {
 			return nil, &ConfigurationError{Err: err}
 		}
 	}
 	keyed := keyedTransport(binding, handle)
-	rt, err := enclaveChain(keyed, handle.Enclave(), opts.BaseURL,
-		cachesecret.Resolve(opts.UserCacheSecret, opts.UserCacheSecret != ""))
+	rt, err := enclaveChain(keyed, handle.Enclave(), baseURL, secret)
 	if err != nil {
 		return nil, err
 	}
@@ -159,8 +161,8 @@ func newEnclaveHTTPClient(handle *enclave.Handle, binding Binding, opts *Enclave
 		handle:    handle,
 		keyed:     keyed,
 		secure:    secure,
-		baseURL:   cmp.Or(opts.BaseURL, "https://"+handle.Enclave()+"/"),
-		openAIURL: cmp.Or(opts.BaseURL, "https://"+handle.Enclave()+"/v1/"),
+		baseURL:   cmp.Or(baseURL, "https://"+handle.Enclave()+"/"),
+		openAIURL: cmp.Or(baseURL, "https://"+handle.Enclave()+"/v1/"),
 	}, nil
 }
 

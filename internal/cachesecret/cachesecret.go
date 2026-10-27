@@ -25,7 +25,10 @@ import (
 // identity) share cached prompt prefixes, requests carrying different secrets
 // cannot observe each other's cache timing.
 //
-// Resolution order, mirroring the other Tinfoil clients:
+// Clients for Tinfoil's inference routes (router discovery and the gateway)
+// resolve it in this order, mirroring the other Tinfoil clients; a client for
+// an explicit enclave uses only the first two, since other enclaves don't
+// read the field:
 //
 //  1. a non-empty explicit per-request `user_cache_secret` field in the body,
 //  2. the client's UserCacheSecret option,
