@@ -22,7 +22,7 @@ type replayTransport struct {
 
 func (t *replayTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	resp, err := t.transport.RoundTrip(req)
-	if !t.retryable(err) {
+	if err == nil || !t.retryable(err) {
 		return resp, err
 	}
 	if resp != nil && resp.Body != nil {

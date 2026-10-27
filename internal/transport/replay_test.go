@@ -19,12 +19,6 @@ type testKeyRejection struct{ error }
 func (e testKeyRejection) KeyRejected() bool { return true }
 func (e testKeyRejection) Unwrap() error     { return e.error }
 
-// keyRejected matches errors the way IsKeyRejection does.
-func keyRejected(err error) bool {
-	var rejection interface{ KeyRejected() bool }
-	return errors.As(err, &rejection) && rejection.KeyRejected()
-}
-
 func TestRequestRecovery(t *testing.T) {
 	first, last := errors.New("rejected key"), errors.New("second failure")
 	for _, tc := range []struct {
@@ -59,7 +53,7 @@ func TestRequestRecovery(t *testing.T) {
 					return nil, tc.first
 				}
 				return &http.Response{StatusCode: http.StatusOK, Body: http.NoBody}, tc.last
-			}), keyRejected)
+			}), IsKeyRejection)
 			req, err := http.NewRequestWithContext(ctx, http.MethodPost, "https://enclave.example/path?q=1", strings.NewReader("payload"))
 			require.NoError(t, err)
 			req.Header.Set("Authorization", "secret")
@@ -93,7 +87,7 @@ func TestRequestClientClosesIdleConnections(t *testing.T) {
 	}))
 	defer server.Close()
 	hc := server.Client()
-	hc.Transport = WithReplay(hc.Transport, keyRejected)
+	hc.Transport = WithReplay(hc.Transport, IsKeyRejection)
 	defer hc.CloseIdleConnections()
 	for i, expectedReuse := range []bool{false, true, false} {
 		if i == 2 {
@@ -121,7 +115,7 @@ func TestRequestRecoveryDiscardsErrorResponses(t *testing.T) {
 			body := &closeCountingBody{Reader: strings.NewReader("failure")}
 			bodies = append(bodies, body)
 			return &http.Response{StatusCode: http.StatusBadRequest, Body: body}, testKeyRejection{cause}
-		}), keyRejected)
+		}), IsKeyRejection)
 		req, err := http.NewRequest(http.MethodPost, "https://enclave.example", strings.NewReader("payload"))
 		require.NoError(t, err)
 		if !replayable {
@@ -150,4 +144,18 @@ func (b *closeCountingBody) Read(p []byte) (int, error) {
 func (b *closeCountingBody) Close() error {
 	b.closes++
 	return nil
+}
+
+func TestReplayAsksOnlyAboutErrors(t *testing.T) {
+	transport := WithReplay(roundTripFunc(func(*http.Request) (*http.Response, error) {
+		return newResponse(http.StatusOK, "ok"), nil
+	}), func(err error) bool {
+		t.Errorf("asked whether to retry %v", err)
+		return false
+	})
+	req, err := http.NewRequest(http.MethodGet, "https://enclave.example", nil)
+	require.NoError(t, err)
+	resp, err := transport.RoundTrip(req)
+	require.NoError(t, err)
+	resp.Body.Close()
 }

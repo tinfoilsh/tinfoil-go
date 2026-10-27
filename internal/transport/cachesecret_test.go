@@ -332,16 +332,8 @@ func TestCacheSecretBodyCanReplay(t *testing.T) {
 	require.Equal(t, "cache-secret", fields[cachesecret.Field])
 }
 
-// idleClosingTransport counts CloseIdleConnections calls.
-type idleClosingTransport struct {
-	http.RoundTripper
-	closes int
-}
-
-func (t *idleClosingTransport) CloseIdleConnections() { t.closes++ }
-
 func TestCacheSecretClosesIdleConnections(t *testing.T) {
-	inner := &idleClosingTransport{}
+	inner := &idleCountingTransport{}
 	transport := WithCacheSecret(inner, "cache-secret")
 	transport.(interface{ CloseIdleConnections() }).CloseIdleConnections()
 	require.Equal(t, 1, inner.closes)
