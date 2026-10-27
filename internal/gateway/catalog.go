@@ -90,9 +90,10 @@ type catalogCache struct {
 
 	// mu is held from a caller's check through its DoChan, so a fetch that
 	// finishes after the check can't be followed by a redundant one.
-	mu        sync.Mutex
-	catalog   Catalog
-	loaded    bool
+	mu      sync.Mutex
+	catalog Catalog
+	loaded  bool
+	// refreshAt is when the next refresh may start.
 	refreshAt time.Time
 }
 
@@ -101,6 +102,12 @@ func (c *catalogCache) get(ctx context.Context) (Catalog, error) {
 	if c.loaded {
 		defer c.mu.Unlock()
 		if !time.Now().Before(c.refreshAt) {
+			// Only this caller starts the refresh. Moving refreshAt ahead now,
+			// rather than when the fetch finishes, keeps later callers from
+			// calling DoChan, each of which would add a result channel that
+			// nobody reads until the fetch completes. They get the same cached
+			// catalog either way, and load resets refreshAt when it finishes.
+			c.refreshAt = time.Now().Add(catalogRefreshInterval)
 			c.group.DoChan("", c.load)
 		}
 		return c.catalog, nil

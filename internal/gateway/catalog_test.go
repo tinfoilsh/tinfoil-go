@@ -87,6 +87,7 @@ func TestCatalogCacheRefreshesWithoutBlocking(t *testing.T) {
 			if catalog := catalogs[n-1]; catalog != nil {
 				return catalog, nil
 			}
+			time.Sleep(catalogRefreshInterval) // fails slowly, as a fetch that times out does
 			return nil, errors.New("gateway unavailable")
 		}}
 		release <- struct{}{}
@@ -104,14 +105,15 @@ func TestCatalogCacheRefreshesWithoutBlocking(t *testing.T) {
 
 		time.Sleep(time.Nanosecond)
 		require.Contains(t, get(), "old", "a stale catalog is returned while it refreshes")
+		require.True(t, time.Now().Before(cache.refreshAt), "starting a refresh moves refreshAt ahead, so later callers don't join it")
 		require.Contains(t, get(), "old")
 		synctest.Wait()
 		require.Equal(t, 2, fetches, "a use during a refresh starts no second fetch")
 		release <- struct{}{}
-		synctest.Wait()
+		time.Sleep(catalogRefreshInterval + time.Nanosecond)
 		require.Contains(t, get(), "old", "a failed refresh keeps the last catalog")
 		synctest.Wait()
-		require.Equal(t, 2, fetches, "a failed refresh waits another interval")
+		require.Equal(t, 2, fetches, "a failed refresh waits another interval after it finishes")
 
 		time.Sleep(catalogRefreshInterval)
 		require.Contains(t, get(), "old")
