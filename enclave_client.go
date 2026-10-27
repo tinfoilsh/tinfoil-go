@@ -193,6 +193,21 @@ func (c *EnclaveHTTPClient) BaseURL() string {
 	return c.baseURL
 }
 
+// Enclave returns the host of the enclave the client verifies: the host passed
+// to NewEnclaveHTTPClient, or the router DiscoverRouter chose. It stays the
+// enclave's host when BaseURL is a proxy.
+func (c *EnclaveHTTPClient) Enclave() string {
+	return c.handle.Enclave()
+}
+
+// Repo returns the repository the enclave is verified against, with any tag
+// or digest pins: the repo passed to NewEnclaveHTTPClient, or the router's
+// for DiscoverRouter. It is empty when EnclaveOptions.Verifier authorizes the
+// config instead.
+func (c *EnclaveHTTPClient) Repo() string {
+	return c.handle.Repo()
+}
+
 // EnsureVerified returns a verification that is valid now, verifying first
 // only if the cached one has expired or been rejected. It also prepares the
 // TLS pin or HPKE key for it, so a nil error means requests can be sent.

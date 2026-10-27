@@ -90,6 +90,18 @@ func TestNewEnclaveHTTPClientResolvesNoCacheSecret(t *testing.T) {
 	require.ErrorIs(t, err, fs.ErrNotExist, "only Tinfoil's inference routes provision the shared secret")
 }
 
+func TestEnclaveHTTPClientReportsItsEnclaveAndRepo(t *testing.T) {
+	repo := "org/repo@v1@sha256:" + strings.Repeat("a", 64)
+	c, err := NewEnclaveHTTPClient("enclave.example:8443", repo, &EnclaveOptions{TransportMode: TransportModeEHBP, BaseURL: "https://proxy.example/v1/"})
+	require.NoError(t, err)
+	require.Equal(t, "enclave.example:8443", c.Enclave(), "the enclave, not the proxy")
+	require.Equal(t, repo, c.Repo(), "with its pins")
+
+	authorized, err := NewEnclaveHTTPClient("enclave.example", "", &EnclaveOptions{Verifier: callerAuthorizedVerifier(t)})
+	require.NoError(t, err)
+	require.Empty(t, authorized.Repo())
+}
+
 func TestDiscoverRouterResolvesTheCacheSecret(t *testing.T) {
 	path := unsetCacheSecretSources(t)
 	original := http.DefaultClient
@@ -274,6 +286,8 @@ func TestLiveDiscoverRouter(t *testing.T) {
 			verified, err := c.EnsureVerified(context.Background())
 			require.NoError(t, err)
 			require.Equal(t, verified.FreshnessExpiresAt(), c.Current().FreshnessExpiresAt(), "a valid verification is reused")
+			require.Equal(t, "https://"+c.Enclave()+"/", c.BaseURL(), "Enclave is the router discovery chose")
+			require.Equal(t, "tinfoilsh/confidential-model-router", c.Repo())
 
 			completion, err := oc.Chat.Completions.New(context.Background(), openai.ChatCompletionNewParams{
 				Model:    "llama3-3-70b",
