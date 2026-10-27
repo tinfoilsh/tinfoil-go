@@ -63,37 +63,68 @@ type closeTrackingBody struct{ closed bool }
 func (*closeTrackingBody) Read([]byte) (int, error) { return 0, io.EOF }
 func (b *closeTrackingBody) Close() error           { b.closed = true; return nil }
 
-func TestEHBPBindingRefusesUpgradesAndTunnels(t *testing.T) {
-	var sent []string
-	original := http.DefaultTransport
-	defer func() { http.DefaultTransport = original }()
-	http.DefaultTransport = roundTripFunc(func(req *http.Request) (*http.Response, error) {
-		sent = append(sent, req.Method+" "+req.URL.Path)
-		return testResponse(), nil
-	})
-	transport, err := EHBP.Transport(hpkeVerification(strings.Repeat("01", 32)))
+func newRequest(t *testing.T, method, url string, body io.Reader) *http.Request {
+	t.Helper()
+	req, err := http.NewRequest(method, url, body)
 	require.NoError(t, err)
+	return req
+}
 
-	upgrade, _ := http.NewRequest(http.MethodGet, "https://enclave.example/v1/realtime", nil)
-	upgrade.Header.Set("Connection", "Upgrade")
-	upgrade.Header.Set("Upgrade", "websocket")
-	tunnel, _ := http.NewRequest(http.MethodConnect, "https://enclave.example/", nil)
-	for _, req := range []*http.Request{upgrade, tunnel} {
+func websocketUpgrade(t *testing.T, url string) *http.Request {
+	req := newRequest(t, http.MethodGet, url, nil)
+	req.Header.Set("Connection", "Upgrade")
+	req.Header.Set("Upgrade", "websocket")
+	return req
+}
+
+func TestBindingsRefuseRequestsTheyCantProtect(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		binding Binding
+		req     *http.Request
+		refused error
+	}{
+		{"EHBP WebSocket upgrade", EHBP, websocketUpgrade(t, "https://enclave.example/v1/realtime"), errEHBPTunnel},
+		{"EHBP CONNECT tunnel", EHBP, newRequest(t, http.MethodConnect, "https://enclave.example/", nil), errEHBPTunnel},
+		{"EHBP request without a body", EHBP, newRequest(t, http.MethodGet, "https://enclave.example/v1/models", nil), nil},
+		{"EHBP request with a body", EHBP, newRequest(t, http.MethodPost, "https://enclave.example/v1/chat/completions", strings.NewReader("{}")), nil},
+		{"TLS WebSocket upgrade", TLS, websocketUpgrade(t, "https://enclave.example/v1/realtime"), nil},
+		{"TLS plaintext request", TLS, newRequest(t, http.MethodGet, "http://enclave.example/v1/models", nil), errNoTLS},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			err := tc.binding.Check(tc.req)
+			if tc.refused == nil {
+				require.NoError(t, err)
+				return
+			}
+			var config *ConfigurationError
+			require.ErrorAs(t, err, &config)
+			require.ErrorIs(t, err, tc.refused)
+		})
+	}
+}
+
+func TestBoundTransportChecksBeforeVerifying(t *testing.T) {
+	h := &Handle{verify: func() (*verify.Verification, error) {
+		t.Error("verified for a request the binding refuses")
+		return nil, errors.New("unreachable")
+	}}
+	for _, tc := range []struct {
+		binding Binding
+		req     *http.Request
+		refused error
+	}{
+		{EHBP, websocketUpgrade(t, "https://enclave.example/v1/realtime"), errEHBPTunnel},
+		{TLS, newRequest(t, http.MethodGet, "http://enclave.example/v1/models", nil), errNoTLS},
+	} {
+		bound, err := NewBoundTransport(h, tc.binding)
+		require.NoError(t, err)
 		body := &closeTrackingBody{}
-		req.Body = body
-		_, err := transport.RoundTrip(req)
-		var config *ConfigurationError
-		require.ErrorAs(t, err, &config)
-		require.ErrorIs(t, err, errEHBPTunnel)
+		tc.req.Body = body
+		_, err = bound.RoundTrip(tc.req)
+		require.ErrorIs(t, err, tc.refused)
 		require.True(t, body.closed, "a refused request's body is closed")
 	}
-	require.Empty(t, sent, "nothing EHBP can't seal is sent")
-
-	models, _ := http.NewRequest(http.MethodGet, "https://enclave.example/v1/models", nil)
-	resp, err := transport.RoundTrip(models)
-	require.NoError(t, err, "a request without a body is still allowed")
-	resp.Body.Close()
-	require.Equal(t, []string{"GET /v1/models"}, sent)
 }
 
 func TestEHBPBindingRecognizesKeyConfigErrors(t *testing.T) {
