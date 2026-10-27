@@ -12,7 +12,7 @@ import (
 	"github.com/tinfoilsh/tinfoil-go/verify"
 )
 
-var errEHBPTunnel = errors.New("EHBP seals only request and response bodies, so it can't protect a protocol upgrade, such as a WebSocket, or a CONNECT tunnel; use the TLS binding on a direct connection")
+var errEHBPTunnel = errors.New("EHBP seals only request and response bodies, so it can't protect a protocol upgrade, such as a WebSocket, or a CONNECT tunnel; use the TLS transport mode on a direct connection")
 
 // WithEHBP returns a Transport that seals request and response bodies to the
 // HPKE key h's current verification attests, and sends the sealed requests
@@ -24,7 +24,7 @@ func WithEHBP(next http.RoundTripper, h *enclave.Handle) *Transport {
 		build: func(v *verify.Verification) (http.RoundTripper, error) {
 			key, ok := v.HPKEPublicKey()
 			if !ok {
-				return nil, &errs.AttestationError{Err: errors.New("document endorses no HPKE key; cannot use the EHBP binding (use the TLS binding)")}
+				return nil, &errs.AttestationError{Err: errors.New("document endorses no HPKE key; cannot use the EHBP transport mode (use the TLS transport mode)")}
 			}
 			identity, err := ehbpidentity.FromPublicKeyHex(key)
 			if err != nil {

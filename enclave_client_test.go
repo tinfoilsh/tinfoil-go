@@ -42,7 +42,7 @@ func TestNewEnclaveHTTPClientRejectsInvalidOptions(t *testing.T) {
 		opts       *EnclaveOptions
 	}{
 		"no host":                                 {"", "org/repo", nil},
-		"unknown binding":                         {"enclave.example", "org/repo", &EnclaveOptions{Binding: "quic"}},
+		"unknown transport mode":                  {"enclave.example", "org/repo", &EnclaveOptions{TransportMode: "quic"}},
 		"plaintext base URL":                      {"enclave.example", "org/repo", &EnclaveOptions{BaseURL: "http://proxy.example/v1/"}},
 		"relative base URL":                       {"enclave.example", "org/repo", &EnclaveOptions{BaseURL: "/v1/"}},
 		"TLS through a proxy":                     {"enclave.example", "org/repo", &EnclaveOptions{BaseURL: "https://proxy.example/v1/"}},
@@ -114,9 +114,9 @@ func TestDiscoverRouterRejectsInvalidOptionsBeforeDiscovery(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	for _, opts := range []*EnclaveOptions{
-		{Binding: "quic"},
+		{TransportMode: "quic"},
 		{BaseURL: "http://proxy.example/v1/"},
-		{Binding: BindingTLS, BaseURL: "https://proxy.example/v1/"},
+		{TransportMode: TransportModeTLS, BaseURL: "https://proxy.example/v1/"},
 		{Verifier: callerAuthorizedVerifier(t)},
 	} {
 		c, err := DiscoverRouter(ctx, opts)
@@ -158,26 +158,26 @@ func TestDiscoverRouterVerifiesTheFallbackUnderItsContext(t *testing.T) {
 	})
 }
 
-func TestBindingDefaultsToTheRoutes(t *testing.T) {
+func TestTransportModeDefaultsToTheRoutes(t *testing.T) {
 	for _, tc := range []struct {
-		binding      Binding
-		routeDefault Binding
-		want         Binding
+		mode         TransportMode
+		routeDefault TransportMode
+		want         TransportMode
 	}{
-		{"", BindingTLS, BindingTLS},
-		{"", BindingEHBP, BindingEHBP},
-		{BindingTLS, BindingEHBP, BindingTLS},
-		{BindingEHBP, BindingTLS, BindingEHBP},
+		{"", TransportModeTLS, TransportModeTLS},
+		{"", TransportModeEHBP, TransportModeEHBP},
+		{TransportModeTLS, TransportModeEHBP, TransportModeTLS},
+		{TransportModeEHBP, TransportModeTLS, TransportModeEHBP},
 	} {
-		got, err := tc.binding.resolve(tc.routeDefault)
+		got, err := tc.mode.resolve(tc.routeDefault)
 		require.NoError(t, err)
 		require.Equal(t, tc.want, got)
 	}
 }
 
-func TestKeyedTransportFollowsTheBinding(t *testing.T) {
+func TestKeyedTransportFollowsTheMode(t *testing.T) {
 	h := enclave.NewTestHandle("enclave.example", nil, func() (*verify.Verification, error) {
-		t.Error("each binding refuses its request before verifying")
+		t.Error("each transport mode refuses its request before verifying")
 		return nil, errors.New("unreachable")
 	})
 	upgrade, err := http.NewRequest(http.MethodGet, "https://enclave.example/v1/realtime", nil)
@@ -185,13 +185,13 @@ func TestKeyedTransportFollowsTheBinding(t *testing.T) {
 	upgrade.Header.Set("Upgrade", "websocket")
 	plaintext, err := http.NewRequest(http.MethodGet, "http://enclave.example/v1/models", nil)
 	require.NoError(t, err)
-	_, err = keyedTransport(BindingEHBP, h).RoundTrip(upgrade)
+	_, err = keyedTransport(TransportModeEHBP, h).RoundTrip(upgrade)
 	require.ErrorContains(t, err, "EHBP seals only request and response bodies")
-	_, err = keyedTransport(BindingTLS, h).RoundTrip(plaintext)
+	_, err = keyedTransport(TransportModeTLS, h).RoundTrip(plaintext)
 	require.ErrorContains(t, err, "requires an HTTPS request")
 }
 
-func TestEnclaveHTTPClientUsesItsBinding(t *testing.T) {
+func TestEnclaveHTTPClientUsesItsTransportMode(t *testing.T) {
 	original := http.DefaultTransport
 	t.Cleanup(func() { http.DefaultTransport = original })
 	synctest.Test(t, func(t *testing.T) {
@@ -206,7 +206,7 @@ func TestEnclaveHTTPClientUsesItsBinding(t *testing.T) {
 			req.Header.Set("Upgrade", "websocket")
 			return req
 		}
-		sealed, err := NewEnclaveHTTPClient("enclave.example", "org/repo", &EnclaveOptions{Binding: BindingEHBP})
+		sealed, err := NewEnclaveHTTPClient("enclave.example", "org/repo", &EnclaveOptions{TransportMode: TransportModeEHBP})
 		require.NoError(t, err)
 		_, err = sealed.Do(upgrade())
 		require.ErrorContains(t, err, "EHBP seals only request and response bodies")
@@ -266,9 +266,9 @@ func TestNewGatewayHTTPClientRejectsInvalidOptions(t *testing.T) {
 func TestLiveDiscoverRouter(t *testing.T) {
 	testutil.RequireLive(t, "TINFOIL_API_KEY")
 	apiKey := os.Getenv("TINFOIL_API_KEY")
-	for _, binding := range []Binding{BindingEHBP, BindingTLS} {
-		t.Run(string(binding), func(t *testing.T) {
-			oc, err := DiscoverRouterOpenAI(context.Background(), &EnclaveOptions{Binding: binding, UserCacheSecret: "go-live-integration-cache-secret"}, option.WithAPIKey(apiKey))
+	for _, mode := range []TransportMode{TransportModeEHBP, TransportModeTLS} {
+		t.Run(string(mode), func(t *testing.T) {
+			oc, err := DiscoverRouterOpenAI(context.Background(), &EnclaveOptions{TransportMode: mode, UserCacheSecret: "go-live-integration-cache-secret"}, option.WithAPIKey(apiKey))
 			require.NoError(t, err)
 			c := oc.HTTPClient()
 			verified, err := c.EnsureVerified(context.Background())
@@ -363,8 +363,8 @@ func TestEnclaveChainStacksEveryLayer(t *testing.T) {
 }
 
 func TestEnclaveHTTPClientRefusesOtherOrigins(t *testing.T) {
-	for _, binding := range []Binding{BindingTLS, BindingEHBP} {
-		c, err := NewEnclaveHTTPClient("enclave.example", "org/repo", &EnclaveOptions{Binding: binding})
+	for _, mode := range []TransportMode{TransportModeTLS, TransportModeEHBP} {
+		c, err := NewEnclaveHTTPClient("enclave.example", "org/repo", &EnclaveOptions{TransportMode: mode})
 		require.NoError(t, err)
 		_, err = c.Get("https://elsewhere.example/v1/models")
 		var config *ConfigurationError

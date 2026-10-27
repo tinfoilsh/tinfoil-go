@@ -15,9 +15,9 @@ import (
 )
 
 var (
-	errNoTLS              = errors.New("TLS binding requires an HTTPS request")
+	errNoTLS              = errors.New("TLS transport mode requires an HTTPS request")
 	errCertMismatch       = errors.New("enclave certificate does not match the attested key; re-verify the enclave")
-	errNoValidCertificate = errors.New("TLS binding requires a verified certificate fingerprint")
+	errNoValidCertificate = errors.New("TLS transport mode requires a verified certificate fingerprint")
 	// errNoTLSKey reports a verification with no TLS key to pin to.
 	errNoTLSKey = fmt.Errorf("document endorses no %q key", document.CryptoMaterialIDTLS)
 )
@@ -63,7 +63,7 @@ func (t *TLSBoundRoundTripper) getTransport() (*http.Transport, error) {
 		// connections; DialTLSContext only covers non-proxied HTTPS.
 		dt, ok := http.DefaultTransport.(*http.Transport)
 		if !ok || dt == nil {
-			t.err = &errs.ConfigurationError{Err: fmt.Errorf("TLS binding requires http.DefaultTransport to be a non-nil *http.Transport")}
+			t.err = &errs.ConfigurationError{Err: fmt.Errorf("TLS transport mode requires http.DefaultTransport to be a non-nil *http.Transport")}
 			return
 		}
 		dt = dt.Clone()
