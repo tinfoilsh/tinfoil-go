@@ -88,10 +88,11 @@ func NewGatewayHTTPClient(opts *GatewayOptions) (*GatewayHTTPClient, error) {
 	if err != nil {
 		return nil, err
 	}
-	secure, err := transport.BoundHTTPClient(&http.Client{Transport: seal}, "", baseURL, "")
+	guarded, err := transport.WithOriginRestriction(seal, "", baseURL)
 	if err != nil {
 		return nil, err
 	}
+	secure := &http.Client{Transport: guarded}
 	return &GatewayHTTPClient{Client: &http.Client{Transport: secure.Transport}, secure: secure, baseURL: baseURL, seal: seal}, nil
 }
 

@@ -2,6 +2,9 @@ package transport
 
 import (
 	"net/http"
+	"net/http/httptest"
+	"net/http/httptrace"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -27,7 +30,7 @@ func TestOriginOfNormalizesDefaultPorts(t *testing.T) {
 	}
 }
 
-func TestHostBoundTransportAllowsEnclaveAndProxy(t *testing.T) {
+func TestOriginRestrictionAllowsEnclaveAndProxy(t *testing.T) {
 	origins, err := allowedOrigins("enclave.example.com", "http://proxy.example.com/v1/")
 	require.NoError(t, err)
 
@@ -36,7 +39,7 @@ func TestHostBoundTransportAllowsEnclaveAndProxy(t *testing.T) {
 		calls++
 		return newResponse(http.StatusOK, "ok"), nil
 	})
-	rt := &hostBoundTransport{allowedOrigins: origins, enclave: "enclave.example.com", transport: inner}
+	rt := &originGuard{allowedOrigins: origins, enclave: "enclave.example.com", transport: inner}
 
 	for _, target := range []string{
 		"https://enclave.example.com/v1/models",
@@ -53,14 +56,14 @@ func TestHostBoundTransportAllowsEnclaveAndProxy(t *testing.T) {
 	require.Equal(t, 4, calls)
 }
 
-func TestHostBoundTransportRejectsForeignHostAndScheme(t *testing.T) {
+func TestOriginRestrictionRejectsForeignHostAndScheme(t *testing.T) {
 	origins, err := allowedOrigins("enclave.example.com", "")
 	require.NoError(t, err)
 	inner := roundTripFunc(func(req *http.Request) (*http.Response, error) {
 		t.Fatalf("inner transport must not be called for a rejected request")
 		return nil, nil
 	})
-	rt := &hostBoundTransport{allowedOrigins: origins, enclave: "enclave.example.com", transport: inner}
+	rt := &originGuard{allowedOrigins: origins, enclave: "enclave.example.com", transport: inner}
 
 	foreign, err := http.NewRequest(http.MethodGet, "https://evil.example.com/v1/models", nil)
 	require.NoError(t, err)
@@ -79,4 +82,32 @@ func TestHostBoundTransportRejectsForeignHostAndScheme(t *testing.T) {
 	_, err = rt.RoundTrip(unsupported)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "ftp://enclave.example.com")
+}
+
+func TestOriginRestrictionClosesIdleConnections(t *testing.T) {
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+	host := strings.TrimPrefix(server.URL, "https://")
+	hc := server.Client()
+	guarded, err := WithOriginRestriction(hc.Transport, host, "")
+	require.NoError(t, err)
+	hc.Transport = guarded
+	defer hc.CloseIdleConnections()
+	for i, expectedReuse := range []bool{false, true, false} {
+		if i == 2 {
+			hc.CloseIdleConnections()
+		}
+		var reused bool
+		req, err := http.NewRequest(http.MethodGet, server.URL, nil)
+		require.NoError(t, err)
+		req = req.WithContext(httptrace.WithClientTrace(req.Context(), &httptrace.ClientTrace{
+			GotConn: func(info httptrace.GotConnInfo) { reused = info.Reused },
+		}))
+		resp, err := hc.Do(req)
+		require.NoError(t, err)
+		resp.Body.Close()
+		require.Equal(t, expectedReuse, reused)
+	}
 }

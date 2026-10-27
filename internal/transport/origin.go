@@ -10,32 +10,15 @@ import (
 	"github.com/tinfoilsh/tinfoil-go/internal/errs"
 )
 
-// BoundHTTPClient wraps httpClient's secure transport in place: first with
-// user_cache_secret injection (skipped when userCacheSecret is empty), then
-// with a hostBoundTransport that refuses origins other than the enclave and
-// baseURL. Either may be empty; the gateway passes only its base URL.
-func BoundHTTPClient(httpClient *http.Client, enclave, baseURL, userCacheSecret string) (*http.Client, error) {
-	// The cache-secret layer sits above the sealing transport, so the field it
-	// injects is encrypted with the rest of the body (EHBP) or sent over the
-	// pinned connection (TLS).
-	transport := httpClient.Transport
-	if userCacheSecret != "" {
-		transport = &userCacheSecretTransport{
-			secret:    userCacheSecret,
-			transport: transport,
-		}
-	}
-
+// WithOriginRestriction returns next behind a guard that refuses requests to
+// any origin other than the enclave and baseURL. Either may be empty; the
+// gateway passes only its base URL.
+func WithOriginRestriction(next http.RoundTripper, enclave, baseURL string) (http.RoundTripper, error) {
 	origins, err := allowedOrigins(enclave, baseURL)
 	if err != nil {
 		return nil, &errs.ConfigurationError{Err: fmt.Errorf("failed to determine allowed request origins: %w", err)}
 	}
-	httpClient.Transport = &hostBoundTransport{
-		allowedOrigins: origins,
-		enclave:        enclave,
-		transport:      transport,
-	}
-	return httpClient, nil
+	return &originGuard{allowedOrigins: origins, enclave: enclave, transport: next}, nil
 }
 
 func allowedOrigins(enclave, baseURL string) (map[string]struct{}, error) {
@@ -57,21 +40,21 @@ func allowedOrigins(enclave, baseURL string) (map[string]struct{}, error) {
 	return origins, nil
 }
 
-// hostBoundTransport rejects requests to any origin other than the verified
-// enclave or the configured proxy. This guards the escape-hatch HTTP client
-// (and the OpenAI client) from disclosing sensitive request headers, such as the
-// API key, to an arbitrary host.
-type hostBoundTransport struct {
+// originGuard rejects requests to any origin other than the verified enclave
+// or the configured proxy. This guards the escape-hatch HTTP client (and the
+// OpenAI client) from disclosing sensitive request headers, such as the API
+// key, to an arbitrary host.
+type originGuard struct {
 	allowedOrigins map[string]struct{}
 	enclave        string
 	transport      http.RoundTripper
 }
 
-func (t *hostBoundTransport) CloseIdleConnections() {
+func (t *originGuard) CloseIdleConnections() {
 	closeIdleConnections(t.transport)
 }
 
-func (t *hostBoundTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+func (t *originGuard) RoundTrip(req *http.Request) (*http.Response, error) {
 	origin := normalizedOrigin(req.URL)
 	if _, ok := t.allowedOrigins[origin]; !ok {
 		return nil, &errs.ConfigurationError{Err: fmt.Errorf("refusing to send request to %q: client is bound to enclave %q", origin, t.enclave)}

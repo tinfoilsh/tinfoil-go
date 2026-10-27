@@ -2,7 +2,6 @@ package transport
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
@@ -40,7 +39,7 @@ func TestRequestRecovery(t *testing.T) {
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
 			var attempts int
-			transport := &recoveryTransport{transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			transport := WithReplay(roundTripFunc(func(req *http.Request) (*http.Response, error) {
 				attempts++
 				body, err := io.ReadAll(req.Body)
 				req.Body.Close()
@@ -54,7 +53,7 @@ func TestRequestRecovery(t *testing.T) {
 					return nil, tc.first
 				}
 				return &http.Response{StatusCode: http.StatusOK, Body: http.NoBody}, tc.last
-			})}
+			}), IsKeyRejection)
 			req, err := http.NewRequestWithContext(ctx, http.MethodPost, "https://enclave.example/path?q=1", strings.NewReader("payload"))
 			require.NoError(t, err)
 			req.Header.Set("Authorization", "secret")
@@ -87,10 +86,8 @@ func TestRequestClientClosesIdleConnections(t *testing.T) {
 		w.WriteHeader(http.StatusNoContent)
 	}))
 	defer server.Close()
-	host := strings.TrimPrefix(server.URL, "https://")
-	hc, err := BoundHTTPClient(server.Client(), host, "", "cache-secret")
-	require.NoError(t, err)
-	hc.Transport = &recoveryTransport{transport: hc.Transport}
+	hc := server.Client()
+	hc.Transport = WithReplay(hc.Transport, IsKeyRejection)
 	defer hc.CloseIdleConnections()
 	for i, expectedReuse := range []bool{false, true, false} {
 		if i == 2 {
@@ -113,12 +110,12 @@ func TestRequestRecoveryDiscardsErrorResponses(t *testing.T) {
 	for _, replayable := range []bool{false, true} {
 		var bodies []*closeCountingBody
 		cause := errors.New("rejected")
-		transport := &recoveryTransport{transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		transport := WithReplay(roundTripFunc(func(req *http.Request) (*http.Response, error) {
 			req.Body.Close()
 			body := &closeCountingBody{Reader: strings.NewReader("failure")}
 			bodies = append(bodies, body)
 			return &http.Response{StatusCode: http.StatusBadRequest, Body: body}, testKeyRejection{cause}
-		})}
+		}), IsKeyRejection)
 		req, err := http.NewRequest(http.MethodPost, "https://enclave.example", strings.NewReader("payload"))
 		require.NoError(t, err)
 		if !replayable {
@@ -131,34 +128,6 @@ func TestRequestRecoveryDiscardsErrorResponses(t *testing.T) {
 			require.Equal(t, 1, body.closes)
 		}
 	}
-}
-
-func TestPreparedRequestBodyCanReplay(t *testing.T) {
-	var bodies []string
-	transport := &recoveryTransport{transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
-		body, err := io.ReadAll(req.Body)
-		req.Body.Close()
-		require.NoError(t, err)
-		bodies = append(bodies, string(body))
-		if len(bodies) == 1 {
-			return nil, testKeyRejection{errors.New("rotated")}
-		}
-		return newResponse(http.StatusOK, "ok"), nil
-	})}
-	hc, err := BoundHTTPClient(&http.Client{Transport: transport}, "enclave.example", "", "cache-secret")
-	require.NoError(t, err)
-	req, err := http.NewRequest(http.MethodPost, "https://enclave.example/v1/chat/completions", io.NopCloser(strings.NewReader(`{"model":"gpt-oss-120b"}`)))
-	require.NoError(t, err)
-	require.Nil(t, req.GetBody)
-	resp, err := hc.Do(req)
-	require.NoError(t, err)
-	resp.Body.Close()
-	require.Equal(t, http.StatusOK, resp.StatusCode)
-	require.Len(t, bodies, 2)
-	require.Equal(t, bodies[0], bodies[1])
-	var fields map[string]any
-	require.NoError(t, json.Unmarshal([]byte(bodies[1]), &fields))
-	require.Equal(t, "cache-secret", fields[UserCacheSecretField])
 }
 
 // closeCountingBody counts the reads and closes of a response body.
@@ -175,4 +144,18 @@ func (b *closeCountingBody) Read(p []byte) (int, error) {
 func (b *closeCountingBody) Close() error {
 	b.closes++
 	return nil
+}
+
+func TestReplayAsksOnlyAboutErrors(t *testing.T) {
+	transport := WithReplay(roundTripFunc(func(*http.Request) (*http.Response, error) {
+		return newResponse(http.StatusOK, "ok"), nil
+	}), func(err error) bool {
+		t.Errorf("asked whether to retry %v", err)
+		return false
+	})
+	req, err := http.NewRequest(http.MethodGet, "https://enclave.example", nil)
+	require.NoError(t, err)
+	resp, err := transport.RoundTrip(req)
+	require.NoError(t, err)
+	resp.Body.Close()
 }

@@ -1,11 +1,7 @@
 package enclave
 
 import (
-	"context"
 	"errors"
-	"io"
-	"net/http"
-	"strings"
 	"testing"
 	"testing/synctest"
 	"time"
@@ -14,31 +10,6 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/tinfoilsh/tinfoil-go/verify"
 )
-
-func TestDefaultClientProbesOncePerDiscovery(t *testing.T) {
-	synctest.Test(t, func(t *testing.T) {
-		cause := errors.New("unavailable")
-		requests := make(map[string]int)
-		original := http.DefaultClient
-		defer func() { http.DefaultClient = original }()
-		http.DefaultClient = &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
-			requests[req.URL.Host]++
-			if req.URL.String() == defaultRouterURL {
-				return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(`["router.example"]`))}, nil
-			}
-			return nil, cause
-		})}
-		s, err := DiscoverRouter(context.Background(), nil)
-		if err == nil {
-			// Complete initialization if the constructor returned a lazy fallback.
-			_, err = verifyNow(s)
-		}
-		require.ErrorIs(t, err, cause)
-		require.Positive(t, requests["atc.tinfoil.sh"])
-		require.Equal(t, requests["atc.tinfoil.sh"], requests["router.example"], "one candidate probe per discovery")
-		require.Equal(t, 2, requests["inference.tinfoil.sh"], "fallback verification has one retry")
-	})
-}
 
 func TestInitializationRecovery(t *testing.T) {
 	firstCause, lastCause := errors.New("first attempt"), errors.New("last attempt")
@@ -126,7 +97,7 @@ func TestRefreshRejectsExpiredPublication(t *testing.T) {
 	time.Sleep(time.Until(<-deadline) + time.Millisecond)
 	s.stateMu.Unlock()
 	<-call.done
-	require.ErrorIs(t, call.err, errFreshnessExpired)
+	require.ErrorIs(t, call.err, ErrFreshnessExpired)
 	require.Nil(t, call.state)
 	require.Nil(t, current(s))
 }

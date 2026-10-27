@@ -71,6 +71,12 @@ func (s *Handle) Reverify(ctx context.Context) (*State, error) {
 	return s.verifiedState(ctx, true, verificationRetries)
 }
 
+// VerifyOnce verifies like Reverify but doesn't retry a failed attempt, so a
+// caller trying several enclaves moves on quickly.
+func (s *Handle) VerifyOnce(ctx context.Context) (*State, error) {
+	return s.verifiedState(ctx, true, candidateVerificationRetries)
+}
+
 // detached returns a copy of v for a caller to keep. Its fields cannot be
 // changed, but a caller holding a pointer can replace the whole value, so the
 // handle never hands out the one it caches. The copy shares v's internals,

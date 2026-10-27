@@ -8,8 +8,9 @@ import (
 	"github.com/tinfoilsh/tinfoil-go/verify"
 )
 
-// errFreshnessExpired means the authenticated witnesses no longer authorize requests.
-var errFreshnessExpired = errors.New("attestation freshness witnesses have expired; retry verification with fresh evidence")
+// ErrFreshnessExpired means the authenticated witnesses no longer authorize
+// requests.
+var ErrFreshnessExpired = errors.New("attestation freshness witnesses have expired; retry verification with fresh evidence")
 
 const (
 	verificationRetries          = 1
@@ -30,6 +31,12 @@ type State struct {
 // Verification returns a copy of the verification for the caller to keep.
 func (state *State) Verification() *verify.Verification {
 	return detached(state.verification)
+}
+
+// Generation orders the states a handle publishes: a later state has a higher
+// generation.
+func (state *State) Generation() uint64 {
+	return state.generation
 }
 
 type verificationCall struct {
@@ -81,7 +88,7 @@ func (s *Handle) refresh(call *verificationCall, retries int) {
 	for attempt := 0; ; attempt++ {
 		verified, err = fetch()
 		if err == nil && !time.Now().Before(verified.FreshnessExpiresAt()) {
-			err = &AttestationError{Err: errFreshnessExpired}
+			err = &AttestationError{Err: ErrFreshnessExpired}
 		}
 		if attempt == retries || !retryableVerification(err) {
 			break
@@ -91,7 +98,7 @@ func (s *Handle) refresh(call *verificationCall, retries int) {
 	}
 	s.stateMu.Lock()
 	if err == nil && !time.Now().Before(verified.FreshnessExpiresAt()) {
-		err = &AttestationError{Err: errFreshnessExpired}
+		err = &AttestationError{Err: ErrFreshnessExpired}
 	}
 	if err != nil && firstErr != nil {
 		err = errors.Join(err, firstErr)
@@ -110,6 +117,14 @@ func (s *Handle) refresh(call *verificationCall, retries int) {
 // valid is called with the handle's stateMu held.
 func (state *State) valid() bool {
 	return !state.rejected && time.Now().Before(state.verification.FreshnessExpiresAt())
+}
+
+// Valid reports whether state can still authorize requests: it hasn't expired
+// or been invalidated.
+func (s *Handle) Valid(state *State) bool {
+	s.stateMu.RLock()
+	defer s.stateMu.RUnlock()
+	return state.valid()
 }
 
 // Invalidate marks state rejected, so the next EnsureVerified verifies again.

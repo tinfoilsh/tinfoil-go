@@ -11,8 +11,8 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	"github.com/tinfoilsh/tinfoil-go/internal/cachesecret"
 	"github.com/tinfoilsh/tinfoil-go/internal/errs"
-	"github.com/tinfoilsh/tinfoil-go/internal/transport"
 	"github.com/tinfoilsh/tinfoil-go/internal/verifytest"
 	"github.com/tinfoilsh/tinfoil-go/verify"
 )
@@ -246,7 +246,7 @@ func TestSealJSONRoutingPreservesInjectedBodyAcrossRetries(t *testing.T) {
 			require.Equal(t, bodies[0], bodies[1])
 			var fields map[string]json.RawMessage
 			require.NoError(t, json.Unmarshal([]byte(bodies[0]), &fields))
-			require.NotContains(t, fields, transport.UserCacheSecretField)
+			require.NotContains(t, fields, cachesecret.Field)
 			require.JSONEq(t, `"12hdflC67PPzpyBnEpYOB30yhkOMQuxLixo9xB48s6A"`, string(fields[cacheSaltField]))
 			require.Equal(t, "ca60642ff6701647124356235d2c925e34117bc73a99b477d4e280c5f0c03527", prefixes[0])
 			require.Equal(t, prefixes[0], prefixes[1])
@@ -308,7 +308,7 @@ func TestSealPerRequestCacheSecretOverridesClientSecret(t *testing.T) {
 		resp, err := seal.RoundTrip(req)
 		require.NoError(t, err)
 		resp.Body.Close()
-		require.NotContains(t, fields, transport.UserCacheSecretField, "the secret never leaves the client")
+		require.NotContains(t, fields, cachesecret.Field, "the secret never leaves the client")
 		return fields[cacheSaltField], prefix
 	}
 	gotSalt, gotPrefix := salt("client-secret", `{"model":"test-model","user_cache_secret":"end-user"}`)
@@ -398,4 +398,31 @@ func TestGatewayKeepsOneTransportPerReplica(t *testing.T) {
 	// One transport means one handle, whose refresh concurrent requests share;
 	// internal/enclave tests that.
 	require.Same(t, first, second, "concurrent first uses share one replica transport")
+}
+
+// testKeyRejection is a key rejection as transport.IsKeyRejection reports one.
+type testKeyRejection struct{ error }
+
+func (testKeyRejection) KeyRejected() bool { return true }
+
+func TestReplicaChainReplaysAndNamesTheReplica(t *testing.T) {
+	var attempts []*http.Request
+	conn := roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		req.Body.Close()
+		attempts = append(attempts, req)
+		if len(attempts) == 1 {
+			return nil, testKeyRejection{errors.New("rotated key")}
+		}
+		return newResponse(http.StatusOK, ""), nil
+	})
+	rt := replicaChain(conn, "replica.example", "https://gateway.example/v1/")
+	req, err := http.NewRequest(http.MethodPost, "https://gateway.example/v1/chat/completions", strings.NewReader(`{"model":"m"}`))
+	require.NoError(t, err)
+	resp, err := rt.RoundTrip(req)
+	require.NoError(t, err)
+	resp.Body.Close()
+	require.Len(t, attempts, 2, "a key rejection is replayed once")
+	for _, attempt := range attempts {
+		require.Equal(t, "https://replica.example", attempt.Header.Get("X-Tinfoil-Enclave-Url"), "SPEC 14.7: every attempt names the replica")
+	}
 }

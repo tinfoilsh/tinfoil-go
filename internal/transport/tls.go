@@ -1,21 +1,50 @@
-package enclave
+package transport
 
 import (
 	"crypto/tls"
+	"crypto/x509"
 	"errors"
 	"fmt"
 	"net/http"
 	"sync"
 
+	"github.com/tinfoilsh/tinfoil-go/internal/enclave"
 	"github.com/tinfoilsh/tinfoil-go/internal/errs"
 	"github.com/tinfoilsh/tinfoil-go/verify"
+	"github.com/tinfoilsh/tinfoil-go/verify/document"
 )
 
 var (
 	errNoTLS              = errors.New("TLS binding requires an HTTPS request")
 	errCertMismatch       = errors.New("enclave certificate does not match the attested key; re-verify the enclave")
 	errNoValidCertificate = errors.New("TLS binding requires a verified certificate fingerprint")
+	// errNoTLSKey reports a verification with no TLS key to pin to.
+	errNoTLSKey = fmt.Errorf("document endorses no %q key", document.CryptoMaterialIDTLS)
 )
+
+// TLS returns a Transport that pins each connection's leaf certificate to the
+// TLS key h's current verification attests. It owns the connections, so it
+// is the bottom of a stack. It refuses plaintext requests, which no pinned
+// connection carries.
+func TLS(h *enclave.Handle) *Transport {
+	return &Transport{
+		handle: h,
+		build: func(v *verify.Verification) (http.RoundTripper, error) {
+			key, ok := v.TLSPublicKeyFP()
+			if !ok {
+				return nil, &errs.AttestationError{Err: errNoTLSKey}
+			}
+			return &TLSBoundRoundTripper{ExpectedPublicKey: key}, nil
+		},
+		keyRejected: isCertificateError,
+		check: func(req *http.Request) error {
+			if req.URL == nil || req.URL.Scheme != "https" {
+				return &errs.ConfigurationError{Err: errNoTLS}
+			}
+			return nil
+		},
+	}
+}
 
 type TLSBoundRoundTripper struct {
 	ExpectedPublicKey string
@@ -34,7 +63,7 @@ func (t *TLSBoundRoundTripper) getTransport() (*http.Transport, error) {
 		// connections; DialTLSContext only covers non-proxied HTTPS.
 		dt, ok := http.DefaultTransport.(*http.Transport)
 		if !ok || dt == nil {
-			t.err = &ConfigurationError{Err: fmt.Errorf("TLS binding requires http.DefaultTransport to be a non-nil *http.Transport")}
+			t.err = &errs.ConfigurationError{Err: fmt.Errorf("TLS binding requires http.DefaultTransport to be a non-nil *http.Transport")}
 			return
 		}
 		dt = dt.Clone()
@@ -53,10 +82,10 @@ func (t *TLSBoundRoundTripper) getTransport() (*http.Transport, error) {
 
 			certFP, err := verify.ConnectionCertFP(state)
 			if err != nil {
-				return &AttestationError{Err: err}
+				return &errs.AttestationError{Err: err}
 			}
 			if certFP != t.ExpectedPublicKey {
-				return &AttestationError{Err: errCertMismatch}
+				return &errs.AttestationError{Err: errCertMismatch}
 			}
 			return nil
 		}
@@ -69,11 +98,11 @@ func (t *TLSBoundRoundTripper) getTransport() (*http.Transport, error) {
 
 func (t *TLSBoundRoundTripper) RoundTrip(r *http.Request) (*http.Response, error) {
 	if len(t.ExpectedPublicKey) == 0 {
-		return nil, &ConfigurationError{Err: errNoValidCertificate}
+		return nil, &errs.ConfigurationError{Err: errNoValidCertificate}
 	}
 
 	if r.URL == nil || r.URL.Scheme != "https" {
-		return nil, &ConfigurationError{Err: errNoTLS}
+		return nil, &errs.ConfigurationError{Err: errNoTLS}
 	}
 
 	transport, err := t.getTransport()
@@ -91,4 +120,14 @@ func (t *TLSBoundRoundTripper) CloseIdleConnections() {
 	if transport, err := t.getTransport(); err == nil {
 		transport.CloseIdleConnections()
 	}
+}
+
+func isCertificateError(err error) bool {
+	var certInvalidErr x509.CertificateInvalidError
+	var unknownAuthErr x509.UnknownAuthorityError
+	var hostnameErr x509.HostnameError
+	var certVerifyErr *tls.CertificateVerificationError
+	return errors.Is(err, errCertMismatch) ||
+		errors.As(err, &certInvalidErr) || errors.As(err, &unknownAuthErr) ||
+		errors.As(err, &hostnameErr) || errors.As(err, &certVerifyErr)
 }

@@ -2,6 +2,7 @@ package tinfoil
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
@@ -123,18 +124,64 @@ func TestDiscoverRouterVerifiesTheFallbackUnderItsContext(t *testing.T) {
 func TestBindingDefaultsToTheRoutes(t *testing.T) {
 	for _, tc := range []struct {
 		binding      Binding
-		routeDefault enclave.Binding
-		want         enclave.Binding
+		routeDefault Binding
+		want         Binding
 	}{
-		{"", enclave.TLS, enclave.TLS},
-		{"", enclave.EHBP, enclave.EHBP},
-		{BindingTLS, enclave.EHBP, enclave.TLS},
-		{BindingEHBP, enclave.TLS, enclave.EHBP},
+		{"", BindingTLS, BindingTLS},
+		{"", BindingEHBP, BindingEHBP},
+		{BindingTLS, BindingEHBP, BindingTLS},
+		{BindingEHBP, BindingTLS, BindingEHBP},
 	} {
-		got, err := tc.binding.enclaveBinding(tc.routeDefault)
+		got, err := tc.binding.resolve(tc.routeDefault)
 		require.NoError(t, err)
 		require.Equal(t, tc.want, got)
 	}
+}
+
+func TestKeyedTransportFollowsTheBinding(t *testing.T) {
+	h := enclave.NewTestHandle("enclave.example", nil, func() (*verify.Verification, error) {
+		t.Error("each binding refuses its request before verifying")
+		return nil, errors.New("unreachable")
+	})
+	upgrade, err := http.NewRequest(http.MethodGet, "https://enclave.example/v1/realtime", nil)
+	require.NoError(t, err)
+	upgrade.Header.Set("Upgrade", "websocket")
+	plaintext, err := http.NewRequest(http.MethodGet, "http://enclave.example/v1/models", nil)
+	require.NoError(t, err)
+	_, err = keyedTransport(BindingEHBP, h).RoundTrip(upgrade)
+	require.ErrorContains(t, err, "EHBP seals only request and response bodies")
+	_, err = keyedTransport(BindingTLS, h).RoundTrip(plaintext)
+	require.ErrorContains(t, err, "requires an HTTPS request")
+}
+
+func TestEnclaveHTTPClientUsesItsBinding(t *testing.T) {
+	original := http.DefaultTransport
+	t.Cleanup(func() { http.DefaultTransport = original })
+	synctest.Test(t, func(t *testing.T) {
+		var fetches int
+		http.DefaultTransport = roundTripFunc(func(*http.Request) (*http.Response, error) {
+			fetches++
+			return nil, errors.New("no network in this test")
+		})
+		upgrade := func() *http.Request {
+			req, err := http.NewRequest(http.MethodGet, "https://enclave.example/v1/realtime", nil)
+			require.NoError(t, err)
+			req.Header.Set("Upgrade", "websocket")
+			return req
+		}
+		sealed, err := NewEnclaveHTTPClient("enclave.example", "org/repo", &EnclaveOptions{Binding: BindingEHBP})
+		require.NoError(t, err)
+		_, err = sealed.Do(upgrade())
+		require.ErrorContains(t, err, "EHBP seals only request and response bodies")
+		require.Zero(t, fetches, "EHBP refuses an upgrade before verifying")
+
+		pinned, err := NewEnclaveHTTPClient("enclave.example", "org/repo", nil)
+		require.NoError(t, err)
+		_, err = pinned.Do(upgrade())
+		require.Error(t, err)
+		require.NotContains(t, err.Error(), "EHBP seals only")
+		require.Positive(t, fetches, "TLS carries the upgrade, so it verifies first")
+	})
 }
 
 func TestGatewayHTTPClientServesPinnedModels(t *testing.T) {
@@ -219,4 +266,81 @@ func TestLiveNewEnclaveHTTPClient(t *testing.T) {
 	after, err := c.Reverify(context.Background())
 	require.NoError(t, err)
 	require.False(t, after.Metadata().VerifiedAt.Before(before.Metadata().VerifiedAt))
+}
+
+func TestValidateTLSBaseURL(t *testing.T) {
+	require.NoError(t, validateTLSBaseURL("", "enclave.example.com"))
+	require.NoError(t, validateTLSBaseURL("https://enclave.example.com/custom/v1", "enclave.example.com"))
+	require.NoError(t, validateTLSBaseURL("https://enclave.example.com:443/custom/v1", "enclave.example.com"))
+
+	err := validateTLSBaseURL("https://proxy.example.com/v1", "enclave.example.com")
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "verified enclave origin")
+
+	err = validateTLSBaseURL("http://enclave.example.com/v1", "enclave.example.com")
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "verified enclave origin")
+}
+
+// testKeyRejection is a key rejection as transport.IsKeyRejection reports one.
+type testKeyRejection struct{ error }
+
+func (testKeyRejection) KeyRejected() bool { return true }
+
+func TestEnclaveChainStacksEveryLayer(t *testing.T) {
+	var attempts []*http.Request
+	var bodies []map[string]any
+	conn := roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		var body map[string]any
+		require.NoError(t, json.NewDecoder(req.Body).Decode(&body))
+		req.Body.Close()
+		attempts, bodies = append(attempts, req), append(bodies, body)
+		if len(attempts) == 1 {
+			return nil, testKeyRejection{errors.New("rotated key")}
+		}
+		return &http.Response{StatusCode: http.StatusOK, Body: http.NoBody, Header: make(http.Header)}, nil
+	})
+	rt, err := enclaveChain(conn, "enclave.example", "https://proxy.example/v1/", "cache-secret")
+	require.NoError(t, err)
+
+	// A body that can't be read twice: only the cache-secret layer, above the
+	// replay, makes it replayable.
+	req, err := http.NewRequest(http.MethodPost, "https://proxy.example/v1/chat/completions", io.NopCloser(strings.NewReader(`{"model":"m"}`)))
+	require.NoError(t, err)
+	require.Nil(t, req.GetBody)
+	resp, err := rt.RoundTrip(req)
+	require.NoError(t, err)
+	resp.Body.Close()
+	require.Len(t, attempts, 2, "a key rejection is replayed once")
+	for i, attempt := range attempts {
+		require.Equal(t, "https://enclave.example", attempt.Header.Get("X-Tinfoil-Enclave-Url"), "every attempt names the enclave to the proxy")
+		require.Equal(t, "cache-secret", bodies[i]["user_cache_secret"], "every attempt carries the cache secret")
+	}
+
+	req, err = http.NewRequest(http.MethodGet, "https://elsewhere.example/v1/models", nil)
+	require.NoError(t, err)
+	_, err = rt.RoundTrip(req)
+	var config *ConfigurationError
+	require.ErrorAs(t, err, &config, "origins other than the enclave and the base URL are refused")
+	require.Len(t, attempts, 2)
+}
+
+func TestEnclaveHTTPClientRefusesOtherOrigins(t *testing.T) {
+	for _, binding := range []Binding{BindingTLS, BindingEHBP} {
+		c, err := NewEnclaveHTTPClient("enclave.example", "org/repo", &EnclaveOptions{Binding: binding})
+		require.NoError(t, err)
+		_, err = c.Get("https://elsewhere.example/v1/models")
+		var config *ConfigurationError
+		require.ErrorAs(t, err, &config, "refused before verifying, so no network I/O")
+		require.ErrorContains(t, err, "refusing to send request")
+	}
+}
+
+func TestGatewayHTTPClientRefusesOtherOrigins(t *testing.T) {
+	gw, err := NewGatewayHTTPClient(&GatewayOptions{Catalog: func() Catalog { return Catalog{} }})
+	require.NoError(t, err)
+	_, err = gw.Get("https://elsewhere.example/v1/models")
+	var config *ConfigurationError
+	require.ErrorAs(t, err, &config)
+	require.ErrorContains(t, err, "refusing to send request")
 }
