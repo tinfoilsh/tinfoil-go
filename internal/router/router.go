@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/tinfoilsh/tinfoil-go/internal/enclave"
+	"github.com/tinfoilsh/tinfoil-go/internal/fetch"
 	"github.com/tinfoilsh/tinfoil-go/verify"
 )
 
@@ -34,7 +35,11 @@ func fetchRouters(ctx context.Context) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	resp, err := http.DefaultClient.Do(req)
+	// Copy http.DefaultClient so an application's process-wide settings still
+	// apply, while refusing a redirect that would fetch the list in plaintext.
+	client := *http.DefaultClient
+	client.CheckRedirect = fetch.RefuseInsecureRedirects
+	resp, err := client.Do(req)
 	if err != nil {
 		return nil, err
 	}

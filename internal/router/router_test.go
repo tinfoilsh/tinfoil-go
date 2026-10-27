@@ -68,3 +68,31 @@ func TestLiveClientFallbackEnclave(t *testing.T) {
 	_, err = defaultClient.Reverify(t.Context())
 	assert.NoError(t, err)
 }
+
+func TestFetchRoutersRefusesInsecureRedirects(t *testing.T) {
+	original := http.DefaultClient
+	t.Cleanup(func() { http.DefaultClient = original })
+	for _, tc := range []struct {
+		location string
+		refused  bool
+	}{
+		{"https://mirror.example/routers", false},
+		{"http://mirror.example/routers", true},
+	} {
+		t.Run(tc.location, func(t *testing.T) {
+			http.DefaultClient = &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+				if req.URL.String() == defaultRouterURL {
+					return &http.Response{StatusCode: http.StatusFound, Header: http.Header{"Location": {tc.location}}, Body: http.NoBody}, nil
+				}
+				return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(`["router.example"]`))}, nil
+			})}
+			routers, err := fetchRouters(context.Background())
+			if tc.refused {
+				require.ErrorContains(t, err, "refusing redirect to non-HTTPS URL")
+				return
+			}
+			require.NoError(t, err)
+			require.Equal(t, []string{"router.example"}, routers)
+		})
+	}
+}
