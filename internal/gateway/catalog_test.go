@@ -3,9 +3,11 @@ package gateway
 import (
 	"context"
 	"errors"
+	"net/http"
 	"strings"
 	"testing"
 	"testing/synctest"
+	"time"
 
 	"github.com/stretchr/testify/require"
 	"github.com/tinfoilsh/tinfoil-go/internal/errs"
@@ -35,12 +37,12 @@ func TestReadCatalogKeepsOnlyTrustedEntries(t *testing.T) {
 	require.Equal(t, Catalog{"ok": {Repo: "tinfoilsh/ok", Hosts: []string{"a.example"}}}, catalog)
 }
 
-func TestLazyCatalogFetchesOnFirstUseAndKeepsSuccess(t *testing.T) {
+func TestCatalogCacheFetchesOnFirstUseAndKeepsSuccess(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		failure := errors.New("gateway unavailable")
 		release := make(chan struct{})
 		var fetches int
-		lazy := &lazyCatalog{fetch: func(context.Context) (Catalog, error) {
+		lazy := &catalogCache{fetch: func(context.Context) (Catalog, error) {
 			fetches++
 			<-release
 			if fetches == 1 {
@@ -70,5 +72,77 @@ func TestLazyCatalogFetchesOnFirstUseAndKeepsSuccess(t *testing.T) {
 		_, err = lazy.get(context.Background())
 		require.NoError(t, err)
 		require.Equal(t, 2, fetches, "a fetched catalog is kept")
+	})
+}
+
+func TestCatalogCacheRefreshesWithoutBlocking(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		catalogs := []Catalog{{"old": {Repo: "tinfoilsh/old", Hosts: []string{"a.example"}}}, nil, {"new": {Repo: "tinfoilsh/new", Hosts: []string{"b.example"}}}}
+		release := make(chan struct{}, len(catalogs))
+		var fetches int
+		cache := &catalogCache{fetch: func(context.Context) (Catalog, error) {
+			fetches++
+			n := fetches
+			<-release
+			if catalog := catalogs[n-1]; catalog != nil {
+				return catalog, nil
+			}
+			return nil, errors.New("gateway unavailable")
+		}}
+		release <- struct{}{}
+		get := func() Catalog {
+			catalog, err := cache.get(context.Background())
+			require.NoError(t, err)
+			return catalog
+		}
+		require.Contains(t, get(), "old")
+
+		time.Sleep(catalogRefreshInterval - time.Nanosecond)
+		require.Contains(t, get(), "old")
+		synctest.Wait()
+		require.Equal(t, 1, fetches, "a catalog is kept for the refresh interval")
+
+		time.Sleep(time.Nanosecond)
+		require.Contains(t, get(), "old", "a stale catalog is returned while it refreshes")
+		require.Contains(t, get(), "old")
+		synctest.Wait()
+		require.Equal(t, 2, fetches, "a use during a refresh starts no second fetch")
+		release <- struct{}{}
+		synctest.Wait()
+		require.Contains(t, get(), "old", "a failed refresh keeps the last catalog")
+		synctest.Wait()
+		require.Equal(t, 2, fetches, "a failed refresh waits another interval")
+
+		time.Sleep(catalogRefreshInterval)
+		require.Contains(t, get(), "old")
+		release <- struct{}{}
+		synctest.Wait()
+		require.Contains(t, get(), "new")
+		require.Equal(t, 3, fetches)
+	})
+}
+
+func TestTransportRefreshesFetchedCatalog(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		served := `{"old": {"repo": "tinfoilsh/old", "hosts": ["a.example"]}}`
+		original := http.DefaultTransport
+		defer func() { http.DefaultTransport = original }()
+		http.DefaultTransport = roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			require.Equal(t, "https://gateway.example/catalog", req.URL.String())
+			return newResponse(http.StatusOK, served), nil
+		})
+		tr, err := NewTransport(Config{BaseURL: "https://gateway.example/v1/", Relay: "gateway.example"})
+		require.NoError(t, err)
+		models := func() []string {
+			models, err := tr.Models(context.Background())
+			require.NoError(t, err)
+			return models
+		}
+		require.Equal(t, []string{"old"}, models())
+		served = `{"new": {"repo": "tinfoilsh/new", "hosts": ["b.example"]}}`
+		time.Sleep(catalogRefreshInterval)
+		require.Equal(t, []string{"old"}, models())
+		synctest.Wait()
+		require.Equal(t, []string{"new"}, models(), "the gateway's catalog is refreshed")
 	})
 }
