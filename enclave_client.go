@@ -15,43 +15,43 @@ import (
 	"github.com/tinfoilsh/tinfoil-go/verify"
 )
 
-// Binding selects how traffic is tied to the keys an enclave attests. The
+// TransportMode selects how a client protects its traffic to an enclave. The
 // zero value selects the route's default.
-type Binding string
+type TransportMode string
 
 const (
-	// BindingTLS pins each connection to the attested TLS key. It protects the
-	// whole request and response, and needs a direct connection.
-	BindingTLS Binding = "tls"
-	// BindingEHBP seals request and response bodies to the attested HPKE key,
-	// so they stay private through a proxy. The method, URL and headers aren't
-	// sealed, and neither is a request without a body or its response. It
-	// refuses protocol upgrades, such as WebSockets, and CONNECT tunnels,
-	// because nothing after the handshake would be sealed.
-	BindingEHBP Binding = "ehbp"
+	// TransportModeTLS pins each connection to the attested TLS key. It
+	// protects the whole request and response, and needs a direct connection.
+	TransportModeTLS TransportMode = "tls"
+	// TransportModeEHBP seals request and response bodies to the attested
+	// HPKE key, so they stay private through a proxy. The method, URL and
+	// headers aren't sealed, and neither is a request without a body or its
+	// response. It refuses protocol upgrades, such as WebSockets, and CONNECT
+	// tunnels, because nothing after the handshake would be sealed.
+	TransportModeEHBP TransportMode = "ehbp"
 )
 
-// resolve returns b, or routeDefault for the zero value.
-func (b Binding) resolve(routeDefault Binding) (Binding, error) {
-	switch b {
+// resolve returns m, or routeDefault for the zero value.
+func (m TransportMode) resolve(routeDefault TransportMode) (TransportMode, error) {
+	switch m {
 	case "":
 		return routeDefault, nil
-	case BindingTLS, BindingEHBP:
-		return b, nil
+	case TransportModeTLS, TransportModeEHBP:
+		return m, nil
 	}
-	return "", &ConfigurationError{Err: fmt.Errorf("unknown binding %q", b)}
+	return "", &ConfigurationError{Err: fmt.Errorf("unknown transport mode %q", m)}
 }
 
 // EnclaveOptions configures an EnclaveHTTPClient.
 type EnclaveOptions struct {
-	// Binding defaults to BindingTLS for NewEnclaveHTTPClient and to BindingEHBP
-	// for DiscoverRouter.
-	Binding Binding
+	// TransportMode defaults to TransportModeTLS for NewEnclaveHTTPClient and
+	// to TransportModeEHBP for DiscoverRouter.
+	TransportMode TransportMode
 	// BaseURL is a path on the enclave's own HTTPS origin, or an HTTPS proxy on
-	// another origin, which requires BindingEHBP. Requests to a proxy carry
-	// X-Tinfoil-Enclave-Url so it can forward them to the enclave.
-	// DiscoverRouter requires BindingEHBP for any BaseURL, because the router's
-	// origin isn't known before discovery.
+	// another origin, which requires TransportModeEHBP. Requests to a proxy
+	// carry X-Tinfoil-Enclave-Url so it can forward them to the enclave.
+	// DiscoverRouter requires TransportModeEHBP for any BaseURL, because the
+	// router's origin isn't known before discovery.
 	BaseURL string
 	// Verifier is the verification policy; nil selects the defaults.
 	Verifier *verify.Verifier
@@ -88,7 +88,7 @@ func NewEnclaveHTTPClient(host, repo string, opts *EnclaveOptions) (*EnclaveHTTP
 	if opts == nil {
 		opts = &EnclaveOptions{}
 	}
-	binding, err := opts.Binding.resolve(BindingTLS)
+	mode, err := opts.TransportMode.resolve(TransportModeTLS)
 	if err != nil {
 		return nil, err
 	}
@@ -101,7 +101,7 @@ func NewEnclaveHTTPClient(host, repo string, opts *EnclaveOptions) (*EnclaveHTTP
 	if err != nil {
 		return nil, err
 	}
-	return newEnclaveHTTPClient(handle, binding, opts.BaseURL, opts.UserCacheSecret)
+	return newEnclaveHTTPClient(handle, mode, opts.BaseURL, opts.UserCacheSecret)
 }
 
 // DiscoverRouter returns a client for the first router from Tinfoil's router
@@ -113,7 +113,7 @@ func DiscoverRouter(ctx context.Context, opts *EnclaveOptions) (*EnclaveHTTPClie
 	if opts == nil {
 		opts = &EnclaveOptions{}
 	}
-	binding, err := opts.Binding.resolve(BindingEHBP)
+	mode, err := opts.TransportMode.resolve(TransportModeEHBP)
 	if err != nil {
 		return nil, err
 	}
@@ -121,8 +121,8 @@ func DiscoverRouter(ctx context.Context, opts *EnclaveOptions) (*EnclaveHTTPClie
 		if err := validateBaseURL(opts.BaseURL); err != nil {
 			return nil, err
 		}
-		if binding == BindingTLS {
-			return nil, &ConfigurationError{Err: errors.New("a base URL requires BindingEHBP when discovering the router")}
+		if mode == TransportModeTLS {
+			return nil, &ConfigurationError{Err: errors.New("a base URL requires TransportModeEHBP when discovering the router")}
 		}
 	}
 	if opts.Verifier != nil && opts.Verifier.CallerAuthorizesConfig() {
@@ -133,7 +133,7 @@ func DiscoverRouter(ctx context.Context, opts *EnclaveOptions) (*EnclaveHTTPClie
 		return nil, err
 	}
 	secret := cachesecret.Resolve(opts.UserCacheSecret, opts.UserCacheSecret != "")
-	client, err := newEnclaveHTTPClient(handle, binding, opts.BaseURL, secret)
+	client, err := newEnclaveHTTPClient(handle, mode, opts.BaseURL, secret)
 	if err != nil {
 		return nil, err
 	}
@@ -144,13 +144,13 @@ func DiscoverRouter(ctx context.Context, opts *EnclaveOptions) (*EnclaveHTTPClie
 	return client, nil
 }
 
-func newEnclaveHTTPClient(handle *enclave.Handle, binding Binding, baseURL, secret string) (*EnclaveHTTPClient, error) {
-	if binding == BindingTLS {
+func newEnclaveHTTPClient(handle *enclave.Handle, mode TransportMode, baseURL, secret string) (*EnclaveHTTPClient, error) {
+	if mode == TransportModeTLS {
 		if err := validateTLSBaseURL(baseURL, handle.Enclave()); err != nil {
 			return nil, &ConfigurationError{Err: err}
 		}
 	}
-	keyed := keyedTransport(binding, handle)
+	keyed := keyedTransport(mode, handle)
 	rt, err := enclaveChain(keyed, handle.Enclave(), baseURL, secret)
 	if err != nil {
 		return nil, err
@@ -166,10 +166,10 @@ func newEnclaveHTTPClient(handle *enclave.Handle, binding Binding, baseURL, secr
 	}, nil
 }
 
-// keyedTransport returns the transport that ties binding's traffic to the keys
-// handle verifies.
-func keyedTransport(binding Binding, handle *enclave.Handle) *transport.Transport {
-	if binding == BindingTLS {
+// keyedTransport returns the transport that protects mode's traffic with the
+// keys handle verifies.
+func keyedTransport(mode TransportMode, handle *enclave.Handle) *transport.Transport {
+	if mode == TransportModeTLS {
 		return transport.TLS(handle)
 	}
 	return transport.WithEHBP(nil, handle)
@@ -195,7 +195,7 @@ func (c *EnclaveHTTPClient) BaseURL() string {
 
 // EnsureVerified returns a verification that is valid now, verifying first
 // only if the cached one has expired or been rejected. It also prepares the
-// binding for it, so a nil error means requests can be sent.
+// TLS pin or HPKE key for it, so a nil error means requests can be sent.
 func (c *EnclaveHTTPClient) EnsureVerified(ctx context.Context) (*verify.Verification, error) {
 	state, err := c.keyed.EnsureVerified(ctx)
 	if err != nil {

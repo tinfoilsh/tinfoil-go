@@ -59,13 +59,13 @@ func TestPlaintextRequestDoesNotRefresh(t *testing.T) {
 	require.ErrorIs(t, err, errNoTLS)
 }
 
-func TestBindingsFailIndependently(t *testing.T) {
+func TestTransportsFailIndependently(t *testing.T) {
 	var verifications int
 	s := enclave.NewTestHandle("enclave.example", nil, func() (*verify.Verification, error) {
 		verifications++
 		return testState(time.Now().Add(time.Hour), "key"), nil
 	})
-	buildErr := errors.New("the verification endorses no key for this binding")
+	buildErr := errors.New("the verification endorses no key for this transport")
 	failing, err := newTestTransport(s, func(*verify.Verification) (http.RoundTripper, error) { return nil, buildErr }, nil)
 	require.NoError(t, err)
 	working, err := newTestTransport(s, func(*verify.Verification) (http.RoundTripper, error) {
@@ -80,7 +80,7 @@ func TestBindingsFailIndependently(t *testing.T) {
 	_, err = working.RoundTrip(req)
 	require.NoError(t, err)
 	require.Equal(t, "key", current(s).CodeTag())
-	require.Equal(t, 1, verifications, "a binding failure leaves the shared verification valid")
+	require.Equal(t, 1, verifications, "a transport failure leaves the shared verification valid")
 }
 
 func TestTransportRejectsSupersededState(t *testing.T) {
@@ -194,7 +194,7 @@ func TestFailedRebuildClosesSupersededConnections(t *testing.T) {
 	s := enclave.NewTestHandle("enclave.example", nil, func() (*verify.Verification, error) {
 		return testState(time.Now().Add(time.Hour), "key"), nil
 	})
-	buildErr := errors.New("the new verification endorses no key for this binding")
+	buildErr := errors.New("the new verification endorses no key for this transport")
 	first := &idleCountingTransport{RoundTripper: roundTripFunc(func(*http.Request) (*http.Response, error) { return testResponse(), nil })}
 	builds := 0
 	transport, err := newTestTransport(s, func(*verify.Verification) (http.RoundTripper, error) {

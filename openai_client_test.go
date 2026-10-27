@@ -79,7 +79,7 @@ func TestOpenAIClientsRejectInvalidOptions(t *testing.T) {
 	enclave, err := NewEnclaveOpenAIClient("", "org/repo", nil)
 	require.Nil(t, enclave)
 	require.ErrorAs(t, err, &config)
-	router, err := DiscoverRouterOpenAI(context.Background(), &EnclaveOptions{Binding: "quic"})
+	router, err := DiscoverRouterOpenAI(context.Background(), &EnclaveOptions{TransportMode: "quic"})
 	require.Nil(t, router)
 	require.ErrorAs(t, err, &config)
 	gateway, err := NewGatewayOpenAIClient(&GatewayOptions{URL: "http://gateway.example/v1/", Catalog: func() Catalog { return Catalog{} }})

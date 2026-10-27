@@ -28,7 +28,7 @@ func TestEHBPRequiresHPKEKey(t *testing.T) {
 	_, err := sealing.build(&verify.Verification{})
 	var attestation *errs.AttestationError
 	require.ErrorAs(t, err, &attestation)
-	require.ErrorContains(t, err, "use the TLS binding")
+	require.ErrorContains(t, err, "use the TLS transport mode")
 
 	_, err = sealing.build(hpkeVerification(""))
 	require.ErrorAs(t, err, &attestation)
@@ -92,7 +92,7 @@ func TestKeyTransportsRefuseRequestsTheyCantProtect(t *testing.T) {
 
 func TestTransportChecksBeforeVerifying(t *testing.T) {
 	h := enclave.NewTestHandle("enclave.example", nil, func() (*verify.Verification, error) {
-		t.Error("verified for a request the binding refuses")
+		t.Error("verified for a request the transport refuses")
 		return nil, errors.New("unreachable")
 	})
 	for _, tc := range []struct {

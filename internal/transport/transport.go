@@ -88,7 +88,7 @@ func (t *Transport) innerFor(state *enclave.State) (http.RoundTripper, error) {
 	closeIdleConnections(t.inner)
 	inner, err := t.build(state.Verification())
 	if inner == nil && err == nil {
-		err = fmt.Errorf("transport binding returned nil")
+		err = fmt.Errorf("transport build returned nil")
 	}
 	if err != nil {
 		closeIdleConnections(inner)

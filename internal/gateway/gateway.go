@@ -356,8 +356,8 @@ func rank(hosts []string, prefix, first string) []string {
 }
 
 func (t *Transport) RoundTrip(req *http.Request) (*http.Response, error) {
-	// Each replica's binding makes the same check; making it here refuses a
-	// request before the catalog is read or a replica verified.
+	// Each replica's EHBP transport makes the same check; making it here
+	// refuses a request before the catalog is read or a replica verified.
 	if err := transport.CheckEHBP(req); err != nil {
 		closeRequestBody(req)
 		return nil, err
