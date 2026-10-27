@@ -129,10 +129,13 @@ func (v *Verifier) FreshnessMaxAge() time.Duration { return v.freshnessMaxAge }
 //     empty while neither an embedded config nor a config authorizer supplies
 //     the config;
 //   - repo is set and v has a config authorizer, which can't authenticate a
-//     repository pin.
+//     repository pin;
+//   - v has an embedded config whose name or digest repo doesn't match.
 //
-// VerifyV3 runs the same checks on its repo argument, so a repo that passes
-// is never the cause of a VerifyV3 UsageError.
+// VerifyV3 rejects every such repo, whatever the document. It can still reject
+// a repo that passes: v3 collateral also requires the repo and revision to be
+// valid config identity components, such as lowercase slugs, and v2
+// collateral doesn't, so that check waits for the document.
 func (v *Verifier) CheckRepoVerifiability(repo string) error {
 	_, err := v.referencePins(repo)
 	return err

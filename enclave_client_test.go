@@ -154,6 +154,10 @@ func TestGatewayHTTPClientServesPinnedModels(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, []string{"pinned"}, models)
 	require.Empty(t, gw.Current(), "no replica is verified before it is used")
+	canceled, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, err = gw.Models(canceled)
+	require.ErrorIs(t, err, context.Canceled, "a canceled context fails even with the catalog at hand")
 }
 
 func TestNewGatewayHTTPClientRejectsInvalidOptions(t *testing.T) {

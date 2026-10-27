@@ -256,6 +256,9 @@ func (t *Transport) Verifications() []ReplicaVerification {
 // Models returns the catalog's models that the policy serves, sorted, without
 // verifying replicas.
 func (t *Transport) Models(ctx context.Context) ([]string, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	catalog, err := t.catalog(ctx)
 	if err != nil {
 		return nil, err

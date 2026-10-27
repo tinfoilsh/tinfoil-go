@@ -24,10 +24,12 @@ func TestCheckRepoVerifiability(t *testing.T) {
 		valid bool
 	}{
 		{"defaults with a pin", nil, "org/repo@v1", true},
+		{"defaults with a pin only v2 collateral accepts", nil, "Org/My_Repo", true},
 		{"defaults without a pin", nil, "", false},
 		{"defaults with a malformed pin", nil, "not a reference", false},
 		{"embedded config without a pin", []Option{WithEmbeddedReferences(inputs)}, "", true},
-		{"embedded config with a pin", []Option{WithEmbeddedReferences(inputs)}, "org/repo", true},
+		{"embedded config with its own pin", []Option{WithEmbeddedReferences(inputs)}, "org/project@v1", true},
+		{"embedded config with another pin", []Option{WithEmbeddedReferences(inputs)}, "org/repo", false},
 		{"config authorizer without a pin", []Option{authorize}, "", true},
 		{"config authorizer with a pin", []Option{authorize}, "org/repo", false},
 	} {
@@ -43,6 +45,17 @@ func TestCheckRepoVerifiability(t *testing.T) {
 			require.ErrorAs(t, err, &usage)
 		})
 	}
+}
+
+func TestV3CollateralRequiresConfigIdentityPins(t *testing.T) {
+	v, err := NewVerifier()
+	require.NoError(t, err)
+	require.NoError(t, v.CheckRepoVerifiability("Org/My_Repo"))
+	raw, nonce, _ := embeddedDocument(t, collateral.FormatV3)
+	_, err = v.VerifyV3(raw, nonce, "Org/My_Repo")
+	var usage *UsageError
+	require.ErrorAs(t, err, &usage)
+	require.ErrorContains(t, err, "invalid config identity")
 }
 
 func TestCallerAuthorizesConfig(t *testing.T) {
