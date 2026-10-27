@@ -1,13 +1,17 @@
 package router
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"strings"
 	"testing"
 	"testing/synctest"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -95,4 +99,33 @@ func TestFetchRoutersRefusesInsecureRedirects(t *testing.T) {
 			require.Equal(t, []string{"router.example"}, routers)
 		})
 	}
+}
+
+func TestDiscoverBoundsTotalProbeTime(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		original := http.DefaultClient
+		defer func() { http.DefaultClient = original }()
+		var routers []string
+		for i := range 10 {
+			routers = append(routers, fmt.Sprintf("router%d.example", i))
+		}
+		list, err := json.Marshal(routers)
+		require.NoError(t, err)
+		probes := make(map[string]int)
+		http.DefaultClient = &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			if req.URL.String() == defaultRouterURL {
+				return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(bytes.NewReader(list))}, nil
+			}
+			probes[req.URL.Host]++
+			<-req.Context().Done() // an unreachable router
+			return nil, req.Context().Err()
+		})}
+		start := time.Now()
+		h, err := Discover(context.Background(), nil)
+		require.NoError(t, err)
+		require.Equal(t, "inference.tinfoil.sh", h.Enclave(), "discovery falls back")
+		require.Equal(t, discoveryTimeout, time.Since(start), "one budget for every probe, not one per router")
+		synctest.Wait()
+		require.Equal(t, map[string]int{"router0.example": 1}, probes, "no router is probed after the budget runs out")
+	})
 }
