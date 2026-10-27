@@ -54,16 +54,7 @@ func Document(ctx context.Context, host, relay string, nonce []byte) (result []b
 		defer transport.CloseIdleConnections()
 		client.Transport = transport
 	}
-	// Replacing CheckRedirect drops the default 10-redirect limit, so restate it.
-	client.CheckRedirect = func(req *http.Request, via []*http.Request) error {
-		if req.URL.Scheme != "https" {
-			return fmt.Errorf("refusing redirect to non-HTTPS URL %s", req.URL.Redacted())
-		}
-		if len(via) >= 10 {
-			return errors.New("stopped after 10 redirects")
-		}
-		return nil
-	}
+	client.CheckRedirect = RefuseInsecureRedirects
 	resp, err := client.Do(req)
 	if err != nil {
 		return nil, err
@@ -82,6 +73,19 @@ func Document(ctx context.Context, host, relay string, nonce []byte) (result []b
 		return nil, fmt.Errorf("attestation document exceeds %d bytes", maxAttestationBytes)
 	}
 	return body, nil
+}
+
+// RefuseInsecureRedirects is an http.Client CheckRedirect that refuses a
+// redirect to a non-HTTPS URL. Replacing CheckRedirect drops the default limit
+// of 10 redirects, so it restates it.
+func RefuseInsecureRedirects(req *http.Request, via []*http.Request) error {
+	if req.URL.Scheme != "https" {
+		return fmt.Errorf("refusing redirect to non-HTTPS URL %s", req.URL.Redacted())
+	}
+	if len(via) >= 10 {
+		return errors.New("stopped after 10 redirects")
+	}
+	return nil
 }
 
 // URL returns where the attestation document of host is fetched with nonce:
