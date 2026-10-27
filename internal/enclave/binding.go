@@ -25,9 +25,24 @@ type Binding interface {
 var (
 	// TLS pins each connection's leaf certificate to the attested TLS key.
 	TLS Binding = tlsBinding{}
-	// EHBP seals request bodies to the attested HPKE key.
+	// EHBP seals request bodies to the attested HPKE key. It refuses the
+	// requests CheckEHBPRequest rejects.
 	EHBP Binding = ehbpBinding{}
 )
+
+var errEHBPTunnel = errors.New("EHBP seals only request and response bodies, so it can't protect a protocol upgrade, such as a WebSocket, or a CONNECT tunnel; use the TLS binding on a direct connection")
+
+// CheckEHBPRequest returns a ConfigurationError for a request whose traffic
+// continues outside the bodies EHBP seals: a protocol upgrade, such as a
+// WebSocket, or a CONNECT tunnel. Sending one would look protected while
+// nothing after the handshake is. Requests without a body are allowed: like
+// every EHBP request, their method, URL and headers aren't sealed.
+func CheckEHBPRequest(req *http.Request) error {
+	if req.Method == http.MethodConnect || req.Header.Get("Upgrade") != "" {
+		return &ConfigurationError{Err: errEHBPTunnel}
+	}
+	return nil
+}
 
 type tlsBinding struct{}
 
@@ -56,7 +71,18 @@ func (ehbpBinding) Transport(v *verify.Verification) (http.RoundTripper, error) 
 	if err != nil {
 		return nil, &AttestationError{Err: fmt.Errorf("failed to create EHBP transport: %w", err)}
 	}
-	return transport, nil
+	return ehbpTransport{transport}, nil
+}
+
+// ehbpTransport refuses the requests CheckEHBPRequest rejects.
+type ehbpTransport struct{ *ehbpclient.Transport }
+
+func (t ehbpTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	if err := CheckEHBPRequest(req); err != nil {
+		closeRequestBody(req)
+		return nil, err
+	}
+	return t.Transport.RoundTrip(req)
 }
 
 func (ehbpBinding) KeyRejected(err error) bool { return ehbpidentity.IsKeyConfigError(err) }

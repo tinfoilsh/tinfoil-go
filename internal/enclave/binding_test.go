@@ -2,6 +2,8 @@ package enclave
 
 import (
 	"errors"
+	"io"
+	"net/http"
 	"strings"
 	"testing"
 
@@ -54,6 +56,44 @@ func TestEHBPBindingBuildsTransportForEachAttestedKey(t *testing.T) {
 		require.NoError(t, err)
 		require.NotNil(t, transport)
 	}
+}
+
+type closeTrackingBody struct{ closed bool }
+
+func (*closeTrackingBody) Read([]byte) (int, error) { return 0, io.EOF }
+func (b *closeTrackingBody) Close() error           { b.closed = true; return nil }
+
+func TestEHBPBindingRefusesUpgradesAndTunnels(t *testing.T) {
+	var sent []string
+	original := http.DefaultTransport
+	defer func() { http.DefaultTransport = original }()
+	http.DefaultTransport = roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		sent = append(sent, req.Method+" "+req.URL.Path)
+		return testResponse(), nil
+	})
+	transport, err := EHBP.Transport(hpkeVerification(strings.Repeat("01", 32)))
+	require.NoError(t, err)
+
+	upgrade, _ := http.NewRequest(http.MethodGet, "https://enclave.example/v1/realtime", nil)
+	upgrade.Header.Set("Connection", "Upgrade")
+	upgrade.Header.Set("Upgrade", "websocket")
+	tunnel, _ := http.NewRequest(http.MethodConnect, "https://enclave.example/", nil)
+	for _, req := range []*http.Request{upgrade, tunnel} {
+		body := &closeTrackingBody{}
+		req.Body = body
+		_, err := transport.RoundTrip(req)
+		var config *ConfigurationError
+		require.ErrorAs(t, err, &config)
+		require.ErrorIs(t, err, errEHBPTunnel)
+		require.True(t, body.closed, "a refused request's body is closed")
+	}
+	require.Empty(t, sent, "nothing EHBP can't seal is sent")
+
+	models, _ := http.NewRequest(http.MethodGet, "https://enclave.example/v1/models", nil)
+	resp, err := transport.RoundTrip(models)
+	require.NoError(t, err, "a request without a body is still allowed")
+	resp.Body.Close()
+	require.Equal(t, []string{"GET /v1/models"}, sent)
 }
 
 func TestEHBPBindingRecognizesKeyConfigErrors(t *testing.T) {

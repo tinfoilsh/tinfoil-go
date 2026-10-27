@@ -31,7 +31,8 @@ func NewClient(openaiOpts ...option.RequestOption) (*Client, error) {
 // re-verifies before new requests when witnesses expire or the enclave rotates its key.
 // It is bound to the verified enclave: requests to any other origin are
 // refused to avoid disclosing sensitive headers. Under EHBP, only request and
-// response bodies are sealed to the enclave; a request without a body is not.
+// response bodies are sealed to the enclave; a request without a body is not,
+// and a WebSocket upgrade is refused.
 func (c *Client) HTTPClient() *http.Client {
 	return c.httpClient
 }

@@ -351,6 +351,12 @@ func rank(hosts []string, prefix, first string) []string {
 }
 
 func (t *Transport) RoundTrip(req *http.Request) (*http.Response, error) {
+	// Each replica's EHBP binding refuses these too; refusing here does it
+	// before reading the catalog or verifying a replica.
+	if err := enclave.CheckEHBPRequest(req); err != nil {
+		closeRequestBody(req)
+		return nil, err
+	}
 	req = req.Clone(req.Context())
 	if err := t.prepare(req); err != nil {
 		return nil, err

@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	"github.com/tinfoilsh/tinfoil-go/internal/errs"
 	"github.com/tinfoilsh/tinfoil-go/internal/transport"
 	"github.com/tinfoilsh/tinfoil-go/internal/verifytest"
 	"github.com/tinfoilsh/tinfoil-go/verify"
@@ -119,6 +120,25 @@ func (b *sealTestBody) Read(p []byte) (int, error) {
 func (b *sealTestBody) Close() error {
 	b.closes++
 	return nil
+}
+
+func TestSealRefusesUpgradesBeforeTouchingReplicas(t *testing.T) {
+	tr := sealTestTransport(func(string) (http.RoundTripper, error) {
+		t.Error("an upgrade reached a replica")
+		return nil, errors.New("unreachable")
+	})
+	tr.catalog = func(context.Context) (Catalog, error) {
+		t.Error("an upgrade read the catalog")
+		return nil, errors.New("unreachable")
+	}
+	req, _ := http.NewRequest(http.MethodGet, "https://gateway.example/v1/realtime?model="+sealTestModel, nil)
+	req.Header.Set(modelHeader, sealTestModel)
+	req.Header.Set("Connection", "Upgrade")
+	req.Header.Set("Upgrade", "websocket")
+	_, err := tr.RoundTrip(req)
+	var config *errs.ConfigurationError
+	require.ErrorAs(t, err, &config)
+	require.ErrorContains(t, err, "WebSocket")
 }
 
 func TestSealUploadReplay(t *testing.T) {
