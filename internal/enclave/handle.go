@@ -90,24 +90,18 @@ type Config struct {
 	Verifier *verify.Verifier
 }
 
-// NewHandle checks c and does no network I/O; the enclave is verified on
-// first use. A caller-authorized config used with a repository pin is
-// reported when verifying.
+// NewHandle checks c.Repo against the verifier's rules for a repository pin
+// and does no network I/O; the enclave is verified on first use.
 func NewHandle(c Config) (*Handle, error) {
-	if c.Repo == "" && c.Verifier == nil {
-		return nil, &ConfigurationError{Err: fmt.Errorf("the default verification policy requires a repository pin")}
-	}
-	if c.Repo != "" {
-		if _, _, _, err := verify.ParseReference(c.Repo); err != nil {
-			return nil, &ConfigurationError{Err: err}
-		}
-	}
 	v := c.Verifier
 	if v == nil {
 		var err error
 		if v, err = verify.NewVerifier(); err != nil {
 			return nil, fromVerify(err)
 		}
+	}
+	if err := v.CheckRepoVerifiability(c.Repo); err != nil {
+		return nil, fromVerify(err)
 	}
 	return &Handle{enclave: c.Host, repo: c.Repo, relay: c.Relay, verifier: v}, nil
 }

@@ -20,6 +20,10 @@ type roundTripFunc func(*http.Request) (*http.Response, error)
 
 func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) { return f(req) }
 
+func staticCatalog(catalog Catalog) func(context.Context) (Catalog, error) {
+	return func(context.Context) (Catalog, error) { return catalog, nil }
+}
+
 func newResponse(status int, body string) *http.Response {
 	return &http.Response{StatusCode: status, Body: io.NopCloser(strings.NewReader(body)), Header: make(http.Header)}
 }
@@ -57,9 +61,7 @@ func sealTestTransport(connect func(host string) (http.RoundTripper, error)) *Tr
 				},
 			}, nil
 		},
-		catalog: func() Catalog {
-			return Catalog{sealTestModel: {Repo: "tinfoilsh/test", Hosts: []string{sealTestInitial}}}
-		},
+		catalog: staticCatalog(Catalog{sealTestModel: {Repo: "tinfoilsh/test", Hosts: []string{sealTestInitial}}}),
 	}
 }
 
@@ -253,7 +255,7 @@ func TestSealFallsOverToAReplicaThatVerifies(t *testing.T) {
 			return newResponse(http.StatusNoContent, ""), nil
 		}), nil
 	})
-	seal.catalog = func() Catalog { return Catalog{sealTestModel: {Repo: "tinfoilsh/test", Hosts: hosts}} }
+	seal.catalog = staticCatalog(Catalog{sealTestModel: {Repo: "tinfoilsh/test", Hosts: hosts}})
 	seal.secret = "test-secret"
 	req, err := http.NewRequest(http.MethodPost, "https://gateway.example/v1/chat/completions", strings.NewReader(`{"model":"test-model","messages":[{"role":"user","content":"hello"}]}`))
 	require.NoError(t, err)
@@ -317,7 +319,7 @@ func TestGatewayEnsureVerifiedFallsOver(t *testing.T) {
 	hosts := []string{"a.example", "b.example", "c.example"}
 	order := rank(hosts, sealTestModel, "")
 	buildFails, expired := order[0], order[1]
-	catalog := func() Catalog { return Catalog{sealTestModel: {Repo: "tinfoilsh/test", Hosts: hosts}} }
+	catalog := staticCatalog(Catalog{sealTestModel: {Repo: "tinfoilsh/test", Hosts: hosts}})
 	newGateway := func(attempts *[]string, build func(replica) (*verifiedReplicaTransport, error)) *Transport {
 		return &Transport{catalog: catalog, build: func(r replica) (*verifiedReplicaTransport, error) {
 			*attempts = append(*attempts, r.host)

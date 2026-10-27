@@ -38,12 +38,13 @@ func TestNewEnclaveHTTPClientRejectsInvalidOptions(t *testing.T) {
 		host, repo string
 		opts       *EnclaveOptions
 	}{
-		"no host":             {"", "org/repo", nil},
-		"unknown binding":     {"enclave.example", "org/repo", &EnclaveOptions{Binding: "quic"}},
-		"plaintext base URL":  {"enclave.example", "org/repo", &EnclaveOptions{BaseURL: "http://proxy.example/v1/"}},
-		"relative base URL":   {"enclave.example", "org/repo", &EnclaveOptions{BaseURL: "/v1/"}},
-		"TLS through a proxy": {"enclave.example", "org/repo", &EnclaveOptions{BaseURL: "https://proxy.example/v1/"}},
-		"invalid repository":  {"enclave.example", "not a reference", nil},
+		"no host":                                 {"", "org/repo", nil},
+		"unknown binding":                         {"enclave.example", "org/repo", &EnclaveOptions{Binding: "quic"}},
+		"plaintext base URL":                      {"enclave.example", "org/repo", &EnclaveOptions{BaseURL: "http://proxy.example/v1/"}},
+		"relative base URL":                       {"enclave.example", "org/repo", &EnclaveOptions{BaseURL: "/v1/"}},
+		"TLS through a proxy":                     {"enclave.example", "org/repo", &EnclaveOptions{BaseURL: "https://proxy.example/v1/"}},
+		"invalid repository":                      {"enclave.example", "not a reference", nil},
+		"config authorizer with a repository pin": {"enclave.example", "org/repo", &EnclaveOptions{Verifier: callerAuthorizedVerifier(t)}},
 	} {
 		t.Run(name, func(t *testing.T) {
 			c, err := NewEnclaveHTTPClient(tc.host, tc.repo, tc.opts)
@@ -52,6 +53,21 @@ func TestNewEnclaveHTTPClientRejectsInvalidOptions(t *testing.T) {
 			require.ErrorAs(t, err, &config)
 		})
 	}
+}
+
+func TestConstructorsDoNoNetworkIO(t *testing.T) {
+	original := http.DefaultTransport
+	defer func() { http.DefaultTransport = original }()
+	http.DefaultTransport = roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		t.Errorf("a constructor sent %s %s", req.Method, req.URL)
+		return nil, errors.New("no network in this test")
+	})
+	enclaveClient, err := NewEnclaveHTTPClient("enclave.example", "org/repo", nil)
+	require.NoError(t, err)
+	require.Nil(t, enclaveClient.Current())
+	gatewayClient, err := NewGatewayHTTPClient(&GatewayOptions{URL: "https://gateway.example/v1/"})
+	require.NoError(t, err)
+	require.Empty(t, gatewayClient.Current())
 }
 
 func TestDiscoverRouterRejectsInvalidOptionsBeforeDiscovery(t *testing.T) {
@@ -193,8 +209,9 @@ func TestLiveNewEnclaveHTTPClient(t *testing.T) {
 	testutil.RequireLive(t, "TINFOIL_ENCLAVE", "TINFOIL_REPO")
 	c, err := NewEnclaveHTTPClient(os.Getenv("TINFOIL_ENCLAVE"), os.Getenv("TINFOIL_REPO"), &EnclaveOptions{UserCacheSecret: "go-live-integration-cache-secret"})
 	require.NoError(t, err)
-	before := c.Current()
-	require.NotNil(t, before, "the client verifies at construction")
+	require.Nil(t, c.Current(), "the client verifies on first use")
+	before, err := c.EnsureVerified(context.Background())
+	require.NoError(t, err)
 	after, err := c.Reverify(context.Background())
 	require.NoError(t, err)
 	require.False(t, after.Metadata().VerifiedAt.Before(before.Metadata().VerifiedAt))

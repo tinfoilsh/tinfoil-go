@@ -59,21 +59,33 @@ func WithFreshnessSigningKeys(keys []crypto.PublicKey) Option {
 	}
 }
 
-func (v *Verifier) configReferences(doc *document.Document, ref string, now time.Time) (*endorsementResult, error) {
+// referencePins returns the config pins ref sets under v's policy, or a usage
+// error if v can't verify against ref. Every check VerifyV3 makes on its repo
+// argument belongs here, so CheckRepoVerifiability makes it too.
+func (v *Verifier) referencePins(ref string) (endorsement.ConfigPolicy, error) {
+	var pins endorsement.ConfigPolicy
 	if v.configAuthorizer != nil && ref != "" {
-		return nil, usageError(fmt.Errorf("config authorizer cannot authenticate repository or revision pins; enforce them in caller policy"))
+		return pins, usageError(fmt.Errorf("config authorizer cannot authenticate repository or revision pins; enforce them in caller policy"))
 	}
-	pins := endorsement.ConfigPolicy{Now: now, MaxAge: v.freshnessMaxAge}
 	if ref != "" || (v.embedded.Config == nil && v.configAuthorizer == nil) {
 		parsed, err := endorsement.ParseReference(ref)
 		if err != nil {
-			return nil, usageError(err)
+			return pins, usageError(err)
 		}
 		pins.Identity, pins.Revision, pins.Digest = "/"+parsed.Repo, parsed.Tag, parsed.Digest
 		if err := pins.ValidatePins(); err != nil {
-			return nil, usageError(err)
+			return pins, usageError(err)
 		}
 	}
+	return pins, nil
+}
+
+func (v *Verifier) configReferences(doc *document.Document, ref string, now time.Time) (*endorsementResult, error) {
+	pins, err := v.referencePins(ref)
+	if err != nil {
+		return nil, err
+	}
+	pins.Now, pins.MaxAge = now, v.freshnessMaxAge
 	config, approved, err := v.resolveConfig(doc, pins)
 	if err != nil {
 		return nil, err

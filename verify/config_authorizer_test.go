@@ -14,6 +14,37 @@ import (
 	"github.com/tinfoilsh/tinfoil-go/verify/internal/quote"
 )
 
+func TestCheckRepoVerifiability(t *testing.T) {
+	inputs := embeddedInputs(t)
+	authorize := WithConfigAuthorizer(func(collateral.ConfigEndorsement) error { return nil })
+	for _, tc := range []struct {
+		name  string
+		opts  []Option
+		ref   string
+		valid bool
+	}{
+		{"defaults with a pin", nil, "org/repo@v1", true},
+		{"defaults without a pin", nil, "", false},
+		{"defaults with a malformed pin", nil, "not a reference", false},
+		{"embedded config without a pin", []Option{WithEmbeddedReferences(inputs)}, "", true},
+		{"embedded config with a pin", []Option{WithEmbeddedReferences(inputs)}, "org/repo", true},
+		{"config authorizer without a pin", []Option{authorize}, "", true},
+		{"config authorizer with a pin", []Option{authorize}, "org/repo", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			v, err := NewVerifier(tc.opts...)
+			require.NoError(t, err)
+			err = v.CheckRepoVerifiability(tc.ref)
+			if tc.valid {
+				require.NoError(t, err)
+				return
+			}
+			var usage *UsageError
+			require.ErrorAs(t, err, &usage)
+		})
+	}
+}
+
 func TestCallerAuthorizesConfig(t *testing.T) {
 	inputs := embeddedInputs(t)
 	withoutConfig := inputs
