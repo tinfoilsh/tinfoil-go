@@ -124,7 +124,7 @@ type Config struct {
 	// attestation is fetched through.
 	BaseURL, Relay string
 	// Catalog is read on every request; nil fetches it from Relay on first
-	// use.
+	// use and refreshes it every catalogRefreshInterval.
 	Catalog          func() Catalog
 	ModelPins        map[string]ModelPin
 	PinnedModelsOnly bool
@@ -144,7 +144,7 @@ func NewTransport(c Config) (*Transport, error) {
 	}
 	catalog := func(context.Context) (Catalog, error) { return c.Catalog(), nil }
 	if c.Catalog == nil {
-		catalog = (&lazyCatalog{fetch: func(ctx context.Context) (Catalog, error) { return fetchCatalog(ctx, c.Relay) }}).get
+		catalog = (&catalogCache{fetch: func(ctx context.Context) (Catalog, error) { return FetchCatalog(ctx, c.Relay) }}).get
 	}
 	return &Transport{
 		catalog: catalog,
@@ -254,7 +254,8 @@ func (t *Transport) Verifications() []ReplicaVerification {
 }
 
 // Models returns the catalog's models that the policy serves, sorted, without
-// verifying replicas.
+// verifying replicas. A failed catalog refresh doesn't fail it; only the
+// first fetch can.
 func (t *Transport) Models(ctx context.Context) ([]string, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err

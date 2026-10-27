@@ -12,6 +12,8 @@ import (
 	"sync"
 	"time"
 
+	"golang.org/x/sync/singleflight"
+
 	"github.com/tinfoilsh/tinfoil-go/internal/errs"
 	"github.com/tinfoilsh/tinfoil-go/verify"
 )
@@ -19,8 +21,11 @@ import (
 const (
 	catalogPath         = "/catalog"
 	catalogFetchTimeout = 10 * time.Second
-	maxCatalogBytes     = 2 << 20
-	trustedRepoOwner    = "tinfoilsh/"
+	// The gateway lists only replicas passing its health checks and reloads
+	// its config every 10 seconds, so a client refreshes as often.
+	catalogRefreshInterval = 10 * time.Second
+	maxCatalogBytes        = 2 << 20
+	trustedRepoOwner       = "tinfoilsh/"
 )
 
 type CatalogEntry struct {
@@ -33,11 +38,7 @@ type Catalog map[string]CatalogEntry
 
 // FetchCatalog reads the catalog of the gateway at host, keeping only models
 // with replicas of a bare tinfoilsh/ repository, without a tag or digest.
-func FetchCatalog(host string) (Catalog, error) {
-	return fetchCatalog(context.Background(), host)
-}
-
-func fetchCatalog(ctx context.Context, host string) (Catalog, error) {
+func FetchCatalog(ctx context.Context, host string) (Catalog, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "https://"+host+catalogPath, nil)
 	if err != nil {
 		return nil, &errs.ConfigurationError{Err: err}
@@ -78,53 +79,63 @@ func (e CatalogEntry) trusted() bool {
 	return err == nil && repo == e.Repo && strings.HasPrefix(repo, trustedRepoOwner) && len(e.Hosts) > 0
 }
 
-// lazyCatalog fetches the catalog on first use and keeps it. Concurrent
-// callers share one fetch, and a failed fetch is retried on the next use.
-type lazyCatalog struct {
+// catalogCache fetches the catalog on first use and refreshes it on use once
+// catalogRefreshInterval has passed. Concurrent callers share one fetch. Until
+// a fetch succeeds, callers wait for it and a failure is retried on the next
+// use. After that, callers never wait: a stale catalog is returned while a
+// refresh runs, and a failed refresh keeps it for another interval.
+type catalogCache struct {
 	fetch func(context.Context) (Catalog, error)
+	group singleflight.Group
 
+	// mu is held from a caller's check through its DoChan, so a fetch that
+	// finishes after the check can't be followed by a redundant one.
 	mu      sync.Mutex
 	catalog Catalog
 	loaded  bool
-	call    *catalogCall
+	// refreshAt is when the next refresh may start.
+	refreshAt time.Time
 }
 
-type catalogCall struct {
-	done    chan struct{}
-	catalog Catalog
-	err     error
-}
-
-func (l *lazyCatalog) get(ctx context.Context) (Catalog, error) {
-	l.mu.Lock()
-	if l.loaded {
-		defer l.mu.Unlock()
-		return l.catalog, nil
+func (c *catalogCache) get(ctx context.Context) (Catalog, error) {
+	c.mu.Lock()
+	if c.loaded {
+		defer c.mu.Unlock()
+		if !time.Now().Before(c.refreshAt) {
+			// Only this caller starts the refresh. Moving refreshAt ahead now,
+			// rather than when the fetch finishes, keeps later callers from
+			// calling DoChan, each of which would add a result channel that
+			// nobody reads until the fetch completes. They get the same cached
+			// catalog either way, and load resets refreshAt when it finishes.
+			c.refreshAt = time.Now().Add(catalogRefreshInterval)
+			c.group.DoChan("", c.load)
+		}
+		return c.catalog, nil
 	}
-	call := l.call
-	if call == nil {
-		call = &catalogCall{done: make(chan struct{})}
-		l.call = call
-		go l.load(call)
-	}
-	l.mu.Unlock()
+	fetched := c.group.DoChan("", c.load)
+	c.mu.Unlock()
 	select {
 	case <-ctx.Done():
 		return nil, ctx.Err()
-	case <-call.done:
-		return call.catalog, call.err
+	case result := <-fetched:
+		if result.Err != nil {
+			return nil, result.Err
+		}
+		return result.Val.(Catalog), nil
 	}
 }
 
-func (l *lazyCatalog) load(call *catalogCall) {
+func (c *catalogCache) load() (any, error) {
 	// One fetch serves every waiter, so no single caller's context applies;
 	// the fetch has its own timeout.
-	call.catalog, call.err = l.fetch(context.Background())
-	l.mu.Lock()
-	if call.err == nil {
-		l.catalog, l.loaded = call.catalog, true
+	catalog, err := c.fetch(context.Background())
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if err == nil {
+		c.catalog, c.loaded = catalog, true
 	}
-	l.call = nil
-	l.mu.Unlock()
-	close(call.done)
+	if c.loaded {
+		c.refreshAt = time.Now().Add(catalogRefreshInterval)
+	}
+	return catalog, err
 }

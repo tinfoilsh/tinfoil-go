@@ -31,7 +31,9 @@ type GatewayOptions struct {
 	// URL is the gateway's base URL; empty selects Tinfoil's gateway.
 	URL string
 	// Catalog is read on every request and must return an immutable map safe
-	// for concurrent readers; nil fetches the gateway's catalog on first use.
+	// for concurrent readers. nil fetches the gateway's catalog on first use
+	// and refreshes it every 10 seconds while the client is used; a failed
+	// refresh keeps the last catalog fetched.
 	Catalog func() Catalog
 }
 
@@ -97,7 +99,8 @@ func (c *GatewayHTTPClient) BaseURL() string {
 }
 
 // Models returns the catalog's models that the client's policy serves,
-// sorted, without verifying replicas.
+// sorted, without verifying replicas. A failed catalog refresh doesn't fail
+// it; only the first fetch can.
 func (c *GatewayHTTPClient) Models(ctx context.Context) ([]string, error) {
 	return c.seal.Models(ctx)
 }
