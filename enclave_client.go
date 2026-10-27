@@ -104,8 +104,9 @@ func NewEnclaveHTTPClient(host, repo string, opts *EnclaveOptions) (*EnclaveHTTP
 
 // DiscoverRouter returns a client for the first router from Tinfoil's router
 // list that passes verification, and otherwise for inference.tinfoil.sh. It
-// does network I/O, and calling it again discovers again. It exists only
-// while the router is Tinfoil's default route.
+// tries routers for at most 30 seconds before falling back. It does network
+// I/O, and calling it again discovers again. It exists only while the router
+// is Tinfoil's default route.
 func DiscoverRouter(ctx context.Context, opts *EnclaveOptions) (*EnclaveHTTPClient, error) {
 	if opts == nil {
 		opts = &EnclaveOptions{}

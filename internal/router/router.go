@@ -22,7 +22,11 @@ var (
 
 const (
 	routerFetchTimeout = 30 * time.Second
-	maxRouterBytes     = 32 << 20
+	// discoveryTimeout bounds the router list fetch and every probe together,
+	// so a long list of unreachable routers can't hold up a client before it
+	// falls back.
+	discoveryTimeout = 30 * time.Second
+	maxRouterBytes   = 32 << 20
 )
 
 // fetchRouters is bounded the same way attestation fetching is: discovery runs
@@ -65,19 +69,24 @@ func fetchRouters(ctx context.Context) ([]string, error) {
 
 // Discover returns a handle for the first router from Tinfoil's router
 // list that verifies under v, and otherwise for inference.tinfoil.sh, which it
-// leaves to be verified on first use. nil v selects the default policy.
+// leaves to be verified on first use. nil v selects the default policy. It
+// stops trying routers after discoveryTimeout, or sooner when ctx ends.
 func Discover(ctx context.Context, v *verify.Verifier) (*enclave.Handle, error) {
 	fallback, err := enclave.NewHandle(enclave.Config{Host: "inference.tinfoil.sh", Repo: defaultRouterRepo, Verifier: v})
 	if err != nil {
 		return nil, err
 	}
-	routers, _ := fetchRouters(ctx)
+	// Once probing expires, VerifyOnce fails each remaining router at once,
+	// without a fetch.
+	probing, cancel := context.WithTimeout(ctx, discoveryTimeout)
+	defer cancel()
+	routers, _ := fetchRouters(probing)
 	for _, router := range routers {
 		candidate, err := enclave.NewHandle(enclave.Config{Host: router, Repo: fallback.Repo(), Verifier: fallback.Verifier()})
 		if err != nil {
 			return nil, err
 		}
-		if _, err := candidate.VerifyOnce(ctx); err == nil {
+		if _, err := candidate.VerifyOnce(probing); err == nil {
 			return candidate, nil
 		}
 	}
