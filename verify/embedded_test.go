@@ -85,12 +85,19 @@ func TestEmbeddedConfigReferenceWithoutConfigBytes(t *testing.T) {
 	inputs.Config = nil
 	v, err := NewVerifier(WithEmbeddedReferences(inputs))
 	require.NoError(t, err)
+	require.True(t, v.CallerAuthorizesConfig())
+	require.NoError(t, v.CheckRepoVerifiability(""))
+	require.NoError(t, v.CheckRepoVerifiability("org/project@v1@sha256:"+reference.Digest))
+	require.ErrorAs(t, v.CheckRepoVerifiability("org/project@v2"), new(*UsageError))
+	require.ErrorAs(t, v.CheckRepoVerifiability("org/project@sha256:"+strings.Repeat("ab", sha256.Size)), new(*UsageError))
 	raw, nonce, doc := embeddedDocument(t, collateral.FormatV3)
 	refs, err := v.configReferences(doc, "org/project@v1", time.Now())
 	require.NoError(t, err)
 	require.Equal(t, digest, refs.quote.(quote.ConfigReferenceValues).Hash)
 	require.Equal(t, runtime.Digest, refs.artifact.Digest)
 	_, err = v.VerifyV3(raw, nonce, "org/project@v1")
+	requireRejectedAt(t, err, LayerQuote)
+	_, err = v.VerifyV3(raw, nonce, "")
 	requireRejectedAt(t, err, LayerQuote)
 	for _, mutate := range []func(*EmbeddedConfigReference){
 		func(r *EmbeddedConfigReference) { r.Digest = "" },
