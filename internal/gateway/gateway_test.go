@@ -214,6 +214,14 @@ func TestSealUploadReplay(t *testing.T) {
 	}
 }
 
+// The cache salt and prefix of SPEC §14.7.4's vector: secret test-secret,
+// Authorization: Bearer test-api-key, and specCacheBody.
+const (
+	specCacheBody   = `{"model":"test-model","messages":[{"role":"user","content":"hello"}]}`
+	specCacheSalt   = "DpKycpNLBpMrAyjpNCVBx66rSpZVwsZJPz5Ty66bBy8"
+	specCachePrefix = "ede1ce81b1779c5d9431ab8d3a073b06a8507da5cc3178ff385c13cef8ff02f6"
+)
+
 func TestSealJSONRoutingPreservesInjectedBodyAcrossRetries(t *testing.T) {
 	for _, contentType := range []string{"application/json", "application/json; charset=utf-8"} {
 		t.Run("contentType="+contentType, func(t *testing.T) {
@@ -235,7 +243,7 @@ func TestSealJSONRoutingPreservesInjectedBodyAcrossRetries(t *testing.T) {
 				}), nil
 			})
 			seal.secret = "test-secret"
-			req, err := http.NewRequest(http.MethodPost, "https://gateway.example/v1/chat/completions", strings.NewReader(`{"model":"test-model","messages":[{"role":"user","content":"hello"}]}`))
+			req, err := http.NewRequest(http.MethodPost, "https://gateway.example/v1/chat/completions", strings.NewReader(specCacheBody))
 			require.NoError(t, err)
 			req.Header.Set("Content-Type", contentType)
 			req.Header.Set("Authorization", "Bearer test-api-key")
@@ -247,8 +255,8 @@ func TestSealJSONRoutingPreservesInjectedBodyAcrossRetries(t *testing.T) {
 			var fields map[string]json.RawMessage
 			require.NoError(t, json.Unmarshal([]byte(bodies[0]), &fields))
 			require.NotContains(t, fields, cachesecret.Field)
-			require.JSONEq(t, `"12hdflC67PPzpyBnEpYOB30yhkOMQuxLixo9xB48s6A"`, string(fields[cacheSaltField]))
-			require.Equal(t, "ca60642ff6701647124356235d2c925e34117bc73a99b477d4e280c5f0c03527", prefixes[0])
+			require.JSONEq(t, `"`+specCacheSalt+`"`, string(fields[cacheSaltField]))
+			require.Equal(t, specCachePrefix, prefixes[0])
 			require.Equal(t, prefixes[0], prefixes[1])
 			require.Empty(t, req.Header.Get(modelHeader))
 			require.Empty(t, req.Header.Get(cachePrefixHeader))
@@ -258,10 +266,8 @@ func TestSealJSONRoutingPreservesInjectedBodyAcrossRetries(t *testing.T) {
 }
 
 func TestSealFallsOverToAReplicaThatVerifies(t *testing.T) {
-	// The cache prefix of the request below, as TestSealJSONRoutingPreservesInjectedBodyAcrossRetries pins it.
-	const prefix = "ca60642ff6701647124356235d2c925e34117bc73a99b477d4e280c5f0c03527"
 	hosts := []string{"a.example", "b.example", "c.example"}
-	order := rank(hosts, prefix, "")
+	order := rank(hosts, specCachePrefix, "")
 	failure := errors.New("verification failed")
 	var verified, sent []string
 	seal := sealTestTransport(func(host string) (http.RoundTripper, error) {
@@ -277,7 +283,7 @@ func TestSealFallsOverToAReplicaThatVerifies(t *testing.T) {
 	})
 	seal.catalog = staticCatalog(Catalog{sealTestModel: {Repo: "tinfoilsh/test", Hosts: hosts}})
 	seal.secret = "test-secret"
-	req, err := http.NewRequest(http.MethodPost, "https://gateway.example/v1/chat/completions", strings.NewReader(`{"model":"test-model","messages":[{"role":"user","content":"hello"}]}`))
+	req, err := http.NewRequest(http.MethodPost, "https://gateway.example/v1/chat/completions", strings.NewReader(specCacheBody))
 	require.NoError(t, err)
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer test-api-key")
@@ -288,35 +294,65 @@ func TestSealFallsOverToAReplicaThatVerifies(t *testing.T) {
 	require.Equal(t, []string{order[2]}, sent, "the request is sealed only to a replica that verified")
 }
 
-func TestSealPerRequestCacheSecretOverridesClientSecret(t *testing.T) {
-	salt := func(clientSecret, body string) (json.RawMessage, string) {
-		var fields map[string]json.RawMessage
-		var prefix string
-		seal := sealTestTransport(func(string) (http.RoundTripper, error) {
-			return roundTripFunc(func(req *http.Request) (*http.Response, error) {
-				defer req.Body.Close()
-				require.NoError(t, json.NewDecoder(req.Body).Decode(&fields))
-				prefix = req.Header.Get(cachePrefixHeader)
-				return newResponse(http.StatusNoContent, ""), nil
-			}), nil
-		})
-		seal.secret = clientSecret
-		req, err := http.NewRequest(http.MethodPost, "https://gateway.example/v1/chat/completions", strings.NewReader(body))
-		require.NoError(t, err)
-		req.Header.Set("Content-Type", "application/json")
-		req.Header.Set("Authorization", "Bearer test-api-key")
-		resp, err := seal.RoundTrip(req)
-		require.NoError(t, err)
-		resp.Body.Close()
-		require.NotContains(t, fields, cachesecret.Field, "the secret never leaves the client")
-		return fields[cacheSaltField], prefix
+// sealCacheScope sends body through a gateway transport whose client-level
+// secret is clientSecret, and returns the cache_salt and cache prefix the
+// replica received.
+func sealCacheScope(t *testing.T, clientSecret, authorization, body string) (json.RawMessage, string) {
+	t.Helper()
+	var fields map[string]json.RawMessage
+	var prefix string
+	seal := sealTestTransport(func(string) (http.RoundTripper, error) {
+		return roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			defer req.Body.Close()
+			require.NoError(t, json.NewDecoder(req.Body).Decode(&fields))
+			prefix = req.Header.Get(cachePrefixHeader)
+			return newResponse(http.StatusNoContent, ""), nil
+		}), nil
+	})
+	seal.secret = clientSecret
+	req, err := http.NewRequest(http.MethodPost, "https://gateway.example/v1/chat/completions", strings.NewReader(body))
+	require.NoError(t, err)
+	req.Header.Set("Content-Type", "application/json")
+	if authorization != "" {
+		req.Header.Set("Authorization", authorization)
 	}
-	gotSalt, gotPrefix := salt("client-secret", `{"model":"test-model","user_cache_secret":"end-user"}`)
-	wantSalt, wantPrefix := salt("end-user", `{"model":"test-model"}`)
+	resp, err := seal.RoundTrip(req)
+	require.NoError(t, err)
+	resp.Body.Close()
+	require.NotContains(t, fields, cachesecret.Field, "the secret never leaves the client")
+	return fields[cacheSaltField], prefix
+}
+
+func TestSealPerRequestCacheSecretOverridesClientSecret(t *testing.T) {
+	gotSalt, gotPrefix := sealCacheScope(t, "client-secret", "Bearer test-api-key", `{"model":"test-model","user_cache_secret":"end-user"}`)
+	wantSalt, wantPrefix := sealCacheScope(t, "end-user", "Bearer test-api-key", `{"model":"test-model"}`)
 	require.Equal(t, wantSalt, gotSalt)
 	require.Equal(t, wantPrefix, gotPrefix)
-	clientSalt, _ := salt("client-secret", `{"model":"test-model"}`)
+	clientSalt, _ := sealCacheScope(t, "client-secret", "Bearer test-api-key", `{"model":"test-model"}`)
 	require.NotEqual(t, clientSalt, gotSalt)
+}
+
+func TestSealCacheScopeUsesTheBearerCredential(t *testing.T) {
+	for _, authorization := range []string{"Bearer test-api-key", "bearer test-api-key", " BEARER  test-api-key "} {
+		salt, prefix := sealCacheScope(t, "test-secret", authorization, specCacheBody)
+		require.JSONEq(t, `"`+specCacheSalt+`"`, string(salt), "%q", authorization)
+		require.Equal(t, specCachePrefix, prefix, "%q", authorization)
+	}
+
+	noKeySalt, noKeyPrefix := sealCacheScope(t, "test-secret", "", specCacheBody)
+	for _, authorization := range []string{"Basic test-api-key", "Bearertest-api-key", "Bearer"} {
+		salt, prefix := sealCacheScope(t, "test-secret", authorization, specCacheBody)
+		require.Equal(t, noKeySalt, salt, "%q carries no Bearer credential", authorization)
+		require.Equal(t, noKeyPrefix, prefix, "%q carries no Bearer credential", authorization)
+	}
+
+	otherSalt, otherPrefix := sealCacheScope(t, "test-secret", "Bearer other-api-key", specCacheBody)
+	for _, salt := range []json.RawMessage{noKeySalt, otherSalt} {
+		require.NotEqual(t, `"`+specCacheSalt+`"`, string(salt), "each API key scopes its own cache")
+	}
+	for _, prefix := range []string{noKeyPrefix, otherPrefix} {
+		require.NotEqual(t, specCachePrefix, prefix, "each API key routes on its own prefix")
+	}
 }
 
 func TestGatewayVerificationsNameReplicaHosts(t *testing.T) {
