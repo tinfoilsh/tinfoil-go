@@ -22,6 +22,10 @@ type TransportMode string
 const (
 	// TransportModeTLS pins each connection to the attested TLS key. It
 	// protects the whole request and response, and needs a direct connection.
+	// Its connections take only the proxy, dialer and connection-pool
+	// settings of http.DefaultTransport and the roots and verification
+	// callbacks of its TLS config; a custom TLS dialer or TLS key log there
+	// is a ConfigurationError.
 	TransportModeTLS TransportMode = "tls"
 	// TransportModeEHBP seals request and response bodies to the attested
 	// HPKE key, so they stay private through a proxy. The method, URL and

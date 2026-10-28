@@ -332,8 +332,7 @@ func TestHTTPClientChecksExpirationOnReusedTLSConnections(t *testing.T) {
 			defer hc.CloseIdleConnections()
 			_, err = hc.Transport.(*Transport).EnsureVerified(context.Background())
 			require.NoError(t, err)
-			base, err := hc.Transport.(*Transport).inner.(*TLSBoundRoundTripper).getTransport()
-			require.NoError(t, err)
+			base := hc.Transport.(*Transport).inner.(*TLSBoundRoundTripper).transport
 			base.Proxy = nil
 			base.TLSClientConfig.RootCAs = roots
 			if useProxy {
