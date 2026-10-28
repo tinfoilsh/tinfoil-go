@@ -22,6 +22,10 @@ type GatewayOptions struct {
 	PinnedModelsOnly bool
 	// Verifier is the policy for unpinned models; nil selects the defaults.
 	Verifier *verify.Verifier
+	// VerificationCheck is called with each replica's verification, as
+	// EnclaveOptions.VerificationCheck is, for pinned and unpinned models.
+	// A replica it rejects is skipped for the next replica of the model.
+	VerificationCheck func(v *verify.Verification) error
 	// UserCacheSecret is the default prompt-cache scope for the client's
 	// requests; empty resolves it from TINFOIL_USER_CACHE_SECRET or
 	// ~/.tinfoil/user_cache_secret. A non-empty user_cache_secret string in a
@@ -77,13 +81,14 @@ func NewGatewayHTTPClient(opts *GatewayOptions) (*GatewayHTTPClient, error) {
 		pins[model] = gateway.ModelPin{Repo: pin.Repo, Verifier: pin.Verifier}
 	}
 	seal, err := gateway.NewTransport(gateway.Config{
-		BaseURL:          baseURL,
-		Relay:            base.Host,
-		Catalog:          opts.Catalog,
-		ModelPins:        pins,
-		PinnedModelsOnly: opts.PinnedModelsOnly,
-		Verifier:         opts.Verifier,
-		UserCacheSecret:  opts.UserCacheSecret,
+		BaseURL:           baseURL,
+		Relay:             base.Host,
+		Catalog:           opts.Catalog,
+		ModelPins:         pins,
+		PinnedModelsOnly:  opts.PinnedModelsOnly,
+		Verifier:          opts.Verifier,
+		VerificationCheck: opts.VerificationCheck,
+		UserCacheSecret:   opts.UserCacheSecret,
 	})
 	if err != nil {
 		return nil, err

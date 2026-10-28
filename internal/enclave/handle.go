@@ -18,6 +18,8 @@ type Handle struct {
 	enclave, repo, relay string
 	// verifier is the immutable verification policy, shareable across handles.
 	verifier *verify.Verifier
+	// check is the caller's VerificationCheck, or nil.
+	check func(v *verify.Verification) error
 
 	stateMu    sync.RWMutex
 	state      *State
@@ -39,6 +41,10 @@ type Config struct {
 	// Verifier is the policy, which several handles can share; nil selects the
 	// defaults, which require Repo.
 	Verifier *verify.Verifier
+	// VerificationCheck, when set, is called with each verification that
+	// passes Verifier, before the handle keeps it. An error rejects the
+	// verification without a retry.
+	VerificationCheck func(v *verify.Verification) error
 }
 
 // NewTestHandle returns a handle for host that starts from initial, unless it
@@ -65,7 +71,7 @@ func NewHandle(c Config) (*Handle, error) {
 	if err := v.CheckRepoVerifiability(c.Repo); err != nil {
 		return nil, fromVerify(err)
 	}
-	return &Handle{enclave: c.Host, repo: c.Repo, relay: c.Relay, verifier: v}, nil
+	return &Handle{enclave: c.Host, repo: c.Repo, relay: c.Relay, verifier: v, check: c.VerificationCheck}, nil
 }
 
 // Enclave returns the enclave host.

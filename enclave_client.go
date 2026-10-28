@@ -55,6 +55,14 @@ type EnclaveOptions struct {
 	BaseURL string
 	// Verifier is the verification policy; nil selects the defaults.
 	Verifier *verify.Verifier
+	// VerificationCheck, when set, is called with each verification that
+	// passes Verifier, before the client uses the enclave's keys: on first use
+	// and whenever the client verifies again. Return an error to reject the
+	// enclave. Verification then fails with an AttestationError that wraps the
+	// error and isn't retried, and DiscoverRouter moves on to the next router.
+	// Requests wait while it runs, so keep it fast; it may be called
+	// concurrently.
+	VerificationCheck func(v *verify.Verification) error
 	// UserCacheSecret is the default prompt-cache scope for the client's
 	// requests. Only Tinfoil's router reads it, so NewEnclaveHTTPClient sends
 	// it only when set, while DiscoverRouter resolves an empty one from
@@ -97,7 +105,7 @@ func NewEnclaveHTTPClient(host, repo string, opts *EnclaveOptions) (*EnclaveHTTP
 			return nil, err
 		}
 	}
-	handle, err := enclave.NewHandle(enclave.Config{Host: host, Repo: repo, Verifier: opts.Verifier})
+	handle, err := enclave.NewHandle(enclave.Config{Host: host, Repo: repo, Verifier: opts.Verifier, VerificationCheck: opts.VerificationCheck})
 	if err != nil {
 		return nil, err
 	}
@@ -128,7 +136,7 @@ func DiscoverRouter(ctx context.Context, opts *EnclaveOptions) (*EnclaveHTTPClie
 	if opts.Verifier != nil && opts.Verifier.CallerAuthorizesConfig() {
 		return nil, &ConfigurationError{Err: errors.New("caller-authorized config requires an explicit enclave")}
 	}
-	handle, err := router.Discover(ctx, opts.Verifier)
+	handle, err := router.Discover(ctx, opts.Verifier, opts.VerificationCheck)
 	if err != nil {
 		return nil, err
 	}

@@ -36,7 +36,7 @@ func TestDefaultClientProbesOncePerDiscovery(t *testing.T) {
 			}
 			return nil, cause
 		})}
-		s, err := Discover(context.Background(), nil)
+		s, err := Discover(context.Background(), nil, nil)
 		if err == nil {
 			// Complete initialization if the constructor returned a lazy fallback.
 			_, err = s.Reverify(context.Background())
@@ -50,7 +50,7 @@ func TestDefaultClientProbesOncePerDiscovery(t *testing.T) {
 
 func TestLiveDiscoverRouter(t *testing.T) {
 	testutil.RequireLive(t)
-	client, err := Discover(t.Context(), nil)
+	client, err := Discover(t.Context(), nil, nil)
 	require.NoError(t, err)
 	assert.NotEmpty(t, client.Enclave())
 	_, err = client.Reverify(t.Context())
@@ -121,7 +121,7 @@ func TestDiscoverBoundsTotalProbeTime(t *testing.T) {
 			return nil, req.Context().Err()
 		})}
 		start := time.Now()
-		h, err := Discover(context.Background(), nil)
+		h, err := Discover(context.Background(), nil, nil)
 		require.NoError(t, err)
 		require.Equal(t, "inference.tinfoil.sh", h.Enclave(), "discovery falls back")
 		require.Equal(t, discoveryTimeout, time.Since(start), "one budget for every probe, not one per router")

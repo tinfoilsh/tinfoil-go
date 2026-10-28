@@ -68,11 +68,12 @@ func fetchRouters(ctx context.Context) ([]string, error) {
 }
 
 // Discover returns a handle for the first router from Tinfoil's router
-// list that verifies under v, and otherwise for inference.tinfoil.sh, which it
-// leaves to be verified on first use. nil v selects the default policy. It
-// stops trying routers after discoveryTimeout, or sooner when ctx ends.
-func Discover(ctx context.Context, v *verify.Verifier) (*enclave.Handle, error) {
-	fallback, err := enclave.NewHandle(enclave.Config{Host: "inference.tinfoil.sh", Repo: defaultRouterRepo, Verifier: v})
+// list that verifies under v and passes check, and otherwise for
+// inference.tinfoil.sh, which it leaves to be verified on first use. nil v
+// selects the default policy, and nil check accepts every router. It stops
+// trying routers after discoveryTimeout, or sooner when ctx ends.
+func Discover(ctx context.Context, v *verify.Verifier, check func(v *verify.Verification) error) (*enclave.Handle, error) {
+	fallback, err := enclave.NewHandle(enclave.Config{Host: "inference.tinfoil.sh", Repo: defaultRouterRepo, Verifier: v, VerificationCheck: check})
 	if err != nil {
 		return nil, err
 	}
@@ -82,7 +83,7 @@ func Discover(ctx context.Context, v *verify.Verifier) (*enclave.Handle, error) 
 	defer cancel()
 	routers, _ := fetchRouters(probing)
 	for _, router := range routers {
-		candidate, err := enclave.NewHandle(enclave.Config{Host: router, Repo: fallback.Repo(), Verifier: fallback.Verifier()})
+		candidate, err := enclave.NewHandle(enclave.Config{Host: router, Repo: fallback.Repo(), Verifier: fallback.Verifier(), VerificationCheck: check})
 		if err != nil {
 			return nil, err
 		}
