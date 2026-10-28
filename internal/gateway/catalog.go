@@ -15,6 +15,7 @@ import (
 	"golang.org/x/sync/singleflight"
 
 	"github.com/tinfoilsh/tinfoil-go/internal/errs"
+	"github.com/tinfoilsh/tinfoil-go/internal/fetch"
 	"github.com/tinfoilsh/tinfoil-go/verify"
 )
 
@@ -43,7 +44,7 @@ func FetchCatalog(ctx context.Context, host string) (Catalog, error) {
 	if err != nil {
 		return nil, &errs.ConfigurationError{Err: err}
 	}
-	resp, err := (&http.Client{Timeout: catalogFetchTimeout}).Do(req)
+	resp, err := (&http.Client{Timeout: catalogFetchTimeout, CheckRedirect: fetch.RefuseInsecureRedirects}).Do(req)
 	if err != nil {
 		return nil, &errs.NetworkError{Err: err}
 	}
