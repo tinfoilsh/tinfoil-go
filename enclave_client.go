@@ -61,7 +61,8 @@ type EnclaveOptions struct {
 	// TINFOIL_USER_CACHE_SECRET or ~/.tinfoil/user_cache_secret. A non-empty
 	// user_cache_secret string in a request's JSON body overrides it, so a
 	// server can scope the cache to each end user, for example with
-	// option.WithJSONSet("user_cache_secret", s).
+	// option.WithJSONSet("user_cache_secret", s). Use an opaque random value,
+	// not a raw user ID or API key.
 	UserCacheSecret string
 }
 

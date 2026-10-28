@@ -27,6 +27,9 @@ type GatewayOptions struct {
 	// ~/.tinfoil/user_cache_secret. A non-empty user_cache_secret string in a
 	// request's JSON body overrides it, so a server can scope the cache to each
 	// end user, for example with option.WithJSONSet("user_cache_secret", s).
+	// Use an opaque random value, not a raw user ID or API key: the gateway
+	// sees a cache prefix keyed on it, and could test guesses of a guessable
+	// secret and then of the prompt.
 	UserCacheSecret string
 	// URL is the gateway's base URL; empty selects Tinfoil's gateway.
 	URL string
