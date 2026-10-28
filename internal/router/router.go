@@ -81,8 +81,14 @@ func Discover(ctx context.Context, v *verify.Verifier, check func(v *verify.Veri
 	// without a fetch.
 	probing, cancel := context.WithTimeout(ctx, discoveryTimeout)
 	defer cancel()
+	deadline, _ := probing.Deadline()
 	routers, _ := fetchRouters(probing)
 	for _, router := range routers {
+		// The deadline can pass before probing's timer cancels it, as when a
+		// probe's own timeout ends at the same instant.
+		if !time.Now().Before(deadline) {
+			break
+		}
 		candidate, err := enclave.NewHandle(enclave.Config{Host: router, Repo: fallback.Repo(), Verifier: fallback.Verifier(), VerificationCheck: check})
 		if err != nil {
 			return nil, err
