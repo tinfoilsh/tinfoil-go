@@ -7,9 +7,12 @@ import (
 	"io"
 	"io/fs"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"testing/synctest"
 	"time"
@@ -317,6 +320,104 @@ func TestLiveNewEnclaveHTTPClient(t *testing.T) {
 	after, err := c.Reverify(context.Background())
 	require.NoError(t, err)
 	require.False(t, after.Metadata().VerifiedAt.Before(before.Metadata().VerifiedAt))
+}
+
+func TestLiveVerificationCheck(t *testing.T) {
+	testutil.RequireLive(t, "TINFOIL_ENCLAVE", "TINFOIL_REPO")
+	rejection := errors.New("rejected by the test")
+	// recorder returns a check that records the TLS key of each verification
+	// it sees and rejects while reject says to.
+	recorder := func(reject func(seen int) bool) (func(*verify.Verification) error, func() []string) {
+		var mu sync.Mutex
+		var keys []string
+		check := func(v *verify.Verification) error {
+			mu.Lock()
+			defer mu.Unlock()
+			key, _ := v.TLSPublicKeyFP()
+			keys = append(keys, key)
+			if reject(len(keys)) {
+				return rejection
+			}
+			return nil
+		}
+		return check, func() []string {
+			mu.Lock()
+			defer mu.Unlock()
+			return slices.Clone(keys)
+		}
+	}
+
+	t.Run("discovery skips a rejected router", func(t *testing.T) {
+		check, keys := recorder(func(seen int) bool { return seen == 1 })
+		c, err := DiscoverRouter(context.Background(), &EnclaveOptions{VerificationCheck: check})
+		require.NoError(t, err)
+		seen := keys()
+		require.GreaterOrEqual(t, len(seen), 2)
+		accepted, _ := c.Current().TLSPublicKeyFP()
+		require.NotEqual(t, seen[0], accepted, "the rejected router isn't used")
+		require.Equal(t, seen[len(seen)-1], accepted)
+	})
+
+	t.Run("an explicit enclave is rejected once", func(t *testing.T) {
+		check, keys := recorder(func(int) bool { return true })
+		c, err := NewEnclaveHTTPClient(os.Getenv("TINFOIL_ENCLAVE"), os.Getenv("TINFOIL_REPO"), &EnclaveOptions{VerificationCheck: check})
+		require.NoError(t, err)
+		_, err = c.EnsureVerified(context.Background())
+		require.ErrorIs(t, err, rejection)
+		var attestation *AttestationError
+		require.ErrorAs(t, err, &attestation)
+		require.Len(t, keys(), 1, "a rejection isn't retried")
+		require.Nil(t, c.Current())
+	})
+
+	// replicatedCatalog fetches Tinfoil's gateway catalog once and returns it
+	// with its model that has the most replicas. Clients built on that catalog
+	// choose the model and verify it against the same snapshot.
+	replicatedCatalog := func(t *testing.T) (Catalog, string) {
+		base, err := url.Parse(defaultGatewayURL)
+		require.NoError(t, err)
+		catalog, err := FetchCatalog(context.Background(), base.Host)
+		require.NoError(t, err)
+		var model string
+		for m, entry := range catalog {
+			if len(entry.Hosts) > len(catalog[model].Hosts) {
+				model = m
+			}
+		}
+		require.GreaterOrEqual(t, len(catalog[model].Hosts), 2, "the gateway's catalog needs a model with two replicas")
+		return catalog, model
+	}
+
+	t.Run("the gateway skips a rejected replica", func(t *testing.T) {
+		check, keys := recorder(func(seen int) bool { return seen == 1 })
+		catalog, model := replicatedCatalog(t)
+		gw, err := NewGatewayHTTPClient(&GatewayOptions{Catalog: func() Catalog { return catalog }, VerificationCheck: check})
+		require.NoError(t, err)
+		verified, err := gw.EnsureVerified(context.Background(), model)
+		require.NoError(t, err)
+		seen := keys()
+		require.GreaterOrEqual(t, len(seen), 2)
+		accepted, _ := verified.TLSPublicKeyFP()
+		require.NotEqual(t, seen[0], accepted, "the rejected replica isn't used")
+		require.Equal(t, seen[len(seen)-1], accepted)
+	})
+
+	t.Run("the gateway checks each replica once", func(t *testing.T) {
+		check, keys := recorder(func(int) bool { return true })
+		catalog, model := replicatedCatalog(t)
+		gw, err := NewGatewayHTTPClient(&GatewayOptions{Catalog: func() Catalog { return catalog }, VerificationCheck: check})
+		require.NoError(t, err)
+		_, err = gw.EnsureVerified(context.Background(), model)
+		require.ErrorIs(t, err, rejection)
+		seen := keys()
+		require.GreaterOrEqual(t, len(seen), 2, "every replica is tried")
+		distinct := map[string]bool{}
+		for _, key := range seen {
+			distinct[key] = true
+		}
+		require.Len(t, distinct, len(seen), "a rejected replica isn't retried")
+		require.Empty(t, gw.Current(), "no rejected replica is kept")
+	})
 }
 
 func TestValidateTLSBaseURL(t *testing.T) {

@@ -90,6 +90,9 @@ func (s *Handle) refresh(call *verificationCall, retries int) {
 		if err == nil && !time.Now().Before(verified.FreshnessExpiresAt()) {
 			err = &AttestationError{Err: ErrFreshnessExpired}
 		}
+		if err == nil {
+			err = s.checkVerification(verified)
+		}
 		if attempt == retries || !retryableVerification(err) {
 			break
 		}
@@ -137,7 +140,8 @@ func (s *Handle) Invalidate(state *State) {
 
 func retryableVerification(err error) bool {
 	var config *ConfigurationError
-	if errors.As(err, &config) {
+	var rejected *rejectedError
+	if errors.As(err, &config) || errors.As(err, &rejected) {
 		return false
 	}
 	// Joined failures put the terminal cause first; earlier probes are diagnostics.

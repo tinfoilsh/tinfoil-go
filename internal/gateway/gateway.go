@@ -132,6 +132,8 @@ type Config struct {
 	PinnedModelsOnly bool
 	// Verifier is the policy for unpinned models; nil selects the defaults.
 	Verifier *verify.Verifier
+	// VerificationCheck, when set, can reject each replica's verification.
+	VerificationCheck func(v *verify.Verification) error
 	// UserCacheSecret is the explicit secret; empty resolves it from the
 	// environment or the persisted file.
 	UserCacheSecret string
@@ -153,7 +155,7 @@ func NewTransport(c Config) (*Transport, error) {
 		policy:  policy,
 		secret:  cachesecret.Resolve(c.UserCacheSecret, c.UserCacheSecret != ""),
 		build: func(r replica) (*verifiedReplicaTransport, error) {
-			h, err := enclave.NewHandle(enclave.Config{Host: r.host, Relay: c.Relay, Repo: r.ref, Verifier: policy.verifierFor(r)})
+			h, err := enclave.NewHandle(enclave.Config{Host: r.host, Relay: c.Relay, Repo: r.ref, Verifier: policy.verifierFor(r), VerificationCheck: c.VerificationCheck})
 			if err != nil {
 				return nil, err
 			}

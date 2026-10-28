@@ -59,6 +59,17 @@ func (s *Handle) fetchVerification() (*verify.Verification, error) {
 	return verified, nil
 }
 
+// checkVerification runs the caller's VerificationCheck on a copy of v.
+func (s *Handle) checkVerification(v *verify.Verification) error {
+	if s.check == nil {
+		return nil
+	}
+	if err := s.check(detached(v)); err != nil {
+		return &AttestationError{Err: &rejectedError{host: s.enclave, err: err}}
+	}
+	return nil
+}
+
 // EnsureVerified returns a state that is valid now, verifying first only if
 // the current one has expired or been invalidated. Concurrent callers share
 // one verification.
