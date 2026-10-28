@@ -7,6 +7,7 @@ import (
 	"io"
 	"io/fs"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"slices"
@@ -369,16 +370,51 @@ func TestLiveVerificationCheck(t *testing.T) {
 		require.Nil(t, c.Current())
 	})
 
-	t.Run("the gateway rejects each replica", func(t *testing.T) {
+	// replicatedModel returns the model gw serves with the most replicas in
+	// its gateway's catalog.
+	replicatedModel := func(t *testing.T, gw *GatewayHTTPClient) string {
+		models, err := gw.Models(context.Background())
+		require.NoError(t, err)
+		base, err := url.Parse(gw.BaseURL())
+		require.NoError(t, err)
+		catalog, err := FetchCatalog(context.Background(), base.Host)
+		require.NoError(t, err)
+		var model string
+		for _, m := range models {
+			if len(catalog[m].Hosts) > len(catalog[model].Hosts) {
+				model = m
+			}
+		}
+		require.GreaterOrEqual(t, len(catalog[model].Hosts), 2, "the gateway's catalog needs a model with two replicas")
+		return model
+	}
+
+	t.Run("the gateway skips a rejected replica", func(t *testing.T) {
+		check, keys := recorder(func(seen int) bool { return seen == 1 })
+		gw, err := NewGatewayHTTPClient(&GatewayOptions{VerificationCheck: check})
+		require.NoError(t, err)
+		verified, err := gw.EnsureVerified(context.Background(), replicatedModel(t, gw))
+		require.NoError(t, err)
+		seen := keys()
+		require.GreaterOrEqual(t, len(seen), 2)
+		accepted, _ := verified.TLSPublicKeyFP()
+		require.NotEqual(t, seen[0], accepted, "the rejected replica isn't used")
+		require.Equal(t, seen[len(seen)-1], accepted)
+	})
+
+	t.Run("the gateway checks each replica once", func(t *testing.T) {
 		check, keys := recorder(func(int) bool { return true })
 		gw, err := NewGatewayHTTPClient(&GatewayOptions{VerificationCheck: check})
 		require.NoError(t, err)
-		models, err := gw.Models(context.Background())
-		require.NoError(t, err)
-		require.NotEmpty(t, models)
-		_, err = gw.EnsureVerified(context.Background(), models[0])
+		_, err = gw.EnsureVerified(context.Background(), replicatedModel(t, gw))
 		require.ErrorIs(t, err, rejection)
-		require.NotEmpty(t, keys())
+		seen := keys()
+		require.GreaterOrEqual(t, len(seen), 2, "every replica is tried")
+		distinct := map[string]bool{}
+		for _, key := range seen {
+			distinct[key] = true
+		}
+		require.Len(t, distinct, len(seen), "a rejected replica isn't retried")
 		require.Empty(t, gw.Current(), "no rejected replica is kept")
 	})
 }
