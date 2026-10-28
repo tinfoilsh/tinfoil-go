@@ -41,8 +41,9 @@ const (
 
 	// Derived client-side: no router sits between a gateway client and the engine.
 	cacheSaltField = "cache_salt"
-	// Derives both the salt and the cache-prefix key from the secret.
-	cacheSaltDomainTag = "tinfoil/client-cache-salt/v2"
+	// Derive the salt and the cache-prefix key from the secret and API key.
+	cacheSaltDomainTag  = "tinfoil/client-cache-salt/v2"
+	cacheRouteDomainTag = "tinfoil/client-cache-route/v2"
 )
 
 type gatewayPolicy struct {
@@ -499,19 +500,34 @@ func (t *Transport) scopeCache(h http.Header, fields map[string]json.RawMessage,
 	if secret = cmp.Or(secret, t.secret); secret == "" {
 		return body, nil
 	}
-	key, err := hkdf.Key(sha256.New, []byte(secret), []byte(h.Get("Authorization")), cacheSaltDomainTag, 2*sha256.Size)
+	apiKey := []byte(bearerCredential(h.Get("Authorization")))
+	salt, err := hkdf.Key(sha256.New, []byte(secret), apiKey, cacheSaltDomainTag, sha256.Size)
 	if err != nil {
-		return nil, fmt.Errorf("deriving cache keys: %w", err)
+		return nil, fmt.Errorf("deriving the cache salt: %w", err)
 	}
 	h.Del(cachePrefixHeader)
 	if head := promptHead(fields); head != nil {
-		mac := hmac.New(sha256.New, key[sha256.Size:])
+		key, err := hkdf.Key(sha256.New, []byte(secret), apiKey, cacheRouteDomainTag, sha256.Size)
+		if err != nil {
+			return nil, fmt.Errorf("deriving the cache prefix key: %w", err)
+		}
+		mac := hmac.New(sha256.New, key)
 		mac.Write(head)
 		h.Set(cachePrefixHeader, hex.EncodeToString(mac.Sum(nil)))
 	}
 	delete(fields, cachesecret.Field)
-	fields[cacheSaltField], _ = json.Marshal(base64.RawURLEncoding.EncodeToString(key[:sha256.Size]))
+	fields[cacheSaltField], _ = json.Marshal(base64.RawURLEncoding.EncodeToString(salt))
 	return json.Marshal(fields)
+}
+
+// bearerCredential returns the credential of a Bearer authorization, whose
+// scheme is case-insensitive, and "" for any other scheme.
+func bearerCredential(authorization string) string {
+	scheme, credential, ok := strings.Cut(strings.TrimSpace(authorization), " ")
+	if !ok || !strings.EqualFold(scheme, "Bearer") {
+		return ""
+	}
+	return strings.TrimSpace(credential)
 }
 
 // The first element is the prefix later turns of a conversation share.
