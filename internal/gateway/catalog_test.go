@@ -37,6 +37,34 @@ func TestReadCatalogKeepsOnlyTrustedEntries(t *testing.T) {
 	require.Equal(t, Catalog{"ok": {Repo: "tinfoilsh/ok", Hosts: []string{"a.example"}}}, catalog)
 }
 
+func TestFetchCatalogRefusesInsecureRedirects(t *testing.T) {
+	original := http.DefaultTransport
+	t.Cleanup(func() { http.DefaultTransport = original })
+	for _, tc := range []struct {
+		location string
+		refused  bool
+	}{
+		{"https://mirror.example/catalog", false},
+		{"http://mirror.example/catalog", true},
+	} {
+		t.Run(tc.location, func(t *testing.T) {
+			http.DefaultTransport = roundTripFunc(func(req *http.Request) (*http.Response, error) {
+				if req.URL.String() == "https://gateway.example/catalog" {
+					return &http.Response{StatusCode: http.StatusFound, Header: http.Header{"Location": {tc.location}}, Body: http.NoBody}, nil
+				}
+				return newResponse(http.StatusOK, `{"m": {"repo": "tinfoilsh/m", "hosts": ["a.example"]}}`), nil
+			})
+			catalog, err := FetchCatalog(context.Background(), "gateway.example")
+			if tc.refused {
+				require.ErrorContains(t, err, "refusing redirect to non-HTTPS URL")
+				return
+			}
+			require.NoError(t, err)
+			require.Contains(t, catalog, "m")
+		})
+	}
+}
+
 func TestCatalogCacheFetchesOnFirstUseAndKeepsSuccess(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		failure := errors.New("gateway unavailable")
