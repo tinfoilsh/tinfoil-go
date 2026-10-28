@@ -370,30 +370,30 @@ func TestLiveVerificationCheck(t *testing.T) {
 		require.Nil(t, c.Current())
 	})
 
-	// replicatedModel returns the model gw serves with the most replicas in
-	// its gateway's catalog.
-	replicatedModel := func(t *testing.T, gw *GatewayHTTPClient) string {
-		models, err := gw.Models(context.Background())
-		require.NoError(t, err)
-		base, err := url.Parse(gw.BaseURL())
+	// replicatedCatalog fetches Tinfoil's gateway catalog once and returns it
+	// with its model that has the most replicas. Clients built on that catalog
+	// choose the model and verify it against the same snapshot.
+	replicatedCatalog := func(t *testing.T) (Catalog, string) {
+		base, err := url.Parse(defaultGatewayURL)
 		require.NoError(t, err)
 		catalog, err := FetchCatalog(context.Background(), base.Host)
 		require.NoError(t, err)
 		var model string
-		for _, m := range models {
-			if len(catalog[m].Hosts) > len(catalog[model].Hosts) {
+		for m, entry := range catalog {
+			if len(entry.Hosts) > len(catalog[model].Hosts) {
 				model = m
 			}
 		}
 		require.GreaterOrEqual(t, len(catalog[model].Hosts), 2, "the gateway's catalog needs a model with two replicas")
-		return model
+		return catalog, model
 	}
 
 	t.Run("the gateway skips a rejected replica", func(t *testing.T) {
 		check, keys := recorder(func(seen int) bool { return seen == 1 })
-		gw, err := NewGatewayHTTPClient(&GatewayOptions{VerificationCheck: check})
+		catalog, model := replicatedCatalog(t)
+		gw, err := NewGatewayHTTPClient(&GatewayOptions{Catalog: func() Catalog { return catalog }, VerificationCheck: check})
 		require.NoError(t, err)
-		verified, err := gw.EnsureVerified(context.Background(), replicatedModel(t, gw))
+		verified, err := gw.EnsureVerified(context.Background(), model)
 		require.NoError(t, err)
 		seen := keys()
 		require.GreaterOrEqual(t, len(seen), 2)
@@ -404,9 +404,10 @@ func TestLiveVerificationCheck(t *testing.T) {
 
 	t.Run("the gateway checks each replica once", func(t *testing.T) {
 		check, keys := recorder(func(int) bool { return true })
-		gw, err := NewGatewayHTTPClient(&GatewayOptions{VerificationCheck: check})
+		catalog, model := replicatedCatalog(t)
+		gw, err := NewGatewayHTTPClient(&GatewayOptions{Catalog: func() Catalog { return catalog }, VerificationCheck: check})
 		require.NoError(t, err)
-		_, err = gw.EnsureVerified(context.Background(), replicatedModel(t, gw))
+		_, err = gw.EnsureVerified(context.Background(), model)
 		require.ErrorIs(t, err, rejection)
 		seen := keys()
 		require.GreaterOrEqual(t, len(seen), 2, "every replica is tried")
