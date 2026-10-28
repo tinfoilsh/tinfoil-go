@@ -27,7 +27,7 @@ func TestPlainConfigCollateral(t *testing.T) {
 	require.ErrorContains(t, err, "cannot contain an endorsement")
 }
 
-func TestDigestConfigCollateralExcludesBytes(t *testing.T) {
+func TestConfigCollateralAllowsOptionalBytes(t *testing.T) {
 	data := configCollateral{Reference: "sha256:" + strings.Repeat("ab", 32), Bundle: []byte(`{"mediaType":"test"}`)}
 	encoded, err := json.Marshal(data)
 	require.NoError(t, err)
@@ -37,11 +37,12 @@ func TestDigestConfigCollateralExcludesBytes(t *testing.T) {
 	require.Equal(t, data.Reference, set.Config.Reference)
 	require.JSONEq(t, string(data.Bundle), string(set.Config.Bundle))
 	require.Nil(t, set.Config.Config)
-	data.Config = base64.StdEncoding.EncodeToString([]byte("private config"))
+	data.Config = base64.StdEncoding.EncodeToString([]byte("public config"))
 	entry.Data, err = json.Marshal(data)
 	require.NoError(t, err)
-	_, err = Decode([]Entry{entry})
-	require.ErrorContains(t, err, "cannot contain config bytes")
+	set, err = Decode([]Entry{entry})
+	require.NoError(t, err)
+	require.Equal(t, []byte("public config"), set.Config.Config)
 }
 
 func TestConfigEndorsement(t *testing.T) {

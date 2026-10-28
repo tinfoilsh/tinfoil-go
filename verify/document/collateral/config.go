@@ -30,9 +30,6 @@ func decodeConfigEndorsement(entry *Entry) (ConfigEndorsement, error) {
 	if err := unmarshalData(entry, entry.Format, &c); err != nil {
 		return ConfigEndorsement{}, err
 	}
-	if entry.Format == ConfigEndorsementV2Format && c.Config != "" {
-		return ConfigEndorsement{}, fmt.Errorf("v2 config collateral cannot contain config bytes")
-	}
 	if entry.Format == ConfigV1Format {
 		if c.Reference != "" || len(c.Bundle) != 0 {
 			return ConfigEndorsement{}, fmt.Errorf("plain config collateral cannot contain an endorsement")
@@ -49,7 +46,7 @@ func decodeConfigEndorsement(entry *Entry) (ConfigEndorsement, error) {
 			return ConfigEndorsement{}, fmt.Errorf("sigstore_bundle must be an object")
 		}
 	}
-	if entry.Format == ConfigEndorsementV2Format {
+	if entry.Format == ConfigEndorsementV2Format && c.Config == "" {
 		return ConfigEndorsement{Reference: c.Reference, Bundle: c.Bundle}, nil
 	}
 	config, err := canonical.DecodeBase64("config_base64", c.Config)

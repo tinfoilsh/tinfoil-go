@@ -79,6 +79,23 @@ func TestDigestEndorsementBindsQuoteAndRuntimeWithoutConfig(t *testing.T) {
 	requireRejectedAt(t, err, LayerQuote)
 	_, err = v.configReferences(doc, "org/other", f.Now)
 	require.ErrorContains(t, err, "pinned identity")
+	for _, attached := range [][]byte{config, append(append([]byte(nil), config...), '\n')} {
+		data, err := json.Marshal(map[string]any{
+			"endorsement_ref": reference, "config_base64": base64.StdEncoding.EncodeToString(attached),
+			"sigstore_bundle": jsontext.Value(sigstoretest.MarshalBundle(t, f.Bundle(t, payload))),
+		})
+		require.NoError(t, err)
+		_, _, withBytes := embeddedDocument(t, collateral.FormatV3, collateral.Entry{
+			ID: collateral.ConfigID, Role: collateral.RoleReferenceValues, Format: collateral.ConfigEndorsementV2Format, Data: data,
+		})
+		got, err := v.configReferences(withBytes, "org/project@v1", f.Now)
+		if len(attached) != len(config) {
+			require.ErrorContains(t, err, "config bytes do not match")
+		} else {
+			require.NoError(t, err)
+			require.Equal(t, refs, got)
+		}
+	}
 	inputs.Runtime = append(inputs.Runtime, '\n')
 	v, err = NewVerifier(WithEmbeddedReferences(inputs), WithConfigSigningKeys([]crypto.PublicKey{f.Key.Public()}))
 	require.NoError(t, err)

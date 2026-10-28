@@ -68,14 +68,14 @@ func (v *Verifier) referencePins(ref string) (endorsement.ConfigPolicy, error) {
 	if v.configAuthorizer != nil && ref != "" {
 		return pins, usageError(fmt.Errorf("config authorizer cannot authenticate repository or revision pins; enforce them in caller policy"))
 	}
-	if ref != "" || (v.embedded.Config == nil && v.configAuthorizer == nil) {
+	if ref != "" || (v.embedded.ConfigReference == nil && v.configAuthorizer == nil) {
 		parsed, err := endorsement.ParseReference(ref)
 		if err != nil {
 			return pins, usageError(err)
 		}
 		pins.Identity, pins.Revision, pins.Digest = "/"+parsed.Repo, parsed.Tag, parsed.Digest
 	}
-	if embedded := v.embedded.Config; embedded != nil {
+	if embedded := v.embedded.ConfigReference; embedded != nil {
 		var identity, revision string
 		if embedded.Name != "" {
 			var err error
@@ -83,8 +83,7 @@ func (v *Verifier) referencePins(ref string) (endorsement.ConfigPolicy, error) {
 				return pins, usageError(err)
 			}
 		}
-		digest := sha256.Sum256(embedded.Bytes)
-		if (pins.Identity != "" && pins.Identity != identity) || (pins.Revision != "" && pins.Revision != revision) || (pins.Digest != "" && pins.Digest != hex.EncodeToString(digest[:])) {
+		if (pins.Identity != "" && pins.Identity != identity) || (pins.Revision != "" && pins.Revision != revision) || (pins.Digest != "" && pins.Digest != embedded.Digest) {
 			return pins, usageError(fmt.Errorf("embedded config does not match the caller's pins"))
 		}
 	}
@@ -136,11 +135,9 @@ func (v *Verifier) configReferences(doc *document.Document, ref string, now time
 
 func (v *Verifier) resolveConfig(doc *document.Document, pins endorsement.ConfigPolicy) (collateral.RuntimeReference, *ConfigVerification, error) {
 	var expected collateral.RuntimeReference
-	if embedded := v.embedded.Config; embedded != nil {
+	if embedded := v.embedded.ConfigReference; embedded != nil {
 		// referencePins matched the pins against it.
-		digest := sha256.Sum256(embedded.Bytes)
-		expected, err := configendorsement.RuntimeFromConfig(embedded.Bytes)
-		return expected, &ConfigVerification{Source: SourceEmbedded, Name: embedded.Name, Digest: hex.EncodeToString(digest[:])}, err
+		return embedded.Runtime, &ConfigVerification{Source: SourceEmbedded, Name: embedded.Name, Digest: embedded.Digest}, nil
 	}
 	config, err := doc.ConfigEndorsement()
 	if err != nil {
@@ -160,12 +157,7 @@ func (v *Verifier) resolveConfig(doc *document.Document, pins endorsement.Config
 	if len(config.Bundle) == 0 {
 		return expected, nil, fmt.Errorf("unsigned config requires a config authorizer")
 	}
-	var approved *endorsement.ConfigVerified
-	if len(config.Config) == 0 {
-		approved, err = v.configVerifier.VerifyDigest(config.Bundle, pins)
-	} else {
-		approved, err = v.configVerifier.Verify(config.Config, config.Bundle, pins)
-	}
+	approved, err := v.configVerifier.Verify(config.Config, config.Bundle, pins)
 	if err != nil {
 		return expected, nil, fmt.Errorf("verifying config approval: %w", err)
 	}

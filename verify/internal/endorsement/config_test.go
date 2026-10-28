@@ -87,7 +87,7 @@ func TestVerifyConfigDigestAndRuntime(t *testing.T) {
 	payload, err := s.Complete(f.Timestamp(t, input, f.Now))
 	require.NoError(t, err)
 	bundle := sigstoretest.MarshalBundle(t, f.Bundle(t, payload))
-	got, err := f.verifier(t).VerifyDigest(bundle, f.policy())
+	got, err := f.verifier(t).Verify(nil, bundle, f.policy())
 	require.NoError(t, err)
 	digest := sha256.Sum256(config)
 	require.Equal(t, hex.EncodeToString(digest[:]), got.Digest)
@@ -110,19 +110,19 @@ func TestVerifyConfigDigestAndRuntime(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			b := f.Bundle(t, payload)
 			mutate(b)
-			_, err := f.verifier(t).VerifyDigest(sigstoretest.MarshalBundle(t, b), f.policy())
+			_, err := f.verifier(t).Verify(nil, sigstoretest.MarshalBundle(t, b), f.policy())
 			require.Error(t, err)
 		})
 	}
-	_, err = f.verifier(t).VerifyDigest(sigstoretest.MarshalBundle(t, f.Bundle(t, f.statement(t, f.Now))), f.policy())
+	_, err = f.verifier(t).Verify(nil, sigstoretest.MarshalBundle(t, f.Bundle(t, f.statement(t, f.Now))), f.policy())
 	require.ErrorContains(t, err, "requires a v2")
 	wrongPin := f.policy()
 	wrongPin.Digest = strings.Repeat("cd", sha256.Size)
-	_, err = f.verifier(t).VerifyDigest(bundle, wrongPin)
+	_, err = f.verifier(t).Verify(nil, bundle, wrongPin)
 	require.ErrorContains(t, err, "pinned digest")
 	stale := f.policy()
 	stale.Now = f.Now.Add(endorsement.DefaultMaxAge + time.Second)
-	_, err = f.verifier(t).VerifyDigest(bundle, stale)
+	_, err = f.verifier(t).Verify(nil, bundle, stale)
 	require.ErrorContains(t, err, "too old")
 }
 
@@ -140,7 +140,7 @@ func TestDeploymentRuntimeRequiresApprovalAndMatchesConfig(t *testing.T) {
 	s.Predicate.Freshness = &configendorsement.Freshness{RFC3161Timestamp: response}
 	payload, err := json.Marshal(s)
 	require.NoError(t, err)
-	_, err = f.verifier(t).VerifyDigest(sigstoretest.MarshalBundle(t, f.Bundle(t, payload)), f.policy())
+	_, err = f.verifier(t).Verify(nil, sigstoretest.MarshalBundle(t, f.Bundle(t, payload)), f.policy())
 	require.ErrorContains(t, err, "inner timestamp")
 
 	input, err = s.TimestampInput()
