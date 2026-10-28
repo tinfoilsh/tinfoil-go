@@ -40,9 +40,9 @@ func TestTLSBoundRoundTripperRejectsPinnedMismatchThroughHTTPSProxy(t *testing.T
 	defer proxy.Close()
 	withDefaultProxyTransport(t, target, proxy)
 
-	client := &http.Client{
-		Transport: &TLSBoundRoundTripper{ExpectedPublicKey: "not-the-attested-key"},
-	}
+	bound, err := newTLSBoundRoundTripper("not-the-attested-key")
+	require.NoError(t, err)
+	client := &http.Client{Transport: bound}
 	resp, err := client.Get(target.URL)
 	if resp != nil {
 		resp.Body.Close()
@@ -71,9 +71,9 @@ func TestTLSBoundRoundTripperAllowsPinnedHTTPSThroughProxy(t *testing.T) {
 	certFP, err := verify.CertPubkeyFP(target.Certificate())
 	require.NoError(t, err)
 
-	client := &http.Client{
-		Transport: &TLSBoundRoundTripper{ExpectedPublicKey: certFP},
-	}
+	bound, err := newTLSBoundRoundTripper(certFP)
+	require.NoError(t, err)
+	client := &http.Client{Transport: bound}
 	resp, err := client.Get(target.URL)
 	require.NoError(t, err)
 	defer resp.Body.Close()
@@ -189,7 +189,7 @@ func TestTLSPinsAttestedKey(t *testing.T) {
 	require.NoError(t, err)
 	pinned, ok := transport.(*TLSBoundRoundTripper)
 	require.True(t, ok)
-	require.Equal(t, key, pinned.ExpectedPublicKey)
+	require.Equal(t, key, pinned.key)
 
 	_, err = pinning.build(&verify.Verification{})
 	var attestation *errs.AttestationError
@@ -209,13 +209,14 @@ func TestTLSUnsupportedDefaultTransport(t *testing.T) {
 		return nil, nil
 	}), (*http.Transport)(nil)} {
 		http.DefaultTransport = transport
-		bound := &TLSBoundRoundTripper{ExpectedPublicKey: "key"}
+		h := enclave.NewTestHandle("enclave.example", testState(time.Now().Add(time.Hour), "key"), nil)
+		pinning := TLS(h)
 		req, err := http.NewRequest(http.MethodGet, "https://enclave.example", nil)
 		require.NoError(t, err)
-		_, err = bound.RoundTrip(req)
+		_, err = pinning.RoundTrip(req)
 		var config *errs.ConfigurationError
 		require.ErrorAs(t, err, &config)
-		bound.CloseIdleConnections()
+		pinning.CloseIdleConnections()
 	}
 }
 

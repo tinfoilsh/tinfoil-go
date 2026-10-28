@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"sync"
 
 	"github.com/tinfoilsh/tinfoil-go/internal/enclave"
 	"github.com/tinfoilsh/tinfoil-go/internal/errs"
@@ -34,7 +33,12 @@ func TLS(h *enclave.Handle) *Transport {
 			if !ok {
 				return nil, &errs.AttestationError{Err: errNoTLSKey}
 			}
-			return &TLSBoundRoundTripper{ExpectedPublicKey: key}, nil
+			rt, err := newTLSBoundRoundTripper(key)
+			if err != nil {
+				// A nil *TLSBoundRoundTripper would be a non-nil RoundTripper.
+				return nil, err
+			}
+			return rt, nil
 		},
 		keyRejected: isCertificateError,
 		check: func(req *http.Request) error {
@@ -46,70 +50,62 @@ func TLS(h *enclave.Handle) *Transport {
 	}
 }
 
+// TLSBoundRoundTripper sends requests over connections whose leaf
+// certificate carries one attested TLS key.
 type TLSBoundRoundTripper struct {
-	ExpectedPublicKey string
-	once              sync.Once
-	transport         *http.Transport
-	err               error
+	key       string
+	transport *http.Transport
 }
 
 var _ http.RoundTripper = &TLSBoundRoundTripper{}
 
-func (t *TLSBoundRoundTripper) getTransport() (*http.Transport, error) {
-	t.once.Do(func() {
-		// Clone DefaultTransport settings for timeouts, proxy, keep-alive, etc.
-		// then verify the attested public key after normal TLS verification.
-		// VerifyConnection runs for direct HTTPS and HTTPS-over-CONNECT proxy
-		// connections; DialTLSContext only covers non-proxied HTTPS.
-		dt, ok := http.DefaultTransport.(*http.Transport)
-		if !ok || dt == nil {
-			t.err = &errs.ConfigurationError{Err: fmt.Errorf("TLS transport mode requires http.DefaultTransport to be a non-nil *http.Transport")}
-			return
-		}
-		dt = dt.Clone()
+// newTLSBoundRoundTripper pins connections to key, an attested TLS key
+// fingerprint. It clones http.DefaultTransport's settings for timeouts,
+// proxy, keep-alive, etc. and verifies key after normal TLS verification.
+// VerifyConnection runs for direct HTTPS and HTTPS-over-CONNECT proxy
+// connections; DialTLSContext only covers non-proxied HTTPS.
+func newTLSBoundRoundTripper(key string) (*TLSBoundRoundTripper, error) {
+	if key == "" {
+		return nil, &errs.ConfigurationError{Err: errNoValidCertificate}
+	}
+	dt, ok := http.DefaultTransport.(*http.Transport)
+	if !ok || dt == nil {
+		return nil, &errs.ConfigurationError{Err: fmt.Errorf("TLS transport mode requires http.DefaultTransport to be a non-nil *http.Transport")}
+	}
+	dt = dt.Clone()
 
-		tlsConfig := &tls.Config{}
-		if dt.TLSClientConfig != nil {
-			tlsConfig = dt.TLSClientConfig.Clone()
-		}
-		prevVerifyConnection := tlsConfig.VerifyConnection
-		tlsConfig.VerifyConnection = func(state tls.ConnectionState) error {
-			if prevVerifyConnection != nil {
-				if err := prevVerifyConnection(state); err != nil {
-					return errs.WrapAttestation(err)
-				}
+	tlsConfig := &tls.Config{}
+	if dt.TLSClientConfig != nil {
+		tlsConfig = dt.TLSClientConfig.Clone()
+	}
+	prevVerifyConnection := tlsConfig.VerifyConnection
+	tlsConfig.VerifyConnection = func(state tls.ConnectionState) error {
+		if prevVerifyConnection != nil {
+			if err := prevVerifyConnection(state); err != nil {
+				return errs.WrapAttestation(err)
 			}
-
-			certFP, err := verify.ConnectionCertFP(state)
-			if err != nil {
-				return &errs.AttestationError{Err: err}
-			}
-			if certFP != t.ExpectedPublicKey {
-				return &errs.AttestationError{Err: errCertMismatch}
-			}
-			return nil
 		}
 
-		dt.TLSClientConfig = tlsConfig
-		t.transport = dt
-	})
-	return t.transport, t.err
+		certFP, err := verify.ConnectionCertFP(state)
+		if err != nil {
+			return &errs.AttestationError{Err: err}
+		}
+		if certFP != key {
+			return &errs.AttestationError{Err: errCertMismatch}
+		}
+		return nil
+	}
+
+	dt.TLSClientConfig = tlsConfig
+	return &TLSBoundRoundTripper{key: key, transport: dt}, nil
 }
 
 func (t *TLSBoundRoundTripper) RoundTrip(r *http.Request) (*http.Response, error) {
-	if len(t.ExpectedPublicKey) == 0 {
-		return nil, &errs.ConfigurationError{Err: errNoValidCertificate}
-	}
-
 	if r.URL == nil || r.URL.Scheme != "https" {
 		return nil, &errs.ConfigurationError{Err: errNoTLS}
 	}
 
-	transport, err := t.getTransport()
-	if err != nil {
-		return nil, err
-	}
-	resp, err := transport.RoundTrip(r)
+	resp, err := t.transport.RoundTrip(r)
 	if isCertificateError(err) {
 		err = errs.WrapAttestation(err)
 	}
@@ -117,9 +113,7 @@ func (t *TLSBoundRoundTripper) RoundTrip(r *http.Request) (*http.Response, error
 }
 
 func (t *TLSBoundRoundTripper) CloseIdleConnections() {
-	if transport, err := t.getTransport(); err == nil {
-		transport.CloseIdleConnections()
-	}
+	t.transport.CloseIdleConnections()
 }
 
 func isCertificateError(err error) bool {
