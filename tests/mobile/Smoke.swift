@@ -1,5 +1,5 @@
 import Foundation
-import Tinfoil
+import TinfoilGo
 
 // Type-check the supported Swift-facing API. Nothing here runs: CI only invokes
 // swiftc -typecheck, so this proves the surface exists with the expected
