@@ -99,6 +99,8 @@ func TestVerifyConfigDigestAndRuntime(t *testing.T) {
 	withBytes, err := f.verifier(t).Verify(config, bundle, f.policy())
 	require.NoError(t, err)
 	require.Equal(t, got, withBytes)
+	_, err = f.verifier(t).Verify([]byte{}, bundle, f.policy())
+	require.ErrorContains(t, err, "config size is outside allowed bounds")
 
 	for name, mutate := range map[string]func(*protobundle.Bundle){
 		"signature":   func(b *protobundle.Bundle) { b.GetDsseEnvelope().Signatures[0].Sig[0] ^= 1 },

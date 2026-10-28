@@ -1,6 +1,7 @@
 package verify
 
 import (
+	"bytes"
 	"crypto"
 	"crypto/ecdsa"
 	"crypto/elliptic"
@@ -79,7 +80,9 @@ func TestDigestEndorsementBindsQuoteAndRuntimeWithoutConfig(t *testing.T) {
 	requireRejectedAt(t, err, LayerQuote)
 	_, err = v.configReferences(doc, "org/other", f.Now)
 	require.ErrorContains(t, err, "pinned identity")
-	for _, attached := range [][]byte{config, append(append([]byte(nil), config...), '\n')} {
+	altered := bytes.Clone(config)
+	altered[0] ^= 1
+	for _, attached := range [][]byte{config, altered, append(bytes.Clone(config), '\n')} {
 		data, err := json.Marshal(map[string]any{
 			"endorsement_ref": reference, "config_base64": base64.StdEncoding.EncodeToString(attached),
 			"sigstore_bundle": jsontext.Value(sigstoretest.MarshalBundle(t, f.Bundle(t, payload))),
@@ -89,7 +92,7 @@ func TestDigestEndorsementBindsQuoteAndRuntimeWithoutConfig(t *testing.T) {
 			ID: collateral.ConfigID, Role: collateral.RoleReferenceValues, Format: collateral.ConfigEndorsementV2Format, Data: data,
 		})
 		got, err := v.configReferences(withBytes, "org/project@v1", f.Now)
-		if len(attached) != len(config) {
+		if !bytes.Equal(attached, config) {
 			require.ErrorContains(t, err, "config bytes do not match")
 		} else {
 			require.NoError(t, err)

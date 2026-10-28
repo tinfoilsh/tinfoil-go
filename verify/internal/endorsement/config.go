@@ -73,7 +73,7 @@ func (p ConfigPolicy) timePolicy() (timePolicy, error) {
 // Verify authenticates the config digest, any supplied bytes, approval identity, signing authority,
 // an independent approval timestamp, and Rekor v2 inclusion. It never accesses a network.
 func (v *ConfigVerifier) Verify(config, bundleJSON []byte, policy ConfigPolicy) (*ConfigVerified, error) {
-	if len(config) > configendorsement.MaxConfigSize {
+	if config != nil && (len(config) == 0 || len(config) > configendorsement.MaxConfigSize) {
 		return nil, fmt.Errorf("config size is outside allowed bounds")
 	}
 	timePolicy, err := policy.timePolicy()
