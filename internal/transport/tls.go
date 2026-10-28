@@ -19,6 +19,11 @@ var (
 	errNoValidCertificate = errors.New("TLS transport mode requires a verified certificate fingerprint")
 	// errNoTLSKey reports a verification with no TLS key to pin to.
 	errNoTLSKey = fmt.Errorf("document endorses no %q key", document.CryptoMaterialIDTLS)
+	// errCustomTLSDialer reports a TLS dialer, which Go would use in place of
+	// the handshake that checks the pin.
+	errCustomTLSDialer = errors.New("TLS transport mode can't pin connections that http.DefaultTransport's DialTLSContext or DialTLS makes; remove the TLS dialer or use the EHBP transport mode")
+	// errKeyLog reports a TLS key log, which would expose pinned connections.
+	errKeyLog = errors.New("TLS transport mode refuses http.DefaultTransport's TLSClientConfig.KeyLogWriter, which would expose the session keys of pinned connections")
 )
 
 // TLS returns a Transport that pins each connection's leaf certificate to the
@@ -60,10 +65,7 @@ type TLSBoundRoundTripper struct {
 var _ http.RoundTripper = &TLSBoundRoundTripper{}
 
 // newTLSBoundRoundTripper pins connections to key, an attested TLS key
-// fingerprint. It clones http.DefaultTransport's settings for timeouts,
-// proxy, keep-alive, etc. and verifies key after normal TLS verification.
-// VerifyConnection runs for direct HTTPS and HTTPS-over-CONNECT proxy
-// connections; DialTLSContext only covers non-proxied HTTPS.
+// fingerprint, on a transport built from http.DefaultTransport's settings.
 func newTLSBoundRoundTripper(key string) (*TLSBoundRoundTripper, error) {
 	if key == "" {
 		return nil, &errs.ConfigurationError{Err: errNoValidCertificate}
@@ -72,16 +74,46 @@ func newTLSBoundRoundTripper(key string) (*TLSBoundRoundTripper, error) {
 	if !ok || dt == nil {
 		return nil, &errs.ConfigurationError{Err: fmt.Errorf("TLS transport mode requires http.DefaultTransport to be a non-nil *http.Transport")}
 	}
-	dt = dt.Clone()
-
-	tlsConfig := &tls.Config{}
-	if dt.TLSClientConfig != nil {
-		tlsConfig = dt.TLSClientConfig.Clone()
+	transport, err := pinnedTransport(dt, key)
+	if err != nil {
+		return nil, err
 	}
-	prevVerifyConnection := tlsConfig.VerifyConnection
+	return &TLSBoundRoundTripper{key: key, transport: transport}, nil
+}
+
+// pinnedTransport returns a transport whose connections must each present
+// key. It starts from an empty transport and copies only the settings of dt
+// that choose a route or tune the connection pool, so a setting it doesn't
+// copy, including any a later Go release adds, can't skip or weaken the pin.
+// Go then makes every TLS handshake itself and checks the pin in
+// VerifyConnection, on a direct connection or through a proxy's CONNECT
+// tunnel. A TLS dialer or key log is refused rather than dropped, since the
+// caller set it expecting it to apply.
+func pinnedTransport(dt *http.Transport, key string) (*http.Transport, error) {
+	// Clone waits for Go's HTTP/2 setup of dt and leaves out the TLSNextProto
+	// entry that setup adds, so base holds only what the caller configured.
+	base := dt.Clone()
+	if base.DialTLSContext != nil || base.DialTLS != nil {
+		return nil, &errs.ConfigurationError{Err: errCustomTLSDialer}
+	}
+
+	// GODEBUG settings can lower Go's default minimum version.
+	tlsConfig := &tls.Config{MinVersion: tls.VersionTLS12}
+	var callerVerifyConnection func(tls.ConnectionState) error
+	if c := base.TLSClientConfig; c != nil {
+		if c.KeyLogWriter != nil {
+			return nil, &errs.ConfigurationError{Err: errKeyLog}
+		}
+		// Roots decide only the normal certificate check, which runs before
+		// the pin, and the callbacks can only reject, so none of them can
+		// admit a peer the pin refuses.
+		tlsConfig.RootCAs = c.RootCAs
+		tlsConfig.VerifyPeerCertificate = c.VerifyPeerCertificate
+		callerVerifyConnection = c.VerifyConnection
+	}
 	tlsConfig.VerifyConnection = func(state tls.ConnectionState) error {
-		if prevVerifyConnection != nil {
-			if err := prevVerifyConnection(state); err != nil {
+		if callerVerifyConnection != nil {
+			if err := callerVerifyConnection(state); err != nil {
 				return errs.WrapAttestation(err)
 			}
 		}
@@ -96,8 +128,41 @@ func newTLSBoundRoundTripper(key string) (*TLSBoundRoundTripper, error) {
 		return nil
 	}
 
-	dt.TLSClientConfig = tlsConfig
-	return &TLSBoundRoundTripper{key: key, transport: dt}, nil
+	pinned := &http.Transport{
+		// The route. Each returns a plain connection, which Go then makes its
+		// own TLS handshake over.
+		Proxy:                  base.Proxy,
+		OnProxyConnectResponse: base.OnProxyConnectResponse,
+		ProxyConnectHeader:     base.ProxyConnectHeader,
+		GetProxyConnectHeader:  base.GetProxyConnectHeader,
+		DialContext:            base.DialContext,
+		Dial:                   base.Dial,
+
+		TLSClientConfig: tlsConfig,
+
+		// Connection and pool tuning, which can't change what is verified.
+		TLSHandshakeTimeout:    base.TLSHandshakeTimeout,
+		DisableKeepAlives:      base.DisableKeepAlives,
+		DisableCompression:     base.DisableCompression,
+		MaxIdleConns:           base.MaxIdleConns,
+		MaxIdleConnsPerHost:    base.MaxIdleConnsPerHost,
+		MaxConnsPerHost:        base.MaxConnsPerHost,
+		IdleConnTimeout:        base.IdleConnTimeout,
+		ResponseHeaderTimeout:  base.ResponseHeaderTimeout,
+		ExpectContinueTimeout:  base.ExpectContinueTimeout,
+		MaxResponseHeaderBytes: base.MaxResponseHeaderBytes,
+		WriteBufferSize:        base.WriteBufferSize,
+		ReadBufferSize:         base.ReadBufferSize,
+		ForceAttemptHTTP2:      base.ForceAttemptHTTP2,
+		HTTP2:                  base.HTTP2,
+		Protocols:              base.Protocols,
+	}
+	// An empty TLSNextProto is the documented way to turn off HTTP/2. Any
+	// entry is a protocol the caller installed, which Go's own HTTP/2 replaces.
+	if base.TLSNextProto != nil && len(base.TLSNextProto) == 0 {
+		pinned.TLSNextProto = base.TLSNextProto
+	}
+	return pinned, nil
 }
 
 func (t *TLSBoundRoundTripper) RoundTrip(r *http.Request) (*http.Response, error) {
