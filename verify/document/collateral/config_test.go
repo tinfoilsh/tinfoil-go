@@ -103,3 +103,40 @@ func TestConfigEndorsement(t *testing.T) {
 		})
 	}
 }
+
+func TestScopeCertificateEncodingIsCanonical(t *testing.T) {
+	data := configCollateral{
+		Reference: "sha256:" + strings.Repeat("ab", 32), Bundle: []byte(`{"mediaType":"test"}`),
+		Scope: &scopeCertificateCollateral{Certificate: "YQ==", Issuer: "Yg==", Bundle: []byte(`{}`)},
+	}
+	encoded, err := json.Marshal(data)
+	require.NoError(t, err)
+	entry := Entry{ID: ConfigID, Role: RoleReferenceValues, Format: ConfigEndorsementV2Format, Data: encoded}
+	set, err := Decode([]Entry{entry})
+	require.NoError(t, err)
+	require.Equal(t, []byte("a"), set.Config.Scope.Certificate)
+	require.Equal(t, []byte("b"), set.Config.Scope.Issuer)
+	data.Config = "Y29uZmln"
+	entry.Data, err = json.Marshal(data)
+	require.NoError(t, err)
+	set, err = Decode([]Entry{entry})
+	require.NoError(t, err)
+	require.Equal(t, []byte("config"), set.Config.Config)
+	require.Equal(t, []byte("a"), set.Config.Scope.Certificate)
+	for _, field := range []string{"certificate_der", "issuer_der"} {
+		for _, noncanonical := range []string{"YR==", "YQ==\n"} {
+			bad := data
+			copied := *data.Scope
+			bad.Scope = &copied
+			if field == "certificate_der" {
+				bad.Scope.Certificate = noncanonical
+			} else {
+				bad.Scope.Issuer = noncanonical
+			}
+			entry.Data, err = json.Marshal(bad)
+			require.NoError(t, err)
+			_, err := Decode([]Entry{entry})
+			require.ErrorContains(t, err, field)
+		}
+	}
+}

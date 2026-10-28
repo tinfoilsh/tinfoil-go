@@ -4,6 +4,7 @@ import (
 	"slices"
 	"time"
 
+	"github.com/tinfoilsh/tinfoil-go/endorsement/scope"
 	"github.com/tinfoilsh/tinfoil-go/internal/verifyhook"
 	"github.com/tinfoilsh/tinfoil-go/verify/document"
 	"github.com/tinfoilsh/tinfoil-go/verify/measurement"
@@ -27,6 +28,8 @@ type ConfigVerification struct {
 	Reference      string
 	SigningKeyHint string
 	ApprovalTime   time.Time
+	Scope          scope.Identity
+	ScopeExpiresAt time.Time
 }
 
 // ArtifactVerification describes accepted reference values and their authority.

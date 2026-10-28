@@ -30,7 +30,9 @@ import (
 	"github.com/sigstore/sigstore-go/pkg/root"
 	"github.com/sigstore/sigstore/pkg/signature"
 	"github.com/stretchr/testify/require"
+	"github.com/tinfoilsh/tinfoil-go/endorsement/scope"
 	"github.com/tinfoilsh/tinfoil-go/internal/statement"
+	"github.com/tinfoilsh/tinfoil-go/verify/document/collateral"
 	f_log "github.com/transparency-dev/formats/log"
 	"github.com/transparency-dev/merkle/rfc6962"
 	"golang.org/x/mod/sumdb/note"
@@ -38,6 +40,8 @@ import (
 )
 
 const logOrigin = "rekor.test.invalid"
+
+const scopeRootLifetime = 365 * 24 * time.Hour
 
 type Trust struct {
 	root.BaseTrustedMaterial
@@ -146,12 +150,54 @@ func (f *Fixture) Bundle(t *testing.T, payload []byte) *protobundle.Bundle {
 			Content: &protobundle.VerificationMaterial_PublicKey{PublicKey: &common.PublicKeyIdentifier{Hint: hint}},
 		},
 	}
+	return f.logBundle(t, b, digest[:], sig)
+}
+
+func (f *Fixture) CertificateBundle(t *testing.T, cert *x509.Certificate) *protobundle.Bundle {
+	t.Helper()
+	hint, err := statement.KeyHint(f.Key.Public())
+	require.NoError(t, err)
+	digest := sha256.Sum256(cert.RawTBSCertificate)
+	b := &protobundle.Bundle{
+		MediaType: statement.BundleType,
+		Content: &protobundle.Bundle_MessageSignature{MessageSignature: &common.MessageSignature{
+			MessageDigest: &common.HashOutput{Algorithm: common.HashAlgorithm_SHA2_256, Digest: digest[:]},
+			Signature:     cert.Signature,
+		}},
+		VerificationMaterial: &protobundle.VerificationMaterial{
+			Content: &protobundle.VerificationMaterial_PublicKey{PublicKey: &common.PublicKeyIdentifier{Hint: hint}},
+		},
+	}
+	return f.logBundle(t, b, digest[:], cert.Signature)
+}
+
+func (f *Fixture) Scope(t *testing.T, key crypto.PublicKey, identity scope.Identity) collateral.ScopeCertificate {
+	t.Helper()
+	template := &x509.Certificate{
+		SerialNumber: big.NewInt(1), Subject: pkix.Name{CommonName: "registry test root"},
+		NotBefore: f.Now.Add(-time.Hour), NotAfter: f.Now.Add(scopeRootLifetime),
+		BasicConstraintsValid: true, IsCA: true, MaxPathLenZero: true,
+		KeyUsage: x509.KeyUsageCertSign | x509.KeyUsageDigitalSignature,
+	}
+	rootDER, err := x509.CreateCertificate(rand.Reader, template, template, f.Key.Public(), f.Key)
+	require.NoError(t, err)
+	issuer, err := x509.ParseCertificate(rootDER)
+	require.NoError(t, err)
+	der, err := scope.Issue(issuer, f.Key, key, identity, f.Now)
+	require.NoError(t, err)
+	cert, err := x509.ParseCertificate(der)
+	require.NoError(t, err)
+	return collateral.ScopeCertificate{Certificate: der, Issuer: rootDER, Bundle: MarshalBundle(t, f.CertificateBundle(t, cert))}
+}
+
+func (f *Fixture) logBundle(t *testing.T, b *protobundle.Bundle, digest, sig []byte) *protobundle.Bundle {
+	t.Helper()
 	keyDER, err := x509.MarshalPKIXPublicKey(f.Key.Public())
 	require.NoError(t, err)
 	algorithms, err := signature.NewAlgorithmRegistryConfig([]common.PublicKeyDetails{common.PublicKeyDetails_PKIX_ECDSA_P256_SHA_256})
 	require.NoError(t, err)
 	entry, err := hashedrekord.ToLogEntry(&rekor.HashedRekordRequestV002{
-		Digest: digest[:],
+		Digest: digest,
 		Signature: &rekor.Signature{Content: sig, Verifier: &rekor.Verifier{
 			KeyDetails: common.PublicKeyDetails_PKIX_ECDSA_P256_SHA_256,
 			Verifier:   &rekor.Verifier_PublicKey{PublicKey: &rekor.PublicKey{RawBytes: keyDER}},

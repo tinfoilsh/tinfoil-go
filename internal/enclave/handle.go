@@ -39,7 +39,7 @@ type Config struct {
 	// org/project[@revision][@sha256:digest].
 	Repo string
 	// Verifier is the policy, which several handles can share; nil selects the
-	// defaults, which require Repo.
+	// defaults, which accept authorized registry scopes when Repo is empty.
 	Verifier *verify.Verifier
 	// VerificationCheck, when set, is called with each verification that
 	// passes Verifier, before the handle keeps it. An error rejects the
