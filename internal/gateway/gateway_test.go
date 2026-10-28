@@ -353,6 +353,8 @@ func TestSealCacheScopeUsesTheBearerCredential(t *testing.T) {
 	for _, prefix := range []string{noKeyPrefix, otherPrefix} {
 		require.NotEqual(t, specCachePrefix, prefix, "each API key routes on its own prefix")
 	}
+	require.NotEqual(t, noKeySalt, otherSalt, "each API key scopes its own cache")
+	require.NotEqual(t, noKeyPrefix, otherPrefix, "each API key routes on its own prefix")
 }
 
 func TestGatewayVerificationsNameReplicaHosts(t *testing.T) {
