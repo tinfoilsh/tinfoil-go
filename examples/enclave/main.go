@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"io"
 	"log"
 	"net/http"
@@ -11,7 +12,7 @@ import (
 )
 
 func main() {
-	client, err := tinfoil.NewEnclaveHTTPClient("inference.tinfoil.sh", "tinfoilsh/confidential-model-router", nil)
+	client, err := tinfoil.NewEnclaveHTTPClient(context.Background(), "inference.tinfoil.sh", "tinfoilsh/confidential-model-router", nil)
 	if err != nil {
 		log.Fatalf("failed to create client: %v", err)
 	}

@@ -20,19 +20,20 @@ type EnclaveOpenAIClient struct {
 // NewEnclaveOpenAIClient creates an EnclaveHTTPClient as NewEnclaveHTTPClient
 // does, and an OpenAI client over it. It applies openaiOpts, then sets the
 // HTTP client and base URL so that openaiOpts can't replace them.
-func NewEnclaveOpenAIClient(host, repo string, opts *EnclaveOptions, openaiOpts ...option.RequestOption) (*EnclaveOpenAIClient, error) {
-	c, err := NewEnclaveHTTPClient(host, repo, opts)
+func NewEnclaveOpenAIClient(ctx context.Context, host, repo string, opts *EnclaveOptions, openaiOpts ...option.RequestOption) (*EnclaveOpenAIClient, error) {
+	c, err := NewEnclaveHTTPClient(ctx, host, repo, opts)
 	if err != nil {
 		return nil, err
 	}
 	return newEnclaveOpenAIClient(c, openaiOpts), nil
 }
 
-// DiscoverRouterOpenAI discovers a router as DiscoverRouter does, and creates
-// an OpenAI client over it as NewEnclaveOpenAIClient does. It exists only
-// while the router is Tinfoil's default route.
-func DiscoverRouterOpenAI(ctx context.Context, opts *EnclaveOptions, openaiOpts ...option.RequestOption) (*EnclaveOpenAIClient, error) {
-	c, err := DiscoverRouter(ctx, opts)
+// NewRouterOpenAIClient creates an EnclaveHTTPClient for a router as
+// NewRouterHTTPClient does, and an OpenAI client over it as
+// NewEnclaveOpenAIClient does. It exists only while the router is Tinfoil's
+// default route.
+func NewRouterOpenAIClient(ctx context.Context, opts *EnclaveOptions, openaiOpts ...option.RequestOption) (*EnclaveOpenAIClient, error) {
+	c, err := NewRouterHTTPClient(ctx, opts)
 	if err != nil {
 		return nil, err
 	}
@@ -59,8 +60,11 @@ type GatewayOpenAIClient struct {
 // NewGatewayOpenAIClient creates a GatewayHTTPClient as NewGatewayHTTPClient
 // does, and an OpenAI client over it. It applies openaiOpts, then sets the
 // HTTP client and base URL so that openaiOpts can't replace them.
-func NewGatewayOpenAIClient(opts *GatewayOptions, openaiOpts ...option.RequestOption) (*GatewayOpenAIClient, error) {
-	c, err := NewGatewayHTTPClient(opts)
+//
+// Experimental: the gateway route is new, and this API may change or be
+// removed in a later release.
+func NewGatewayOpenAIClient(ctx context.Context, opts *GatewayOptions, openaiOpts ...option.RequestOption) (*GatewayOpenAIClient, error) {
+	c, err := NewGatewayHTTPClient(ctx, opts)
 	if err != nil {
 		return nil, err
 	}

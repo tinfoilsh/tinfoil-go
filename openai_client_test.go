@@ -45,7 +45,7 @@ func TestOpenAIClientsSendThroughTheirHTTPClient(t *testing.T) {
 		{
 			name: "gateway",
 			newClient: func(t *testing.T, opts ...option.RequestOption) (*openai.Client, *http.Client, *http.Client) {
-				oc, err := NewGatewayOpenAIClient(&GatewayOptions{
+				oc, err := NewGatewayOpenAIClient(t.Context(), &GatewayOptions{
 					URL:     "https://gateway.example/v1/",
 					Catalog: func() Catalog { return Catalog{} },
 				}, opts...)
@@ -76,13 +76,13 @@ func TestOpenAIClientsSendThroughTheirHTTPClient(t *testing.T) {
 
 func TestOpenAIClientsRejectInvalidOptions(t *testing.T) {
 	var config *ConfigurationError
-	enclave, err := NewEnclaveOpenAIClient("", "org/repo", nil)
+	enclave, err := NewEnclaveOpenAIClient(t.Context(), "", "org/repo", nil)
 	require.Nil(t, enclave)
 	require.ErrorAs(t, err, &config)
-	router, err := DiscoverRouterOpenAI(context.Background(), &EnclaveOptions{TransportMode: "quic"})
+	router, err := NewRouterOpenAIClient(t.Context(), &EnclaveOptions{TransportMode: "quic"})
 	require.Nil(t, router)
 	require.ErrorAs(t, err, &config)
-	gateway, err := NewGatewayOpenAIClient(&GatewayOptions{URL: "http://gateway.example/v1/", Catalog: func() Catalog { return Catalog{} }})
+	gateway, err := NewGatewayOpenAIClient(t.Context(), &GatewayOptions{URL: "http://gateway.example/v1/", Catalog: func() Catalog { return Catalog{} }})
 	require.Nil(t, gateway)
 	require.ErrorAs(t, err, &config)
 }

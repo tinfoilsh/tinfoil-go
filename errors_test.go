@@ -51,7 +51,7 @@ func TestErrorContract(t *testing.T) {
 
 func TestPublicInputErrors(t *testing.T) {
 	var config *tinfoil.ConfigurationError
-	_, err := tinfoil.NewEnclaveHTTPClient("enclave.example", "org/repo", &tinfoil.EnclaveOptions{TransportMode: "invalid"})
+	_, err := tinfoil.NewEnclaveHTTPClient(t.Context(), "enclave.example", "org/repo", &tinfoil.EnclaveOptions{TransportMode: "invalid"})
 	require.ErrorAs(t, err, &config)
 	var usage *verify.UsageError
 	verifier, err := verify.NewVerifier()
@@ -60,10 +60,10 @@ func TestPublicInputErrors(t *testing.T) {
 	require.ErrorAs(t, err, &usage)
 	_, err = verifier.VerifyV3(nil, nil, "org/repo")
 	require.ErrorAs(t, err, &usage)
-	_, err = tinfoil.NewEnclaveHTTPClient("enclave.example", "", nil)
+	_, err = tinfoil.NewEnclaveHTTPClient(t.Context(), "enclave.example", "", nil)
 	require.ErrorAs(t, err, &config, "reject missing trust configuration before fetching")
 	for _, repo := range []string{"owner", "owner/repo/extra", "owner/repo@sha256:bad"} {
-		_, err = tinfoil.NewEnclaveHTTPClient("enclave.example", repo, nil)
+		_, err = tinfoil.NewEnclaveHTTPClient(t.Context(), "enclave.example", repo, nil)
 		require.ErrorAs(t, err, &config)
 		_, err = verifier.VerifyV3(nil, nil, repo)
 		require.ErrorAs(t, err, &usage)

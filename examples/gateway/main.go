@@ -13,7 +13,7 @@ import (
 
 func main() {
 	const model = "gpt-oss-120b"
-	client, err := tinfoil.NewGatewayOpenAIClient(&tinfoil.GatewayOptions{
+	client, err := tinfoil.NewGatewayOpenAIClient(context.Background(), &tinfoil.GatewayOptions{
 		ModelPins: map[string]tinfoil.ModelPin{
 			model: {Repo: os.Getenv("TINFOIL_MODEL_REF")},
 		},

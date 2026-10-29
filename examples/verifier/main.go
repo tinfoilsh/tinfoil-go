@@ -19,16 +19,12 @@ func main() {
 	flag.Parse()
 
 	slog.Info("verifying enclave", "enclave", *host, "repo", *repo)
-	c, err := tinfoil.NewEnclaveHTTPClient(*host, *repo, nil)
-	if err != nil {
-		slog.Error("creating client", "error", err)
-		os.Exit(1)
-	}
-	verified, err := c.EnsureVerified(context.Background())
+	c, err := tinfoil.NewEnclaveHTTPClient(context.Background(), *host, *repo, nil)
 	if err != nil {
 		slog.Error("verification failed", "error", err)
 		os.Exit(1)
 	}
+	verified := c.Current()
 
 	fmt.Printf("code %s@%s (sha256:%s)\n", verified.ConfigRepo(), verified.CodeTag(), verified.CodeDigest())
 	fmt.Printf("fresh until %s\n", verified.FreshnessExpiresAt())

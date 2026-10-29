@@ -3,9 +3,12 @@ package tinfoil
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"net/http"
 	"os"
 	"strings"
 	"testing"
+	"testing/synctest"
 
 	"github.com/openai/openai-go/v3"
 	"github.com/openai/openai-go/v3/option"
@@ -13,11 +16,26 @@ import (
 	"github.com/tinfoilsh/tinfoil-go/internal/testutil"
 )
 
+func TestNewClientDiscoversUnderItsContext(t *testing.T) {
+	original := http.DefaultTransport
+	t.Cleanup(func() { http.DefaultTransport = original })
+	synctest.Test(t, func(t *testing.T) {
+		http.DefaultTransport = roundTripFunc(func(*http.Request) (*http.Response, error) {
+			return nil, errors.New("no network in this test")
+		})
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+		c, err := NewClient(ctx)
+		require.Nil(t, c)
+		require.ErrorIs(t, err, context.Canceled)
+	})
+}
+
 func TestLiveClientStreamingChat(t *testing.T) {
 	testutil.RequireLive(t, "TINFOIL_API_KEY")
 	apiKey := os.Getenv("TINFOIL_API_KEY")
 
-	client, err := NewClient(option.WithAPIKey(apiKey))
+	client, err := NewClient(context.Background(), option.WithAPIKey(apiKey))
 	require.NoError(t, err)
 
 	// Create a streaming chat completion request
@@ -49,7 +67,7 @@ func TestLiveClientStreamingChat(t *testing.T) {
 func TestLiveHTTPClient(t *testing.T) {
 	testutil.RequireLive(t)
 	t.Setenv("TINFOIL_USER_CACHE_SECRET", "test-secret")
-	client, err := NewClient()
+	client, err := NewClient(context.Background())
 	require.NoError(t, err)
 
 	httpClient := client.HTTPClient()
@@ -71,7 +89,7 @@ func TestLiveClientIntegration_AudioTranscription(t *testing.T) {
 	testutil.RequireLive(t, "TINFOIL_API_KEY")
 	apiKey := os.Getenv("TINFOIL_API_KEY")
 
-	c, err := NewClient(option.WithAPIKey(apiKey))
+	c, err := NewClient(context.Background(), option.WithAPIKey(apiKey))
 	require.NoError(t, err)
 
 	audioFile, err := os.Open("testdata/jackhammer.wav")

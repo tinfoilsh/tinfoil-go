@@ -17,9 +17,11 @@ type Client struct {
 	baseURL    string
 }
 
-// NewClient creates a new secure OpenAI client using default parameters
-func NewClient(openaiOpts ...option.RequestOption) (*Client, error) {
-	client, err := DiscoverRouterOpenAI(context.Background(), nil, openaiOpts...)
+// NewClient returns an OpenAI client for Tinfoil's default route, verified
+// under ctx before it returns, as NewRouterOpenAIClient does with default
+// options.
+func NewClient(ctx context.Context, openaiOpts ...option.RequestOption) (*Client, error) {
+	client, err := NewRouterOpenAIClient(ctx, nil, openaiOpts...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create enclave handle: %w", err)
 	}
