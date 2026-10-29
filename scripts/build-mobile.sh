@@ -2,7 +2,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 export PATH="$(go env GOPATH)/bin:$PATH"
-output="${1:-Tinfoil.xcframework}"
+output="${1:-TinfoilGo.xcframework}"
 
 # Minimum OS versions the framework is built against. gomobile defaults
 # -macosversion to empty, which leaves clang to take the build host's SDK

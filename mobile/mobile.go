@@ -1,5 +1,5 @@
 // Package mobile is the SDK's gomobile surface: the one package bound into
-// Tinfoil.xcframework.
+// TinfoilGo.xcframework.
 //
 // It exists so the Go API does not have to be FFI-shaped. gomobile silently
 // drops anything it cannot represent — maps, slices other than []byte, struct

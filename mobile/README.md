@@ -1,6 +1,6 @@
 # mobile
 
-The gomobile surface: the one package bound into `Tinfoil.xcframework`, which
+The gomobile surface: the one package bound into `TinfoilGo.xcframework`, which
 [tinfoil-swift](https://github.com/tinfoilsh/tinfoil-swift) uses. Everything
 structured crosses as a JSON string whose shape is declared in
 `verification.go`. That struct is the contract, and `schema_version` says which

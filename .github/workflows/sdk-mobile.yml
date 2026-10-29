@@ -48,7 +48,7 @@ jobs:
       - name: Type-check Swift API
         run: |
           shopt -s nullglob
-          frameworks=(Tinfoil.xcframework/macos-*/Tinfoil.framework)
+          frameworks=(TinfoilGo.xcframework/macos-*/TinfoilGo.framework)
           if [[ ${#frameworks[@]} -ne 1 ]]; then
             echo "Expected one macOS framework slice, found ${#frameworks[@]}" >&2
             exit 1

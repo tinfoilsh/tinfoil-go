@@ -34,10 +34,10 @@ jobs:
       - name: Build XCFramework
         run: |
           bash scripts/build-mobile.sh
-          zip -ry Tinfoil.xcframework.zip Tinfoil.xcframework
+          zip -ry TinfoilGo.xcframework.zip TinfoilGo.xcframework
 
       - name: Generate checksum
-        run: shasum -a 256 Tinfoil.xcframework.zip > Tinfoil.xcframework.zip.sha256
+        run: shasum -a 256 TinfoilGo.xcframework.zip > TinfoilGo.xcframework.zip.sha256
 
       - name: Release
         if: startsWith(github.ref, 'refs/tags/')
@@ -49,4 +49,4 @@ jobs:
           if [[ "$TAG_NAME" == *-* ]]; then
             release_flags+=(--prerelease --latest=false)
           fi
-          gh release create "$TAG_NAME" --generate-notes "${release_flags[@]}" Tinfoil.xcframework.zip Tinfoil.xcframework.zip.sha256
+          gh release create "$TAG_NAME" --generate-notes "${release_flags[@]}" TinfoilGo.xcframework.zip TinfoilGo.xcframework.zip.sha256
