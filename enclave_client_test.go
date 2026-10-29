@@ -40,6 +40,12 @@ type roundTripFunc func(*http.Request) (*http.Response, error)
 func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) { return f(req) }
 
 func TestNewEnclaveHTTPClientRejectsInvalidOptions(t *testing.T) {
+	original := http.DefaultTransport
+	t.Cleanup(func() { http.DefaultTransport = original })
+	http.DefaultTransport = roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		t.Errorf("invalid options sent %s %s", req.Method, req.URL)
+		return nil, errors.New("no network in this test")
+	})
 	for name, tc := range map[string]struct {
 		host, repo string
 		opts       *EnclaveOptions
@@ -53,7 +59,7 @@ func TestNewEnclaveHTTPClientRejectsInvalidOptions(t *testing.T) {
 		"config authorizer with a repository pin": {"enclave.example", "org/repo", &EnclaveOptions{Verifier: callerAuthorizedVerifier(t)}},
 	} {
 		t.Run(name, func(t *testing.T) {
-			c, err := NewEnclaveHTTPClient(tc.host, tc.repo, tc.opts)
+			c, err := NewEnclaveHTTPClient(t.Context(), tc.host, tc.repo, tc.opts)
 			require.Nil(t, c)
 			var config *ConfigurationError
 			require.ErrorAs(t, err, &config)
@@ -61,19 +67,49 @@ func TestNewEnclaveHTTPClientRejectsInvalidOptions(t *testing.T) {
 	}
 }
 
-func TestConstructorsDoNoNetworkIO(t *testing.T) {
+func TestConstructorsVerifyBeforeReturning(t *testing.T) {
 	original := http.DefaultTransport
-	defer func() { http.DefaultTransport = original }()
-	http.DefaultTransport = roundTripFunc(func(req *http.Request) (*http.Response, error) {
-		t.Errorf("a constructor sent %s %s", req.Method, req.URL)
-		return nil, errors.New("no network in this test")
+	t.Cleanup(func() { http.DefaultTransport = original })
+	unreachable := errors.New("no network in this test")
+	synctest.Test(t, func(t *testing.T) {
+		var mu sync.Mutex
+		var requested []string
+		http.DefaultTransport = roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			mu.Lock()
+			defer mu.Unlock()
+			requested = append(requested, req.URL.Host)
+			return nil, unreachable
+		})
+		hosts := func() []string {
+			mu.Lock()
+			defer mu.Unlock()
+			seen := requested
+			requested = nil
+			return seen
+		}
+
+		enclaveClient, err := NewEnclaveHTTPClient(context.Background(), "enclave.example", "org/repo", nil)
+		require.Nil(t, enclaveClient)
+		require.ErrorIs(t, err, unreachable)
+		require.Contains(t, hosts(), "enclave.example", "the enclave is verified before the client is returned")
+
+		gw, err := NewGatewayHTTPClient(context.Background(), &GatewayOptions{URL: "https://gateway.example/v1/"})
+		require.Nil(t, gw)
+		require.ErrorIs(t, err, unreachable)
+		require.Equal(t, []string{"gateway.example"}, hosts(), "the catalog is fetched before the client is returned")
+
+		catalog := Catalog{"pinned": {Repo: "tinfoilsh/pinned", Hosts: []string{"replica.example"}}}
+		gw, err = NewGatewayHTTPClient(context.Background(), &GatewayOptions{
+			Catalog: func() Catalog { return catalog },
+			ModelPins: map[string]ModelPin{
+				"pinned": {Repo: "tinfoilsh/pinned@v1"},
+				"absent": {Repo: "tinfoilsh/absent"},
+			},
+		})
+		require.NoError(t, err, "pins may name models the catalog doesn't list")
+		require.Empty(t, hosts(), "with a supplied catalog, nothing is fetched")
+		require.Empty(t, gw.Current(), "a model's replicas are verified on its first request")
 	})
-	enclaveClient, err := NewEnclaveHTTPClient("enclave.example", "org/repo", nil)
-	require.NoError(t, err)
-	require.Nil(t, enclaveClient.Current())
-	gatewayClient, err := NewGatewayHTTPClient(&GatewayOptions{URL: "https://gateway.example/v1/"})
-	require.NoError(t, err)
-	require.Empty(t, gatewayClient.Current())
 }
 
 // unsetCacheSecretSources points the cache-secret lookup at an empty home
@@ -87,7 +123,7 @@ func unsetCacheSecretSources(t *testing.T) string {
 
 func TestNewEnclaveHTTPClientResolvesNoCacheSecret(t *testing.T) {
 	path := unsetCacheSecretSources(t)
-	_, err := NewEnclaveHTTPClient("enclave.example", "org/repo", nil)
+	_, err := unverifiedEnclaveHTTPClient("enclave.example", "org/repo", nil)
 	require.NoError(t, err)
 	_, err = os.Stat(filepath.Dir(path))
 	require.ErrorIs(t, err, fs.ErrNotExist, "only Tinfoil's inference routes provision the shared secret")
@@ -95,17 +131,17 @@ func TestNewEnclaveHTTPClientResolvesNoCacheSecret(t *testing.T) {
 
 func TestEnclaveHTTPClientReportsItsEnclaveAndRepo(t *testing.T) {
 	repo := "org/repo@v1@sha256:" + strings.Repeat("a", 64)
-	c, err := NewEnclaveHTTPClient("enclave.example:8443", repo, &EnclaveOptions{TransportMode: TransportModeEHBP, BaseURL: "https://proxy.example/v1/"})
+	c, err := unverifiedEnclaveHTTPClient("enclave.example:8443", repo, &EnclaveOptions{TransportMode: TransportModeEHBP, BaseURL: "https://proxy.example/v1/"})
 	require.NoError(t, err)
 	require.Equal(t, "enclave.example:8443", c.Enclave(), "the enclave, not the proxy")
 	require.Equal(t, repo, c.Repo(), "with its pins")
 
-	authorized, err := NewEnclaveHTTPClient("enclave.example", "", &EnclaveOptions{Verifier: callerAuthorizedVerifier(t)})
+	authorized, err := unverifiedEnclaveHTTPClient("enclave.example", "", &EnclaveOptions{Verifier: callerAuthorizedVerifier(t)})
 	require.NoError(t, err)
 	require.Empty(t, authorized.Repo())
 }
 
-func TestDiscoverRouterResolvesTheCacheSecret(t *testing.T) {
+func TestNewRouterHTTPClientResolvesTheCacheSecret(t *testing.T) {
 	path := unsetCacheSecretSources(t)
 	original := http.DefaultClient
 	defer func() { http.DefaultClient = original }()
@@ -116,14 +152,14 @@ func TestDiscoverRouterResolvesTheCacheSecret(t *testing.T) {
 			}
 			return nil, errors.New("no network in this test")
 		})}
-		_, err := DiscoverRouter(context.Background(), nil)
+		_, err := NewRouterHTTPClient(context.Background(), nil)
 		require.Error(t, err, "the fallback can't be verified")
 	})
 	_, err := os.Stat(path)
 	require.NoError(t, err, "the router route provisions the shared secret")
 }
 
-func TestDiscoverRouterRejectsInvalidOptionsBeforeDiscovery(t *testing.T) {
+func TestNewRouterHTTPClientRejectsInvalidOptionsBeforeDiscovery(t *testing.T) {
 	// A done context makes discovery itself fail, so only a check made before
 	// discovery reports a ConfigurationError.
 	ctx, cancel := context.WithCancel(context.Background())
@@ -134,14 +170,14 @@ func TestDiscoverRouterRejectsInvalidOptionsBeforeDiscovery(t *testing.T) {
 		{TransportMode: TransportModeTLS, BaseURL: "https://proxy.example/v1/"},
 		{Verifier: callerAuthorizedVerifier(t)},
 	} {
-		c, err := DiscoverRouter(ctx, opts)
+		c, err := NewRouterHTTPClient(ctx, opts)
 		require.Nil(t, c)
 		var config *ConfigurationError
 		require.ErrorAs(t, err, &config)
 	}
 }
 
-func TestDiscoverRouterVerifiesTheFallbackUnderItsContext(t *testing.T) {
+func TestNewRouterHTTPClientVerifiesTheFallbackUnderItsContext(t *testing.T) {
 	original := http.DefaultClient
 	defer func() { http.DefaultClient = original }()
 	synctest.Test(t, func(t *testing.T) {
@@ -161,14 +197,14 @@ func TestDiscoverRouterVerifiesTheFallbackUnderItsContext(t *testing.T) {
 		defer cancel()
 		done := make(chan error, 1)
 		go func() {
-			_, err := DiscoverRouter(ctx, nil)
+			_, err := NewRouterHTTPClient(ctx, nil)
 			done <- err
 		}()
 		select {
 		case err := <-done:
 			require.ErrorIs(t, err, context.DeadlineExceeded)
 		case <-time.After(time.Minute):
-			t.Fatal("DiscoverRouter kept verifying the fallback after its context expired")
+			t.Fatal("NewRouterHTTPClient kept verifying the fallback after its context expired")
 		}
 	})
 }
@@ -221,13 +257,13 @@ func TestEnclaveHTTPClientUsesItsTransportMode(t *testing.T) {
 			req.Header.Set("Upgrade", "websocket")
 			return req
 		}
-		sealed, err := NewEnclaveHTTPClient("enclave.example", "org/repo", &EnclaveOptions{TransportMode: TransportModeEHBP})
+		sealed, err := unverifiedEnclaveHTTPClient("enclave.example", "org/repo", &EnclaveOptions{TransportMode: TransportModeEHBP})
 		require.NoError(t, err)
 		_, err = sealed.Do(upgrade())
 		require.ErrorContains(t, err, "EHBP seals only request and response bodies")
 		require.Zero(t, fetches, "EHBP refuses an upgrade before verifying")
 
-		pinned, err := NewEnclaveHTTPClient("enclave.example", "org/repo", nil)
+		pinned, err := unverifiedEnclaveHTTPClient("enclave.example", "org/repo", nil)
 		require.NoError(t, err)
 		_, err = pinned.Do(upgrade())
 		require.Error(t, err)
@@ -241,7 +277,7 @@ func TestGatewayHTTPClientServesPinnedModels(t *testing.T) {
 		"pinned":   {Repo: "tinfoilsh/pinned", Hosts: []string{"a.example"}},
 		"unpinned": {Repo: "tinfoilsh/unpinned", Hosts: []string{"b.example"}},
 	}
-	gw, err := NewGatewayHTTPClient(&GatewayOptions{
+	gw, err := unverifiedGatewayHTTPClient(&GatewayOptions{
 		Catalog:          func() Catalog { return catalog },
 		ModelPins:        map[string]ModelPin{"pinned": {Repo: "tinfoilsh/pinned@v1"}},
 		PinnedModelsOnly: true,
@@ -270,7 +306,7 @@ func TestNewGatewayHTTPClientRejectsInvalidOptions(t *testing.T) {
 		"caller-authorized pin":    {ModelPins: map[string]ModelPin{"m": {Repo: "tinfoilsh/m", Verifier: callerAuthorizedVerifier(t)}}, Catalog: catalog},
 	} {
 		t.Run(name, func(t *testing.T) {
-			gw, err := NewGatewayHTTPClient(opts)
+			gw, err := NewGatewayHTTPClient(t.Context(), opts)
 			require.Nil(t, gw)
 			var config *ConfigurationError
 			require.ErrorAs(t, err, &config)
@@ -278,12 +314,12 @@ func TestNewGatewayHTTPClientRejectsInvalidOptions(t *testing.T) {
 	}
 }
 
-func TestLiveDiscoverRouter(t *testing.T) {
+func TestLiveRouterClient(t *testing.T) {
 	testutil.RequireLive(t, "TINFOIL_API_KEY")
 	apiKey := os.Getenv("TINFOIL_API_KEY")
 	for _, mode := range []TransportMode{TransportModeEHBP, TransportModeTLS} {
 		t.Run(string(mode), func(t *testing.T) {
-			oc, err := DiscoverRouterOpenAI(context.Background(), &EnclaveOptions{TransportMode: mode, UserCacheSecret: "go-live-integration-cache-secret"}, option.WithAPIKey(apiKey))
+			oc, err := NewRouterOpenAIClient(context.Background(), &EnclaveOptions{TransportMode: mode, UserCacheSecret: "go-live-integration-cache-secret"}, option.WithAPIKey(apiKey))
 			require.NoError(t, err)
 			c := oc.HTTPClient()
 			verified, err := c.EnsureVerified(context.Background())
@@ -312,11 +348,12 @@ func TestLiveDiscoverRouter(t *testing.T) {
 
 func TestLiveNewEnclaveHTTPClient(t *testing.T) {
 	testutil.RequireLive(t, "TINFOIL_ENCLAVE", "TINFOIL_REPO")
-	c, err := NewEnclaveHTTPClient(os.Getenv("TINFOIL_ENCLAVE"), os.Getenv("TINFOIL_REPO"), &EnclaveOptions{UserCacheSecret: "go-live-integration-cache-secret"})
+	c, err := NewEnclaveHTTPClient(context.Background(), os.Getenv("TINFOIL_ENCLAVE"), os.Getenv("TINFOIL_REPO"), &EnclaveOptions{UserCacheSecret: "go-live-integration-cache-secret"})
 	require.NoError(t, err)
-	require.Nil(t, c.Current(), "the client verifies on first use")
+	require.NotNil(t, c.Current(), "the client is verified when it's returned")
 	before, err := c.EnsureVerified(context.Background())
 	require.NoError(t, err)
+	require.Equal(t, c.Current().Metadata().VerifiedAt, before.Metadata().VerifiedAt, "the constructor's verification is reused")
 	after, err := c.Reverify(context.Background())
 	require.NoError(t, err)
 	require.False(t, after.Metadata().VerifiedAt.Before(before.Metadata().VerifiedAt))
@@ -349,7 +386,7 @@ func TestLiveVerificationCheck(t *testing.T) {
 
 	t.Run("discovery skips a rejected router", func(t *testing.T) {
 		check, keys := recorder(func(seen int) bool { return seen == 1 })
-		c, err := DiscoverRouter(context.Background(), &EnclaveOptions{VerificationCheck: check})
+		c, err := NewRouterHTTPClient(context.Background(), &EnclaveOptions{VerificationCheck: check})
 		require.NoError(t, err)
 		seen := keys()
 		require.GreaterOrEqual(t, len(seen), 2)
@@ -360,14 +397,12 @@ func TestLiveVerificationCheck(t *testing.T) {
 
 	t.Run("an explicit enclave is rejected once", func(t *testing.T) {
 		check, keys := recorder(func(int) bool { return true })
-		c, err := NewEnclaveHTTPClient(os.Getenv("TINFOIL_ENCLAVE"), os.Getenv("TINFOIL_REPO"), &EnclaveOptions{VerificationCheck: check})
-		require.NoError(t, err)
-		_, err = c.EnsureVerified(context.Background())
+		c, err := NewEnclaveHTTPClient(context.Background(), os.Getenv("TINFOIL_ENCLAVE"), os.Getenv("TINFOIL_REPO"), &EnclaveOptions{VerificationCheck: check})
+		require.Nil(t, c, "a rejected enclave fails the constructor")
 		require.ErrorIs(t, err, rejection)
 		var attestation *AttestationError
 		require.ErrorAs(t, err, &attestation)
 		require.Len(t, keys(), 1, "a rejection isn't retried")
-		require.Nil(t, c.Current())
 	})
 
 	// replicatedCatalog fetches Tinfoil's gateway catalog once and returns it
@@ -391,7 +426,7 @@ func TestLiveVerificationCheck(t *testing.T) {
 	t.Run("the gateway skips a rejected replica", func(t *testing.T) {
 		check, keys := recorder(func(seen int) bool { return seen == 1 })
 		catalog, model := replicatedCatalog(t)
-		gw, err := NewGatewayHTTPClient(&GatewayOptions{Catalog: func() Catalog { return catalog }, VerificationCheck: check})
+		gw, err := NewGatewayHTTPClient(context.Background(), &GatewayOptions{Catalog: func() Catalog { return catalog }, VerificationCheck: check})
 		require.NoError(t, err)
 		verified, err := gw.EnsureVerified(context.Background(), model)
 		require.NoError(t, err)
@@ -405,7 +440,7 @@ func TestLiveVerificationCheck(t *testing.T) {
 	t.Run("the gateway checks each replica once", func(t *testing.T) {
 		check, keys := recorder(func(int) bool { return true })
 		catalog, model := replicatedCatalog(t)
-		gw, err := NewGatewayHTTPClient(&GatewayOptions{Catalog: func() Catalog { return catalog }, VerificationCheck: check})
+		gw, err := NewGatewayHTTPClient(context.Background(), &GatewayOptions{Catalog: func() Catalog { return catalog }, VerificationCheck: check})
 		require.NoError(t, err)
 		_, err = gw.EnsureVerified(context.Background(), model)
 		require.ErrorIs(t, err, rejection)
@@ -479,7 +514,7 @@ func TestEnclaveChainStacksEveryLayer(t *testing.T) {
 
 func TestEnclaveHTTPClientRefusesOtherOrigins(t *testing.T) {
 	for _, mode := range []TransportMode{TransportModeTLS, TransportModeEHBP} {
-		c, err := NewEnclaveHTTPClient("enclave.example", "org/repo", &EnclaveOptions{TransportMode: mode})
+		c, err := unverifiedEnclaveHTTPClient("enclave.example", "org/repo", &EnclaveOptions{TransportMode: mode})
 		require.NoError(t, err)
 		_, err = c.Get("https://elsewhere.example/v1/models")
 		var config *ConfigurationError
@@ -489,7 +524,7 @@ func TestEnclaveHTTPClientRefusesOtherOrigins(t *testing.T) {
 }
 
 func TestGatewayHTTPClientRefusesOtherOrigins(t *testing.T) {
-	gw, err := NewGatewayHTTPClient(&GatewayOptions{Catalog: func() Catalog { return Catalog{} }})
+	gw, err := NewGatewayHTTPClient(t.Context(), &GatewayOptions{Catalog: func() Catalog { return Catalog{} }})
 	require.NoError(t, err)
 	_, err = gw.Get("https://elsewhere.example/v1/models")
 	var config *ConfigurationError

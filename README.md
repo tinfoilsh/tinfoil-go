@@ -31,7 +31,7 @@ import (
 )
 
 func main() {
-	client, err := tinfoil.NewClient(
+	client, err := tinfoil.NewClient(context.Background(),
 		option.WithAPIKey(os.Getenv("TINFOIL_API_KEY")),
 	)
 	if err != nil {
@@ -57,7 +57,7 @@ func main() {
 
 - [Go SDK documentation](https://docs.tinfoil.sh/sdk/go-sdk) and [error handling](https://docs.tinfoil.sh/sdk/error-handling).
 - Multi-user services must scope prompt caches to each end user with a per-request `user_cache_secret`, or `UserCacheSecret` in a client's options; see [Prompt caching](https://docs.tinfoil.sh/sdk/prompt-caching).
-- `tinfoil.NewEnclaveHTTPClient` returns a client for one enclave that embeds an `*http.Client` for requests to it; `tinfoil.NewGatewayHTTPClient` returns one that seals each request to a verified replica of its model through Tinfoil's gateway. Neither does network I/O: they verify on first use, and `EnsureVerified` fails fast. Both take a [`verify.Verifier`](verify/README.md) in their options to pin registers or set freshness, and a `VerificationCheck` that can reject a verified enclave by its `verify.Verification`. `tinfoil.NewEnclaveOpenAIClient` and `tinfoil.NewGatewayOpenAIClient` take the same options plus OpenAI options, and return an OpenAI client that sends through one of them.
+- `tinfoil.NewEnclaveHTTPClient` returns a client for one enclave that embeds an `*http.Client` for requests to it; `tinfoil.NewGatewayHTTPClient` returns one that seals each request to a verified replica of its model through Tinfoil's gateway. The gateway constructors are experimental and may change in a later release. Each checks its configuration before it returns, so a misconfigured client fails at construction: the enclave client verifies its enclave, and the gateway client fetches its catalog and verifies each model's replicas on first use. `tinfoil.NewRouterHTTPClient` verifies Tinfoil's router the same way. All three take a [`verify.Verifier`](verify/README.md) in their options to pin registers or set freshness, and a `VerificationCheck` that can reject a verified enclave by its `verify.Verification`. The matching `OpenAIClient` constructors take the same options plus OpenAI options, and return an OpenAI client that sends through one of them.
 - All OpenAI methods and types are unchanged; see the [OpenAI Go client documentation](https://pkg.go.dev/github.com/openai/openai-go/v3).
 
 ## Development

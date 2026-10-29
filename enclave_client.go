@@ -49,27 +49,27 @@ func (m TransportMode) resolve(routeDefault TransportMode) (TransportMode, error
 // EnclaveOptions configures an EnclaveHTTPClient.
 type EnclaveOptions struct {
 	// TransportMode defaults to TransportModeTLS for NewEnclaveHTTPClient and
-	// to TransportModeEHBP for DiscoverRouter.
+	// to TransportModeEHBP for NewRouterHTTPClient.
 	TransportMode TransportMode
 	// BaseURL is a path on the enclave's own HTTPS origin, or an HTTPS proxy on
 	// another origin, which requires TransportModeEHBP. Requests to a proxy
 	// carry X-Tinfoil-Enclave-Url so it can forward them to the enclave.
-	// DiscoverRouter requires TransportModeEHBP for any BaseURL, because the
-	// router's origin isn't known before discovery.
+	// NewRouterHTTPClient requires TransportModeEHBP for any BaseURL, because
+	// the router's origin isn't known before discovery.
 	BaseURL string
 	// Verifier is the verification policy; nil selects the defaults.
 	Verifier *verify.Verifier
 	// VerificationCheck, when set, is called with each verification that
-	// passes Verifier, before the client uses the enclave's keys: on first use
-	// and whenever the client verifies again. Return an error to reject the
-	// enclave. Verification then fails with an AttestationError that wraps the
-	// error and isn't retried, and DiscoverRouter moves on to the next router.
-	// Requests wait while it runs, so keep it fast; it may be called
-	// concurrently.
+	// passes Verifier, before the client uses the enclave's keys: when the
+	// client is created and whenever it verifies again. Return an error to
+	// reject the enclave. Verification then fails with an AttestationError that
+	// wraps the error and isn't retried, and NewRouterHTTPClient moves on to
+	// the next router. Requests wait while it runs, so keep it fast; it may be
+	// called concurrently.
 	VerificationCheck func(v *verify.Verification) error
 	// UserCacheSecret is the default prompt-cache scope for the client's
 	// requests. Only Tinfoil's router reads it, so NewEnclaveHTTPClient sends
-	// it only when set, while DiscoverRouter resolves an empty one from
+	// it only when set, while NewRouterHTTPClient resolves an empty one from
 	// TINFOIL_USER_CACHE_SECRET or ~/.tinfoil/user_cache_secret. A non-empty
 	// user_cache_secret string in a request's JSON body overrides it, so a
 	// server can scope the cache to each end user, for example with
@@ -92,9 +92,24 @@ type EnclaveHTTPClient struct {
 
 // NewEnclaveHTTPClient returns a client for the enclave at host, verified
 // against repo, owner/name[@tag][@sha256:digest]. An empty repo leaves config
-// authorization to opts.Verifier. It does no network I/O: the enclave is
-// verified on the first request, or by EnsureVerified to fail fast.
-func NewEnclaveHTTPClient(host, repo string, opts *EnclaveOptions) (*EnclaveHTTPClient, error) {
+// authorization to opts.Verifier. It checks opts before any network I/O, then
+// verifies the enclave under ctx before returning, so a misconfigured client
+// fails here rather than on its first request. The client verifies again by
+// itself when the verification expires or is rejected.
+func NewEnclaveHTTPClient(ctx context.Context, host, repo string, opts *EnclaveOptions) (*EnclaveHTTPClient, error) {
+	c, err := unverifiedEnclaveHTTPClient(host, repo, opts)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := c.EnsureVerified(ctx); err != nil {
+		return nil, err
+	}
+	return c, nil
+}
+
+// unverifiedEnclaveHTTPClient is NewEnclaveHTTPClient without the network I/O:
+// the client verifies on its first request.
+func unverifiedEnclaveHTTPClient(host, repo string, opts *EnclaveOptions) (*EnclaveHTTPClient, error) {
 	if host == "" {
 		return nil, &ConfigurationError{Err: errors.New("enclave host is required")}
 	}
@@ -117,12 +132,13 @@ func NewEnclaveHTTPClient(host, repo string, opts *EnclaveOptions) (*EnclaveHTTP
 	return newEnclaveHTTPClient(handle, mode, opts.BaseURL, opts.UserCacheSecret)
 }
 
-// DiscoverRouter returns a client for the first router from Tinfoil's router
-// list that passes verification, and otherwise for inference.tinfoil.sh. It
-// tries routers for at most 30 seconds before falling back. It does network
-// I/O, and calling it again discovers again. It exists only while the router
-// is Tinfoil's default route.
-func DiscoverRouter(ctx context.Context, opts *EnclaveOptions) (*EnclaveHTTPClient, error) {
+// NewRouterHTTPClient returns a client for the first router from Tinfoil's
+// router list that passes verification, and otherwise for
+// inference.tinfoil.sh, verified before it returns. It checks opts before any
+// network I/O, tries routers for at most 30 seconds before falling back, and
+// discovers again each time it is called. It exists only while the router is
+// Tinfoil's default route.
+func NewRouterHTTPClient(ctx context.Context, opts *EnclaveOptions) (*EnclaveHTTPClient, error) {
 	if opts == nil {
 		opts = &EnclaveOptions{}
 	}
@@ -207,16 +223,16 @@ func (c *EnclaveHTTPClient) BaseURL() string {
 }
 
 // Enclave returns the host of the enclave the client verifies: the host passed
-// to NewEnclaveHTTPClient, or the router DiscoverRouter chose. It stays the
-// enclave's host when BaseURL is a proxy.
+// to NewEnclaveHTTPClient, or the router NewRouterHTTPClient chose. It stays
+// the enclave's host when BaseURL is a proxy.
 func (c *EnclaveHTTPClient) Enclave() string {
 	return c.handle.Enclave()
 }
 
 // Repo returns the repository the enclave is verified against, with any tag
 // or digest pins: the repo passed to NewEnclaveHTTPClient, or the router's
-// for DiscoverRouter. It is empty when EnclaveOptions.Verifier authorizes the
-// config instead.
+// for NewRouterHTTPClient. It is empty when EnclaveOptions.Verifier
+// authorizes the config instead.
 func (c *EnclaveHTTPClient) Repo() string {
 	return c.handle.Repo()
 }

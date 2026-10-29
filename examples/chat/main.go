@@ -21,7 +21,7 @@ func main() {
 		log.Fatal("TINFOIL_API_KEY environment variable is not set")
 	}
 
-	client, err := tinfoil.NewClient(
+	client, err := tinfoil.NewClient(context.Background(),
 		option.WithAPIKey(apiKey),
 	)
 	if err != nil {

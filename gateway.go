@@ -38,9 +38,9 @@ type GatewayOptions struct {
 	// URL is the gateway's base URL; empty selects Tinfoil's gateway.
 	URL string
 	// Catalog is read on every request and must return an immutable map safe
-	// for concurrent readers. nil fetches the gateway's catalog on first use
-	// and refreshes it every 10 seconds while the client is used; a failed
-	// refresh keeps the last catalog fetched.
+	// for concurrent readers. nil fetches the gateway's catalog when the client
+	// is created and refreshes it every 10 seconds while the client is used; a
+	// failed refresh keeps the last catalog fetched.
 	Catalog func() Catalog
 }
 
@@ -63,14 +63,33 @@ type GatewayHTTPClient struct {
 	*http.Client
 	// secure is the client OpenAI clients use, which changes to the embedded
 	// client can't reach.
-	secure  *http.Client
-	baseURL string
-	seal    *gateway.Transport
+	secure    *http.Client
+	baseURL   string
+	transport *gateway.Transport
 }
 
-// NewGatewayHTTPClient copies opts and does no network I/O: the catalog is
-// fetched and replicas are verified on first use.
-func NewGatewayHTTPClient(opts *GatewayOptions) (*GatewayHTTPClient, error) {
+// NewGatewayHTTPClient copies opts and checks them before any network I/O,
+// then fetches the catalog under ctx before it returns, so an unreachable
+// gateway fails here rather than on its first request. A model's replicas are
+// verified on its first request, so ModelPins may name models the catalog
+// doesn't list.
+//
+// Experimental: the gateway route is new, and this API may change or be
+// removed in a later release.
+func NewGatewayHTTPClient(ctx context.Context, opts *GatewayOptions) (*GatewayHTTPClient, error) {
+	c, err := unverifiedGatewayHTTPClient(opts)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := c.transport.Models(ctx); err != nil {
+		return nil, err
+	}
+	return c, nil
+}
+
+// unverifiedGatewayHTTPClient is NewGatewayHTTPClient without the network
+// I/O: the catalog is fetched and replicas are verified on first use.
+func unverifiedGatewayHTTPClient(opts *GatewayOptions) (*GatewayHTTPClient, error) {
 	if opts == nil {
 		opts = &GatewayOptions{}
 	}
@@ -83,7 +102,7 @@ func NewGatewayHTTPClient(opts *GatewayOptions) (*GatewayHTTPClient, error) {
 	for model, pin := range opts.ModelPins {
 		pins[model] = gateway.ModelPin{Repo: pin.Repo, Verifier: pin.Verifier}
 	}
-	seal, err := gateway.NewTransport(gateway.Config{
+	gatewayTransport, err := gateway.NewTransport(gateway.Config{
 		BaseURL:           baseURL,
 		Relay:             base.Host,
 		Catalog:           opts.Catalog,
@@ -96,12 +115,12 @@ func NewGatewayHTTPClient(opts *GatewayOptions) (*GatewayHTTPClient, error) {
 	if err != nil {
 		return nil, err
 	}
-	guarded, err := transport.WithOriginRestriction(seal, "", baseURL)
+	guarded, err := transport.WithOriginRestriction(gatewayTransport, "", baseURL)
 	if err != nil {
 		return nil, err
 	}
 	secure := &http.Client{Transport: guarded}
-	return &GatewayHTTPClient{Client: &http.Client{Transport: secure.Transport}, secure: secure, baseURL: baseURL, seal: seal}, nil
+	return &GatewayHTTPClient{Client: &http.Client{Transport: secure.Transport}, secure: secure, baseURL: baseURL, transport: gatewayTransport}, nil
 }
 
 // BaseURL returns the gateway's base URL, which requests are sent to.
@@ -113,17 +132,17 @@ func (c *GatewayHTTPClient) BaseURL() string {
 // sorted, without verifying replicas. A failed catalog refresh doesn't fail
 // it; only the first fetch can.
 func (c *GatewayHTTPClient) Models(ctx context.Context) ([]string, error) {
-	return c.seal.Models(ctx)
+	return c.transport.Models(ctx)
 }
 
 // EnsureVerified returns a verification that is valid now of a replica
 // serving model, verifying replicas only if needed.
 func (c *GatewayHTTPClient) EnsureVerified(ctx context.Context, model string) (*verify.Verification, error) {
-	return c.seal.EnsureVerified(ctx, model)
+	return c.transport.EnsureVerified(ctx, model)
 }
 
 // Current returns the last successful verification of each replica used so
 // far, without checking them. They may have expired or been rejected.
 func (c *GatewayHTTPClient) Current() []ReplicaVerification {
-	return c.seal.Verifications()
+	return c.transport.Verifications()
 }
