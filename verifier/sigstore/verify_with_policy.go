@@ -38,6 +38,19 @@ func VerifyBundleWithPolicy(
 	policy *Policy,
 	trustRootJSON []byte,
 ) (*Verification, error) {
+	if policy == nil {
+		return nil, fmt.Errorf("BUNDLE_MALFORMED: policy is nil")
+	}
+	// An empty pin would match anything; both are mandatory under SPEC §5.3.
+	if policy.OIDCIssuer == "" {
+		return nil, fmt.Errorf("OIDC_ISSUER_MISMATCH: policy.OIDCIssuer is empty")
+	}
+	if policy.WorkflowRepository == "" {
+		return nil, fmt.Errorf("WORKFLOW_REPOSITORY_MISMATCH: policy.WorkflowRepository is empty")
+	}
+	if len(expectedDigest) != sha256.Size*2 {
+		return nil, fmt.Errorf("BUNDLE_MALFORMED: expected digest must be %d hex characters", sha256.Size*2)
+	}
 	trustRoot, err := root.NewTrustedRootFromJSON(trustRootJSON)
 	if err != nil {
 		return nil, fmt.Errorf("TRUST_ROOT_INVALID: parsing trust root: %w", err)
@@ -53,6 +66,9 @@ func VerifyBundleWithPolicy(
 	}
 	if err := requireExactlyOneDSSESignature(b.Bundle); err != nil {
 		return nil, err
+	}
+	if pt := b.Bundle.GetDsseEnvelope().GetPayloadType(); policy.PayloadType != "" && pt != policy.PayloadType {
+		return nil, fmt.Errorf("PAYLOAD_TYPE_MISMATCH: DSSE payloadType %q != policy.PayloadType %q", pt, policy.PayloadType)
 	}
 
 	verifier, err := verify.NewSignedEntityVerifier(
@@ -77,10 +93,7 @@ func VerifyBundleWithPolicy(
 	if err != nil {
 		return nil, fmt.Errorf("creating issuer matcher: %w", err)
 	}
-	exts := certificate.Extensions{}
-	if policy.WorkflowRepository != "" {
-		exts.GithubWorkflowRepository = policy.WorkflowRepository
-	}
+	exts := certificate.Extensions{GithubWorkflowRepository: policy.WorkflowRepository}
 	certID, err := verify.NewCertificateIdentity(sanMatcher, issuerMatcher, exts)
 	if err != nil {
 		return nil, fmt.Errorf("creating certificate identity: %w", err)
@@ -207,6 +220,9 @@ func extractMeasurement(pt string, pred *structpb.Struct) (*MeasurementOutput, e
 	if !ok || snpField == nil {
 		return nil, fmt.Errorf("PREDICATE_MEASUREMENT_INVALID: SnpTdxMultiPlatformV1 missing snp_measurement")
 	}
+	if _, isStr := snpField.GetKind().(*structpb.Value_StringValue); !isStr {
+		return nil, fmt.Errorf("PREDICATE_MEASUREMENT_INVALID: snp_measurement is not a string")
+	}
 	snp := snpField.GetStringValue()
 	tdxField, ok := fields["tdx_measurement"]
 	if !ok || tdxField == nil {
@@ -225,6 +241,11 @@ func extractMeasurement(pt string, pred *structpb.Struct) (*MeasurementOutput, e
 	rtmr2Field, ok := tdxFields["rtmr2"]
 	if !ok || rtmr2Field == nil {
 		return nil, fmt.Errorf("PREDICATE_MEASUREMENT_INVALID: SnpTdxMultiPlatformV1 missing tdx_measurement.rtmr2")
+	}
+	for name, f := range map[string]*structpb.Value{"rtmr1": rtmr1Field, "rtmr2": rtmr2Field} {
+		if _, isStr := f.GetKind().(*structpb.Value_StringValue); !isStr {
+			return nil, fmt.Errorf("PREDICATE_MEASUREMENT_INVALID: tdx_measurement.%s is not a string", name)
+		}
 	}
 	return &MeasurementOutput{
 		Type: pt,

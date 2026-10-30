@@ -79,6 +79,37 @@ func main() {
 	}
 }
 
+// readInput decodes stdin into v. Malformed JSON or a wrong schema_version is a
+// structured rejection for stage (exitBadInput); -1 means the input is usable.
+func readInput(stage, code, specRef string, v any) int {
+	raw, err := io.ReadAll(os.Stdin)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error reading stdin: %v\n", err)
+		return exitInternal
+	}
+	reject := func(msg string) int {
+		body := map[string]any{
+			"stage":     stage,
+			"accepted":  false,
+			"rejection": map[string]string{"code": code, "spec_ref": specRef, "message": msg},
+		}
+		out, _ := json.MarshalIndent(body, "", "  ")
+		fmt.Println(string(out))
+		return exitBadInput
+	}
+	if err := json.Unmarshal(raw, v); err != nil {
+		return reject(fmt.Sprintf("input is not valid JSON: %v", err))
+	}
+	var sv struct {
+		SchemaVersion string `json:"schema_version"`
+	}
+	_ = json.Unmarshal(raw, &sv)
+	if sv.SchemaVersion != "1" {
+		return reject(`input.schema_version != "1"`)
+	}
+	return -1
+}
+
 func printHelp() {
 	fmt.Fprintf(os.Stderr,
 		"tinfoil-conformance: Tinfoil cross-SDK conformance binary (%s %s)\n\n"+
@@ -637,19 +668,9 @@ func emitMeasurementRejection(code, specRef, message string) int {
 }
 
 func cmdVerifyMeasurement() int {
-	raw, err := io.ReadAll(os.Stdin)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "error reading stdin: %v\n", err)
-		return exitInternal
-	}
 	var in verifyMeasurementInput
-	if err := json.Unmarshal(raw, &in); err != nil {
-		fmt.Fprintf(os.Stderr, "input schema violation: %v\n", err)
-		return exitBadInput
-	}
-	if in.SchemaVersion != "1" {
-		fmt.Fprintln(os.Stderr, "schema_version must be \"1\"")
-		return exitBadInput
+	if code := readInput("verify-measurement", "MEASUREMENT_TYPE_UNKNOWN", "2.3", &in); code >= 0 {
+		return code
 	}
 
 	src, code, specRef := normalizeMeasurement(in.Source)
@@ -703,19 +724,9 @@ type ehbpKeyBindingInput struct {
 }
 
 func cmdVerifyEHBPKeyBinding() int {
-	raw, err := io.ReadAll(os.Stdin)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "error reading stdin: %v\n", err)
-		return exitInternal
-	}
 	var in ehbpKeyBindingInput
-	if err := json.Unmarshal(raw, &in); err != nil {
-		fmt.Fprintf(os.Stderr, "input schema violation: %v\n", err)
-		return exitBadInput
-	}
-	if in.SchemaVersion != "1" {
-		fmt.Fprintln(os.Stderr, "schema_version must be \"1\"")
-		return exitBadInput
+	if code := readInput("verify-ehbp-key-binding", "INPUT_MALFORMED", "14.2", &in); code >= 0 {
+		return code
 	}
 
 	reportData, err := hex.DecodeString(in.ReportDataHex)
@@ -800,19 +811,9 @@ func emitHardwareRejection(code, specRef, message string) int {
 }
 
 func cmdVerifyHardwareMeasurements() int {
-	raw, err := io.ReadAll(os.Stdin)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "error reading stdin: %v\n", err)
-		return exitInternal
-	}
 	var in verifyHardwareInput
-	if err := json.Unmarshal(raw, &in); err != nil {
-		fmt.Fprintf(os.Stderr, "input schema violation: %v\n", err)
-		return exitBadInput
-	}
-	if in.SchemaVersion != "1" {
-		fmt.Fprintln(os.Stderr, `schema_version must be "1"`)
-		return exitBadInput
+	if code := readInput("verify-hardware-measurements", "ENCLAVE_MEASUREMENT_TYPE_INVALID", "6.3", &in); code >= 0 {
+		return code
 	}
 
 	// SPEC §6.3 step 1: enclave_measurement MUST be TdxGuestV2 with exactly 5

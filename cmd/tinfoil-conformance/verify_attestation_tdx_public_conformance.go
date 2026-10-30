@@ -8,6 +8,7 @@ import (
 	"os"
 	"time"
 
+	tdxabi "github.com/google/go-tdx-guest/abi"
 	tinfoilattestation "github.com/tinfoilsh/tinfoil-go/verifier/attestation"
 )
 
@@ -21,9 +22,11 @@ func cmdVerifyAttestationTDXPublic(in verifyAttestationTdxInput, quoteBytes []by
 	tcbEval := tcbEvaluationRequired(in.Policy)
 	opts := &tinfoilattestation.TDXVerificationOptions{
 		Getter:           getter,
-		Now:              time.Unix(in.ExpirationCheckDateUnix, 0).UTC(),
 		GetCollateral:    boolPtr(tcbEval),
 		CheckRevocations: boolPtr(tcbEval),
+	}
+	if in.ExpirationCheckDateUnix > 0 {
+		opts.Now = time.Unix(in.ExpirationCheckDateUnix, 0).UTC()
 	}
 	if in.Collateral.IntelRootCAPEM != "" {
 		pool, err := trustedRootsFromPEM(in.Collateral.IntelRootCAPEM)
@@ -40,12 +43,11 @@ func cmdVerifyAttestationTDXPublic(in verifyAttestationTdxInput, quoteBytes []by
 	// targeted check. The fixture's §4.8 pins are still enforced precisely by
 	// enforceExtendedPolicy below. Mirrors tinfoil-python's TdxVerificationConfig.
 	// Body field offsets match enforceExtendedPolicy (header[:48], body[48:632]).
-	if len(quoteBytes) >= 48+584 {
-		body := quoteBytes[48 : 48+584]
-		opts.ExpectedMinimumTeeTcbSvn = append([]byte(nil), body[0:16]...)
-		opts.AcceptedMrSeams = [][]byte{append([]byte(nil), body[16:64]...)}
-		opts.ExpectedTdAttributes = append([]byte(nil), body[120:128]...)
-		opts.ExpectedXfam = append([]byte(nil), body[128:136]...)
+	if q, ok := parseTdxQuoteV4(quoteBytes); ok {
+		opts.ExpectedMinimumTeeTcbSvn = append([]byte(nil), q.teeTcbSvn...)
+		opts.AcceptedMrSeams = [][]byte{append([]byte(nil), q.mrSeam...)}
+		opts.ExpectedTdAttributes = append([]byte(nil), q.tdAttrs...)
+		opts.ExpectedXfam = append([]byte(nil), q.xfam...)
 	}
 
 	var verifyErr error
@@ -59,6 +61,15 @@ func cmdVerifyAttestationTDXPublic(in verifyAttestationTdxInput, quoteBytes []by
 
 	if code, msg := enforceTcbEvaluationDataNumberPolicy(in); code != "" {
 		return emitTdxRejection(code, "4.7.11", msg)
+	}
+	if tcbEval {
+		quote, err := tdxabi.QuoteToProto(quoteBytes)
+		if err != nil {
+			return emitTdxRejection("QUOTE_FORMAT_UNSUPPORTED", "A.3", err.Error())
+		}
+		if code, msg := checkFmspcBinding(quote, in.Collateral.TcbInfoJSON); code != "" {
+			return emitTdxRejection(code, "4.7", msg)
+		}
 	}
 	if in.Policy != nil {
 		if code, msg := enforceExtendedPolicy(quoteBytes, in.Policy); code != "" {

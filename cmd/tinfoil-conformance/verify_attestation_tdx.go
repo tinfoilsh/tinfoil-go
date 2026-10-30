@@ -21,7 +21,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	urlpkg "net/url"
 	"os"
 	"strings"
@@ -31,6 +30,11 @@ import (
 	tdxtesting "github.com/google/go-tdx-guest/testing"
 	tdxverify "github.com/google/go-tdx-guest/verify"
 
+	"encoding/pem"
+	tdxpcs "github.com/google/go-tdx-guest/pcs"
+	tdxpb "github.com/google/go-tdx-guest/proto/tdx"
+	tdxvalidate "github.com/google/go-tdx-guest/validate"
+	tinfoilattestation "github.com/tinfoilsh/tinfoil-go/verifier/attestation"
 	"syscall"
 )
 
@@ -160,19 +164,9 @@ func tcbEvaluationRequired(policy *tdxPolicyInput) bool {
 }
 
 func cmdVerifyAttestationTDX() int {
-	raw, err := io.ReadAll(os.Stdin)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "error reading stdin: %v\n", err)
-		return exitInternal
-	}
 	var in verifyAttestationTdxInput
-	if err := json.Unmarshal(raw, &in); err != nil {
-		fmt.Fprintf(os.Stderr, "input schema violation: %v\n", err)
-		return exitBadInput
-	}
-	if in.SchemaVersion != "1" {
-		fmt.Fprintln(os.Stderr, `schema_version must be "1"`)
-		return exitBadInput
+	if code := readInput("verify-attestation-tdx", "QUOTE_FORMAT_UNSUPPORTED", "A.3", &in); code >= 0 {
+		return code
 	}
 
 	quoteBytes, err := base64.StdEncoding.DecodeString(in.QuoteB64)
@@ -234,7 +228,10 @@ func cmdVerifyAttestationTDX() int {
 
 	opts := tdxverify.DefaultOptions()
 	opts.Getter = getter
-	opts.Now = time.Unix(in.ExpirationCheckDateUnix, 0).UTC()
+	// Zero/absent means "now"; time.Unix(0) would make every cert not-yet-valid.
+	if in.ExpirationCheckDateUnix > 0 {
+		opts.Now = time.Unix(in.ExpirationCheckDateUnix, 0).UTC()
+	}
 	// Honor an optional synthetic Intel SGX Root CA passed via input.
 	// Phase 3 synthetic fixtures use a self-issued root in place of the
 	// real Intel root so we can re-sign TCB Info, QE Identity, and CRLs
@@ -260,6 +257,25 @@ func cmdVerifyAttestationTDX() int {
 	if verifyErr != nil {
 		code, ref := classifyTdxError(verifyErr)
 		return emitTdxRejection(code, ref, verifyErr.Error())
+	}
+	// verify.TdxQuote covers crypto + collateral only; the body validator holds
+	// the mandatory checks (QE vendor, fixed TD_ATTRIBUTES/XFAM bits, zero
+	// MRCONFIGID/MROWNER/MROWNERCONFIG). Same baseline the SDK's public path uses.
+	if err := tdxvalidate.TdxQuote(quote, &tdxvalidate.Options{
+		HeaderOptions: tdxvalidate.HeaderOptions{QeVendorID: tinfoilattestation.IntelQeVendorID},
+		TdQuoteBodyOptions: tdxvalidate.TdQuoteBodyOptions{
+			MrConfigID:    make([]byte, 48),
+			MrOwner:       make([]byte, 48),
+			MrOwnerConfig: make([]byte, 48),
+		},
+	}); err != nil {
+		code, ref := classifyTdxError(err)
+		return emitTdxRejection(code, ref, err.Error())
+	}
+	if tcbEval {
+		if code, msg := checkFmspcBinding(quote, in.Collateral.TcbInfoJSON); code != "" {
+			return emitTdxRejection(code, "4.7", msg)
+		}
 	}
 
 	if code, msg := enforceTcbEvaluationDataNumberPolicy(in); code != "" {
@@ -528,33 +544,14 @@ func buildTdxOutputs(quote any, rawQuote []byte) (map[string]any, error) {
 	// have, but importing the proto here just for type access is heavy —
 	// instead we re-extract the body bytes from the raw quote and decode
 	// directly. This is the same parse the schema's body_fields block expects.
-	if len(rawQuote) < 48+584 {
+	q, ok := parseTdxQuoteV4(rawQuote)
+	if !ok {
 		return nil, fmt.Errorf("quote shorter than v4 minimum (got %d bytes)", len(rawQuote))
 	}
-	header := rawQuote[:48]
-	body := rawQuote[48 : 48+584]
-
-	version := binary.LittleEndian.Uint16(header[0:2])
-	akt := binary.LittleEndian.Uint16(header[2:4])
-	teeType := binary.LittleEndian.Uint32(header[4:8])
-	qeVendorID := header[12:28]
-	userData := header[28:48]
-
-	teeTcbSvn := body[0:16]
-	mrSeam := body[16:64]
-	mrSignerSeam := body[64:112]
-	seamAttrs := body[112:120]
-	tdAttrs := body[120:128]
-	xfam := body[128:136]
-	mrTd := body[136:184]
-	mrConfigID := body[184:232]
-	mrOwner := body[232:280]
-	mrOwnerConfig := body[280:328]
-	rtmr0 := body[328:376]
-	rtmr1 := body[376:424]
-	rtmr2 := body[424:472]
-	rtmr3 := body[472:520]
-	reportData := body[520:584]
+	version, akt, teeType, qeVendorID, userData := q.version, q.akt, q.teeType, q.qeVendorID, q.userData
+	teeTcbSvn, mrSeam, mrSignerSeam, seamAttrs := q.teeTcbSvn, q.mrSeam, q.mrSignerSeam, q.seamAttrs
+	tdAttrs, xfam, mrTd, mrConfigID, mrOwner, mrOwnerConfig := q.tdAttrs, q.xfam, q.mrTd, q.mrConfigID, q.mrOwner, q.mrOwnerConfig
+	rtmr0, rtmr1, rtmr2, rtmr3, reportData := q.rtmr0, q.rtmr1, q.rtmr2, q.rtmr3, q.reportData
 
 	tdAttrInt := binary.LittleEndian.Uint64(tdAttrs)
 	tdDecoded := map[string]bool{
@@ -628,25 +625,13 @@ func buildTdxOutputs(quote any, rawQuote []byte) (map[string]any, error) {
 // every set pin matches, otherwise (rejection_code, message). Pins that are
 // empty in the policy are skipped — fixture-by-fixture opt-in.
 func enforceExtendedPolicy(rawQuote []byte, p *tdxPolicyInput) (string, string) {
-	if len(rawQuote) < 48+584 {
+	q, ok := parseTdxQuoteV4(rawQuote)
+	if !ok {
 		return "", "" // can't enforce; let upstream parse have failed already
 	}
-	header := rawQuote[:48]
-	body := rawQuote[48 : 48+584]
-
-	qeVendor := header[12:28]
-	teeTcbSvn := body[0:16]
-	mrSeam := body[16:64]
-	mrSignerSeam := body[64:112]
-	seamAttrs := body[112:120]
-	tdAttrs := body[120:128]
-	xfam := body[128:136]
-	mrTd := body[136:184]
-	mrConfigId := body[184:232]
-	mrOwner := body[232:280]
-	mrOwnerConfig := body[280:328]
-	rtmr3 := body[472:520]
-	reportData := body[520:584]
+	qeVendor, teeTcbSvn, mrSeam, mrSignerSeam, seamAttrs := q.qeVendorID, q.teeTcbSvn, q.mrSeam, q.mrSignerSeam, q.seamAttrs
+	tdAttrs, xfam, mrTd, mrConfigId, mrOwner, mrOwnerConfig := q.tdAttrs, q.xfam, q.mrTd, q.mrConfigID, q.mrOwner, q.mrOwnerConfig
+	rtmr3, reportData := q.rtmr3, q.reportData
 
 	// Helper: compare hex string (case-insensitive) against raw bytes.
 	matchHex := func(expectedHex string, got []byte) bool {
@@ -768,7 +753,11 @@ func enforceExtendedPolicy(rawQuote []byte, p *tdxPolicyInput) (string, string) 
 	// Min TEE_TCB_SVN — component-wise comparison per SPEC §4.8.7.
 	if p.MinTeeTcbSvnHex != "" {
 		minimum, err := hex.DecodeString(strings.ToLower(strings.TrimSpace(p.MinTeeTcbSvnHex)))
-		if err == nil && len(minimum) == 16 {
+		if err != nil || len(minimum) != 16 {
+			return "QV_RESULT_NOT_ACCEPTED_BY_POLICY", fmt.Sprintf(
+				"policy min_tee_tcb_svn_hex %q is not 16 bytes of hex", p.MinTeeTcbSvnHex)
+		}
+		{
 			for i := 0; i < 16; i++ {
 				if teeTcbSvn[i] < minimum[i] {
 					return "TEE_TCB_SVN_BELOW_MINIMUM", fmt.Sprintf(
@@ -797,4 +786,83 @@ func emitTdxRejection(code, specRef, message string) int {
 	out, _ := json.MarshalIndent(body, "", "  ")
 	fmt.Println(string(out))
 	return exitReject
+}
+
+// tdxQuoteV4Fields is the one place the TDX quote v4 header / TD body layout
+// lives (Intel TDX DCAP Quote Generation Library, Quote v4; sizes from tdxabi).
+type tdxQuoteV4Fields struct {
+	version, akt                                            uint16
+	teeType                                                 uint32
+	qeVendorID, userData                                    []byte
+	teeTcbSvn, mrSeam, mrSignerSeam, seamAttrs              []byte
+	tdAttrs, xfam, mrTd, mrConfigID, mrOwner, mrOwnerConfig []byte
+	rtmr0, rtmr1, rtmr2, rtmr3, reportData                  []byte
+}
+
+func parseTdxQuoteV4(raw []byte) (*tdxQuoteV4Fields, bool) {
+	// Quote v4: 48-byte header then 584-byte TD body (go-tdx-guest does not export these sizes).
+	const headerSize, bodySize = 48, 584
+	if len(raw) < headerSize+bodySize {
+		return nil, false
+	}
+	header := raw[:headerSize]
+	body := raw[headerSize : headerSize+bodySize]
+	return &tdxQuoteV4Fields{
+		version:       binary.LittleEndian.Uint16(header[0:2]),
+		akt:           binary.LittleEndian.Uint16(header[2:4]),
+		teeType:       binary.LittleEndian.Uint32(header[4:8]),
+		qeVendorID:    header[12:28],
+		userData:      header[28:48],
+		teeTcbSvn:     body[0:16],
+		mrSeam:        body[16:64],
+		mrSignerSeam:  body[64:112],
+		seamAttrs:     body[112:120],
+		tdAttrs:       body[120:128],
+		xfam:          body[128:136],
+		mrTd:          body[136:184],
+		mrConfigID:    body[184:232],
+		mrOwner:       body[232:280],
+		mrOwnerConfig: body[280:328],
+		rtmr0:         body[328:376],
+		rtmr1:         body[376:424],
+		rtmr2:         body[424:472],
+		rtmr3:         body[472:520],
+		reportData:    body[520:584],
+	}, true
+}
+
+// checkFmspcBinding rejects a quote whose PCK certificate FMSPC differs from
+// the FMSPC of the TCB Info it was evaluated against (SPEC §4.7); go-tdx-guest
+// does not cross-check these on the injected-collateral path.
+func checkFmspcBinding(quote any, tcbInfoJSON string) (string, string) {
+	q, ok := quote.(*tdxpb.QuoteV4)
+	if !ok {
+		return "QUOTE_FORMAT_UNSUPPORTED", "quote is not a v4 quote"
+	}
+	chainPEM := q.GetSignedData().GetCertificationData().GetQeReportCertificationData().GetPckCertificateChainData().GetPckCertChain()
+	block, _ := pem.Decode(chainPEM)
+	if block == nil {
+		return "PCK_CHAIN_INVALID", "quote carries no PEM PCK certificate chain"
+	}
+	leaf, err := x509.ParseCertificate(block.Bytes)
+	if err != nil {
+		return "PCK_CHAIN_INVALID", fmt.Sprintf("PCK leaf certificate: %v", err)
+	}
+	ext, err := tdxpcs.PckCertificateExtensions(leaf)
+	if err != nil {
+		return "PCK_CHAIN_INVALID", fmt.Sprintf("PCK certificate SGX extensions: %v", err)
+	}
+	var tcb struct {
+		TcbInfo struct {
+			Fmspc string `json:"fmspc"`
+		} `json:"tcbInfo"`
+	}
+	if err := json.Unmarshal([]byte(tcbInfoJSON), &tcb); err != nil {
+		return "TCB_INFO_SIGNATURE_INVALID", fmt.Sprintf("tcb_info_json: %v", err)
+	}
+	if !strings.EqualFold(ext.FMSPC, tcb.TcbInfo.Fmspc) {
+		return "PCK_FMSPC_MISMATCH", fmt.Sprintf(
+			"PCK certificate FMSPC %s != TCB Info fmspc %s", ext.FMSPC, tcb.TcbInfo.Fmspc)
+	}
+	return "", ""
 }

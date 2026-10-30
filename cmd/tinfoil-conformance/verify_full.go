@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 
 	"github.com/tinfoilsh/tinfoil-go/verifier/attestation"
 	"github.com/tinfoilsh/tinfoil-go/verifier/sigstore"
@@ -100,13 +101,18 @@ func runSigstoreSub(in *sigstoreSubInput) (*sigstore.Verification, *struct{ code
 
 // runAttestationSEVSub feeds a raw SEV input through cmdVerifyAttestationSEV's
 // pure entrypoint. Returns the parsed measurement on success.
-func runAttestationSEVSub(rawInput json.RawMessage) (*attestation.Measurement, *struct{ code, specRef, message string }) {
+func runAttestationSEVSub(rawInput json.RawMessage) (*attestation.Measurement, *sevRejection) {
 	var in verifyAttestationSevInput
 	if err := json.Unmarshal(rawInput, &in); err != nil {
-		return nil, &struct{ code, specRef, message string }{"REPORT_FORMAT_UNSUPPORTED", "3.1",
+		return nil, &sevRejection{"REPORT_FORMAT_UNSUPPORTED", "3.1",
 			fmt.Sprintf("attestation_sev input malformed: %v", err)}
 	}
-	// Force schema_version so the inner call doesn't reject on missing field.
+	// The nested block may omit schema_version (the envelope carries it), but
+	// an explicit other version is still an error.
+	if in.SchemaVersion != "" && in.SchemaVersion != "1" {
+		return nil, &sevRejection{"REPORT_FORMAT_UNSUPPORTED", "3.1",
+			fmt.Sprintf("attestation_sev.schema_version %q != \"1\"", in.SchemaVersion)}
+	}
 	in.SchemaVersion = "1"
 
 	parsed, rejErr := runVerifyAttestationSev(&in)
@@ -179,7 +185,12 @@ func cmdVerifyFull() int {
 			return emitFullRejection("MEASUREMENT_TYPE_UNKNOWN", "verify-measurement", "2.3",
 				fmt.Sprintf("sigstore predicate type %q unknown", sigV.Measurement.Type))
 		}
-		sigM := &attestation.Measurement{Type: sigPT, Registers: sigV.Measurement.Registers}
+		// SPEC §7.3: lowercase before comparing.
+		sigRegs := make([]string, len(sigV.Measurement.Registers))
+		for i, r := range sigV.Measurement.Registers {
+			sigRegs[i] = strings.ToLower(r)
+		}
+		sigM := &attestation.Measurement{Type: sigPT, Registers: sigRegs}
 		if err := sigM.Equals(attM); err != nil {
 			code, specRef := classifyMeasurementError(err)
 			return emitFullRejection(code, "verify-measurement", specRef, err.Error())

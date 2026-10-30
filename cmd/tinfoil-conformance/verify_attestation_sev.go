@@ -100,25 +100,25 @@ type sevRejection struct {
 // returns either a successful parse + verify or a rejection. Shared by
 // cmdVerifyAttestationSEV (stdin/stdout wrapper) and runAttestationSEVSub
 // (verify-full chaining).
-func runVerifyAttestationSev(in *verifyAttestationSevInput) (*sevParsedOutput, *struct{ code, specRef, message string }) {
+func runVerifyAttestationSev(in *verifyAttestationSevInput) (*sevParsedOutput, *sevRejection) {
 	gzBytes, err := base64.StdEncoding.DecodeString(in.AttestationDocB64)
 	if err != nil {
-		return nil, &struct{ code, specRef, message string }{"REPORT_FORMAT_UNSUPPORTED", "3.1",
+		return nil, &sevRejection{"REPORT_FORMAT_UNSUPPORTED", "3.1",
 			fmt.Sprintf("attestation_doc_b64 not valid base64: %v", err)}
 	}
 	reportBytes, err := gunzipBytes(gzBytes)
 	if err != nil {
-		return nil, &struct{ code, specRef, message string }{"REPORT_FORMAT_UNSUPPORTED", "3.1",
+		return nil, &sevRejection{"REPORT_FORMAT_UNSUPPORTED", "3.1",
 			fmt.Sprintf("gzip decompress failed: %v", err)}
 	}
 	if len(reportBytes) < 1184 {
-		return nil, &struct{ code, specRef, message string }{"REPORT_TRUNCATED", "3.1",
+		return nil, &sevRejection{"REPORT_TRUNCATED", "3.1",
 			fmt.Sprintf("SEV report is %d bytes, expected ≥1184", len(reportBytes))}
 	}
 
 	vcekDer, err := base64.StdEncoding.DecodeString(in.VcekDerB64)
 	if err != nil {
-		return nil, &struct{ code, specRef, message string }{"VCEK_CHAIN_INVALID", "3.3",
+		return nil, &sevRejection{"VCEK_CHAIN_INVALID", "3.3",
 			fmt.Sprintf("vcek_der_b64 not valid base64: %v", err)}
 	}
 
@@ -130,7 +130,7 @@ func runVerifyAttestationSev(in *verifyAttestationSevInput) (*sevParsedOutput, *
 		// GUEST_POLICY_RESERVED_BIT_SET rather than the generic
 		// REPORT_FORMAT_UNSUPPORTED bucket.
 		code, ref := classifySevVerifyError(fmt.Errorf("ReportToProto failed: %w", err))
-		return nil, &struct{ code, specRef, message string }{code, ref,
+		return nil, &sevRejection{code, ref,
 			fmt.Sprintf("ReportToProto failed: %v", err)}
 	}
 
@@ -139,10 +139,9 @@ func runVerifyAttestationSev(in *verifyAttestationSevInput) (*sevParsedOutput, *
 		CertificateChain: &sevpb.CertificateChain{
 			VcekCert: vcekDer,
 		},
-		Product: &sevpb.SevProduct{
-			Name:            sevpb.SevProduct_SEV_PRODUCT_GENOA,
-			MachineStepping: &wrapperspb.UInt32Value{Value: 0},
-		},
+		// Same rule as the SDK (sevProductFromReport): report v3+ carries
+		// CPUID family/model/stepping; v2 predates Turin and is Genoa.
+		Product: sevProductFromReport(parsed),
 	}
 
 	opts := sevverify.DefaultOptions()
@@ -154,7 +153,7 @@ func runVerifyAttestationSev(in *verifyAttestationSevInput) (*sevParsedOutput, *
 		chain := strings.TrimSpace(in.AskPEM) + "\n" + strings.TrimSpace(in.AmdRootCAPEM) + "\n"
 		root := sevtrust.AMDRootCertsProduct("Genoa")
 		if err := root.FromKDSCertBytes([]byte(chain)); err != nil {
-			return nil, &struct{ code, specRef, message string }{"ARK_UNTRUSTED", "3.3.1",
+			return nil, &sevRejection{"ARK_UNTRUSTED", "3.3.1",
 				fmt.Sprintf("could not parse fixture-supplied AMD chain: %v", err)}
 		}
 		opts.TrustedRoots = map[string][]*sevtrust.AMDRootCerts{"Genoa": {root}}
@@ -165,7 +164,7 @@ func runVerifyAttestationSev(in *verifyAttestationSevInput) (*sevParsedOutput, *
 
 	if err := sevverify.SnpAttestation(attestation, opts); err != nil {
 		code, ref := classifySevVerifyError(err)
-		return nil, &struct{ code, specRef, message string }{code, ref, err.Error()}
+		return nil, &sevRejection{code, ref, err.Error()}
 	}
 
 	valOpts := &sevvalidate.Options{
@@ -176,18 +175,18 @@ func runVerifyAttestationSev(in *verifyAttestationSevInput) (*sevParsedOutput, *
 	}
 	if err := sevvalidate.SnpAttestation(attestation, valOpts); err != nil {
 		code, ref := classifySevValidateError(err)
-		return nil, &struct{ code, specRef, message string }{code, ref, err.Error()}
+		return nil, &sevRejection{code, ref, err.Error()}
 	}
 
 	if in.Policy != nil {
 		if code, ref, msg := enforceSevPolicy(reportBytes, parsed, in.Policy); code != "" {
-			return nil, &struct{ code, specRef, message string }{code, ref, msg}
+			return nil, &sevRejection{code, ref, msg}
 		}
 	}
 
 	body, err := buildSevOutputs(reportBytes, parsed)
 	if err != nil {
-		return nil, &struct{ code, specRef, message string }{"QV_RESULT_TERMINAL_UNSPECIFIED", "3",
+		return nil, &sevRejection{"QV_RESULT_TERMINAL_UNSPECIFIED", "3",
 			fmt.Sprintf("internal: %v", err)}
 	}
 	outputs := body["outputs"].(map[string]any)
@@ -201,19 +200,9 @@ func runVerifyAttestationSev(in *verifyAttestationSevInput) (*sevParsedOutput, *
 }
 
 func cmdVerifyAttestationSEV() int {
-	raw, err := io.ReadAll(os.Stdin)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "error reading stdin: %v\n", err)
-		return exitInternal
-	}
 	var in verifyAttestationSevInput
-	if err := json.Unmarshal(raw, &in); err != nil {
-		fmt.Fprintf(os.Stderr, "input schema violation: %v\n", err)
-		return exitBadInput
-	}
-	if in.SchemaVersion != "1" {
-		fmt.Fprintln(os.Stderr, `schema_version must be "1"`)
-		return exitBadInput
+	if code := readInput("verify-attestation-sev", "REPORT_FORMAT_UNSUPPORTED", "3.1", &in); code >= 0 {
+		return code
 	}
 
 	if in.ExecutionMode == "public_api" {
@@ -390,10 +379,11 @@ func enforceSevPolicy(rawReport []byte, parsed *sevpb.Report, p *sevPolicyInput)
 			return "GUEST_POLICY_RESERVED_BIT_SET", "3.7", fmt.Sprintf(
 				"guest_policy reserved-MBO bit (17) is clear (policy=%016x)", policy)
 		}
-		const RESERVED_MBZ_MASK uint64 = 0xFFFFFFFFFE000000
+		// Bit 25 is PAGE_SWAP_DISABLE (ABI 1.58); reserved-MBZ starts at 26.
+		const RESERVED_MBZ_MASK uint64 = 0xFFFFFFFFFC000000
 		if policy&RESERVED_MBZ_MASK != 0 {
 			return "GUEST_POLICY_RESERVED_BIT_SET", "3.7", fmt.Sprintf(
-				"guest_policy has reserved-MBZ bit(s) (≥25) set (policy=%016x)", policy)
+				"guest_policy has reserved-MBZ bit(s) (≥26) set (policy=%016x)", policy)
 		}
 		_ = platformInfo
 	}
@@ -467,6 +457,7 @@ func buildSevOutputs(rawReport []byte, parsed *sevpb.Report) (map[string]any, er
 		"mem_aes_256_xts":        policy&(1<<22) != 0,
 		"raplmsr_dis":            policy&(1<<23) != 0,
 		"ciphertext_hiding_dram": policy&(1<<24) != 0,
+		"page_swap_disable":      policy&(1<<25) != 0,
 	}
 	platformInfoDecoded := map[string]any{
 		"smt_en":            platformInfo&(1<<0) != 0,
@@ -540,4 +531,15 @@ func emitSevRejection(code, specRef, message string) int {
 	out, _ := json.MarshalIndent(body, "", "  ")
 	fmt.Println(string(out))
 	return exitReject
+}
+
+// sevProductFromReport mirrors the SDK's unexported helper of the same name.
+func sevProductFromReport(report *sevpb.Report) *sevpb.SevProduct {
+	if fms := report.GetCpuid1EaxFms(); fms != 0 {
+		return sevabi.SevProductFromCpuid1Eax(fms)
+	}
+	return &sevpb.SevProduct{
+		Name:            sevpb.SevProduct_SEV_PRODUCT_GENOA,
+		MachineStepping: &wrapperspb.UInt32Value{Value: 0},
+	}
 }

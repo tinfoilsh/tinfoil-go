@@ -97,6 +97,9 @@ func cmdVerifyAttestationSEVPublic(in *verifyAttestationSevInput) int {
 	}
 	enc := json.NewEncoder(os.Stdout)
 	enc.SetIndent("", "  ")
-	_ = enc.Encode(body)
+	if err := enc.Encode(body); err != nil {
+		fmt.Fprintf(os.Stderr, "internal error: %v\n", err)
+		return exitInternal
+	}
 	return exitAccept
 }
