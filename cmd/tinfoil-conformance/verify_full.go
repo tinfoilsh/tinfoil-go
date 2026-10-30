@@ -131,12 +131,12 @@ func runAttestationSEVSub(rawInput json.RawMessage) (*attestation.Measurement, *
 func runAttestationTDXSub(rawInput json.RawMessage) (*attestation.Measurement, *tdxRejection) {
 	var in verifyAttestationTdxInput
 	if err := json.Unmarshal(rawInput, &in); err != nil {
-		return nil, &tdxRejection{"QUOTE_FORMAT_UNSUPPORTED", "A.3",
-			fmt.Sprintf("attestation_tdx input malformed: %v", err)}
+		return nil, tdxRej("QUOTE_FORMAT_UNSUPPORTED", "A.3",
+			fmt.Sprintf("attestation_tdx input malformed: %v", err))
 	}
 	if in.SchemaVersion != "" && in.SchemaVersion != "1" {
-		return nil, &tdxRejection{"QUOTE_FORMAT_UNSUPPORTED", "A.3",
-			fmt.Sprintf("attestation_tdx.schema_version %q != \"1\"", in.SchemaVersion)}
+		return nil, tdxRej("QUOTE_FORMAT_UNSUPPORTED", "A.3",
+			fmt.Sprintf("attestation_tdx.schema_version %q != \"1\"", in.SchemaVersion))
 	}
 	in.SchemaVersion = "1"
 	in.ExecutionMode = ""
@@ -146,7 +146,7 @@ func runAttestationTDXSub(rawInput json.RawMessage) (*attestation.Measurement, *
 	}
 	regs, _ := body["outputs"].(map[string]any)["measurement"].(map[string]any)["registers"].([]string)
 	if len(regs) != 5 {
-		return nil, &tdxRejection{"QV_RESULT_TERMINAL_UNSPECIFIED", "4", "TDX stage produced no measurement"}
+		return nil, &tdxRejection{message: "TDX stage produced no measurement", internal: true}
 	}
 	return &attestation.Measurement{Type: attestation.TdxGuestV2, Registers: regs}, nil
 }
@@ -197,6 +197,10 @@ func cmdVerifyFull() int {
 			platform = "tdx"
 			m, rej := runAttestationTDXSub(*in.AttestationTDX)
 			if rej != nil {
+				if rej.internal {
+					fmt.Fprintf(os.Stderr, "internal: %s\n", rej.message)
+					return exitInternal
+				}
 				return emitFullRejection(rej.code, "verify-attestation-tdx", rej.specRef, rej.message)
 			}
 			attM = m
@@ -270,6 +274,10 @@ func cmdVerifyFull() int {
 			platform = "tdx"
 			m, rej := runAttestationTDXSub(*in.AttestationTDX)
 			if rej != nil {
+				if rej.internal {
+					fmt.Fprintf(os.Stderr, "internal: %s\n", rej.message)
+					return exitInternal
+				}
 				return emitFullRejection(rej.code, "verify-attestation-tdx", rej.specRef, rej.message)
 			}
 			attM = m
