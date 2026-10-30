@@ -444,14 +444,14 @@ func buildSevOutputs(rawReport []byte, parsed *sevpb.Report) (map[string]any, er
 	reportIdMa := rawReport[0x160 : 0x160+32]
 	reportedTcb := rawReport[0x180 : 0x180+8]
 	chipId := rawReport[0x1A0 : 0x1A0+64]
-	committedTcb := rawReport[0x1E8 : 0x1E8+8]
-	currentBuild := uint16(rawReport[0x1F0])
-	currentMinor := uint16(rawReport[0x1F1])
-	currentMajor := uint16(rawReport[0x1F2])
-	committedBuild := uint16(rawReport[0x1F4])
-	committedMinor := uint16(rawReport[0x1F5])
-	committedMajor := uint16(rawReport[0x1F6])
-	launchTcb := rawReport[0x1F8 : 0x1F8+8]
+	committedTcb := rawReport[0x1E0 : 0x1E0+8]
+	currentBuild := uint16(rawReport[0x1E8])
+	currentMinor := uint16(rawReport[0x1E9])
+	currentMajor := uint16(rawReport[0x1EA])
+	committedBuild := uint16(rawReport[0x1EC])
+	committedMinor := uint16(rawReport[0x1ED])
+	committedMajor := uint16(rawReport[0x1EE])
+	launchTcb := rawReport[0x1F0 : 0x1F0+8]
 
 	// SPEC §3.2.2 / AMD APM Vol 3 Table B-3. Bit 17 is reserved-MBO; the
 	// post-MBO flags start at bit 18 (MIGRATE_MA), not 17.
