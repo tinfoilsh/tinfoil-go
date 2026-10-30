@@ -52,7 +52,8 @@ func TestNewEnclaveHTTPClientRejectsInvalidOptions(t *testing.T) {
 	}{
 		"no host":                                 {"", "org/repo", nil},
 		"unknown transport mode":                  {"enclave.example", "org/repo", &EnclaveOptions{TransportMode: "quic"}},
-		"plaintext base URL":                      {"enclave.example", "org/repo", &EnclaveOptions{BaseURL: "http://proxy.example/v1/"}},
+		"plaintext remote proxy":                  {"enclave.example", "org/repo", &EnclaveOptions{TransportMode: TransportModeEHBP, BaseURL: "http://proxy.example/v1/"}},
+		"TLS through a loopback proxy":            {"enclave.example", "org/repo", &EnclaveOptions{BaseURL: "http://localhost:8080/v1/"}},
 		"relative base URL":                       {"enclave.example", "org/repo", &EnclaveOptions{BaseURL: "/v1/"}},
 		"TLS through a proxy":                     {"enclave.example", "org/repo", &EnclaveOptions{BaseURL: "https://proxy.example/v1/"}},
 		"invalid repository":                      {"enclave.example", "not a reference", nil},
@@ -175,6 +176,8 @@ func TestNewRouterHTTPClientRejectsInvalidOptionsBeforeDiscovery(t *testing.T) {
 		var config *ConfigurationError
 		require.ErrorAs(t, err, &config)
 	}
+	_, err := NewRouterHTTPClient(ctx, &EnclaveOptions{BaseURL: "http://localhost:8080/v1/"})
+	require.ErrorIs(t, err, context.Canceled, "a loopback proxy passes the checks and reaches discovery")
 }
 
 func TestNewRouterHTTPClientVerifiesTheFallbackUnderItsContext(t *testing.T) {
@@ -453,6 +456,48 @@ func TestLiveVerificationCheck(t *testing.T) {
 		require.Len(t, distinct, len(seen), "a rejected replica isn't retried")
 		require.Empty(t, gw.Current(), "no rejected replica is kept")
 	})
+}
+
+func TestValidateBaseURL(t *testing.T) {
+	for _, baseURL := range []string{
+		"https://proxy.example/v1/",
+		"http://localhost:8080/v1/",
+		"http://LOCALHOST/v1/",
+		"http://127.0.0.1:8080/v1/",
+		"http://127.1.2.3/v1/",
+		"http://[::1]:8080/v1/",
+	} {
+		require.NoError(t, validateBaseURL(baseURL), baseURL)
+	}
+	for _, baseURL := range []string{
+		"http://proxy.example/v1/",
+		"http://app.localhost/v1/",
+		"http://localhost.example/v1/",
+		"http://0.0.0.0:8080/v1/",
+		"http://10.0.0.1/v1/",
+		"/v1/",
+		"ftp://localhost/v1/",
+	} {
+		var config *ConfigurationError
+		require.ErrorAs(t, validateBaseURL(baseURL), &config, baseURL)
+	}
+}
+
+func TestLoopbackProxyAuthorizesOnlyItsOrigin(t *testing.T) {
+	c, err := unverifiedEnclaveHTTPClient("enclave.example", "org/repo", &EnclaveOptions{TransportMode: TransportModeEHBP, BaseURL: "http://localhost:8080/v1/"})
+	require.NoError(t, err)
+	require.Equal(t, "http://localhost:8080/v1/", c.BaseURL())
+	for _, target := range []string{
+		"https://localhost:8080/v1/models",
+		"http://localhost:8081/v1/models",
+		"http://127.0.0.1:8080/v1/models",
+		"http://enclave.example/v1/models",
+	} {
+		_, err := c.Get(target)
+		var config *ConfigurationError
+		require.ErrorAs(t, err, &config, "%s is refused before verifying, so no network I/O", target)
+		require.ErrorContains(t, err, "refusing to send request")
+	}
 }
 
 func TestValidateTLSBaseURL(t *testing.T) {
