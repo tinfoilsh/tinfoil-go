@@ -220,9 +220,6 @@ func extractMeasurement(pt string, pred *structpb.Struct) (*MeasurementOutput, e
 	if !ok || snpField == nil {
 		return nil, fmt.Errorf("PREDICATE_MEASUREMENT_INVALID: SnpTdxMultiPlatformV1 missing snp_measurement")
 	}
-	if _, isStr := snpField.GetKind().(*structpb.Value_StringValue); !isStr {
-		return nil, fmt.Errorf("PREDICATE_MEASUREMENT_INVALID: snp_measurement is not a string")
-	}
 	snp := snpField.GetStringValue()
 	tdxField, ok := fields["tdx_measurement"]
 	if !ok || tdxField == nil {
@@ -242,9 +239,13 @@ func extractMeasurement(pt string, pred *structpb.Struct) (*MeasurementOutput, e
 	if !ok || rtmr2Field == nil {
 		return nil, fmt.Errorf("PREDICATE_MEASUREMENT_INVALID: SnpTdxMultiPlatformV1 missing tdx_measurement.rtmr2")
 	}
-	for name, f := range map[string]*structpb.Value{"rtmr1": rtmr1Field, "rtmr2": rtmr2Field} {
+	for name, f := range map[string]*structpb.Value{"snp_measurement": snpField, "tdx_measurement.rtmr1": rtmr1Field, "tdx_measurement.rtmr2": rtmr2Field} {
 		if _, isStr := f.GetKind().(*structpb.Value_StringValue); !isStr {
-			return nil, fmt.Errorf("PREDICATE_MEASUREMENT_INVALID: tdx_measurement.%s is not a string", name)
+			return nil, fmt.Errorf("PREDICATE_MEASUREMENT_INVALID: %s is not a string", name)
+		}
+		// SEV-SNP measurements and RTMRs are 48 bytes; anything else is not a register.
+		if !isHex96(f.GetStringValue()) {
+			return nil, fmt.Errorf("PREDICATE_MEASUREMENT_INVALID: %s is not a 96-hex-character register", name)
 		}
 	}
 	return &MeasurementOutput{
@@ -425,4 +426,16 @@ func classifyVerifyError(err error) error {
 		return fmt.Errorf("SUBJECT_DIGEST_MISMATCH: %w", err)
 	}
 	return err
+}
+
+func isHex96(r string) bool {
+	if len(r) != 96 {
+		return false
+	}
+	for _, c := range r {
+		if !(c >= '0' && c <= '9' || c >= 'a' && c <= 'f' || c >= 'A' && c <= 'F') {
+			return false
+		}
+	}
+	return true
 }
