@@ -148,6 +148,7 @@ func cmdCapabilities() int {
 			// x509CertificateChain layout (rejectLegacyBundleFormat); only the
 			// v0.3 single-certificate form is accepted. SPEC §5.2.
 			"legacy_bundle_format_supported": false,
+			"rekor_v2_supported":            true,
 			// sigstore-go's tlogEntriesThreshold is a minimum (>= 1), so it
 			// accepts bundles with multiple verified tlog entries — matching
 			// SPEC §5.2 #3 ("at least 1"). The synthetic size-1-tree shape that
@@ -451,6 +452,11 @@ func classifyError(msg string) (string, string) {
 	}
 	if strings.Contains(low, "statement has no subject") {
 		return "SUBJECT_MISSING", "5.4"
+	}
+
+	// sigstore-go: no verified RFC 3161 / SET-backed observer timestamp left.
+	if strings.Contains(low, "threshold not met for verified signed") {
+		return "OBSERVER_TIMESTAMP_INSUFFICIENT", "5.2"
 	}
 
 	// sigstore-go phrases empty-tlog and missing-rekor-key the same way
