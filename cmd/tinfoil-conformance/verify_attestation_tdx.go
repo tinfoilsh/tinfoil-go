@@ -163,26 +163,51 @@ func tcbEvaluationRequired(policy *tdxPolicyInput) bool {
 	return true
 }
 
+type tdxRejection struct {
+	code, specRef, message string
+}
+
 func cmdVerifyAttestationTDX() int {
 	var in verifyAttestationTdxInput
 	if code := readInput("verify-attestation-tdx", "QUOTE_FORMAT_UNSUPPORTED", "A.3", &in); code >= 0 {
 		return code
 	}
+	if in.ExecutionMode == "public_api" {
+		quoteBytes, getter, rej := tdxInputs(in)
+		if rej != nil {
+			return emitTdxRejection(rej.code, rej.specRef, rej.message)
+		}
+		return cmdVerifyAttestationTDXPublic(in, quoteBytes, getter)
+	}
+	body, rej := runVerifyAttestationTdx(in)
+	if rej != nil {
+		return emitTdxRejection(rej.code, rej.specRef, rej.message)
+	}
+	enc := json.NewEncoder(os.Stdout)
+	enc.SetIndent("", "  ")
+	if err := enc.Encode(body); err != nil {
+		fmt.Fprintf(os.Stderr, "internal error: %v\n", err)
+		return exitInternal
+	}
+	return exitAccept
+}
 
+// tdxInputs decodes the quote and builds the collateral getter from the input.
+func tdxInputs(in verifyAttestationTdxInput) ([]byte, *injectedGetter, *tdxRejection) {
 	quoteBytes, err := base64.StdEncoding.DecodeString(in.QuoteB64)
 	if err != nil {
-		return emitTdxRejection("QUOTE_FORMAT_UNSUPPORTED", "A.3",
-			fmt.Sprintf("quote_b64 not valid base64: %v", err))
+		return nil, nil, &tdxRejection{"QUOTE_FORMAT_UNSUPPORTED", "A.3",
+			fmt.Sprintf("quote_b64 not valid base64: %v", err)}
 	}
 	pckCRLDer, err := base64.StdEncoding.DecodeString(in.Collateral.PckCRLDerB64)
 	if err != nil {
-		return emitTdxRejection("PCK_CHAIN_INVALID", "4.1.2",
-			fmt.Sprintf("pck_crl_der_b64 not valid base64: %v", err))
+		return nil, nil, &tdxRejection{"PCK_CHAIN_INVALID", "4.1.2",
+			fmt.Sprintf("pck_crl_der_b64 not valid base64: %v", err)}
 	}
 	rootCRLDer, err := base64.StdEncoding.DecodeString(in.Collateral.RootCRLDerB64)
 	if err != nil {
-		return emitTdxRejection("ROOT_CA_UNTRUSTED", "4.1.2",
-			fmt.Sprintf("root_crl_der_b64 not valid base64: %v", err))
+		return nil, nil, &tdxRejection{"ROOT_CA_UNTRUSTED", "4.1.2",
+			fmt.Sprintf("root_crl_der_b64 not valid base64: %v", err)}
 	}
 
 	getter := &injectedGetter{
@@ -212,10 +237,16 @@ func cmdVerifyAttestationTDX() int {
 			"Sgx-Pck-Crl-Issuer-Chain": {pemToURLEncoded(in.Collateral.PckCRLIssuerChainPEM)},
 		}
 	}
-	if in.ExecutionMode == "public_api" {
-		return cmdVerifyAttestationTDXPublic(in, quoteBytes, getter)
-	}
+	return quoteBytes, getter, nil
+}
 
+// runVerifyAttestationTdx is the pure adapter path shared by the CLI stage and
+// verify-full: returns the accepted output body or a rejection.
+func runVerifyAttestationTdx(in verifyAttestationTdxInput) (map[string]any, *tdxRejection) {
+	quoteBytes, getter, rej := tdxInputs(in)
+	if rej != nil {
+		return nil, rej
+	}
 	var quote any
 	var verifyErr error
 	withStdoutSilenced(func() {
@@ -223,7 +254,7 @@ func cmdVerifyAttestationTDX() int {
 	})
 	if verifyErr != nil {
 		code, ref := classifyTdxError(verifyErr)
-		return emitTdxRejection(code, ref, verifyErr.Error())
+		return nil, &tdxRejection{code, ref, verifyErr.Error()}
 	}
 
 	opts := tdxverify.DefaultOptions()
@@ -240,7 +271,7 @@ func cmdVerifyAttestationTDX() int {
 	if in.Collateral.IntelRootCAPEM != "" {
 		pool, err := trustedRootsFromPEM(in.Collateral.IntelRootCAPEM)
 		if err != nil {
-			return emitTdxRejection("ROOT_CA_UNTRUSTED", "4.2", err.Error())
+			return nil, &tdxRejection{"ROOT_CA_UNTRUSTED", "4.2", err.Error()}
 		}
 		opts.TrustedRoots = pool
 	}
@@ -256,7 +287,7 @@ func cmdVerifyAttestationTDX() int {
 	})
 	if verifyErr != nil {
 		code, ref := classifyTdxError(verifyErr)
-		return emitTdxRejection(code, ref, verifyErr.Error())
+		return nil, &tdxRejection{code, ref, verifyErr.Error()}
 	}
 	// verify.TdxQuote covers crypto + collateral only; the body validator holds
 	// the mandatory checks (QE vendor, fixed TD_ATTRIBUTES/XFAM bits, zero
@@ -270,16 +301,27 @@ func cmdVerifyAttestationTDX() int {
 		},
 	}); err != nil {
 		code, ref := classifyTdxError(err)
-		return emitTdxRejection(code, ref, err.Error())
+		return nil, &tdxRejection{code, ref, err.Error()}
 	}
 	if tcbEval {
 		if code, msg := checkFmspcBinding(quote, in.Collateral.TcbInfoJSON); code != "" {
-			return emitTdxRejection(code, "4.7", msg)
+			return nil, &tdxRejection{code, "4.7", msg}
+		}
+	}
+	// SPEC §4.8 policy pin on the platform (PCK FMSPC).
+	if in.Policy != nil && in.Policy.ExpectedFmspcHex != "" {
+		fmspc, rej := pckFmspc(quote)
+		if rej != nil {
+			return nil, rej
+		}
+		if !strings.EqualFold(fmspc, strings.TrimSpace(in.Policy.ExpectedFmspcHex)) {
+			return nil, &tdxRejection{"PCK_FMSPC_MISMATCH", "4.8",
+				fmt.Sprintf("PCK certificate FMSPC %s != policy expected_fmspc_hex %s", fmspc, in.Policy.ExpectedFmspcHex)}
 		}
 	}
 
 	if code, msg := enforceTcbEvaluationDataNumberPolicy(in); code != "" {
-		return emitTdxRejection(code, "4.7.11", msg)
+		return nil, &tdxRejection{code, "4.7.11", msg}
 	}
 
 	// Phase 4: extended-TD policy checks (SPEC §4.8 / Intel §2.3.2). Each
@@ -289,7 +331,7 @@ func cmdVerifyAttestationTDX() int {
 	// mismatch code.
 	if in.Policy != nil {
 		if code, msg := enforceExtendedPolicy(quoteBytes, in.Policy); code != "" {
-			return emitTdxRejection(code, "4.8", msg)
+			return nil, &tdxRejection{code, "4.8", msg}
 		}
 	}
 
@@ -299,16 +341,9 @@ func cmdVerifyAttestationTDX() int {
 	// equivalent terminal-accept).
 	body, err := buildTdxOutputs(quote, quoteBytes)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "internal: failed to assemble outputs: %v\n", err)
-		return exitInternal
+		return nil, &tdxRejection{"QV_RESULT_TERMINAL_UNSPECIFIED", "4", fmt.Sprintf("internal: failed to assemble outputs: %v", err)}
 	}
-	enc := json.NewEncoder(os.Stdout)
-	enc.SetIndent("", "  ")
-	if err := enc.Encode(body); err != nil {
-		fmt.Fprintf(os.Stderr, "internal error: %v\n", err)
-		return exitInternal
-	}
-	return exitAccept
+	return body, nil
 }
 
 func enforceTcbEvaluationDataNumberPolicy(in verifyAttestationTdxInput) (string, string) {
@@ -831,26 +866,35 @@ func parseTdxQuoteV4(raw []byte) (*tdxQuoteV4Fields, bool) {
 	}, true
 }
 
-// checkFmspcBinding rejects a quote whose PCK certificate FMSPC differs from
-// the FMSPC of the TCB Info it was evaluated against (SPEC §4.7); go-tdx-guest
-// does not cross-check these on the injected-collateral path.
-func checkFmspcBinding(quote any, tcbInfoJSON string) (string, string) {
+// pckFmspc extracts the FMSPC from the quote's PCK leaf certificate SGX extensions.
+func pckFmspc(quote any) (string, *tdxRejection) {
 	q, ok := quote.(*tdxpb.QuoteV4)
 	if !ok {
-		return "QUOTE_FORMAT_UNSUPPORTED", "quote is not a v4 quote"
+		return "", &tdxRejection{"QUOTE_FORMAT_UNSUPPORTED", "A.3", "quote is not a v4 quote"}
 	}
 	chainPEM := q.GetSignedData().GetCertificationData().GetQeReportCertificationData().GetPckCertificateChainData().GetPckCertChain()
 	block, _ := pem.Decode(chainPEM)
 	if block == nil {
-		return "PCK_CHAIN_INVALID", "quote carries no PEM PCK certificate chain"
+		return "", &tdxRejection{"PCK_CHAIN_INVALID", "4.1", "quote carries no PEM PCK certificate chain"}
 	}
 	leaf, err := x509.ParseCertificate(block.Bytes)
 	if err != nil {
-		return "PCK_CHAIN_INVALID", fmt.Sprintf("PCK leaf certificate: %v", err)
+		return "", &tdxRejection{"PCK_CHAIN_INVALID", "4.1", fmt.Sprintf("PCK leaf certificate: %v", err)}
 	}
 	ext, err := tdxpcs.PckCertificateExtensions(leaf)
 	if err != nil {
-		return "PCK_CHAIN_INVALID", fmt.Sprintf("PCK certificate SGX extensions: %v", err)
+		return "", &tdxRejection{"PCK_CHAIN_INVALID", "4.1", fmt.Sprintf("PCK certificate SGX extensions: %v", err)}
+	}
+	return ext.FMSPC, nil
+}
+
+// checkFmspcBinding rejects a quote whose PCK certificate FMSPC differs from
+// the FMSPC of the TCB Info it was evaluated against (SPEC §4.7); go-tdx-guest
+// does not cross-check these on the injected-collateral path.
+func checkFmspcBinding(quote any, tcbInfoJSON string) (string, string) {
+	fmspc, rej := pckFmspc(quote)
+	if rej != nil {
+		return rej.code, rej.message
 	}
 	var tcb struct {
 		TcbInfo struct {
@@ -860,9 +904,9 @@ func checkFmspcBinding(quote any, tcbInfoJSON string) (string, string) {
 	if err := json.Unmarshal([]byte(tcbInfoJSON), &tcb); err != nil {
 		return "TCB_INFO_SIGNATURE_INVALID", fmt.Sprintf("tcb_info_json: %v", err)
 	}
-	if !strings.EqualFold(ext.FMSPC, tcb.TcbInfo.Fmspc) {
+	if !strings.EqualFold(fmspc, tcb.TcbInfo.Fmspc) {
 		return "PCK_FMSPC_MISMATCH", fmt.Sprintf(
-			"PCK certificate FMSPC %s != TCB Info fmspc %s", ext.FMSPC, tcb.TcbInfo.Fmspc)
+			"PCK certificate FMSPC %s != TCB Info fmspc %s", fmspc, tcb.TcbInfo.Fmspc)
 	}
 	return "", ""
 }

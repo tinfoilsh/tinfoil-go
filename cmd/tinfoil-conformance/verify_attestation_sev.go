@@ -24,9 +24,9 @@ import (
 	sevabi "github.com/google/go-sev-guest/abi"
 	sevkds "github.com/google/go-sev-guest/kds"
 	sevpb "github.com/google/go-sev-guest/proto/sevsnp"
-	sevtrust "github.com/google/go-sev-guest/verify/trust"
 	sevvalidate "github.com/google/go-sev-guest/validate"
 	sevverify "github.com/google/go-sev-guest/verify"
+	sevtrust "github.com/google/go-sev-guest/verify/trust"
 	"google.golang.org/protobuf/types/known/wrapperspb"
 )
 
@@ -65,14 +65,14 @@ type sevPolicyInput struct {
 }
 
 type verifyAttestationSevInput struct {
-	SchemaVersion            string         `json:"schema_version"`
-	AttestationDocB64        string         `json:"attestation_doc_b64"`
-	VcekDerB64               string         `json:"vcek_der_b64"`
-	AmdRootCAPEM             string         `json:"amd_root_ca_pem"`
-	AskPEM                   string         `json:"ask_pem"`
-	ExpirationCheckDateUnix  int64          `json:"expiration_check_date_unix"`
-	Policy                   *sevPolicyInput `json:"policy"`
-	ExecutionMode            string         `json:"execution_mode"`
+	SchemaVersion           string          `json:"schema_version"`
+	AttestationDocB64       string          `json:"attestation_doc_b64"`
+	VcekDerB64              string          `json:"vcek_der_b64"`
+	AmdRootCAPEM            string          `json:"amd_root_ca_pem"`
+	AskPEM                  string          `json:"ask_pem"`
+	ExpirationCheckDateUnix int64           `json:"expiration_check_date_unix"`
+	Policy                  *sevPolicyInput `json:"policy"`
+	ExecutionMode           string          `json:"execution_mode"`
 }
 
 func gunzipBytes(in []byte) ([]byte, error) {
@@ -483,36 +483,36 @@ func buildSevOutputs(rawReport []byte, parsed *sevpb.Report) (map[string]any, er
 				"registers": []string{hex.EncodeToString(measurement)},
 			},
 			"body_fields": map[string]any{
-				"version":              int(version),
-				"guest_svn":            int(guestSvn),
-				"policy_hex":           fmt.Sprintf("%016x", policy),
-				"policy_decoded":       policyDecoded,
-				"family_id_hex":        hex.EncodeToString(familyId),
-				"image_id_hex":         hex.EncodeToString(imageId),
-				"vmpl":                 int(vmpl),
-				"signature_algo":       int(signatureAlgo),
-				"current_tcb_hex":      fmt.Sprintf("%016x", currentTcb),
-				"current_tcb_decoded":  currentTcbDecoded,
-				"platform_info_hex":    fmt.Sprintf("%016x", platformInfo),
+				"version":               int(version),
+				"guest_svn":             int(guestSvn),
+				"policy_hex":            fmt.Sprintf("%016x", policy),
+				"policy_decoded":        policyDecoded,
+				"family_id_hex":         hex.EncodeToString(familyId),
+				"image_id_hex":          hex.EncodeToString(imageId),
+				"vmpl":                  int(vmpl),
+				"signature_algo":        int(signatureAlgo),
+				"current_tcb_hex":       fmt.Sprintf("%016x", currentTcb),
+				"current_tcb_decoded":   currentTcbDecoded,
+				"platform_info_hex":     fmt.Sprintf("%016x", platformInfo),
 				"platform_info_decoded": platformInfoDecoded,
-				"signer_info_hex":      fmt.Sprintf("%08x", signerInfo),
-				"report_data_hex":      hex.EncodeToString(reportData),
-				"measurement_hex":      hex.EncodeToString(measurement),
-				"host_data_hex":        hex.EncodeToString(hostData),
-				"id_key_digest_hex":    hex.EncodeToString(idKeyDigest),
+				"signer_info_hex":       fmt.Sprintf("%08x", signerInfo),
+				"report_data_hex":       hex.EncodeToString(reportData),
+				"measurement_hex":       hex.EncodeToString(measurement),
+				"host_data_hex":         hex.EncodeToString(hostData),
+				"id_key_digest_hex":     hex.EncodeToString(idKeyDigest),
 				"author_key_digest_hex": hex.EncodeToString(authorKeyDigest),
-				"report_id_hex":        hex.EncodeToString(reportId),
-				"report_id_ma_hex":     hex.EncodeToString(reportIdMa),
-				"reported_tcb_hex":     hex.EncodeToString(reportedTcb),
-				"chip_id_hex":          hex.EncodeToString(chipId),
-				"committed_tcb_hex":    hex.EncodeToString(committedTcb),
-				"current_build":        int(currentBuild),
-				"current_minor":        int(currentMinor),
-				"current_major":        int(currentMajor),
-				"committed_build":      int(committedBuild),
-				"committed_minor":      int(committedMinor),
-				"committed_major":      int(committedMajor),
-				"launch_tcb_hex":       hex.EncodeToString(launchTcb),
+				"report_id_hex":         hex.EncodeToString(reportId),
+				"report_id_ma_hex":      hex.EncodeToString(reportIdMa),
+				"reported_tcb_hex":      hex.EncodeToString(reportedTcb),
+				"chip_id_hex":           hex.EncodeToString(chipId),
+				"committed_tcb_hex":     hex.EncodeToString(committedTcb),
+				"current_build":         int(currentBuild),
+				"current_minor":         int(currentMinor),
+				"current_major":         int(currentMajor),
+				"committed_build":       int(committedBuild),
+				"committed_minor":       int(committedMinor),
+				"committed_major":       int(committedMajor),
+				"launch_tcb_hex":        hex.EncodeToString(launchTcb),
 			},
 		},
 	}, nil

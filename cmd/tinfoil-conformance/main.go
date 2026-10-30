@@ -179,7 +179,7 @@ func cmdCapabilities() int {
 			// x509CertificateChain layout (rejectLegacyBundleFormat); only the
 			// v0.3 single-certificate form is accepted. SPEC §5.2.
 			"legacy_bundle_format_supported": false,
-			"rekor_v2_supported":            true,
+			"rekor_v2_supported":             true,
 			// sigstore-go's tlogEntriesThreshold is a minimum (>= 1), so it
 			// accepts bundles with multiple verified tlog entries — matching
 			// SPEC §5.2 #3 ("at least 1"). The synthetic size-1-tree shape that
@@ -229,6 +229,8 @@ func cmdCapabilities() int {
 			"amd_root_ca_injection_supported": true,
 		},
 		"attestation_tdx": map[string]any{
+			// verify-full chains runVerifyAttestationTdx for standard/bundle/pinned.
+			"verify_full_supported": true,
 			// Phase 1.5 wired: cmd/tinfoil-conformance/verify_attestation_tdx.go
 			// wraps google/go-tdx-guest's verify.TdxQuote with an in-process
 			// HTTPSGetter that returns fixture-injected collateral, so no
@@ -259,7 +261,7 @@ func cmdCapabilities() int {
 			"accepts_non_terminal_tcb_statuses":           false,
 			"enforces_tcb_evaluation_data_number_minimum": true,
 			"policy_fields_supported": map[string]any{
-				"expected_fmspc_hex":  false,
+				"expected_fmspc_hex":  true,
 				"accepted_qv_results": false,
 			},
 		},

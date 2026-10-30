@@ -21,13 +21,13 @@ import (
 )
 
 type verifyFullInput struct {
-	SchemaVersion       string                      `json:"schema_version"`
-	Mode                string                      `json:"mode"`
-	Sigstore            *sigstoreSubInput           `json:"sigstore"`
-	AttestationSEV      *json.RawMessage            `json:"attestation_sev"`
-	AttestationTDX      *json.RawMessage            `json:"attestation_tdx"`
-	HardwareMeasurements []hwMeasurementInput       `json:"hardware_measurements"`
-	PinnedMeasurement   *measurementInput           `json:"pinned_measurement"`
+	SchemaVersion        string               `json:"schema_version"`
+	Mode                 string               `json:"mode"`
+	Sigstore             *sigstoreSubInput    `json:"sigstore"`
+	AttestationSEV       *json.RawMessage     `json:"attestation_sev"`
+	AttestationTDX       *json.RawMessage     `json:"attestation_tdx"`
+	HardwareMeasurements []hwMeasurementInput `json:"hardware_measurements"`
+	PinnedMeasurement    *measurementInput    `json:"pinned_measurement"`
 }
 
 type sigstoreSubInput struct {
@@ -126,6 +126,31 @@ func runAttestationSEVSub(rawInput json.RawMessage) (*attestation.Measurement, *
 	return m, nil
 }
 
+// runAttestationTDXSub feeds a raw TDX input through the verify-attestation-tdx
+// pure entrypoint and lifts its 5 registers into a Measurement.
+func runAttestationTDXSub(rawInput json.RawMessage) (*attestation.Measurement, *tdxRejection) {
+	var in verifyAttestationTdxInput
+	if err := json.Unmarshal(rawInput, &in); err != nil {
+		return nil, &tdxRejection{"QUOTE_FORMAT_UNSUPPORTED", "A.3",
+			fmt.Sprintf("attestation_tdx input malformed: %v", err)}
+	}
+	if in.SchemaVersion != "" && in.SchemaVersion != "1" {
+		return nil, &tdxRejection{"QUOTE_FORMAT_UNSUPPORTED", "A.3",
+			fmt.Sprintf("attestation_tdx.schema_version %q != \"1\"", in.SchemaVersion)}
+	}
+	in.SchemaVersion = "1"
+	in.ExecutionMode = ""
+	body, rej := runVerifyAttestationTdx(in)
+	if rej != nil {
+		return nil, rej
+	}
+	regs, _ := body["outputs"].(map[string]any)["measurement"].(map[string]any)["registers"].([]string)
+	if len(regs) != 5 {
+		return nil, &tdxRejection{"QV_RESULT_TERMINAL_UNSPECIFIED", "4", "TDX stage produced no measurement"}
+	}
+	return &attestation.Measurement{Type: attestation.TdxGuestV2, Registers: regs}, nil
+}
+
 func cmdVerifyFull() int {
 	raw, err := io.ReadAll(os.Stdin)
 	if err != nil {
@@ -169,9 +194,12 @@ func cmdVerifyFull() int {
 			}
 			attM = m
 		} else if in.AttestationTDX != nil {
-			// Wire TDX path when verify-full TDX fixtures land.
-			return emitFullRejection("QV_RESULT_TERMINAL_UNSPECIFIED", "verify-full", "11.1",
-				"TDX path not yet wired in verify-full Phase 1")
+			platform = "tdx"
+			m, rej := runAttestationTDXSub(*in.AttestationTDX)
+			if rej != nil {
+				return emitFullRejection(rej.code, "verify-attestation-tdx", rej.specRef, rej.message)
+			}
+			attM = m
 		} else {
 			return emitFullRejection("BUNDLE_MALFORMED", "verify-full", "11.1",
 				`mode="standard"/"bundle" requires either attestation_sev or attestation_tdx`)
@@ -229,13 +257,25 @@ func cmdVerifyFull() int {
 			return emitFullRejection(code, "verify-full", specRef,
 				"pinned_measurement invalid")
 		}
-		if in.AttestationSEV == nil {
+		var attM *attestation.Measurement
+		platform := "sev-snp"
+		switch {
+		case in.AttestationSEV != nil:
+			m, rej := runAttestationSEVSub(*in.AttestationSEV)
+			if rej != nil {
+				return emitFullRejection(rej.code, "verify-attestation-sev", rej.specRef, rej.message)
+			}
+			attM = m
+		case in.AttestationTDX != nil:
+			platform = "tdx"
+			m, rej := runAttestationTDXSub(*in.AttestationTDX)
+			if rej != nil {
+				return emitFullRejection(rej.code, "verify-attestation-tdx", rej.specRef, rej.message)
+			}
+			attM = m
+		default:
 			return emitFullRejection("BUNDLE_MALFORMED", "verify-full", "11.3",
-				`mode="pinned" requires attestation_sev (TDX not yet wired)`)
-		}
-		attM, rej := runAttestationSEVSub(*in.AttestationSEV)
-		if rej != nil {
-			return emitFullRejection(rej.code, "verify-attestation-sev", rej.specRef, rej.message)
+				`mode="pinned" requires attestation_sev or attestation_tdx`)
 		}
 		if err := pinM.Equals(attM); err != nil {
 			code, specRef := classifyMeasurementError(err)
@@ -247,7 +287,7 @@ func cmdVerifyFull() int {
 			"accepted": true,
 			"outputs": map[string]any{
 				"mode":     in.Mode,
-				"platform": "sev-snp",
+				"platform": platform,
 				"attestation_measurement": map[string]any{
 					"type":      attM.Type,
 					"registers": attM.Registers,

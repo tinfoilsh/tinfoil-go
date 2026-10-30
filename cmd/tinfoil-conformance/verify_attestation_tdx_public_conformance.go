@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	tdxabi "github.com/google/go-tdx-guest/abi"
@@ -62,13 +63,25 @@ func cmdVerifyAttestationTDXPublic(in verifyAttestationTdxInput, quoteBytes []by
 	if code, msg := enforceTcbEvaluationDataNumberPolicy(in); code != "" {
 		return emitTdxRejection(code, "4.7.11", msg)
 	}
-	if tcbEval {
+	if tcbEval || (in.Policy != nil && in.Policy.ExpectedFmspcHex != "") {
 		quote, err := tdxabi.QuoteToProto(quoteBytes)
 		if err != nil {
 			return emitTdxRejection("QUOTE_FORMAT_UNSUPPORTED", "A.3", err.Error())
 		}
-		if code, msg := checkFmspcBinding(quote, in.Collateral.TcbInfoJSON); code != "" {
-			return emitTdxRejection(code, "4.7", msg)
+		if tcbEval {
+			if code, msg := checkFmspcBinding(quote, in.Collateral.TcbInfoJSON); code != "" {
+				return emitTdxRejection(code, "4.7", msg)
+			}
+		}
+		if in.Policy != nil && in.Policy.ExpectedFmspcHex != "" {
+			fmspc, rej := pckFmspc(quote)
+			if rej != nil {
+				return emitTdxRejection(rej.code, rej.specRef, rej.message)
+			}
+			if !strings.EqualFold(fmspc, strings.TrimSpace(in.Policy.ExpectedFmspcHex)) {
+				return emitTdxRejection("PCK_FMSPC_MISMATCH", "4.8",
+					fmt.Sprintf("PCK certificate FMSPC %s != policy expected_fmspc_hex %s", fmspc, in.Policy.ExpectedFmspcHex))
+			}
 		}
 	}
 	if in.Policy != nil {
