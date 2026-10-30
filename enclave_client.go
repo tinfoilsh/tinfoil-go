@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/netip"
+	"net/url"
 	"strings"
 
 	"github.com/tinfoilsh/tinfoil-go/internal/cachesecret"
@@ -51,9 +53,12 @@ type EnclaveOptions struct {
 	// TransportMode defaults to TransportModeTLS for NewEnclaveHTTPClient and
 	// to TransportModeEHBP for NewRouterHTTPClient.
 	TransportMode TransportMode
-	// BaseURL is a path on the enclave's own HTTPS origin, or an HTTPS proxy on
+	// BaseURL is a path on the enclave's own HTTPS origin, or a proxy on
 	// another origin, which requires TransportModeEHBP. Requests to a proxy
-	// carry X-Tinfoil-Enclave-Url so it can forward them to the enclave.
+	// carry X-Tinfoil-Enclave-Url so it can forward them to the enclave. A
+	// proxy must use HTTPS, since EHBP doesn't seal headers such as the API
+	// key; http:// is accepted only when its host is localhost or a loopback
+	// IP address, for a local development proxy or a sidecar.
 	// NewRouterHTTPClient requires TransportModeEHBP for any BaseURL, because
 	// the router's origin isn't known before discovery.
 	BaseURL string
@@ -267,17 +272,33 @@ func (c *EnclaveHTTPClient) Current() *verify.Verification {
 	return nil
 }
 
-// validateBaseURL requires an absolute HTTPS URL, which keeps request headers
-// private on the way to the enclave or proxy.
+// validateBaseURL requires an absolute URL that keeps request headers private
+// on the way to the enclave or proxy: HTTPS, or HTTP to a loopback host, whose
+// traffic never leaves the machine.
 func validateBaseURL(baseURL string) error {
 	origin, err := transport.OriginOf(baseURL)
 	if err != nil {
 		return &ConfigurationError{Err: fmt.Errorf("invalid base URL: %w", err)}
 	}
-	if !strings.HasPrefix(origin, "https://") {
-		return &ConfigurationError{Err: fmt.Errorf("invalid base URL: HTTPS is required to protect request headers")}
+	if strings.HasPrefix(origin, "https://") {
+		return nil
+	}
+	u, _ := url.Parse(baseURL) // OriginOf parsed it
+	if !isLoopback(u.Hostname()) {
+		return &ConfigurationError{Err: errors.New("invalid base URL: HTTP is allowed only for localhost or a loopback IP address; use HTTPS to protect request headers")}
 	}
 	return nil
+}
+
+// isLoopback reports whether host, as written, is localhost or a loopback IP
+// address. It doesn't resolve other names, so DNS can't make a remote host
+// pass.
+func isLoopback(host string) bool {
+	if strings.EqualFold(host, "localhost") {
+		return true
+	}
+	addr, err := netip.ParseAddr(host)
+	return err == nil && addr.IsLoopback()
 }
 
 // validateTLSBaseURL requires a TLS base URL to use the enclave's own origin,
