@@ -24,20 +24,20 @@ func hpkeVerification(key string) *verify.Verification {
 }
 
 func TestEHBPRequiresHPKEKey(t *testing.T) {
-	sealing := WithEHBP(nil, nil)
-	_, err := sealing.build(&verify.Verification{})
+	sealing := ehbpMode{}
+	_, err := sealing.newRoundTripper(&verify.Verification{})
 	var attestation *errs.AttestationError
 	require.ErrorAs(t, err, &attestation)
 	require.ErrorContains(t, err, "use the TLS transport mode")
 
-	_, err = sealing.build(hpkeVerification(""))
+	_, err = sealing.newRoundTripper(hpkeVerification(""))
 	require.ErrorAs(t, err, &attestation)
 	require.ErrorContains(t, err, "HPKE public key")
 }
 
 func TestEHBPBuildsTransportForEachAttestedKey(t *testing.T) {
 	for _, key := range []string{strings.Repeat("01", 32), strings.Repeat("02", 32)} {
-		transport, err := WithEHBP(nil, nil).build(hpkeVerification(key))
+		transport, err := ehbpMode{}.newRoundTripper(hpkeVerification(key))
 		require.NoError(t, err)
 		require.NotNil(t, transport)
 	}
@@ -78,7 +78,7 @@ func TestKeyTransportsRefuseRequestsTheyCantProtect(t *testing.T) {
 		{"TLS plaintext request", tls, newRequest(t, http.MethodGet, "http://enclave.example/v1/models", nil), errNoTLS},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			err := tc.keyed.check(tc.req)
+			err := tc.keyed.mode.validateRequest(tc.req)
 			if tc.refused == nil {
 				require.NoError(t, err)
 				return
@@ -111,10 +111,20 @@ func TestTransportChecksBeforeVerifying(t *testing.T) {
 	}
 }
 
-func TestEHBPRecognizesKeyConfigErrors(t *testing.T) {
-	sealing := WithEHBP(nil, nil)
-	require.True(t, sealing.keyRejected(ehbpidentity.NewKeyConfigError(errors.New("rotated"))))
-	require.False(t, sealing.keyRejected(errors.New("connection reset")))
+func TestEHBPMarksKeyConfigErrors(t *testing.T) {
+	for _, tc := range []struct {
+		err      error
+		lacksKey bool
+	}{
+		{ehbpidentity.NewKeyConfigError(errors.New("rotated")), true},
+		{errors.New("connection reset"), false},
+	} {
+		bound := &ehbpRoundTripper{sealing: roundTripFunc(func(*http.Request) (*http.Response, error) { return nil, tc.err })}
+		_, err := bound.RoundTrip(newRequest(t, http.MethodGet, "https://enclave.example/v1/models", nil))
+		require.ErrorIs(t, err, tc.err)
+		var lacksKey *peerLacksKeyError
+		require.Equal(t, tc.lacksKey, errors.As(err, &lacksKey))
+	}
 }
 
 func TestEHBPSendsOverNext(t *testing.T) {

@@ -31,28 +31,30 @@ var (
 // is the bottom of a stack. It refuses plaintext requests, which no pinned
 // connection carries.
 func TLS(h *enclave.Handle) *Transport {
-	return &Transport{
-		handle: h,
-		build: func(v *verify.Verification) (http.RoundTripper, error) {
-			key, ok := v.TLSPublicKeyFP()
-			if !ok {
-				return nil, &errs.AttestationError{Err: errNoTLSKey}
-			}
-			rt, err := newTLSBoundRoundTripper(key)
-			if err != nil {
-				// A nil *TLSBoundRoundTripper would be a non-nil RoundTripper.
-				return nil, err
-			}
-			return rt, nil
-		},
-		keyRejected: isCertificateError,
-		check: func(req *http.Request) error {
-			if req.URL == nil || req.URL.Scheme != "https" {
-				return &errs.ConfigurationError{Err: errNoTLS}
-			}
-			return nil
-		},
+	return &Transport{handle: h, mode: tlsMode{}}
+}
+
+// tlsMode pins connections to the attested TLS key.
+type tlsMode struct{}
+
+func (tlsMode) validateRequest(req *http.Request) error {
+	if req.URL == nil || req.URL.Scheme != "https" {
+		return &errs.ConfigurationError{Err: errNoTLS}
 	}
+	return nil
+}
+
+func (tlsMode) newRoundTripper(v *verify.Verification) (http.RoundTripper, error) {
+	key, ok := v.TLSPublicKeyFP()
+	if !ok {
+		return nil, &errs.AttestationError{Err: errNoTLSKey}
+	}
+	rt, err := newTLSBoundRoundTripper(key)
+	if err != nil {
+		// A nil *TLSBoundRoundTripper would be a non-nil RoundTripper.
+		return nil, err
+	}
+	return rt, nil
 }
 
 // TLSBoundRoundTripper sends requests over connections whose leaf
@@ -166,13 +168,16 @@ func pinnedTransport(dt *http.Transport, key string) (*http.Transport, error) {
 }
 
 func (t *TLSBoundRoundTripper) RoundTrip(r *http.Request) (*http.Response, error) {
+	// Transport validates this too, but the round tripper can be used alone.
 	if r.URL == nil || r.URL.Scheme != "https" {
 		return nil, &errs.ConfigurationError{Err: errNoTLS}
 	}
 
 	resp, err := t.transport.RoundTrip(r)
+	// A failed certificate check, the pin included, fails the handshake, so
+	// no request reached the application.
 	if isCertificateError(err) {
-		err = errs.WrapAttestation(err)
+		err = &peerLacksKeyError{errs.WrapAttestation(err)}
 	}
 	return resp, err
 }

@@ -27,13 +27,17 @@ type roundTripFunc func(*http.Request) (*http.Response, error)
 
 func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
 
-// newTestTransport is a Transport over the transport build makes for each
-// verification, with an optional key-rejection test and no request check.
-func newTestTransport(h *enclave.Handle, build func(*verify.Verification) (http.RoundTripper, error), keyRejected func(error) bool) (*Transport, error) {
-	if keyRejected == nil {
-		keyRejected = func(error) bool { return false }
-	}
-	return &Transport{handle: h, build: build, keyRejected: keyRejected, check: func(*http.Request) error { return nil }}, nil
+// testMode creates the round tripper build makes for each verification and
+// checks no requests.
+type testMode func(*verify.Verification) (http.RoundTripper, error)
+
+func (testMode) validateRequest(*http.Request) error                                 { return nil }
+func (m testMode) newRoundTripper(v *verify.Verification) (http.RoundTripper, error) { return m(v) }
+
+// newTestTransport is a Transport over the round tripper build makes for each
+// verification.
+func newTestTransport(h *enclave.Handle, build func(*verify.Verification) (http.RoundTripper, error)) (*Transport, error) {
+	return &Transport{handle: h, mode: testMode(build)}, nil
 }
 
 // verifyNow verifies h again and returns the caller's copy.
@@ -86,7 +90,7 @@ func TestTransportExpirationAndUnchangedWitness(t *testing.T) {
 				requests++
 				return testResponse(), nil
 			}), nil
-		}, nil)
+		})
 		require.NoError(t, err)
 		req, _ := http.NewRequest(http.MethodGet, "https://enclave.example", nil)
 		time.Sleep(time.Minute - time.Nanosecond)
@@ -125,7 +129,7 @@ func TestRefreshCoalescesRequestsAndExplicitVerify(t *testing.T) {
 						}
 						return testResponse(), nil
 					}), nil
-				}, nil)
+				})
 				require.NoError(t, err)
 				time.Sleep(time.Minute)
 				results := make(chan error, 33)
@@ -177,11 +181,11 @@ func TestPreviouslyReturnedTransportsUseExplicitVerification(t *testing.T) {
 			return resp, nil
 		}), nil
 	}
-	first, err := newTestTransport(s, build, nil)
+	first, err := newTestTransport(s, build)
 	require.NoError(t, err)
 	_, err = first.EnsureVerified(context.Background())
 	require.NoError(t, err)
-	second, err := newTestTransport(s, build, nil)
+	second, err := newTestTransport(s, build)
 	require.NoError(t, err)
 	verified, err := verifyNow(s)
 	require.NoError(t, err)
@@ -199,13 +203,13 @@ func TestPreviouslyReturnedTransportsUseExplicitVerification(t *testing.T) {
 
 func TestKeyRejectionInvalidatesWithoutReplay(t *testing.T) {
 	for _, mode := range []struct {
-		name    string
-		err     error
-		matches func(error) bool
+		name     string
+		err      error
+		lacksKey bool
 	}{
-		{"TLS", errCertMismatch, isCertificateError},
-		{"EHBP", ehbpidentity.NewKeyConfigError(errors.New("rotated")), ehbpidentity.IsKeyConfigError},
-		{"network", errors.New("connection refused"), isCertificateError},
+		{"TLS", errCertMismatch, true},
+		{"EHBP", ehbpidentity.NewKeyConfigError(errors.New("rotated")), true},
+		{"network", errors.New("connection refused"), false},
 	} {
 		t.Run(mode.name, func(t *testing.T) {
 			var sends, refreshes int
@@ -219,17 +223,20 @@ func TestKeyRejectionInvalidatesWithoutReplay(t *testing.T) {
 				return roundTripFunc(func(req *http.Request) (*http.Response, error) {
 					req.Body.Close()
 					sends++
+					if mode.lacksKey {
+						return nil, &peerLacksKeyError{mode.err}
+					}
 					return nil, mode.err
 				}), nil
-			}, mode.matches)
+			})
 			require.NoError(t, err)
 			req, _ := http.NewRequest(http.MethodPost, "https://enclave.example", bytes.NewBufferString("payload"))
 			req.GetBody = nil
 			_, err = transport.RoundTrip(req)
 			require.ErrorIs(t, err, mode.err)
-			require.Equal(t, mode.matches(mode.err), IsKeyRejection(err))
+			require.Equal(t, mode.lacksKey, IsKeyRejection(err))
 			rejected := !s.Valid(s.Current())
-			require.Equal(t, mode.matches(mode.err), rejected)
+			require.Equal(t, mode.lacksKey, rejected)
 			require.Equal(t, "old", current(s).CodeTag())
 			require.Equal(t, 1, sends)
 			require.Zero(t, refreshes)
@@ -265,7 +272,7 @@ func TestExpirationDoesNotInterruptStream(t *testing.T) {
 				resp.Body = reader
 				return resp, nil
 			}), nil
-		}, nil)
+		})
 		require.NoError(t, err)
 		req, _ := http.NewRequest(http.MethodGet, "https://enclave.example", nil)
 		resp, err := transport.RoundTrip(req)
@@ -296,7 +303,7 @@ func TestRedirectChecksExpiration(t *testing.T) {
 				resp.Header.Set("Location", "/redirected")
 				return resp, nil
 			}), nil
-		}, nil)
+		})
 		require.NoError(t, err)
 		hc := &http.Client{Transport: transport, CheckRedirect: func(*http.Request, []*http.Request) error {
 			time.Sleep(time.Minute)
@@ -332,7 +339,7 @@ func TestHTTPClientChecksExpirationOnReusedTLSConnections(t *testing.T) {
 			defer hc.CloseIdleConnections()
 			_, err = hc.Transport.(*Transport).EnsureVerified(context.Background())
 			require.NoError(t, err)
-			base := hc.Transport.(*Transport).inner.(*TLSBoundRoundTripper).transport
+			base := hc.Transport.(*Transport).roundTripper.(*TLSBoundRoundTripper).transport
 			base.Proxy = nil
 			base.TLSClientConfig.RootCAs = roots
 			if useProxy {
@@ -441,7 +448,7 @@ func TestCallersCannotReplaceCachedVerification(t *testing.T) {
 	transport, err := newTestTransport(s, func(v *verify.Verification) (http.RoundTripper, error) {
 		*v = *testState(time.Now().Add(time.Hour), "other")
 		return roundTripFunc(func(*http.Request) (*http.Response, error) { return testResponse(), nil }), nil
-	}, nil)
+	})
 	require.NoError(t, err)
 	_, err = transport.EnsureVerified(context.Background())
 	require.NoError(t, err)

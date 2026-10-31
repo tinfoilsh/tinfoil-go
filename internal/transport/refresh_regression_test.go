@@ -29,7 +29,7 @@ func TestTransportDiscardsSnapshotRefreshedDuringBuild(t *testing.T) {
 				sent = append(sent, verified.CodeTag())
 				return testResponse(), nil
 			}), nil
-		}, nil)
+		})
 		require.NoError(t, err)
 		finished := make(chan error, 1)
 		go func() {
@@ -66,11 +66,11 @@ func TestTransportsFailIndependently(t *testing.T) {
 		return testState(time.Now().Add(time.Hour), "key"), nil
 	})
 	buildErr := errors.New("the verification endorses no key for this transport")
-	failing, err := newTestTransport(s, func(*verify.Verification) (http.RoundTripper, error) { return nil, buildErr }, nil)
+	failing, err := newTestTransport(s, func(*verify.Verification) (http.RoundTripper, error) { return nil, buildErr })
 	require.NoError(t, err)
 	working, err := newTestTransport(s, func(*verify.Verification) (http.RoundTripper, error) {
 		return roundTripFunc(func(*http.Request) (*http.Response, error) { return testResponse(), nil }), nil
-	}, nil)
+	})
 	require.NoError(t, err)
 	_, err = failing.EnsureVerified(context.Background())
 	require.ErrorIs(t, err, buildErr)
@@ -91,7 +91,7 @@ func TestTransportRejectsSupersededState(t *testing.T) {
 	transport, err := newTestTransport(s, func(*verify.Verification) (http.RoundTripper, error) {
 		built++
 		return roundTripFunc(func(*http.Request) (*http.Response, error) { return testResponse(), nil }), nil
-	}, nil)
+	})
 	require.NoError(t, err)
 	old, err := transport.EnsureVerified(context.Background())
 	require.NoError(t, err)
@@ -100,9 +100,9 @@ func TestTransportRejectsSupersededState(t *testing.T) {
 	replacement, err := transport.EnsureVerified(context.Background())
 	require.NoError(t, err)
 	require.NotSame(t, old, replacement)
-	_, err = transport.innerFor(old)
+	_, err = transport.roundTripperFor(old)
 	require.ErrorIs(t, err, errSuperseded, "a request admitted before a refresh retries under the newer state")
-	require.Same(t, replacement, transport.state)
+	require.Same(t, replacement, transport.roundTripperState)
 	require.Equal(t, 2, built)
 }
 
@@ -114,7 +114,7 @@ func TestRefreshRejectsExpiryBeforeTransportConstruction(t *testing.T) {
 	transport, err := newTestTransport(s, func(*verify.Verification) (http.RoundTripper, error) {
 		builds++
 		return roundTripFunc(func(*http.Request) (*http.Response, error) { return testResponse(), nil }), nil
-	}, nil)
+	})
 	require.NoError(t, err)
 	_, err = transport.EnsureVerified(context.Background())
 	require.NoError(t, err)
@@ -136,11 +136,11 @@ func TestLateRejectionDoesNotInvalidateReplacement(t *testing.T) {
 			return roundTripFunc(func(*http.Request) (*http.Response, error) {
 				if verified.CodeTag() == "old" {
 					<-release
-					return nil, errCertMismatch
+					return nil, &peerLacksKeyError{errCertMismatch}
 				}
 				return testResponse(), nil
 			}), nil
-		}, isCertificateError)
+		})
 		require.NoError(t, err)
 		finished := make(chan error, 1)
 		go func() {
@@ -173,7 +173,7 @@ func TestTransportRechecksStateAfterSlowBuild(t *testing.T) {
 				sent = append(sent, verified.CodeTag())
 				return testResponse(), nil
 			}), nil
-		}, nil)
+		})
 		require.NoError(t, err)
 		req, _ := http.NewRequest(http.MethodGet, "https://enclave.example", nil)
 		_, err = transport.RoundTrip(req)
@@ -203,7 +203,7 @@ func TestFailedRebuildClosesSupersededConnections(t *testing.T) {
 			return nil, buildErr
 		}
 		return first, nil
-	}, nil)
+	})
 	require.NoError(t, err)
 	_, err = transport.EnsureVerified(context.Background())
 	require.NoError(t, err)
