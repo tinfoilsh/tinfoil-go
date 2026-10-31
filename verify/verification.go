@@ -46,7 +46,7 @@ type ArtifactVerification struct {
 // itself. Only the verifier creates one, and its fields cannot be changed:
 // accessors return copies. Assigning through a pointer still replaces the whole
 // value, so code that keeps a Verification hands out copies of it, as
-// enclave.Handle does.
+// the SDK's clients do.
 type Verification struct {
 	configRepo         string
 	codeDigest         string

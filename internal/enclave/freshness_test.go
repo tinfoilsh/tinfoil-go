@@ -56,9 +56,9 @@ func TestLiveVerifyFreshnessExpiration(t *testing.T) {
 	require.ErrorAs(t, err, &rejected)
 	v, err := verify.NewVerifier(verify.WithPinnedRegisters(badPins), verify.WithFreshnessMaxAge(maxAge))
 	require.NoError(t, err)
-	s, err := NewHandle(Config{Host: host, Repo: repo, Verifier: v})
+	s, err := New(Config{Host: host, Repo: repo, Verifier: v})
 	require.NoError(t, err)
-	_, err = s.EnsureVerified(t.Context())
+	_, err = s.Verify()
 	var attestation *AttestationError
 	require.ErrorAs(t, err, &attestation)
 }

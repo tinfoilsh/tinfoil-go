@@ -23,7 +23,6 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
-	"github.com/tinfoilsh/tinfoil-go/internal/enclave"
 	"github.com/tinfoilsh/tinfoil-go/internal/errs"
 	"github.com/tinfoilsh/tinfoil-go/internal/verifytest"
 	"github.com/tinfoilsh/tinfoil-go/verify"
@@ -55,6 +54,8 @@ func TestTLSBoundRoundTripperRejectsPinnedMismatchThroughHTTPSProxy(t *testing.T
 	var attestation *errs.AttestationError
 	require.ErrorAs(t, err, &attestation)
 	require.True(t, isCertificateError(err), "typed errors must preserve TLS recovery")
+	var lacksKey *peerLacksKeyError
+	require.ErrorAs(t, err, &lacksKey, "a pin mismatch must reach Transport as a key rejection")
 	require.False(t, reached.Load(), "request must not reach the server after a pin mismatch")
 }
 
@@ -184,8 +185,8 @@ func tunnel(dst net.Conn, src net.Conn) {
 
 func TestTLSPinsAttestedKey(t *testing.T) {
 	key := strings.Repeat("ab", 32)
-	pinning := TLS(nil)
-	transport, err := pinning.build(verifytest.New(verifytest.Fields{CryptoMaterial: []document.CryptoMaterialItem{
+	pinning := tlsMode{}
+	transport, err := pinning.newRoundTripper(verifytest.New(verifytest.Fields{CryptoMaterial: []document.CryptoMaterialItem{
 		{ID: document.CryptoMaterialIDTLS, Format: document.KeySPKIFPSHA256V1Format, Data: key},
 	}}))
 	require.NoError(t, err)
@@ -193,13 +194,10 @@ func TestTLSPinsAttestedKey(t *testing.T) {
 	require.True(t, ok)
 	require.Equal(t, key, pinned.key)
 
-	_, err = pinning.build(&verify.Verification{})
+	_, err = pinning.newRoundTripper(&verify.Verification{})
 	var attestation *errs.AttestationError
 	require.ErrorAs(t, err, &attestation)
 	require.ErrorIs(t, err, errNoTLSKey)
-
-	require.True(t, pinning.keyRejected(&errs.AttestationError{Err: errCertMismatch}))
-	require.False(t, pinning.keyRejected(errors.New("connection reset")))
 }
 
 func TestTLSUnsupportedDefaultTransport(t *testing.T) {
@@ -211,8 +209,9 @@ func TestTLSUnsupportedDefaultTransport(t *testing.T) {
 		return nil, nil
 	}), (*http.Transport)(nil)} {
 		http.DefaultTransport = transport
-		h := enclave.NewTestHandle("enclave.example", testState(time.Now().Add(time.Hour), "key"), nil)
-		pinning := TLS(h)
+		pinning := newTestTransport(t, nil, func() (*verify.Verification, error) {
+			return testState(time.Now().Add(time.Hour), "key"), nil
+		}, tlsMode{})
 		req, err := http.NewRequest(http.MethodGet, "https://enclave.example", nil)
 		require.NoError(t, err)
 		_, err = pinning.RoundTrip(req)
@@ -243,11 +242,11 @@ func TestTLSClientPreservesTLSCategory(t *testing.T) {
 			http.DefaultTransport = transport
 			t.Cleanup(func() { http.DefaultTransport = original; transport.CloseIdleConnections() })
 			var refreshes int
-			s := enclave.NewTestHandle("enclave.example", testState(time.Now().Add(time.Hour), "wrong-pin"), func() (*verify.Verification, error) {
+			pinning := newTestTransport(t, testState(time.Now().Add(time.Hour), "wrong-pin"), func() (*verify.Verification, error) {
 				refreshes++
 				return testState(time.Now().Add(time.Hour), "wrong-pin"), nil
-			})
-			_, err := tlsClient(s).Get(server.URL)
+			}, tlsMode{})
+			_, err := (&http.Client{Transport: pinning}).Get(server.URL)
 			var attestation *errs.AttestationError
 			require.ErrorAs(t, err, &attestation)
 			var httpError *url.Error
@@ -285,8 +284,10 @@ func TestTLSRefusesCustomTLSDialers(t *testing.T) {
 			http.DefaultTransport = transport
 			// No certificate matches the pin, so only a skipped pin reaches
 			// the server.
-			h := enclave.NewTestHandle("enclave.example", testState(time.Now().Add(time.Hour), "wrong-pin"), nil)
-			_, err := tlsClient(h).Post(server.URL, "text/plain", strings.NewReader("plaintext"))
+			pinning := newTestTransport(t, nil, func() (*verify.Verification, error) {
+				return testState(time.Now().Add(time.Hour), "wrong-pin"), nil
+			}, tlsMode{})
+			_, err := (&http.Client{Transport: pinning}).Post(server.URL, "text/plain", strings.NewReader("plaintext"))
 			require.ErrorIs(t, err, errCustomTLSDialer)
 			var config *errs.ConfigurationError
 			require.ErrorAs(t, err, &config)

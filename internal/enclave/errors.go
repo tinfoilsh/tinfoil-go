@@ -17,7 +17,7 @@ type (
 )
 
 // rejectedError is a VerificationCheck's rejection. It is a decision about
-// the evidence, so the handle doesn't retry it.
+// the evidence, so an Enclave doesn't retry it.
 type rejectedError struct {
 	host string
 	err  error

@@ -155,26 +155,15 @@ func NewTransport(c Config) (*Transport, error) {
 		policy:  policy,
 		secret:  cachesecret.Resolve(c.UserCacheSecret, c.UserCacheSecret != ""),
 		build: func(r replica) (*verifiedReplicaTransport, error) {
-			h, err := enclave.NewHandle(enclave.Config{Host: r.host, Relay: c.Relay, Repo: r.ref, Verifier: policy.verifierFor(r), VerificationCheck: c.VerificationCheck})
+			e, err := enclave.New(enclave.Config{Host: r.host, Relay: c.Relay, Repo: r.ref, Verifier: policy.verifierFor(r), VerificationCheck: c.VerificationCheck})
 			if err != nil {
 				return nil, err
 			}
-			keyed := transport.WithEHBP(nil, h)
+			keyed := transport.WithEHBP(nil, e)
 			return &verifiedReplicaTransport{
-				transport: replicaChain(keyed, h.Enclave(), c.BaseURL),
-				verification: func() *verify.Verification {
-					if state := h.Current(); state != nil {
-						return state.Verification()
-					}
-					return nil
-				},
-				ensureVerified: func(ctx context.Context) (*verify.Verification, error) {
-					state, err := keyed.EnsureVerified(ctx)
-					if err != nil {
-						return nil, err
-					}
-					return state.Verification(), nil
-				},
+				transport:      replicaChain(keyed, e.Host(), c.BaseURL),
+				verification:   keyed.Current,
+				ensureVerified: keyed.EnsureVerified,
 			}, nil
 		},
 	}, nil
