@@ -91,7 +91,7 @@ func TestKeyTransportsRefuseRequestsTheyCantProtect(t *testing.T) {
 }
 
 func TestTransportChecksBeforeVerifying(t *testing.T) {
-	h := enclave.NewTestHandle("enclave.example", nil, func() (*verify.Verification, error) {
+	e := enclave.NewForTest("enclave.example", func() (*verify.Verification, error) {
 		t.Error("verified for a request the transport refuses")
 		return nil, errors.New("unreachable")
 	})
@@ -100,8 +100,8 @@ func TestTransportChecksBeforeVerifying(t *testing.T) {
 		req     *http.Request
 		refused error
 	}{
-		{WithEHBP(nil, h), websocketUpgrade(t, "https://enclave.example/v1/realtime"), errEHBPTunnel},
-		{TLS(h), newRequest(t, http.MethodGet, "http://enclave.example/v1/models", nil), errNoTLS},
+		{WithEHBP(nil, e), websocketUpgrade(t, "https://enclave.example/v1/realtime"), errEHBPTunnel},
+		{TLS(e), newRequest(t, http.MethodGet, "http://enclave.example/v1/models", nil), errNoTLS},
 	} {
 		body := &closeTrackingBody{}
 		tc.req.Body = body
@@ -129,13 +129,13 @@ func TestEHBPMarksKeyConfigErrors(t *testing.T) {
 
 func TestEHBPSendsOverNext(t *testing.T) {
 	key := strings.Repeat("01", 32)
-	h := enclave.NewTestHandle("enclave.example", testState(time.Now().Add(time.Hour), key), nil)
 	var sent []string
 	next := roundTripFunc(func(req *http.Request) (*http.Response, error) {
 		sent = append(sent, req.URL.Path)
 		return testResponse(), nil
 	})
-	resp, err := WithEHBP(next, h).RoundTrip(newRequest(t, http.MethodGet, "https://enclave.example/v1/models", nil))
+	sealing := newTestTransport(t, testState(time.Now().Add(time.Hour), key), nil, ehbpMode{next: next})
+	resp, err := sealing.RoundTrip(newRequest(t, http.MethodGet, "https://enclave.example/v1/models", nil))
 	require.NoError(t, err)
 	resp.Body.Close()
 	require.Equal(t, []string{"/v1/models"}, sent)

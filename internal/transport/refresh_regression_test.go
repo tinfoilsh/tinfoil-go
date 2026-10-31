@@ -13,126 +13,137 @@ import (
 	"github.com/tinfoilsh/tinfoil-go/verify"
 )
 
-func TestTransportDiscardsSnapshotRefreshedDuringBuild(t *testing.T) {
-	synctest.Test(t, func(t *testing.T) {
-		s := enclave.NewTestHandle("enclave.example", testState(time.Now().Add(time.Hour), "old"), func() (*verify.Verification, error) {
-			return testState(time.Now().Add(time.Hour), "new"), nil
-		})
-		release := make(chan struct{})
-		var built, sent []string
-		transport, err := newTestTransport(s, func(verified *verify.Verification) (http.RoundTripper, error) {
-			built = append(built, verified.CodeTag())
-			if verified.CodeTag() == "old" {
-				<-release
-			}
-			return roundTripFunc(func(*http.Request) (*http.Response, error) {
-				sent = append(sent, verified.CodeTag())
-				return testResponse(), nil
-			}), nil
-		})
-		require.NoError(t, err)
-		finished := make(chan error, 1)
-		go func() {
-			_, err := transport.EnsureVerified(context.Background())
-			finished <- err
-		}()
-		synctest.Wait()
-		_, err = verifyNow(s)
-		require.NoError(t, err)
-		close(release)
-		require.NoError(t, <-finished)
-		require.Equal(t, []string{"old"}, built, "a refresh builds nothing")
-		req, _ := http.NewRequest(http.MethodGet, "https://enclave.example", nil)
-		_, err = transport.RoundTrip(req)
-		require.NoError(t, err)
-		require.Equal(t, []string{"old", "new"}, built, "the next request rebuilds for the new state")
-		require.Equal(t, []string{"new"}, sent)
-	})
-}
-
 func TestPlaintextRequestDoesNotRefresh(t *testing.T) {
-	s := enclave.NewTestHandle("enclave.example", testState(time.Now().Add(time.Hour), "key"), func() (*verify.Verification, error) {
+	pinning := newTestTransport(t, testState(time.Now().Add(time.Hour), "key"), func() (*verify.Verification, error) {
 		t.Error("re-verification cannot make a plaintext URL acceptable")
 		return nil, errNoTLS
-	})
-	_, err := tlsClient(s).Get("http://enclave.example")
+	}, tlsMode{})
+	_, err := (&http.Client{Transport: pinning}).Get("http://enclave.example")
 	require.ErrorIs(t, err, errNoTLS)
 }
 
-func TestTransportsFailIndependently(t *testing.T) {
+func TestEnsureVerifiedReusesValidVerification(t *testing.T) {
 	var verifications int
-	s := enclave.NewTestHandle("enclave.example", nil, func() (*verify.Verification, error) {
+	transport := newTestTransport(t, nil, func() (*verify.Verification, error) {
 		verifications++
 		return testState(time.Now().Add(time.Hour), "key"), nil
-	})
-	buildErr := errors.New("the verification endorses no key for this transport")
-	failing, err := newTestTransport(s, func(*verify.Verification) (http.RoundTripper, error) { return nil, buildErr })
+	}, sendOK)
+	for range 2 {
+		_, err := transport.EnsureVerified(context.Background())
+		require.NoError(t, err)
+	}
+	require.Equal(t, 1, verifications, "a valid verification is reused")
+
+	_, err := transport.Reverify(context.Background())
 	require.NoError(t, err)
-	working, err := newTestTransport(s, func(*verify.Verification) (http.RoundTripper, error) {
-		return roundTripFunc(func(*http.Request) (*http.Response, error) { return testResponse(), nil }), nil
-	})
-	require.NoError(t, err)
-	_, err = failing.EnsureVerified(context.Background())
-	require.ErrorIs(t, err, buildErr)
-	req, _ := http.NewRequest(http.MethodGet, "https://enclave.example", nil)
-	_, err = failing.RoundTrip(req)
-	require.ErrorIs(t, err, buildErr)
-	_, err = working.RoundTrip(req)
-	require.NoError(t, err)
-	require.Equal(t, "key", current(s).CodeTag())
-	require.Equal(t, 1, verifications, "a transport failure leaves the shared verification valid")
+	require.Equal(t, 2, verifications, "Reverify always verifies")
 }
 
-func TestTransportRejectsSupersededState(t *testing.T) {
-	s := enclave.NewTestHandle("enclave.example", nil, func() (*verify.Verification, error) {
+func TestRefreshWaitersCancelIndependentlyWithoutVerificationTimeout(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		release := make(chan struct{})
+		transport := newTestTransport(t, nil, func() (*verify.Verification, error) {
+			<-release
+			return testState(time.Now().Add(time.Hour), "key"), nil
+		}, sendOK)
+		ctx, cancel := context.WithCancel(context.Background())
+		canceled, waiting := make(chan error, 1), make(chan error, 1)
+		go func() { _, err := transport.EnsureVerified(ctx); canceled <- err }()
+		go func() { _, err := transport.Reverify(context.Background()); waiting <- err }()
+		synctest.Wait()
+		cancel()
+		require.ErrorIs(t, <-canceled, context.Canceled)
+		time.Sleep(time.Minute)
+		select {
+		case <-waiting:
+			t.Fatal("shared verification must survive caller cancellation and has no SDK timeout")
+		default:
+		}
+		close(release)
+		require.NoError(t, <-waiting)
+		require.NotNil(t, transport.Current())
+	})
+}
+
+func TestInitializationRetryIsShared(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		var attempts int
+		release := make(chan struct{})
+		transport := newTestTransport(t, nil, func() (*verify.Verification, error) {
+			attempts++
+			if attempts == 1 {
+				<-release
+				return nil, &enclave.NetworkError{Err: errors.New("temporarily unavailable")}
+			}
+			return testState(time.Now().Add(time.Hour), "fresh"), nil
+		}, sendOK)
+		results := make(chan error, 8)
+		for range cap(results) {
+			go func() { _, err := transport.Reverify(context.Background()); results <- err }()
+		}
+		synctest.Wait()
+		close(release)
+		for range cap(results) {
+			require.NoError(t, <-results)
+		}
+		require.Equal(t, 2, attempts)
+	})
+}
+
+func TestRoundTripperFailureFailsVerification(t *testing.T) {
+	var verifications int
+	newErr := errors.New("the verification endorses no key for this transport")
+	transport := newTestTransport(t, nil, func() (*verify.Verification, error) {
+		verifications++
 		return testState(time.Now().Add(time.Hour), "key"), nil
-	})
-	var built int
-	transport, err := newTestTransport(s, func(*verify.Verification) (http.RoundTripper, error) {
-		built++
-		return roundTripFunc(func(*http.Request) (*http.Response, error) { return testResponse(), nil }), nil
-	})
-	require.NoError(t, err)
-	old, err := transport.EnsureVerified(context.Background())
-	require.NoError(t, err)
-	_, err = s.Reverify(context.Background())
-	require.NoError(t, err)
-	replacement, err := transport.EnsureVerified(context.Background())
-	require.NoError(t, err)
-	require.NotSame(t, old, replacement)
-	_, err = transport.roundTripperFor(old)
-	require.ErrorIs(t, err, errSuperseded, "a request admitted before a refresh retries under the newer state")
-	require.Same(t, replacement, transport.roundTripperState)
-	require.Equal(t, 2, built)
+	}, testMode(func(*verify.Verification) (http.RoundTripper, error) { return nil, newErr }))
+	_, err := transport.EnsureVerified(context.Background())
+	require.ErrorIs(t, err, newErr)
+	req, _ := http.NewRequest(http.MethodGet, "https://enclave.example", nil)
+	_, err = transport.RoundTrip(req)
+	require.ErrorIs(t, err, newErr)
+	require.Nil(t, transport.Current(), "a verification the mode can't use is never kept")
+	require.Equal(t, 2, verifications, "each attempt verifies once, without a retry")
 }
 
-func TestRefreshRejectsExpiryBeforeTransportConstruction(t *testing.T) {
-	s := enclave.NewTestHandle("enclave.example", testState(time.Now().Add(time.Hour), "old"), func() (*verify.Verification, error) {
+func TestRefreshRejectsExpiredVerification(t *testing.T) {
+	transport := newTestTransport(t, testState(time.Now().Add(time.Hour), "old"), func() (*verify.Verification, error) {
 		return testState(time.Now().Add(-time.Second), "expired"), nil
-	})
-	var builds int
-	transport, err := newTestTransport(s, func(*verify.Verification) (http.RoundTripper, error) {
-		builds++
-		return roundTripFunc(func(*http.Request) (*http.Response, error) { return testResponse(), nil }), nil
-	})
-	require.NoError(t, err)
-	_, err = transport.EnsureVerified(context.Background())
-	require.NoError(t, err)
-	_, err = verifyNow(s)
+	}, sendOK)
+	_, err := transport.Reverify(context.Background())
 	require.ErrorIs(t, err, enclave.ErrFreshnessExpired)
-	require.Equal(t, 1, builds)
-	require.Equal(t, "old", current(s).CodeTag())
+	require.Equal(t, "old", transport.Current().CodeTag())
+	require.True(t, currentValid(transport), "a failed refresh leaves a valid verification in place")
+}
+
+func TestRefreshRejectsVerificationThatExpiresDuringCreation(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		var sent int
+		transport := newTestTransport(t, nil, func() (*verify.Verification, error) {
+			return testState(time.Now().Add(time.Minute), "key"), nil
+		}, testMode(func(*verify.Verification) (http.RoundTripper, error) {
+			time.Sleep(2 * time.Minute) // the verification expires while its round tripper is created
+			return roundTripFunc(func(*http.Request) (*http.Response, error) {
+				sent++
+				return testResponse(), nil
+			}), nil
+		}))
+		req, _ := http.NewRequest(http.MethodGet, "https://enclave.example", nil)
+		_, err := transport.RoundTrip(req)
+		require.ErrorIs(t, err, enclave.ErrFreshnessExpired)
+		require.Zero(t, sent, "a verification that expired before publication never authorizes a request")
+		require.Nil(t, transport.Current())
+	})
 }
 
 func TestLateRejectionDoesNotInvalidateReplacement(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		var verifications int
-		s := enclave.NewTestHandle("enclave.example", testState(time.Now().Add(time.Hour), "old"), func() (*verify.Verification, error) {
+		release := make(chan struct{})
+		transport := newTestTransport(t, testState(time.Now().Add(time.Hour), "old"), func() (*verify.Verification, error) {
 			verifications++
 			return testState(time.Now().Add(time.Hour), "new"), nil
-		})
-		release := make(chan struct{})
-		transport, err := newTestTransport(s, func(verified *verify.Verification) (http.RoundTripper, error) {
+		}, testMode(func(verified *verify.Verification) (http.RoundTripper, error) {
 			return roundTripFunc(func(*http.Request) (*http.Response, error) {
 				if verified.CodeTag() == "old" {
 					<-release
@@ -140,8 +151,7 @@ func TestLateRejectionDoesNotInvalidateReplacement(t *testing.T) {
 				}
 				return testResponse(), nil
 			}), nil
-		})
-		require.NoError(t, err)
+		}))
 		finished := make(chan error, 1)
 		go func() {
 			req, _ := http.NewRequest(http.MethodGet, "https://enclave.example", nil)
@@ -149,36 +159,13 @@ func TestLateRejectionDoesNotInvalidateReplacement(t *testing.T) {
 			finished <- err
 		}()
 		synctest.Wait()
-		_, err = verifyNow(s)
+		_, err := transport.Reverify(context.Background())
 		require.NoError(t, err)
 		close(release)
 		require.ErrorIs(t, <-finished, errCertMismatch)
-		require.True(t, s.Valid(s.Current()), "the replacement stays valid")
-		require.Equal(t, "new", current(s).CodeTag())
+		require.True(t, currentValid(transport), "the replacement stays valid")
+		require.Equal(t, "new", transport.Current().CodeTag())
 		require.Equal(t, 1, verifications)
-	})
-}
-
-func TestTransportRechecksStateAfterSlowBuild(t *testing.T) {
-	synctest.Test(t, func(t *testing.T) {
-		s := enclave.NewTestHandle("enclave.example", testState(time.Now().Add(time.Minute), "old"), func() (*verify.Verification, error) {
-			return testState(time.Now().Add(time.Hour), "new"), nil
-		})
-		var sent []string
-		transport, err := newTestTransport(s, func(verified *verify.Verification) (http.RoundTripper, error) {
-			if verified.CodeTag() == "old" {
-				time.Sleep(2 * time.Minute) // the state expires while its transport is built
-			}
-			return roundTripFunc(func(*http.Request) (*http.Response, error) {
-				sent = append(sent, verified.CodeTag())
-				return testResponse(), nil
-			}), nil
-		})
-		require.NoError(t, err)
-		req, _ := http.NewRequest(http.MethodGet, "https://enclave.example", nil)
-		_, err = transport.RoundTrip(req)
-		require.NoError(t, err)
-		require.Equal(t, []string{"new"}, sent, "a state that expired during the build never authorizes a request")
 	})
 }
 
@@ -190,26 +177,27 @@ type idleCountingTransport struct {
 
 func (t *idleCountingTransport) CloseIdleConnections() { t.closes++ }
 
-func TestFailedRebuildClosesSupersededConnections(t *testing.T) {
-	s := enclave.NewTestHandle("enclave.example", nil, func() (*verify.Verification, error) {
+func TestRefreshClosesReplacedConnections(t *testing.T) {
+	newErr := errors.New("the new verification endorses no key for this transport")
+	var created []*idleCountingTransport
+	transport := newTestTransport(t, nil, func() (*verify.Verification, error) {
 		return testState(time.Now().Add(time.Hour), "key"), nil
-	})
-	buildErr := errors.New("the new verification endorses no key for this transport")
-	first := &idleCountingTransport{RoundTripper: roundTripFunc(func(*http.Request) (*http.Response, error) { return testResponse(), nil })}
-	builds := 0
-	transport, err := newTestTransport(s, func(*verify.Verification) (http.RoundTripper, error) {
-		builds++
-		if builds > 1 {
-			return nil, buildErr
+	}, testMode(func(*verify.Verification) (http.RoundTripper, error) {
+		if len(created) == 1 {
+			created = append(created, nil)
+			return nil, newErr
 		}
-		return first, nil
-	})
+		rt := &idleCountingTransport{RoundTripper: roundTripFunc(func(*http.Request) (*http.Response, error) { return testResponse(), nil })}
+		created = append(created, rt)
+		return rt, nil
+	}))
+	_, err := transport.EnsureVerified(context.Background())
 	require.NoError(t, err)
-	_, err = transport.EnsureVerified(context.Background())
+	first := created[0]
+	_, err = transport.Reverify(context.Background())
+	require.ErrorIs(t, err, newErr)
+	require.Zero(t, first.closes, "a failed refresh keeps the current round tripper")
+	_, err = transport.Reverify(context.Background())
 	require.NoError(t, err)
-	_, err = s.Reverify(context.Background())
-	require.NoError(t, err)
-	_, err = transport.EnsureVerified(context.Background())
-	require.ErrorIs(t, err, buildErr)
-	require.Equal(t, 1, first.closes, "connections bound to the superseded keys are closed even though no replacement was built")
+	require.Equal(t, 1, first.closes, "connections tied to the replaced keys are closed")
 }

@@ -12,6 +12,7 @@ import (
 
 	"github.com/tinfoilsh/tinfoil-go/internal/enclave"
 	"github.com/tinfoilsh/tinfoil-go/internal/fetch"
+	"github.com/tinfoilsh/tinfoil-go/internal/transport"
 	"github.com/tinfoilsh/tinfoil-go/verify"
 )
 
@@ -67,13 +68,13 @@ func fetchRouters(ctx context.Context) ([]string, error) {
 	return routers, nil
 }
 
-// Discover returns a handle for the first router from Tinfoil's router
-// list that verifies under v and passes check, and otherwise for
-// inference.tinfoil.sh, which it leaves to be verified on first use. nil v
+// Discover returns the transport newTransport makes for the first router from
+// Tinfoil's router list that verifies under v and passes check, and otherwise
+// for inference.tinfoil.sh, which it leaves to be verified on first use. nil v
 // selects the default policy, and nil check accepts every router. It stops
 // trying routers after discoveryTimeout, or sooner when ctx ends.
-func Discover(ctx context.Context, v *verify.Verifier, check func(v *verify.Verification) error) (*enclave.Handle, error) {
-	fallback, err := enclave.NewHandle(enclave.Config{Host: "inference.tinfoil.sh", Repo: defaultRouterRepo, Verifier: v, VerificationCheck: check})
+func Discover(ctx context.Context, v *verify.Verifier, check func(v *verify.Verification) error, newTransport func(*enclave.Enclave) *transport.Transport) (*transport.Transport, error) {
+	fallback, err := enclave.New(enclave.Config{Host: "inference.tinfoil.sh", Repo: defaultRouterRepo, Verifier: v, VerificationCheck: check})
 	if err != nil {
 		return nil, err
 	}
@@ -89,10 +90,13 @@ func Discover(ctx context.Context, v *verify.Verifier, check func(v *verify.Veri
 		if !time.Now().Before(deadline) {
 			break
 		}
-		candidate, err := enclave.NewHandle(enclave.Config{Host: router, Repo: fallback.Repo(), Verifier: fallback.Verifier(), VerificationCheck: check})
+		e, err := enclave.New(enclave.Config{Host: router, Repo: fallback.Repo(), Verifier: fallback.Verifier(), VerificationCheck: check})
 		if err != nil {
 			return nil, err
 		}
+		// The candidate keeps the verification, so the client doesn't repeat
+		// it, and a router whose keys the mode can't use is skipped.
+		candidate := newTransport(e)
 		if _, err := candidate.VerifyOnce(probing); err == nil {
 			return candidate, nil
 		}
@@ -100,5 +104,5 @@ func Discover(ctx context.Context, v *verify.Verifier, check func(v *verify.Veri
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	return fallback, nil
+	return newTransport(fallback), nil
 }

@@ -230,7 +230,7 @@ func TestTransportModeDefaultsToTheRoutes(t *testing.T) {
 }
 
 func TestKeyedTransportFollowsTheMode(t *testing.T) {
-	h := enclave.NewTestHandle("enclave.example", nil, func() (*verify.Verification, error) {
+	e := enclave.NewForTest("enclave.example", func() (*verify.Verification, error) {
 		t.Error("each transport mode refuses its request before verifying")
 		return nil, errors.New("unreachable")
 	})
@@ -239,9 +239,9 @@ func TestKeyedTransportFollowsTheMode(t *testing.T) {
 	upgrade.Header.Set("Upgrade", "websocket")
 	plaintext, err := http.NewRequest(http.MethodGet, "http://enclave.example/v1/models", nil)
 	require.NoError(t, err)
-	_, err = keyedTransport(TransportModeEHBP, h).RoundTrip(upgrade)
+	_, err = keyedTransport(TransportModeEHBP, e).RoundTrip(upgrade)
 	require.ErrorContains(t, err, "EHBP seals only request and response bodies")
-	_, err = keyedTransport(TransportModeTLS, h).RoundTrip(plaintext)
+	_, err = keyedTransport(TransportModeTLS, e).RoundTrip(plaintext)
 	require.ErrorContains(t, err, "requires an HTTPS request")
 }
 

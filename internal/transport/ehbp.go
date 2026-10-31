@@ -15,11 +15,11 @@ import (
 var errEHBPTunnel = errors.New("EHBP seals only request and response bodies, so it can't protect a protocol upgrade, such as a WebSocket, or a CONNECT tunnel; use the TLS transport mode on a direct connection")
 
 // WithEHBP returns a Transport that seals request and response bodies to the
-// HPKE key h's current verification attests, and sends the sealed requests
+// HPKE key e's current verification attests, and sends the sealed requests
 // over next; nil next uses http.DefaultTransport, as http.Client does. It
 // refuses the requests CheckEHBP rejects.
-func WithEHBP(next http.RoundTripper, h *enclave.Handle) *Transport {
-	return &Transport{handle: h, mode: ehbpMode{next: next}}
+func WithEHBP(next http.RoundTripper, e *enclave.Enclave) *Transport {
+	return &Transport{enclave: e, mode: ehbpMode{next: next}}
 }
 
 // ehbpMode seals bodies to the attested HPKE key and sends them over next.

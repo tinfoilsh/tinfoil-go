@@ -27,11 +27,11 @@ var (
 )
 
 // TLS returns a Transport that pins each connection's leaf certificate to the
-// TLS key h's current verification attests. It owns the connections, so it
+// TLS key e's current verification attests. It owns the connections, so it
 // is the bottom of a stack. It refuses plaintext requests, which no pinned
 // connection carries.
-func TLS(h *enclave.Handle) *Transport {
-	return &Transport{handle: h, mode: tlsMode{}}
+func TLS(e *enclave.Enclave) *Transport {
+	return &Transport{enclave: e, mode: tlsMode{}}
 }
 
 // tlsMode pins connections to the attested TLS key.
