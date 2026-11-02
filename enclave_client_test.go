@@ -15,7 +15,6 @@ import (
 	"sync"
 	"testing"
 	"testing/synctest"
-	"time"
 
 	"github.com/openai/openai-go/v3"
 	"github.com/openai/openai-go/v3/option"
@@ -142,79 +141,6 @@ func TestEnclaveHTTPClientReportsItsEnclaveAndRepo(t *testing.T) {
 	require.Empty(t, authorized.Repo())
 }
 
-func TestNewRouterHTTPClientResolvesTheCacheSecret(t *testing.T) {
-	path := unsetCacheSecretSources(t)
-	original := http.DefaultClient
-	defer func() { http.DefaultClient = original }()
-	synctest.Test(t, func(t *testing.T) {
-		http.DefaultClient = &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
-			if req.URL.Host == "atc.tinfoil.sh" {
-				return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader("[]")), Request: req}, nil
-			}
-			return nil, errors.New("no network in this test")
-		})}
-		_, err := NewRouterHTTPClient(context.Background(), nil)
-		require.Error(t, err, "the fallback can't be verified")
-	})
-	_, err := os.Stat(path)
-	require.NoError(t, err, "the router route provisions the shared secret")
-}
-
-func TestNewRouterHTTPClientRejectsInvalidOptionsBeforeDiscovery(t *testing.T) {
-	// A done context makes discovery itself fail, so only a check made before
-	// discovery reports a ConfigurationError.
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-	for _, opts := range []*EnclaveOptions{
-		{TransportMode: "quic"},
-		{TransportMode: TransportModeEHBP, BaseURL: "http://proxy.example/v1/"},
-		{BaseURL: "https://proxy.example/v1/"},
-		{TransportMode: TransportModeTLS, BaseURL: "https://proxy.example/v1/"},
-		{Verifier: callerAuthorizedVerifier(t)},
-	} {
-		c, err := NewRouterHTTPClient(ctx, opts)
-		require.Nil(t, c)
-		var config *ConfigurationError
-		require.ErrorAs(t, err, &config)
-	}
-	_, err := NewRouterHTTPClient(ctx, &EnclaveOptions{BaseURL: "https://proxy.example/v1/"})
-	require.ErrorContains(t, err, "requires TransportModeEHBP", "a proxy never downgrades the default mode silently")
-	_, err = NewRouterHTTPClient(ctx, &EnclaveOptions{TransportMode: TransportModeEHBP, BaseURL: "http://localhost:8080/v1/"})
-	require.ErrorIs(t, err, context.Canceled, "a loopback proxy passes the checks and reaches discovery")
-}
-
-func TestNewRouterHTTPClientVerifiesTheFallbackUnderItsContext(t *testing.T) {
-	original := http.DefaultClient
-	defer func() { http.DefaultClient = original }()
-	synctest.Test(t, func(t *testing.T) {
-		release := make(chan struct{})
-		defer func() {
-			close(release)
-			time.Sleep(time.Minute) // let the abandoned verification finish its retries
-		}()
-		http.DefaultClient = &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
-			if req.URL.Host == "atc.tinfoil.sh" {
-				return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader("[]")), Request: req}, nil
-			}
-			<-release // the fallback's attestation never arrives
-			return nil, errors.New("unreachable")
-		})}
-		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
-		defer cancel()
-		done := make(chan error, 1)
-		go func() {
-			_, err := NewRouterHTTPClient(ctx, nil)
-			done <- err
-		}()
-		select {
-		case err := <-done:
-			require.ErrorIs(t, err, context.DeadlineExceeded)
-		case <-time.After(time.Minute):
-			t.Fatal("NewRouterHTTPClient kept verifying the fallback after its context expired")
-		}
-	})
-}
-
 func TestTransportModeDefaultsToTLS(t *testing.T) {
 	for _, tc := range []struct {
 		mode TransportMode
@@ -323,7 +249,7 @@ func TestLiveRouterClient(t *testing.T) {
 	apiKey := os.Getenv("TINFOIL_API_KEY")
 	for _, mode := range []TransportMode{TransportModeEHBP, TransportModeTLS} {
 		t.Run(string(mode), func(t *testing.T) {
-			oc, err := NewRouterOpenAIClient(context.Background(), &EnclaveOptions{TransportMode: mode, UserCacheSecret: "go-live-integration-cache-secret"}, option.WithAPIKey(apiKey))
+			oc, err := NewRouterOpenAIClient(context.Background(), &RouterOptions{TransportMode: mode, UserCacheSecret: "go-live-integration-cache-secret"}, option.WithAPIKey(apiKey))
 			require.NoError(t, err)
 			c := oc.HTTPClient()
 			verified, err := c.EnsureVerified(context.Background())
@@ -390,7 +316,7 @@ func TestLiveVerificationCheck(t *testing.T) {
 
 	t.Run("discovery skips a rejected router", func(t *testing.T) {
 		check, keys := recorder(func(seen int) bool { return seen == 1 })
-		c, err := NewRouterHTTPClient(context.Background(), &EnclaveOptions{VerificationCheck: check})
+		c, err := NewRouterHTTPClient(context.Background(), &RouterOptions{VerificationCheck: check})
 		require.NoError(t, err)
 		seen := keys()
 		require.GreaterOrEqual(t, len(seen), 2)

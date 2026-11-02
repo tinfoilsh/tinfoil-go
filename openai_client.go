@@ -28,24 +28,41 @@ func NewEnclaveOpenAIClient(ctx context.Context, host, repo string, opts *Enclav
 	return newEnclaveOpenAIClient(c, openaiOpts), nil
 }
 
-// NewRouterOpenAIClient creates an EnclaveHTTPClient for a router as
-// NewRouterHTTPClient does, and an OpenAI client over it as
-// NewEnclaveOpenAIClient does. It exists only while the router is Tinfoil's
-// default route.
-func NewRouterOpenAIClient(ctx context.Context, opts *EnclaveOptions, openaiOpts ...option.RequestOption) (*EnclaveOpenAIClient, error) {
-	c, err := NewRouterHTTPClient(ctx, opts)
-	if err != nil {
-		return nil, err
-	}
-	return newEnclaveOpenAIClient(c, openaiOpts), nil
-}
-
 func newEnclaveOpenAIClient(c *EnclaveHTTPClient, opts []option.RequestOption) *EnclaveOpenAIClient {
 	return &EnclaveOpenAIClient{Client: newOpenAIClient(c.secure, c.openAIURL, opts), httpClient: c}
 }
 
 // HTTPClient returns the enclave client the OpenAI client sends through.
 func (c *EnclaveOpenAIClient) HTTPClient() *EnclaveHTTPClient {
+	return c.httpClient
+}
+
+// RouterOpenAIClient is an OpenAI client whose requests go through a
+// RouterHTTPClient, to RouterOptions.BaseURL or, when that is unset, the
+// router's /v1/ API. A per-request option.WithHTTPClient bypasses the router
+// client and its protections.
+type RouterOpenAIClient struct {
+	*openai.Client
+	httpClient *RouterHTTPClient
+}
+
+// NewRouterOpenAIClient creates a RouterHTTPClient as NewRouterHTTPClient
+// does, and an OpenAI client over it. It applies openaiOpts, then sets the
+// HTTP client and base URL so that openaiOpts can't replace them.
+func NewRouterOpenAIClient(ctx context.Context, opts *RouterOptions, openaiOpts ...option.RequestOption) (*RouterOpenAIClient, error) {
+	c, err := NewRouterHTTPClient(ctx, opts)
+	if err != nil {
+		return nil, err
+	}
+	return newRouterOpenAIClient(c, openaiOpts), nil
+}
+
+func newRouterOpenAIClient(c *RouterHTTPClient, opts []option.RequestOption) *RouterOpenAIClient {
+	return &RouterOpenAIClient{Client: newOpenAIClient(c.secure, c.openAIURL, opts), httpClient: c}
+}
+
+// HTTPClient returns the router client the OpenAI client sends through.
+func (c *RouterOpenAIClient) HTTPClient() *RouterHTTPClient {
 	return c.httpClient
 }
 

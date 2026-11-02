@@ -153,7 +153,7 @@ verifier, err := verify.NewVerifier(
 ```
 
 The SDK's clients take this verifier as their policy, through
-`EnclaveOptions.Verifier` and `GatewayOptions.Verifier`.
+`EnclaveOptions.Verifier`, `RouterOptions.Verifier` and `GatewayOptions.Verifier`.
 
 ## JavaScript / TypeScript / WASM
 

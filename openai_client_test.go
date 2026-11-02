@@ -35,12 +35,22 @@ func TestOpenAIClientsSendThroughTheirHTTPClient(t *testing.T) {
 		{
 			name: "enclave",
 			newClient: func(t *testing.T, opts ...option.RequestOption) (*openai.Client, *http.Client, *http.Client) {
-				c := &EnclaveHTTPClient{Client: &http.Client{}, secure: &http.Client{}, openAIURL: "https://enclave.example/v1/"}
+				c := &EnclaveHTTPClient{Client: &http.Client{}, attestedClient: attestedClient{secure: &http.Client{}, openAIURL: "https://enclave.example/v1/"}}
 				oc := newEnclaveOpenAIClient(c, opts)
 				require.Same(t, c, oc.HTTPClient())
 				return oc.Client, c.secure, c.Client
 			},
 			wantURL: "https://enclave.example/v1/models",
+		},
+		{
+			name: "router",
+			newClient: func(t *testing.T, opts ...option.RequestOption) (*openai.Client, *http.Client, *http.Client) {
+				c := &RouterHTTPClient{Client: &http.Client{}, attestedClient: attestedClient{secure: &http.Client{}, openAIURL: "https://router.example/v1/"}}
+				oc := newRouterOpenAIClient(c, opts)
+				require.Same(t, c, oc.HTTPClient())
+				return oc.Client, c.secure, c.Client
+			},
+			wantURL: "https://router.example/v1/models",
 		},
 		{
 			name: "gateway",
@@ -79,7 +89,7 @@ func TestOpenAIClientsRejectInvalidOptions(t *testing.T) {
 	enclave, err := NewEnclaveOpenAIClient(t.Context(), "", "org/repo", nil)
 	require.Nil(t, enclave)
 	require.ErrorAs(t, err, &config)
-	router, err := NewRouterOpenAIClient(t.Context(), &EnclaveOptions{TransportMode: "quic"})
+	router, err := NewRouterOpenAIClient(t.Context(), &RouterOptions{TransportMode: "quic"})
 	require.Nil(t, router)
 	require.ErrorAs(t, err, &config)
 	gateway, err := NewGatewayOpenAIClient(t.Context(), &GatewayOptions{URL: "http://gateway.example/v1/", Catalog: func() Catalog { return Catalog{} }})

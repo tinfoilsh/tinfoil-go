@@ -9,32 +9,30 @@ import (
 	"github.com/openai/openai-go/v3/option"
 )
 
-// Client wraps the OpenAI client to provide secure inference through Tinfoil
-// on its default route.
+// Client is an OpenAI client for Tinfoil's recommended route.
 type Client struct {
 	*openai.Client
 	httpClient *http.Client
 	baseURL    string
 }
 
-// NewClient returns an OpenAI client for Tinfoil's default route, verified
-// under ctx before it returns, as NewRouterOpenAIClient does with default
-// options.
+// NewClient returns an OpenAI client for Tinfoil's recommended route,
+// verified under ctx before it returns.
 func NewClient(ctx context.Context, openaiOpts ...option.RequestOption) (*Client, error) {
 	client, err := NewRouterOpenAIClient(ctx, nil, openaiOpts...)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create enclave handle: %w", err)
+		return nil, fmt.Errorf("failed to create client: %w", err)
 	}
 	router := client.HTTPClient()
 	return &Client{Client: client.Client, httpClient: router.secure, baseURL: router.openAIURL}, nil
 }
 
-// HTTPClient returns the underlying HTTP client used to reach the enclave. It
-// re-verifies before new requests when witnesses expire or the enclave rotates its key.
-// It is bound to the verified enclave: requests to any other origin are
-// refused to avoid disclosing sensitive headers. Each connection is pinned to
-// the enclave's attested TLS key, so the whole request and response are
-// protected.
+// HTTPClient returns the HTTP client the OpenAI client sends through. It
+// verifies the service behind the route again before new requests when the
+// verification expires or its key changes. It is bound to that service:
+// requests to any other origin are refused to avoid disclosing sensitive
+// headers. A request's body and the response to it are protected end to end;
+// don't rely on headers, or a request without a body, being private.
 func (c *Client) HTTPClient() *http.Client {
 	return c.httpClient
 }
