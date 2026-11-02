@@ -21,19 +21,25 @@ import (
 func TestErrorContract(t *testing.T) {
 	cause := &url.Error{Op: "Get", URL: "https://enclave.example", Err: context.DeadlineExceeded}
 	for _, tc := range []struct {
-		prefix string
-		err    error
-		target any
+		prefix   string
+		err      error
+		category error
 	}{
-		{"configuration", &tinfoil.ConfigurationError{Err: cause}, new(*tinfoil.ConfigurationError)},
-		{"network", errs.WrapNetwork(cause), new(*tinfoil.NetworkError)},
-		{"attestation", errs.WrapAttestation(cause), new(*tinfoil.AttestationError)},
+		{"configuration", errs.Configuration(cause), tinfoil.ErrConfiguration},
+		{"network", errs.WrapNetwork(cause), tinfoil.ErrNetwork},
+		{"attestation", errs.WrapAttestation(cause), tinfoil.ErrAttestation},
 	} {
 		t.Run(tc.prefix, func(t *testing.T) {
 			err := tc.err
-			require.ErrorAs(t, err, tc.target)
-			var sdkError tinfoil.Error
+			require.ErrorIs(t, err, tc.category)
+			for _, other := range []error{tinfoil.ErrConfiguration, tinfoil.ErrNetwork, tinfoil.ErrAttestation} {
+				if other != tc.category {
+					require.NotErrorIs(t, err, other, "an error has one category")
+				}
+			}
+			var sdkError *tinfoil.Error
 			require.ErrorAs(t, err, &sdkError)
+			require.Same(t, cause, sdkError.Err)
 			var networkError *url.Error
 			require.ErrorAs(t, err, &networkError)
 			require.Same(t, cause, networkError)
@@ -50,9 +56,8 @@ func TestErrorContract(t *testing.T) {
 }
 
 func TestPublicInputErrors(t *testing.T) {
-	var config *tinfoil.ConfigurationError
 	_, err := tinfoil.NewEnclaveHTTPClient(t.Context(), "enclave.example", "org/repo", &tinfoil.EnclaveOptions{TransportMode: "invalid"})
-	require.ErrorAs(t, err, &config)
+	require.ErrorIs(t, err, tinfoil.ErrConfiguration)
 	var usage *verify.UsageError
 	verifier, err := verify.NewVerifier()
 	require.NoError(t, err)
@@ -61,17 +66,17 @@ func TestPublicInputErrors(t *testing.T) {
 	_, err = verifier.VerifyV3(nil, nil, "org/repo")
 	require.ErrorAs(t, err, &usage)
 	_, err = tinfoil.NewEnclaveHTTPClient(t.Context(), "enclave.example", "", nil)
-	require.ErrorAs(t, err, &config, "reject missing trust configuration before fetching")
+	require.ErrorIs(t, err, tinfoil.ErrConfiguration, "reject missing trust configuration before fetching")
 	for _, repo := range []string{"owner", "owner/repo/extra", "owner/repo@sha256:bad"} {
 		_, err = tinfoil.NewEnclaveHTTPClient(t.Context(), "enclave.example", repo, nil)
-		require.ErrorAs(t, err, &config)
+		require.ErrorIs(t, err, tinfoil.ErrConfiguration)
 		_, err = verifier.VerifyV3(nil, nil, repo)
 		require.ErrorAs(t, err, &usage)
 	}
 	_, err = enclave.New(enclave.Config{Host: "enclave.example", Repo: "org/repo@v1@sha256:" + strings.Repeat("a", 64)})
 	require.NoError(t, err)
 	_, err = fetch.Document(t.Context(), "", "", make([]byte, document.NonceSize))
-	require.ErrorAs(t, err, &config)
+	require.ErrorIs(t, err, tinfoil.ErrConfiguration)
 	var verified *verify.Verification
 	_, ok := verified.TLSPublicKeyFP()
 	require.False(t, ok, "a nil verification endorses nothing")

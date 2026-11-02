@@ -7,6 +7,7 @@ import (
 
 	"github.com/tinfoilsh/tinfoil-go/internal/cachesecret"
 	"github.com/tinfoilsh/tinfoil-go/internal/enclave"
+	"github.com/tinfoilsh/tinfoil-go/internal/errs"
 	"github.com/tinfoilsh/tinfoil-go/internal/router"
 	"github.com/tinfoilsh/tinfoil-go/internal/transport"
 	"github.com/tinfoilsh/tinfoil-go/verify"
@@ -25,14 +26,14 @@ type RouterOptions struct {
 	// local development proxy or a sidecar.
 	BaseURL string
 	// Verifier is the verification policy; nil selects the defaults. A
-	// verifier that authorizes the config itself is a ConfigurationError,
+	// verifier that authorizes the config itself is an ErrConfiguration error,
 	// since it needs an explicit enclave.
 	Verifier *verify.Verifier
 	// VerificationCheck, when set, is called with each verification that
 	// passes Verifier, before the client uses the router's keys: for each
 	// router tried during discovery, and whenever the client verifies again.
 	// Return an error to reject the router. Discovery then moves on to the
-	// next router; otherwise verification fails with an AttestationError that
+	// next router; otherwise verification fails with an ErrAttestation error that
 	// wraps the error and isn't retried. Requests wait while it runs, so keep
 	// it fast; it may be called concurrently.
 	VerificationCheck func(v *verify.Verification) error
@@ -71,11 +72,11 @@ func NewRouterHTTPClient(ctx context.Context, opts *RouterOptions) (*RouterHTTPC
 			return nil, err
 		}
 		if mode == TransportModeTLS {
-			return nil, &ConfigurationError{Err: errors.New("a base URL is a proxy when discovering the router, which requires TransportModeEHBP")}
+			return nil, errs.Configuration(errors.New("a base URL is a proxy when discovering the router, which requires TransportModeEHBP"))
 		}
 	}
 	if opts.Verifier != nil && opts.Verifier.CallerAuthorizesConfig() {
-		return nil, &ConfigurationError{Err: errors.New("caller-authorized config requires an explicit enclave")}
+		return nil, errs.Configuration(errors.New("caller-authorized config requires an explicit enclave"))
 	}
 	keyed, err := router.Discover(ctx, opts.Verifier, opts.VerificationCheck, func(e *enclave.Enclave) *transport.Transport {
 		return keyedTransport(mode, e)

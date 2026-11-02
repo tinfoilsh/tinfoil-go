@@ -77,9 +77,8 @@ func TestURL(t *testing.T) {
 	require.Error(t, err)
 
 	// Document reports a URL it cannot build as the caller's configuration.
-	var config *errs.ConfigurationError
 	_, err = Document(t.Context(), "https://enclave.example", "", testNonce())
-	require.ErrorAs(t, err, &config)
+	require.ErrorIs(t, err, errs.ErrConfiguration)
 }
 
 type fetchTransport func(*http.Request) (*http.Response, error)

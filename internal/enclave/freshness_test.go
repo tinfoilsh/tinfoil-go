@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
+	"github.com/tinfoilsh/tinfoil-go/internal/errs"
 	"github.com/tinfoilsh/tinfoil-go/internal/fetch"
 	"github.com/tinfoilsh/tinfoil-go/internal/testutil"
 	"github.com/tinfoilsh/tinfoil-go/verify"
@@ -59,8 +60,7 @@ func TestLiveVerifyFreshnessExpiration(t *testing.T) {
 	s, err := New(Config{Host: host, Repo: repo, Verifier: v})
 	require.NoError(t, err)
 	_, err = s.Verify()
-	var attestation *AttestationError
-	require.ErrorAs(t, err, &attestation)
+	require.ErrorIs(t, err, errs.ErrAttestation)
 }
 
 // exactPins pins every register of m, replacing its first register with first

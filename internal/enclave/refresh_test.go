@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
+	"github.com/tinfoilsh/tinfoil-go/internal/errs"
 	"github.com/tinfoilsh/tinfoil-go/verify"
 )
 
@@ -28,8 +29,7 @@ func TestVerificationFetchStillTimesOut(t *testing.T) {
 		require.NoError(t, err)
 		_, err = client.Verify()
 		require.ErrorIs(t, err, context.DeadlineExceeded)
-		var fetch *NetworkError
-		require.ErrorAs(t, err, &fetch)
+		require.ErrorIs(t, err, errs.ErrNetwork)
 		require.True(t, strings.HasPrefix(err.Error(), "network error: "), "verification fetch retains its SDK category prefix")
 		require.Equal(t, 2, requests)
 		require.Equal(t, 61*time.Second, time.Since(start), "two bounded 30-second fetches and one recovery delay")
@@ -48,8 +48,7 @@ func TestRejectedDocumentIsAttestationError(t *testing.T) {
 		client, err := New(Config{Host: "enclave.example", Repo: "org/repo"})
 		require.NoError(t, err)
 		_, err = client.Verify()
-		var attestation *AttestationError
-		require.ErrorAs(t, err, &attestation)
+		require.ErrorIs(t, err, errs.ErrAttestation)
 		var rejected *verify.VerificationError
 		require.ErrorAs(t, err, &rejected, "verify's error remains the cause")
 		require.True(t, strings.HasPrefix(err.Error(), "attestation error: "), err.Error())

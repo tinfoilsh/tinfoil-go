@@ -61,8 +61,7 @@ func TestNewEnclaveHTTPClientRejectsInvalidOptions(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			c, err := NewEnclaveHTTPClient(t.Context(), tc.host, tc.repo, tc.opts)
 			require.Nil(t, c)
-			var config *ConfigurationError
-			require.ErrorAs(t, err, &config)
+			require.ErrorIs(t, err, ErrConfiguration)
 		})
 	}
 }
@@ -238,8 +237,7 @@ func TestNewGatewayHTTPClientRejectsInvalidOptions(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			gw, err := NewGatewayHTTPClient(t.Context(), opts)
 			require.Nil(t, gw)
-			var config *ConfigurationError
-			require.ErrorAs(t, err, &config)
+			require.ErrorIs(t, err, ErrConfiguration)
 		})
 	}
 }
@@ -330,8 +328,7 @@ func TestLiveVerificationCheck(t *testing.T) {
 		c, err := NewEnclaveHTTPClient(context.Background(), os.Getenv("TINFOIL_ENCLAVE"), os.Getenv("TINFOIL_REPO"), &EnclaveOptions{VerificationCheck: check})
 		require.Nil(t, c, "a rejected enclave fails the constructor")
 		require.ErrorIs(t, err, rejection)
-		var attestation *AttestationError
-		require.ErrorAs(t, err, &attestation)
+		require.ErrorIs(t, err, ErrAttestation)
 		require.Len(t, keys(), 1, "a rejection isn't retried")
 	})
 
@@ -405,8 +402,7 @@ func TestValidateBaseURL(t *testing.T) {
 		"/v1/",
 		"ftp://localhost/v1/",
 	} {
-		var config *ConfigurationError
-		require.ErrorAs(t, validateBaseURL(baseURL), &config, baseURL)
+		require.ErrorIs(t, validateBaseURL(baseURL), ErrConfiguration, baseURL)
 	}
 }
 
@@ -421,8 +417,7 @@ func TestLoopbackProxyAuthorizesOnlyItsOrigin(t *testing.T) {
 		"http://enclave.example/v1/models",
 	} {
 		_, err := c.Get(target)
-		var config *ConfigurationError
-		require.ErrorAs(t, err, &config, "%s is refused before verifying, so no network I/O", target)
+		require.ErrorIs(t, err, ErrConfiguration, "%s is refused before verifying, so no network I/O", target)
 		require.ErrorContains(t, err, "refusing to send request")
 	}
 }
@@ -480,8 +475,7 @@ func TestEnclaveChainStacksEveryLayer(t *testing.T) {
 	req, err = http.NewRequest(http.MethodGet, "https://elsewhere.example/v1/models", nil)
 	require.NoError(t, err)
 	_, err = rt.RoundTrip(req)
-	var config *ConfigurationError
-	require.ErrorAs(t, err, &config, "origins other than the enclave and the base URL are refused")
+	require.ErrorIs(t, err, ErrConfiguration, "origins other than the enclave and the base URL are refused")
 	require.Len(t, attempts, 2)
 }
 
@@ -490,8 +484,7 @@ func TestEnclaveHTTPClientRefusesOtherOrigins(t *testing.T) {
 		c, err := unverifiedEnclaveHTTPClient("enclave.example", "org/repo", &EnclaveOptions{TransportMode: mode})
 		require.NoError(t, err)
 		_, err = c.Get("https://elsewhere.example/v1/models")
-		var config *ConfigurationError
-		require.ErrorAs(t, err, &config, "refused before verifying, so no network I/O")
+		require.ErrorIs(t, err, ErrConfiguration, "refused before verifying, so no network I/O")
 		require.ErrorContains(t, err, "refusing to send request")
 	}
 }
@@ -500,7 +493,6 @@ func TestGatewayHTTPClientRefusesOtherOrigins(t *testing.T) {
 	gw, err := NewGatewayHTTPClient(t.Context(), &GatewayOptions{Catalog: func() Catalog { return Catalog{} }})
 	require.NoError(t, err)
 	_, err = gw.Get("https://elsewhere.example/v1/models")
-	var config *ConfigurationError
-	require.ErrorAs(t, err, &config)
+	require.ErrorIs(t, err, ErrConfiguration)
 	require.ErrorContains(t, err, "refusing to send request")
 }

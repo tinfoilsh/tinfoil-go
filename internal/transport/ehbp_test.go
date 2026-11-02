@@ -26,12 +26,11 @@ func hpkeVerification(key string) *verify.Verification {
 func TestEHBPRequiresHPKEKey(t *testing.T) {
 	sealing := ehbpMode{}
 	_, err := sealing.newRoundTripper(&verify.Verification{})
-	var attestation *errs.AttestationError
-	require.ErrorAs(t, err, &attestation)
+	require.ErrorIs(t, err, errs.ErrAttestation)
 	require.ErrorContains(t, err, "use the TLS transport mode")
 
 	_, err = sealing.newRoundTripper(hpkeVerification(""))
-	require.ErrorAs(t, err, &attestation)
+	require.ErrorIs(t, err, errs.ErrAttestation)
 	require.ErrorContains(t, err, "HPKE public key")
 }
 
@@ -83,8 +82,7 @@ func TestKeyTransportsRefuseRequestsTheyCantProtect(t *testing.T) {
 				require.NoError(t, err)
 				return
 			}
-			var config *errs.ConfigurationError
-			require.ErrorAs(t, err, &config)
+			require.ErrorIs(t, err, errs.ErrConfiguration)
 			require.ErrorIs(t, err, tc.refused)
 		})
 	}

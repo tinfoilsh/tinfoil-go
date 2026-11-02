@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/url"
 
+	"github.com/tinfoilsh/tinfoil-go/internal/errs"
 	"github.com/tinfoilsh/tinfoil-go/internal/gateway"
 	"github.com/tinfoilsh/tinfoil-go/internal/transport"
 	"github.com/tinfoilsh/tinfoil-go/verify"
@@ -96,7 +97,7 @@ func unverifiedGatewayHTTPClient(opts *GatewayOptions) (*GatewayHTTPClient, erro
 	baseURL := cmp.Or(opts.URL, defaultGatewayURL)
 	base, err := url.Parse(baseURL)
 	if err != nil || base.Scheme != "https" || base.Host == "" {
-		return nil, &ConfigurationError{Err: fmt.Errorf("gateway base URL must be an absolute HTTPS URL: %q", baseURL)}
+		return nil, errs.Configuration(fmt.Errorf("gateway base URL must be an absolute HTTPS URL: %q", baseURL))
 	}
 	pins := make(map[string]gateway.ModelPin, len(opts.ModelPins))
 	for model, pin := range opts.ModelPins {

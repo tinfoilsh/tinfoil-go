@@ -136,8 +136,7 @@ func TestSealRefusesUpgradesBeforeTouchingReplicas(t *testing.T) {
 	req.Header.Set("Connection", "Upgrade")
 	req.Header.Set("Upgrade", "websocket")
 	_, err := tr.RoundTrip(req)
-	var config *errs.ConfigurationError
-	require.ErrorAs(t, err, &config)
+	require.ErrorIs(t, err, errs.ErrConfiguration)
 	require.ErrorContains(t, err, "WebSocket")
 }
 

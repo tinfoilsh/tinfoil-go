@@ -26,13 +26,13 @@ func Document(ctx context.Context, host, relay string, nonce []byte) (result []b
 	defer func() { err = errs.WrapNetwork(err) }()
 	target, err := URL(host, relay, nonce)
 	if err != nil {
-		return nil, &errs.ConfigurationError{Err: err}
+		return nil, errs.Configuration(err)
 	}
 	ctx, cancel := context.WithTimeout(ctx, attestationFetchTimeout)
 	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, target, nil)
 	if err != nil {
-		return nil, &errs.ConfigurationError{Err: err}
+		return nil, errs.Configuration(err)
 	}
 	req.Header.Set(sdkNameHeader, sdkinfo.Name)
 	req.Header.Set(sdkVersionHeader, sdkinfo.Version())

@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/tinfoilsh/tinfoil-go/internal/enclave"
+	"github.com/tinfoilsh/tinfoil-go/internal/errs"
 	"github.com/tinfoilsh/tinfoil-go/verify"
 )
 
@@ -117,7 +118,7 @@ func (t *Transport) refresh(verify func(*enclave.Enclave) (*verify.Verification,
 	// Creating the round tripper or waiting for mu can outlast freshness.
 	if err == nil && !s.valid() {
 		closeIdleConnections(s.roundTripper)
-		err = &enclave.AttestationError{Err: enclave.ErrFreshnessExpired}
+		err = errs.Attestation(enclave.ErrFreshnessExpired)
 	}
 	if err == nil {
 		// Idle connections of the replaced state are tied to its keys.

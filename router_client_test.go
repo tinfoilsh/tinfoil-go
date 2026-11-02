@@ -34,7 +34,7 @@ func TestNewRouterHTTPClientResolvesTheCacheSecret(t *testing.T) {
 
 func TestNewRouterHTTPClientRejectsInvalidOptionsBeforeDiscovery(t *testing.T) {
 	// A done context makes discovery itself fail, so only a check made before
-	// discovery reports a ConfigurationError.
+	// discovery reports ErrConfiguration.
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	for _, opts := range []*RouterOptions{
@@ -46,8 +46,7 @@ func TestNewRouterHTTPClientRejectsInvalidOptionsBeforeDiscovery(t *testing.T) {
 	} {
 		c, err := NewRouterHTTPClient(ctx, opts)
 		require.Nil(t, c)
-		var config *ConfigurationError
-		require.ErrorAs(t, err, &config)
+		require.ErrorIs(t, err, ErrConfiguration)
 	}
 	_, err := NewRouterHTTPClient(ctx, &RouterOptions{BaseURL: "https://proxy.example/v1/"})
 	require.ErrorContains(t, err, "requires TransportModeEHBP", "a proxy never downgrades the default mode silently")

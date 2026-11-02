@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	"github.com/tinfoilsh/tinfoil-go/internal/errs"
 	"github.com/tinfoilsh/tinfoil-go/internal/verifytest"
 	"github.com/tinfoilsh/tinfoil-go/verify/document"
 )
@@ -27,8 +28,7 @@ func TestVerifiedTransportKeysAllowTLSOnly(t *testing.T) {
 			v := verifytest.New(verifytest.Fields{CryptoMaterial: tt.items})
 			err := validateTransportKeys(v)
 			if tt.wantErr != "" {
-				var attestation *AttestationError
-				require.ErrorAs(t, err, &attestation)
+				require.ErrorIs(t, err, errs.ErrAttestation)
 				require.ErrorContains(t, err, tt.wantErr)
 				return
 			}

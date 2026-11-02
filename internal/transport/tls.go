@@ -39,7 +39,7 @@ type tlsMode struct{}
 
 func (tlsMode) validateRequest(req *http.Request) error {
 	if req.URL == nil || req.URL.Scheme != "https" {
-		return &errs.ConfigurationError{Err: errNoTLS}
+		return errs.Configuration(errNoTLS)
 	}
 	return nil
 }
@@ -47,7 +47,7 @@ func (tlsMode) validateRequest(req *http.Request) error {
 func (tlsMode) newRoundTripper(v *verify.Verification) (http.RoundTripper, error) {
 	key, ok := v.TLSPublicKeyFP()
 	if !ok {
-		return nil, &errs.AttestationError{Err: errNoTLSKey}
+		return nil, errs.Attestation(errNoTLSKey)
 	}
 	rt, err := newTLSBoundRoundTripper(key)
 	if err != nil {
@@ -70,11 +70,11 @@ var _ http.RoundTripper = &TLSBoundRoundTripper{}
 // fingerprint, on a transport built from http.DefaultTransport's settings.
 func newTLSBoundRoundTripper(key string) (*TLSBoundRoundTripper, error) {
 	if key == "" {
-		return nil, &errs.ConfigurationError{Err: errNoValidCertificate}
+		return nil, errs.Configuration(errNoValidCertificate)
 	}
 	dt, ok := http.DefaultTransport.(*http.Transport)
 	if !ok || dt == nil {
-		return nil, &errs.ConfigurationError{Err: fmt.Errorf("TLS transport mode requires http.DefaultTransport to be a non-nil *http.Transport")}
+		return nil, errs.Configuration(fmt.Errorf("TLS transport mode requires http.DefaultTransport to be a non-nil *http.Transport"))
 	}
 	transport, err := pinnedTransport(dt, key)
 	if err != nil {
@@ -96,7 +96,7 @@ func pinnedTransport(dt *http.Transport, key string) (*http.Transport, error) {
 	// entry that setup adds, so base holds only what the caller configured.
 	base := dt.Clone()
 	if base.DialTLSContext != nil || base.DialTLS != nil {
-		return nil, &errs.ConfigurationError{Err: errCustomTLSDialer}
+		return nil, errs.Configuration(errCustomTLSDialer)
 	}
 
 	// GODEBUG settings can lower Go's default minimum version.
@@ -104,7 +104,7 @@ func pinnedTransport(dt *http.Transport, key string) (*http.Transport, error) {
 	var callerVerifyConnection func(tls.ConnectionState) error
 	if c := base.TLSClientConfig; c != nil {
 		if c.KeyLogWriter != nil {
-			return nil, &errs.ConfigurationError{Err: errKeyLog}
+			return nil, errs.Configuration(errKeyLog)
 		}
 		// Roots decide only the normal certificate check, which runs before
 		// the pin, and the callbacks can only reject, so none of them can
@@ -122,10 +122,10 @@ func pinnedTransport(dt *http.Transport, key string) (*http.Transport, error) {
 
 		certFP, err := verify.ConnectionCertFP(state)
 		if err != nil {
-			return &errs.AttestationError{Err: err}
+			return errs.Attestation(err)
 		}
 		if certFP != key {
-			return &errs.AttestationError{Err: errCertMismatch}
+			return errs.Attestation(errCertMismatch)
 		}
 		return nil
 	}
@@ -170,7 +170,7 @@ func pinnedTransport(dt *http.Transport, key string) (*http.Transport, error) {
 func (t *TLSBoundRoundTripper) RoundTrip(r *http.Request) (*http.Response, error) {
 	// Transport validates this too, but the round tripper can be used alone.
 	if r.URL == nil || r.URL.Scheme != "https" {
-		return nil, &errs.ConfigurationError{Err: errNoTLS}
+		return nil, errs.Configuration(errNoTLS)
 	}
 
 	resp, err := t.transport.RoundTrip(r)
