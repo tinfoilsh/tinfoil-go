@@ -78,8 +78,7 @@ type GatewayOpenAIClient struct {
 // does, and an OpenAI client over it. It applies openaiOpts, then sets the
 // HTTP client and base URL so that openaiOpts can't replace them.
 //
-// Experimental: the gateway route is new, and this API may change or be
-// removed in a later release.
+// Experimental: the gateway route is new.
 func NewGatewayOpenAIClient(ctx context.Context, opts *GatewayOptions, openaiOpts ...option.RequestOption) (*GatewayOpenAIClient, error) {
 	c, err := NewGatewayHTTPClient(ctx, opts)
 	if err != nil {

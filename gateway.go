@@ -75,8 +75,7 @@ type GatewayHTTPClient struct {
 // verified on its first request, so ModelPins may name models the catalog
 // doesn't list.
 //
-// Experimental: the gateway route is new, and this API may change or be
-// removed in a later release.
+// Experimental: the gateway route is new.
 func NewGatewayHTTPClient(ctx context.Context, opts *GatewayOptions) (*GatewayHTTPClient, error) {
 	c, err := unverifiedGatewayHTTPClient(opts)
 	if err != nil {

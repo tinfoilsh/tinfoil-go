@@ -53,11 +53,15 @@ type EnclaveOptions struct {
 	// TransportMode defaults to TransportModeTLS.
 	TransportMode TransportMode
 	// BaseURL is a path on the enclave's own HTTPS origin, or a proxy on
-	// another origin, which requires TransportModeEHBP. Requests to a proxy
-	// carry X-Tinfoil-Enclave-Url so it can forward them to the enclave. A
-	// proxy must use HTTPS, since EHBP doesn't seal headers such as the API
-	// key; http:// is accepted only when its host is localhost or a loopback
-	// IP address, for a local development proxy or a sidecar.
+	// another origin that terminates TLS and forwards each request to the
+	// enclave its X-Tinfoil-Enclave-Url header names. A proxy requires
+	// TransportModeEHBP, since a pinned connection can't pass through it, and
+	// must use HTTPS, since EHBP doesn't seal headers such as the API key;
+	// http:// is accepted only when its host is localhost or a loopback IP
+	// address, for a local development proxy or a sidecar. A forward proxy
+	// isn't a BaseURL: set it with HTTPS_PROXY or http.DefaultTransport's
+	// Proxy, and TransportModeTLS pins the connection through its CONNECT
+	// tunnel.
 	BaseURL string
 	// Verifier is the verification policy; nil selects the defaults.
 	Verifier *verify.Verifier
