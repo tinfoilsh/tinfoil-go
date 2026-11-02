@@ -16,7 +16,7 @@ import (
 func WithOriginRestriction(next http.RoundTripper, enclave, baseURL string) (http.RoundTripper, error) {
 	origins, err := allowedOrigins(enclave, baseURL)
 	if err != nil {
-		return nil, &errs.ConfigurationError{Err: fmt.Errorf("failed to determine allowed request origins: %w", err)}
+		return nil, errs.Configuration(fmt.Errorf("failed to determine allowed request origins: %w", err))
 	}
 	return &originGuard{allowedOrigins: origins, enclave: enclave, transport: next}, nil
 }
@@ -57,7 +57,7 @@ func (t *originGuard) CloseIdleConnections() {
 func (t *originGuard) RoundTrip(req *http.Request) (*http.Response, error) {
 	origin := normalizedOrigin(req.URL)
 	if _, ok := t.allowedOrigins[origin]; !ok {
-		return nil, &errs.ConfigurationError{Err: fmt.Errorf("refusing to send request to %q: client is bound to enclave %q", origin, t.enclave)}
+		return nil, errs.Configuration(fmt.Errorf("refusing to send request to %q: client is bound to enclave %q", origin, t.enclave))
 	}
 	return t.transport.RoundTrip(req)
 }

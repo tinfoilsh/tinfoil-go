@@ -37,7 +37,7 @@ type Transport struct {
 // A mode protects requests with the keys of one verification: TLS pins
 // connections to its TLS key, and EHBP seals bodies to its HPKE key.
 type mode interface {
-	// validateRequest returns a ConfigurationError for a request the mode
+	// validateRequest returns a configuration error for a request the mode
 	// can't protect, before any network I/O.
 	validateRequest(*http.Request) error
 	// newRoundTripper returns a round tripper tied to v's keys. It marks an

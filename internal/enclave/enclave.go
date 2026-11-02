@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/tinfoilsh/tinfoil-go/internal/errs"
 	"github.com/tinfoilsh/tinfoil-go/internal/fetch"
 	"github.com/tinfoilsh/tinfoil-go/verify"
 	"github.com/tinfoilsh/tinfoil-go/verify/document"
@@ -169,7 +170,7 @@ func (e *Enclave) fetchVerification() (*verify.Verification, error) {
 // requests.
 func checkFreshness(v *verify.Verification) error {
 	if !time.Now().Before(v.FreshnessExpiresAt()) {
-		return &AttestationError{Err: ErrFreshnessExpired}
+		return errs.Attestation(ErrFreshnessExpired)
 	}
 	return nil
 }
@@ -180,7 +181,7 @@ func (e *Enclave) checkVerification(v *verify.Verification) error {
 		return nil
 	}
 	if err := e.check(Detached(v)); err != nil {
-		return &AttestationError{Err: &rejectedError{host: e.host, err: err}}
+		return errs.Attestation(&rejectedError{host: e.host, err: err})
 	}
 	return nil
 }
@@ -189,13 +190,13 @@ func (e *Enclave) checkVerification(v *verify.Verification) error {
 // TLS key, and the HPKE key when the document endorses one.
 func validateTransportKeys(v *verify.Verification) error {
 	if err := keyFormat(v, document.CryptoMaterialIDTLS, document.KeySPKIFPSHA256V1Format); err != nil {
-		return &AttestationError{Err: err}
+		return errs.Attestation(err)
 	}
 	if _, ok := v.TLSPublicKeyFP(); !ok {
-		return &AttestationError{Err: errNoTLSKey}
+		return errs.Attestation(errNoTLSKey)
 	}
 	if err := keyFormat(v, document.CryptoMaterialIDHPKE, document.KeyX25519HPKEV1Format); err != nil {
-		return &AttestationError{Err: err}
+		return errs.Attestation(err)
 	}
 	return nil
 }
@@ -211,9 +212,8 @@ func keyFormat(v *verify.Verification, id, format string) error {
 }
 
 func retryableVerification(err error) bool {
-	var config *ConfigurationError
 	var rejected *rejectedError
-	if errors.As(err, &config) || errors.As(err, &rejected) {
+	if errors.Is(err, errs.ErrConfiguration) || errors.As(err, &rejected) {
 		return false
 	}
 	// Joined failures put the terminal cause first; earlier probes are diagnostics.
@@ -221,9 +221,7 @@ func retryableVerification(err error) bool {
 		causes := joined.Unwrap()
 		return len(causes) > 0 && retryableVerification(causes[0])
 	}
-	var fetch *NetworkError
-	var attestation *AttestationError
-	return errors.As(err, &fetch) || errors.As(err, &attestation)
+	return errors.Is(err, errs.ErrNetwork) || errors.Is(err, errs.ErrAttestation)
 }
 
 // Detached returns a copy of v for a caller to keep. Its fields cannot be

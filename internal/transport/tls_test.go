@@ -51,8 +51,7 @@ func TestTLSBoundRoundTripperRejectsPinnedMismatchThroughHTTPSProxy(t *testing.T
 
 	require.Error(t, err)
 	require.True(t, errors.Is(err, errCertMismatch), "got %v", err)
-	var attestation *errs.AttestationError
-	require.ErrorAs(t, err, &attestation)
+	require.ErrorIs(t, err, errs.ErrAttestation)
 	require.True(t, isCertificateError(err), "typed errors must preserve TLS recovery")
 	var lacksKey *peerLacksKeyError
 	require.ErrorAs(t, err, &lacksKey, "a pin mismatch must reach Transport as a key rejection")
@@ -195,8 +194,7 @@ func TestTLSPinsAttestedKey(t *testing.T) {
 	require.Equal(t, key, pinned.key)
 
 	_, err = pinning.newRoundTripper(&verify.Verification{})
-	var attestation *errs.AttestationError
-	require.ErrorAs(t, err, &attestation)
+	require.ErrorIs(t, err, errs.ErrAttestation)
 	require.ErrorIs(t, err, errNoTLSKey)
 }
 
@@ -215,8 +213,7 @@ func TestTLSUnsupportedDefaultTransport(t *testing.T) {
 		req, err := http.NewRequest(http.MethodGet, "https://enclave.example", nil)
 		require.NoError(t, err)
 		_, err = pinning.RoundTrip(req)
-		var config *errs.ConfigurationError
-		require.ErrorAs(t, err, &config)
+		require.ErrorIs(t, err, errs.ErrConfiguration)
 		pinning.CloseIdleConnections()
 	}
 }
@@ -247,8 +244,7 @@ func TestTLSClientPreservesTLSCategory(t *testing.T) {
 				return testState(time.Now().Add(time.Hour), "wrong-pin"), nil
 			}, tlsMode{})
 			_, err := (&http.Client{Transport: pinning}).Get(server.URL)
-			var attestation *errs.AttestationError
-			require.ErrorAs(t, err, &attestation)
+			require.ErrorIs(t, err, errs.ErrAttestation)
 			var httpError *url.Error
 			require.ErrorAs(t, err, &httpError)
 			require.Zero(t, refreshes, "standalone clients report rejection without replay")
@@ -289,8 +285,7 @@ func TestTLSRefusesCustomTLSDialers(t *testing.T) {
 			}, tlsMode{})
 			_, err := (&http.Client{Transport: pinning}).Post(server.URL, "text/plain", strings.NewReader("plaintext"))
 			require.ErrorIs(t, err, errCustomTLSDialer)
-			var config *errs.ConfigurationError
-			require.ErrorAs(t, err, &config)
+			require.ErrorIs(t, err, errs.ErrConfiguration)
 			require.Zero(t, received.Load(), "the request never reaches the server")
 		})
 	}
@@ -302,8 +297,7 @@ func TestTLSRefusesKeyLog(t *testing.T) {
 	http.DefaultTransport = &http.Transport{TLSClientConfig: &tls.Config{KeyLogWriter: io.Discard}}
 	_, err := newTLSBoundRoundTripper("key")
 	require.ErrorIs(t, err, errKeyLog)
-	var config *errs.ConfigurationError
-	require.ErrorAs(t, err, &config)
+	require.ErrorIs(t, err, errs.ErrConfiguration)
 }
 
 // TestPinnedTransportCopiesOnlyItsAllowlist sets every http.Transport field

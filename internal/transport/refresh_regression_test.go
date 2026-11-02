@@ -10,6 +10,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"github.com/tinfoilsh/tinfoil-go/internal/enclave"
+	"github.com/tinfoilsh/tinfoil-go/internal/errs"
 	"github.com/tinfoilsh/tinfoil-go/verify"
 )
 
@@ -73,7 +74,7 @@ func TestInitializationRetryIsShared(t *testing.T) {
 			attempts++
 			if attempts == 1 {
 				<-release
-				return nil, &enclave.NetworkError{Err: errors.New("temporarily unavailable")}
+				return nil, errs.Network(errors.New("temporarily unavailable"))
 			}
 			return testState(time.Now().Add(time.Hour), "fresh"), nil
 		}, sendOK)

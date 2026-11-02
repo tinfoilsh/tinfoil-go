@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
+	"github.com/tinfoilsh/tinfoil-go/internal/errs"
 	"github.com/tinfoilsh/tinfoil-go/verify"
 )
 
@@ -43,8 +44,7 @@ func TestVerificationCheckRejectsWithoutRetry(t *testing.T) {
 		}
 		_, err = s.Verify()
 		require.ErrorIs(t, err, rejection)
-		var attestation *AttestationError
-		require.ErrorAs(t, err, &attestation)
+		require.ErrorIs(t, err, errs.ErrAttestation)
 		require.ErrorContains(t, err, "verification check rejected enclave.example")
 		require.Equal(t, 1, verifications, "a rejection is a decision about the evidence, so it isn't retried")
 	})

@@ -74,8 +74,7 @@ func TestLiveHTTPClient(t *testing.T) {
 	require.NotNil(t, httpClient, "HTTPClient() should return a non-nil client")
 
 	_, err = httpClient.Get("https://unrelated.example")
-	var config *ConfigurationError
-	require.ErrorAs(t, err, &config, "the HTTP client must refuse unrelated origins")
+	require.ErrorIs(t, err, ErrConfiguration, "the HTTP client must refuse unrelated origins")
 
 	// Verify it returns the same instance (shared client)
 	httpClient2 := client.HTTPClient()

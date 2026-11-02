@@ -30,15 +30,15 @@ func (ehbpMode) validateRequest(req *http.Request) error { return CheckEHBP(req)
 func (m ehbpMode) newRoundTripper(v *verify.Verification) (http.RoundTripper, error) {
 	key, ok := v.HPKEPublicKey()
 	if !ok {
-		return nil, &errs.AttestationError{Err: errors.New("document endorses no HPKE key; cannot use the EHBP transport mode (use the TLS transport mode)")}
+		return nil, errs.Attestation(errors.New("document endorses no HPKE key; cannot use the EHBP transport mode (use the TLS transport mode)"))
 	}
 	identity, err := ehbpidentity.FromPublicKeyHex(key)
 	if err != nil {
-		return nil, &errs.AttestationError{Err: fmt.Errorf("failed to parse HPKE public key: %w", err)}
+		return nil, errs.Attestation(fmt.Errorf("failed to parse HPKE public key: %w", err))
 	}
 	sealing, err := ehbpclient.NewTransportWithIdentity(identity, ehbpclient.WithHTTPClient(&http.Client{Transport: m.next}))
 	if err != nil {
-		return nil, &errs.AttestationError{Err: fmt.Errorf("failed to create EHBP transport: %w", err)}
+		return nil, errs.Attestation(fmt.Errorf("failed to create EHBP transport: %w", err))
 	}
 	return &ehbpRoundTripper{sealing: sealing}, nil
 }
@@ -59,14 +59,14 @@ func (t *ehbpRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) 
 	return resp, err
 }
 
-// CheckEHBP returns a ConfigurationError for a request whose traffic continues
+// CheckEHBP returns a configuration error for a request whose traffic continues
 // outside the bodies EHBP seals: a protocol upgrade, such as a WebSocket, or a
 // CONNECT tunnel. Sending one would look protected while nothing after the
 // handshake is. Other requests are allowed, with or without a body; like every
 // EHBP request, their method, URL and headers aren't sealed.
 func CheckEHBP(req *http.Request) error {
 	if req.Method == http.MethodConnect || req.Header.Get("Upgrade") != "" {
-		return &errs.ConfigurationError{Err: errEHBPTunnel}
+		return errs.Configuration(errEHBPTunnel)
 	}
 	return nil
 }

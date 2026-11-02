@@ -8,14 +8,6 @@ import (
 	"github.com/tinfoilsh/tinfoil-go/verify"
 )
 
-// SDK error categories support errors.As; their causes support errors.Is.
-type (
-	Error              = errs.Error
-	ConfigurationError = errs.ConfigurationError
-	NetworkError       = errs.NetworkError
-	AttestationError   = errs.AttestationError
-)
-
 // rejectedError is a VerificationCheck's rejection. It is a decision about
 // the evidence, so an Enclave doesn't retry it.
 type rejectedError struct {
@@ -39,8 +31,8 @@ func fromVerify(err error) error {
 	var classified verify.Error
 	if errors.As(err, &classified) {
 		if _, usage := classified.(*verify.UsageError); usage {
-			return &ConfigurationError{Err: err}
+			return errs.Configuration(err)
 		}
 	}
-	return &AttestationError{Err: err}
+	return errs.Attestation(err)
 }

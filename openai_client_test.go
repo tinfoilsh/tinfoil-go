@@ -85,14 +85,13 @@ func TestOpenAIClientsSendThroughTheirHTTPClient(t *testing.T) {
 }
 
 func TestOpenAIClientsRejectInvalidOptions(t *testing.T) {
-	var config *ConfigurationError
 	enclave, err := NewEnclaveOpenAIClient(t.Context(), "", "org/repo", nil)
 	require.Nil(t, enclave)
-	require.ErrorAs(t, err, &config)
+	require.ErrorIs(t, err, ErrConfiguration)
 	router, err := NewRouterOpenAIClient(t.Context(), &RouterOptions{TransportMode: "quic"})
 	require.Nil(t, router)
-	require.ErrorAs(t, err, &config)
+	require.ErrorIs(t, err, ErrConfiguration)
 	gateway, err := NewGatewayOpenAIClient(t.Context(), &GatewayOptions{URL: "http://gateway.example/v1/", Catalog: func() Catalog { return Catalog{} }})
 	require.Nil(t, gateway)
-	require.ErrorAs(t, err, &config)
+	require.ErrorIs(t, err, ErrConfiguration)
 }

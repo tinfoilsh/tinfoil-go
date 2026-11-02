@@ -78,7 +78,7 @@ func newGatewayPolicy(modelPins map[string]ModelPin, pinnedOnly bool, v *verify.
 			return gatewayPolicy{}, fmt.Errorf("model pin %q repository %q must belong to %s", model, pin.Repo, trustedRepoOwner)
 		}
 		if _, _, _, err := verify.ParseReference(pin.Repo); err != nil {
-			return gatewayPolicy{}, fmt.Errorf("model %q: %w", model, &errs.ConfigurationError{Err: err})
+			return gatewayPolicy{}, fmt.Errorf("model %q: %w", model, errs.Configuration(err))
 		}
 		p.pins[model] = ModelPin{Repo: pin.Repo, Verifier: cmp.Or(pin.Verifier, v)}
 	}
@@ -88,15 +88,15 @@ func newGatewayPolicy(modelPins map[string]ModelPin, pinnedOnly bool, v *verify.
 func (p *gatewayPolicy) resolve(model string, catalog Catalog) ([]string, replica, error) {
 	pin, pinned := p.pins[model]
 	if p.pinnedOnly && !pinned {
-		return nil, replica{}, &errs.ConfigurationError{Err: fmt.Errorf("model %q is not pinned", model)}
+		return nil, replica{}, errs.Configuration(fmt.Errorf("model %q is not pinned", model))
 	}
 	entry := catalog[model]
 	if !entry.trusted() {
-		return nil, replica{}, &errs.ConfigurationError{Err: fmt.Errorf("model %q has no valid bare %s repository with replicas in the gateway catalog", model, trustedRepoOwner)}
+		return nil, replica{}, errs.Configuration(fmt.Errorf("model %q has no valid bare %s repository with replicas in the gateway catalog", model, trustedRepoOwner))
 	}
 	if pinned {
 		if repo, _, _ := strings.Cut(pin.Repo, "@"); entry.Repo != repo {
-			return nil, replica{}, &errs.AttestationError{Err: fmt.Errorf("model %q: expected repository %q, gateway offered %q", model, repo, entry.Repo)}
+			return nil, replica{}, errs.Attestation(fmt.Errorf("model %q: expected repository %q, gateway offered %q", model, repo, entry.Repo))
 		}
 		return entry.Hosts, replica{ref: pin.Repo, model: model}, nil
 	}
@@ -144,7 +144,7 @@ type Config struct {
 func NewTransport(c Config) (*Transport, error) {
 	policy, err := newGatewayPolicy(c.ModelPins, c.PinnedModelsOnly, c.Verifier)
 	if err != nil {
-		return nil, &errs.ConfigurationError{Err: err}
+		return nil, errs.Configuration(err)
 	}
 	catalog := func(context.Context) (Catalog, error) { return c.Catalog(), nil }
 	if c.Catalog == nil {
@@ -402,7 +402,7 @@ func (t *Transport) RoundTrip(req *http.Request) (*http.Response, error) {
 		}
 		resp.Body.Close()
 		if redirects == maxSealRedirects {
-			return nil, &errs.NetworkError{Err: fmt.Errorf("gateway kept routing away from the enclave the request was sealed to (last: %s)", routed)}
+			return nil, errs.Network(fmt.Errorf("gateway kept routing away from the enclave the request was sealed to (last: %s)", routed))
 		}
 		r.host = routed
 		if rt, _, err = t.verified(req.Context(), r); err != nil {
@@ -464,7 +464,7 @@ func setGatewayBody(req *http.Request, body []byte) {
 func prepareMultipart(req *http.Request, boundary string) error {
 	defer req.Body.Close()
 	if boundary == "" {
-		return &errs.ConfigurationError{Err: fmt.Errorf("multipart upload is missing its boundary")}
+		return errs.Configuration(fmt.Errorf("multipart upload is missing its boundary"))
 	}
 	body, err := io.ReadAll(http.MaxBytesReader(nil, req.Body, maxMultipartBodySize))
 	if err != nil {
@@ -472,12 +472,12 @@ func prepareMultipart(req *http.Request, boundary string) error {
 	}
 	form, err := multipart.NewReader(bytes.NewReader(body), boundary).ReadForm(maxMultipartBodySize)
 	if err != nil {
-		return &errs.ConfigurationError{Err: fmt.Errorf("invalid multipart upload: %w", err)}
+		return errs.Configuration(fmt.Errorf("invalid multipart upload: %w", err))
 	}
 	defer form.RemoveAll()
 	models := form.Value["model"]
 	if len(models) != 1 || strings.TrimSpace(models[0]) == "" || form.File["model"] != nil {
-		return &errs.ConfigurationError{Err: fmt.Errorf("multipart upload must contain exactly one non-empty model field")}
+		return errs.Configuration(fmt.Errorf("multipart upload must contain exactly one non-empty model field"))
 	}
 	req.Header.Set(modelHeader, models[0])
 	setGatewayBody(req, body)

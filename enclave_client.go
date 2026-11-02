@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/tinfoilsh/tinfoil-go/internal/enclave"
+	"github.com/tinfoilsh/tinfoil-go/internal/errs"
 	"github.com/tinfoilsh/tinfoil-go/internal/transport"
 	"github.com/tinfoilsh/tinfoil-go/verify"
 )
@@ -26,7 +27,7 @@ const (
 	// Its connections take only the proxy, dialer and connection-pool
 	// settings of http.DefaultTransport and the roots and verification
 	// callbacks of its TLS config; a custom TLS dialer or TLS key log there
-	// is a ConfigurationError.
+	// is an ErrConfiguration error.
 	TransportModeTLS TransportMode = "tls"
 	// TransportModeEHBP seals request and response bodies to the attested
 	// HPKE key, so they stay private through a proxy. The method, URL and
@@ -44,7 +45,7 @@ func (m TransportMode) resolve() (TransportMode, error) {
 	case TransportModeTLS, TransportModeEHBP:
 		return m, nil
 	}
-	return "", &ConfigurationError{Err: fmt.Errorf("unknown transport mode %q", m)}
+	return "", errs.Configuration(fmt.Errorf("unknown transport mode %q", m))
 }
 
 // EnclaveOptions configures an EnclaveHTTPClient.
@@ -63,7 +64,7 @@ type EnclaveOptions struct {
 	// VerificationCheck, when set, is called with each verification that
 	// passes Verifier, before the client uses the enclave's keys: when the
 	// client is created and whenever it verifies again. Return an error to
-	// reject the enclave. Verification then fails with an AttestationError that
+	// reject the enclave. Verification then fails with an ErrAttestation error that
 	// wraps the error and isn't retried. Requests wait while it runs, so keep
 	// it fast; it may be called concurrently.
 	VerificationCheck func(v *verify.Verification) error
@@ -104,7 +105,7 @@ func NewEnclaveHTTPClient(ctx context.Context, host, repo string, opts *EnclaveO
 // the client verifies on its first request.
 func unverifiedEnclaveHTTPClient(host, repo string, opts *EnclaveOptions) (*EnclaveHTTPClient, error) {
 	if host == "" {
-		return nil, &ConfigurationError{Err: errors.New("enclave host is required")}
+		return nil, errs.Configuration(errors.New("enclave host is required"))
 	}
 	if opts == nil {
 		opts = &EnclaveOptions{}
@@ -143,7 +144,7 @@ func newAttestedClient(keyed *transport.Transport, mode TransportMode, baseURL, 
 	host := keyed.Enclave().Host()
 	if mode == TransportModeTLS {
 		if err := validateTLSBaseURL(baseURL, host); err != nil {
-			return attestedClient{}, &ConfigurationError{Err: err}
+			return attestedClient{}, errs.Configuration(err)
 		}
 	}
 	rt, err := enclaveChain(keyed, host, baseURL, secret)
@@ -229,14 +230,14 @@ func (c *attestedClient) Current() *verify.Verification {
 func validateBaseURL(baseURL string) error {
 	origin, err := transport.OriginOf(baseURL)
 	if err != nil {
-		return &ConfigurationError{Err: fmt.Errorf("invalid base URL: %w", err)}
+		return errs.Configuration(fmt.Errorf("invalid base URL: %w", err))
 	}
 	if strings.HasPrefix(origin, "https://") {
 		return nil
 	}
 	u, _ := url.Parse(baseURL) // OriginOf parsed it
 	if !isLoopback(u.Hostname()) {
-		return &ConfigurationError{Err: errors.New("invalid base URL: HTTP is allowed only for localhost or a loopback IP address; use HTTPS to protect request headers")}
+		return errs.Configuration(errors.New("invalid base URL: HTTP is allowed only for localhost or a loopback IP address; use HTTPS to protect request headers"))
 	}
 	return nil
 }

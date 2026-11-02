@@ -7,21 +7,21 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/tinfoilsh/tinfoil-go/internal/errs"
 	"github.com/tinfoilsh/tinfoil-go/internal/testutil"
 	"github.com/tinfoilsh/tinfoil-go/verify"
 	"github.com/tinfoilsh/tinfoil-go/verify/document/collateral"
 )
 
 func TestNewChecksConfig(t *testing.T) {
-	var config *ConfigurationError
 	_, err := New(Config{Host: "enclave.example", Repo: "not a reference"})
-	require.ErrorAs(t, err, &config)
+	require.ErrorIs(t, err, errs.ErrConfiguration)
 	_, err = New(Config{Host: "enclave.example"})
-	require.ErrorAs(t, err, &config, "the default policy requires a repository pin")
+	require.ErrorIs(t, err, errs.ErrConfiguration, "the default policy requires a repository pin")
 	authorizer, err := verify.NewVerifier(verify.WithConfigAuthorizer(func(collateral.ConfigEndorsement) error { return nil }))
 	require.NoError(t, err)
 	_, err = New(Config{Host: "enclave.example", Repo: "org/repo", Verifier: authorizer})
-	require.ErrorAs(t, err, &config, "a config authorizer can't verify a repository pin")
+	require.ErrorIs(t, err, errs.ErrConfiguration, "a config authorizer can't verify a repository pin")
 
 	v, err := verify.NewVerifier(verify.WithFreshnessMaxAge(time.Hour))
 	require.NoError(t, err)

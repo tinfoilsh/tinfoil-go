@@ -74,7 +74,7 @@ func TestWithEnclaveURLPreservesAdmissionAndProxyHeader(t *testing.T) {
 	}))
 	defer proxy.Close()
 
-	admissionFailure := &errs.AttestationError{Err: errors.New("expired witnesses")}
+	admissionFailure := errs.Attestation(errors.New("expired witnesses"))
 	hc := &http.Client{Transport: WithEnclaveURL(roundTripFunc(func(*http.Request) (*http.Response, error) {
 		return nil, admissionFailure
 	}), "enclave.example", proxy.URL)}
