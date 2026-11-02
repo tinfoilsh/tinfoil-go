@@ -49,3 +49,40 @@ func TestVerificationCheckRejectsWithoutRetry(t *testing.T) {
 		require.Equal(t, 1, verifications, "a rejection is a decision about the evidence, so it isn't retried")
 	})
 }
+
+func TestSlowVerificationCheckFetchesFreshEvidence(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		slowCalls int
+	}{
+		{"retry succeeds", 1},
+		{"every attempt expires", 2},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				var checks int
+				s, err := New(Config{Host: "enclave.example", Repo: "org/repo", VerificationCheck: func(*verify.Verification) error {
+					checks++
+					if checks <= tc.slowCalls {
+						time.Sleep(2 * time.Minute) // outlasts the verification's deadline
+					}
+					return nil
+				}})
+				require.NoError(t, err)
+				var fetches int
+				s.fetch = func() (*verify.Verification, error) {
+					fetches++
+					return testState(time.Now().Add(time.Minute), "key"), nil
+				}
+				verified, err := s.Verify()
+				require.Equal(t, 2, fetches, "an expiry after the check is retried with fresh evidence")
+				if tc.slowCalls == 2 {
+					require.ErrorIs(t, err, ErrFreshnessExpired)
+					return
+				}
+				require.NoError(t, err)
+				require.True(t, time.Now().Before(verified.FreshnessExpiresAt()), "Verify returns only fresh verifications")
+			})
+		})
+	}
+}

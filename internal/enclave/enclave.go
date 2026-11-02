@@ -117,11 +117,16 @@ func (e *Enclave) verify(retries int) (*verify.Verification, error) {
 	var err, firstErr error
 	for attempt := 0; ; attempt++ {
 		verified, err = fetch()
-		if err == nil && !time.Now().Before(verified.FreshnessExpiresAt()) {
-			err = &AttestationError{Err: ErrFreshnessExpired}
+		if err == nil {
+			err = checkFreshness(verified)
 		}
 		if err == nil {
 			err = e.checkVerification(verified)
+		}
+		// The VerificationCheck can run past the deadline; a retry fetches
+		// fresh evidence.
+		if err == nil {
+			err = checkFreshness(verified)
 		}
 		if attempt == retries || !retryableVerification(err) {
 			break
@@ -158,6 +163,15 @@ func (e *Enclave) fetchVerification() (*verify.Verification, error) {
 		return nil, err
 	}
 	return verified, nil
+}
+
+// checkFreshness reports a verification whose witnesses no longer authorize
+// requests.
+func checkFreshness(v *verify.Verification) error {
+	if !time.Now().Before(v.FreshnessExpiresAt()) {
+		return &AttestationError{Err: ErrFreshnessExpired}
+	}
+	return nil
 }
 
 // checkVerification runs the caller's VerificationCheck on a copy of v.
