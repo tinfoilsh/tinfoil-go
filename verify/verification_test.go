@@ -103,7 +103,7 @@ func TestVerifyV3AtRequiresAnInstant(t *testing.T) {
 }
 
 // Accessors hand out copies, so a caller cannot change a Verification that
-// another holder, such as a Handle's cache, still uses.
+// another holder, such as a client's cache, still uses.
 func TestVerificationAccessorsReturnCopies(t *testing.T) {
 	register := measurement.Register{0xab}
 	v := &Verification{

@@ -1,126 +1,95 @@
 // Package transport holds the http.RoundTrippers the routes stack in front of
-// an enclave, one kind per file. Transport, built by TLS or WithEHBP, ties
-// requests to the keys of a handle's current verification; the With functions
-// each layer one more round tripper onto another, and each route chooses which
-// to stack, in what order.
+// an enclave, one kind per file. Transport, built by TLS or WithEHBP, verifies
+// an enclave and ties requests to the keys of its current verification; the
+// With functions each layer one more round tripper onto another, and each
+// route chooses which to stack, in what order.
 package transport
 
 import (
-	"context"
 	"errors"
-	"fmt"
 	"net/http"
 	"sync"
 
 	"github.com/tinfoilsh/tinfoil-go/internal/enclave"
 	"github.com/tinfoilsh/tinfoil-go/verify"
+	"golang.org/x/sync/singleflight"
 )
 
-// Transport sends each request over a transport tied to the keys of its
-// handle's current verification, which TLS or WithEHBP builds once per
-// verification, on the first request under it. It does no network I/O until
-// then: the first request or EnsureVerified verifies. A key rejection
-// invalidates the verification the request was sent under and is reported
-// through IsKeyRejection; replaying the request is up to the caller.
-// Transports on one handle share its verification and refresh.
+// Transport verifies its enclave on first use, and again when the verification
+// expires or is rejected, and sends each request over a round tripper tied to
+// the keys of the current verification. It does no network I/O until then:
+// the first request or EnsureVerified verifies, and concurrent callers share
+// one verification. A key rejection invalidates the verification the request
+// was sent under and is reported through IsKeyRejection; replaying the
+// request is up to the caller.
 type Transport struct {
-	handle *enclave.Handle
-	// build makes the transport tied to one verification's keys.
-	build func(*verify.Verification) (http.RoundTripper, error)
-	// keyRejected reports an error meaning the peer doesn't hold the attested
-	// key, detected before the application processes the request.
-	keyRejected func(error) bool
-	// check returns a ConfigurationError for a request the keys can't protect,
-	// before any network I/O.
-	check func(*http.Request) error
+	enclave *enclave.Enclave
+	mode    mode
+	// refreshes runs one refresh at a time for every caller that needs it.
+	refreshes singleflight.Group
 
-	mu    sync.Mutex
-	state *enclave.State // the state inner was built for
-	inner http.RoundTripper
+	// mu is held from a caller's check through its DoChan, so a refresh that
+	// finishes after the check can't be followed by a redundant one.
+	mu      sync.RWMutex
+	current *state
 }
 
-// errSuperseded reports a state that a newer one replaced after the request
-// was admitted under it.
-var errSuperseded = errors.New("verification superseded")
-
-// EnsureVerified returns a state that is valid now, with the transport built
-// for it, verifying first only if needed.
-func (t *Transport) EnsureVerified(ctx context.Context) (*enclave.State, error) {
-	_, state, err := t.admit(ctx)
-	return state, err
+// A mode protects requests with the keys of one verification: TLS pins
+// connections to its TLS key, and EHBP seals bodies to its HPKE key.
+type mode interface {
+	// validateRequest returns a ConfigurationError for a request the mode
+	// can't protect, before any network I/O.
+	validateRequest(*http.Request) error
+	// newRoundTripper returns a round tripper tied to v's keys. It marks an
+	// error meaning the peer doesn't hold those keys, detected before the
+	// application processes the request, with peerLacksKeyError.
+	newRoundTripper(v *verify.Verification) (http.RoundTripper, error)
 }
 
-func (t *Transport) admit(ctx context.Context) (http.RoundTripper, *enclave.State, error) {
-	for {
-		state, err := t.handle.EnsureVerified(ctx)
-		if err != nil {
-			return nil, nil, err
-		}
-		if err := ctx.Err(); err != nil {
-			return nil, nil, err
-		}
-		inner, err := t.innerFor(state)
-		if errors.Is(err, errSuperseded) {
-			continue
-		}
-		if err != nil {
-			return nil, nil, err
-		}
-		if t.handle.Valid(state) {
-			return inner, state, nil
-		}
-	}
-}
+// peerLacksKeyError is a mode's round tripper reporting that the peer doesn't
+// hold the keys it was created for. Transport turns it into a
+// keyRejectionError once it has invalidated the state. It is a separate type
+// because IsKeyRejection promises that invalidation, which a mode's round
+// tripper used alone can't make, so its errors mustn't make a caller replay.
+type peerLacksKeyError struct{ error }
 
-// innerFor returns the transport for state, building it when state is newer
-// than the one the current transport was built for.
-func (t *Transport) innerFor(state *enclave.State) (http.RoundTripper, error) {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	switch {
-	case state == t.state:
-		return t.inner, nil
-	case t.state != nil && state.Generation() < t.state.Generation():
-		return nil, errSuperseded
-	}
-	// Idle connections of the current transport are bound to keys a newer
-	// state replaced, whether or not its transport builds.
-	closeIdleConnections(t.inner)
-	inner, err := t.build(state.Verification())
-	if inner == nil && err == nil {
-		err = fmt.Errorf("transport build returned nil")
-	}
-	if err != nil {
-		closeIdleConnections(inner)
-		return nil, err
-	}
-	t.state, t.inner = state, inner
-	return inner, nil
+func (e *peerLacksKeyError) Unwrap() error { return e.error }
+
+// Enclave returns the enclave the transport verifies.
+func (t *Transport) Enclave() *enclave.Enclave {
+	return t.enclave
 }
 
 func (t *Transport) RoundTrip(req *http.Request) (*http.Response, error) {
-	if err := t.check(req); err != nil {
+	// Validate first, so a request the mode can't protect never triggers a
+	// verification.
+	if err := t.mode.validateRequest(req); err != nil {
 		closeRequestBody(req)
 		return nil, err
 	}
-	inner, state, err := t.admit(req.Context())
+	s, err := t.verified(req.Context(), false, (*enclave.Enclave).Verify)
 	if err != nil {
 		closeRequestBody(req)
 		return nil, err
 	}
-	resp, err := inner.RoundTrip(req)
-	if err == nil || !t.keyRejected(err) {
+	resp, err := s.roundTripper.RoundTrip(req)
+	var lacksKey *peerLacksKeyError
+	if !errors.As(err, &lacksKey) {
 		return resp, err
 	}
-	t.handle.Invalidate(state)
+	// Invalidate the state the request was sent under, not the current one,
+	// so a late rejection can't retire a newer verification.
+	t.invalidate(s)
 	return resp, &keyRejectionError{err}
 }
 
 func (t *Transport) CloseIdleConnections() {
-	t.mu.Lock()
-	inner := t.inner
-	t.mu.Unlock()
-	closeIdleConnections(inner)
+	t.mu.RLock()
+	s := t.current
+	t.mu.RUnlock()
+	if s != nil {
+		closeIdleConnections(s.roundTripper)
+	}
 }
 
 // IsKeyRejection reports a key rejection before application processing. The

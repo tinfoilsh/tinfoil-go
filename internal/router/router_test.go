@@ -17,11 +17,15 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/tinfoilsh/tinfoil-go/internal/enclave"
 	"github.com/tinfoilsh/tinfoil-go/internal/testutil"
+	"github.com/tinfoilsh/tinfoil-go/internal/transport"
 )
 
 type roundTripFunc func(*http.Request) (*http.Response, error)
 
 func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
+
+// newTLS is the transport Discover makes for each router in these tests.
+var newTLS = transport.TLS
 
 func TestDefaultClientProbesOncePerDiscovery(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
@@ -36,7 +40,7 @@ func TestDefaultClientProbesOncePerDiscovery(t *testing.T) {
 			}
 			return nil, cause
 		})}
-		s, err := Discover(context.Background(), nil, nil)
+		s, err := Discover(context.Background(), nil, nil, newTLS)
 		if err == nil {
 			// Complete initialization if the constructor returned a lazy fallback.
 			_, err = s.Reverify(context.Background())
@@ -50,9 +54,9 @@ func TestDefaultClientProbesOncePerDiscovery(t *testing.T) {
 
 func TestLiveDiscoverRouter(t *testing.T) {
 	testutil.RequireLive(t)
-	client, err := Discover(t.Context(), nil, nil)
+	client, err := Discover(t.Context(), nil, nil, newTLS)
 	require.NoError(t, err)
-	assert.NotEmpty(t, client.Enclave())
+	assert.NotEmpty(t, client.Enclave().Host())
 	_, err = client.Reverify(t.Context())
 	assert.NoError(t, err)
 }
@@ -67,9 +71,9 @@ func TestLiveClientFetchRouters(t *testing.T) {
 
 func TestLiveClientFallbackEnclave(t *testing.T) {
 	testutil.RequireLive(t)
-	defaultClient, err := enclave.NewHandle(enclave.Config{Host: "inference.tinfoil.sh", Repo: defaultRouterRepo})
+	defaultClient, err := enclave.New(enclave.Config{Host: "inference.tinfoil.sh", Repo: defaultRouterRepo})
 	require.NoError(t, err)
-	_, err = defaultClient.Reverify(t.Context())
+	_, err = defaultClient.Verify()
 	assert.NoError(t, err)
 }
 
@@ -121,9 +125,9 @@ func TestDiscoverBoundsTotalProbeTime(t *testing.T) {
 			return nil, req.Context().Err()
 		})}
 		start := time.Now()
-		h, err := Discover(context.Background(), nil, nil)
+		h, err := Discover(context.Background(), nil, nil, newTLS)
 		require.NoError(t, err)
-		require.Equal(t, "inference.tinfoil.sh", h.Enclave(), "discovery falls back")
+		require.Equal(t, "inference.tinfoil.sh", h.Enclave().Host(), "discovery falls back")
 		require.Equal(t, discoveryTimeout, time.Since(start), "one budget for every probe, not one per router")
 		synctest.Wait()
 		require.Equal(t, map[string]int{"router0.example": 1}, probes, "no router is probed after the budget runs out")

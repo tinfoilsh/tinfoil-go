@@ -226,7 +226,7 @@ func verifyFull(doc, nonce []byte, repo string, verifier *verify.Verifier, appra
 		return Output{Stage: StageVerify, Rejection: &Rejection{Code: code}}, exit
 	}
 	// A document that verifies but endorses no usable channel keys is useless
-	// to every real client (an enclave.Handle rejects at binding), so the full
+	// to every real client (an enclave.Enclave rejects it), so the full
 	// stage requires both — mirroring the deployed end-to-end behavior.
 	tlsFP, ok := verified.TLSPublicKeyFP()
 	if !ok {

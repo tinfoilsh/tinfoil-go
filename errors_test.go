@@ -68,7 +68,7 @@ func TestPublicInputErrors(t *testing.T) {
 		_, err = verifier.VerifyV3(nil, nil, repo)
 		require.ErrorAs(t, err, &usage)
 	}
-	_, err = enclave.NewHandle(enclave.Config{Host: "enclave.example", Repo: "org/repo@v1@sha256:" + strings.Repeat("a", 64)})
+	_, err = enclave.New(enclave.Config{Host: "enclave.example", Repo: "org/repo@v1@sha256:" + strings.Repeat("a", 64)})
 	require.NoError(t, err)
 	_, err = fetch.Document(t.Context(), "", "", make([]byte, document.NonceSize))
 	require.ErrorAs(t, err, &config)

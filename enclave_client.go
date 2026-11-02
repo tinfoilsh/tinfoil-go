@@ -87,8 +87,7 @@ type EnclaveOptions struct {
 // enclave.
 type EnclaveHTTPClient struct {
 	*http.Client
-	handle *enclave.Handle
-	keyed  *transport.Transport
+	keyed *transport.Transport
 	// secure is the client OpenAI clients use, which changes to the embedded
 	// client can't reach.
 	secure             *http.Client
@@ -130,11 +129,11 @@ func unverifiedEnclaveHTTPClient(host, repo string, opts *EnclaveOptions) (*Encl
 			return nil, err
 		}
 	}
-	handle, err := enclave.NewHandle(enclave.Config{Host: host, Repo: repo, Verifier: opts.Verifier, VerificationCheck: opts.VerificationCheck})
+	e, err := enclave.New(enclave.Config{Host: host, Repo: repo, Verifier: opts.Verifier, VerificationCheck: opts.VerificationCheck})
 	if err != nil {
 		return nil, err
 	}
-	return newEnclaveHTTPClient(handle, mode, opts.BaseURL, opts.UserCacheSecret)
+	return newEnclaveHTTPClient(keyedTransport(mode, e), mode, opts.BaseURL, opts.UserCacheSecret)
 }
 
 // NewRouterHTTPClient returns a client for the first router from Tinfoil's
@@ -162,12 +161,14 @@ func NewRouterHTTPClient(ctx context.Context, opts *EnclaveOptions) (*EnclaveHTT
 	if opts.Verifier != nil && opts.Verifier.CallerAuthorizesConfig() {
 		return nil, &ConfigurationError{Err: errors.New("caller-authorized config requires an explicit enclave")}
 	}
-	handle, err := router.Discover(ctx, opts.Verifier, opts.VerificationCheck)
+	keyed, err := router.Discover(ctx, opts.Verifier, opts.VerificationCheck, func(e *enclave.Enclave) *transport.Transport {
+		return keyedTransport(mode, e)
+	})
 	if err != nil {
 		return nil, err
 	}
 	secret := cachesecret.Resolve(opts.UserCacheSecret, opts.UserCacheSecret != "")
-	client, err := newEnclaveHTTPClient(handle, mode, opts.BaseURL, secret)
+	client, err := newEnclaveHTTPClient(keyed, mode, opts.BaseURL, secret)
 	if err != nil {
 		return nil, err
 	}
@@ -178,35 +179,34 @@ func NewRouterHTTPClient(ctx context.Context, opts *EnclaveOptions) (*EnclaveHTT
 	return client, nil
 }
 
-func newEnclaveHTTPClient(handle *enclave.Handle, mode TransportMode, baseURL, secret string) (*EnclaveHTTPClient, error) {
+func newEnclaveHTTPClient(keyed *transport.Transport, mode TransportMode, baseURL, secret string) (*EnclaveHTTPClient, error) {
+	host := keyed.Enclave().Host()
 	if mode == TransportModeTLS {
-		if err := validateTLSBaseURL(baseURL, handle.Enclave()); err != nil {
+		if err := validateTLSBaseURL(baseURL, host); err != nil {
 			return nil, &ConfigurationError{Err: err}
 		}
 	}
-	keyed := keyedTransport(mode, handle)
-	rt, err := enclaveChain(keyed, handle.Enclave(), baseURL, secret)
+	rt, err := enclaveChain(keyed, host, baseURL, secret)
 	if err != nil {
 		return nil, err
 	}
 	secure := &http.Client{Transport: rt}
 	return &EnclaveHTTPClient{
 		Client:    &http.Client{Transport: secure.Transport},
-		handle:    handle,
 		keyed:     keyed,
 		secure:    secure,
-		baseURL:   cmp.Or(baseURL, "https://"+handle.Enclave()+"/"),
-		openAIURL: cmp.Or(baseURL, "https://"+handle.Enclave()+"/v1/"),
+		baseURL:   cmp.Or(baseURL, "https://"+host+"/"),
+		openAIURL: cmp.Or(baseURL, "https://"+host+"/v1/"),
 	}, nil
 }
 
-// keyedTransport returns the transport that protects mode's traffic with the
-// keys handle verifies.
-func keyedTransport(mode TransportMode, handle *enclave.Handle) *transport.Transport {
+// keyedTransport returns the transport that verifies e and protects mode's
+// traffic with the keys it verifies.
+func keyedTransport(mode TransportMode, e *enclave.Enclave) *transport.Transport {
 	if mode == TransportModeTLS {
-		return transport.TLS(handle)
+		return transport.TLS(e)
 	}
-	return transport.WithEHBP(nil, handle)
+	return transport.WithEHBP(nil, e)
 }
 
 // enclaveChain stacks what an enclave client sends through around keyed, from
@@ -231,7 +231,7 @@ func (c *EnclaveHTTPClient) BaseURL() string {
 // to NewEnclaveHTTPClient, or the router NewRouterHTTPClient chose. It stays
 // the enclave's host when BaseURL is a proxy.
 func (c *EnclaveHTTPClient) Enclave() string {
-	return c.handle.Enclave()
+	return c.keyed.Enclave().Host()
 }
 
 // Repo returns the repository the enclave is verified against, with any tag
@@ -239,37 +239,26 @@ func (c *EnclaveHTTPClient) Enclave() string {
 // for NewRouterHTTPClient. It is empty when EnclaveOptions.Verifier
 // authorizes the config instead.
 func (c *EnclaveHTTPClient) Repo() string {
-	return c.handle.Repo()
+	return c.keyed.Enclave().Repo()
 }
 
 // EnsureVerified returns a verification that is valid now, verifying first
 // only if the cached one has expired or been rejected. It also prepares the
 // TLS pin or HPKE key for it, so a nil error means requests can be sent.
 func (c *EnclaveHTTPClient) EnsureVerified(ctx context.Context) (*verify.Verification, error) {
-	state, err := c.keyed.EnsureVerified(ctx)
-	if err != nil {
-		return nil, err
-	}
-	return state.Verification(), nil
+	return c.keyed.EnsureVerified(ctx)
 }
 
 // Reverify verifies again even if the cached verification is still valid.
 func (c *EnclaveHTTPClient) Reverify(ctx context.Context) (*verify.Verification, error) {
-	state, err := c.handle.Reverify(ctx)
-	if err != nil {
-		return nil, err
-	}
-	return state.Verification(), nil
+	return c.keyed.Reverify(ctx)
 }
 
 // Current returns the last successful verification without checking it. It
 // may have expired or been rejected; use EnsureVerified for one that is
 // valid.
 func (c *EnclaveHTTPClient) Current() *verify.Verification {
-	if state := c.handle.Current(); state != nil {
-		return state.Verification()
-	}
-	return nil
+	return c.keyed.Current()
 }
 
 // validateBaseURL requires an absolute URL that keeps request headers private

@@ -38,7 +38,7 @@ func enclaveURLHeaderValue(baseURL, enclave string) (string, bool) {
 // enclaveURLHeaderTransport injects the X-Tinfoil-Enclave-Url header before
 // delegating to the wrapped transport. EHBP leaves request headers in
 // plaintext, so the header reaches the proxy while the body stays sealed to the
-// enclave's HPKE key. The value is the handle's enclave, which never
+// enclave's HPKE key. The value is the verified enclave's host, which never
 // changes, so every request, including retries and requests after
 // re-verification, points at the enclave that was verified.
 type enclaveURLHeaderTransport struct {

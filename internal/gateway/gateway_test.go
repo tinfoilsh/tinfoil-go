@@ -35,7 +35,7 @@ const (
 )
 
 // sealTestTransport serves each replica through the transport connect returns
-// for its host. Like a handle verifying, a replica calls connect until it
+// for its host. Like a transport verifying, a replica calls connect until it
 // succeeds, then reuses the result.
 func sealTestTransport(connect func(host string) (http.RoundTripper, error)) *Transport {
 	return &Transport{
@@ -433,8 +433,8 @@ func TestGatewayKeepsOneTransportPerReplica(t *testing.T) {
 	close(proceed)
 	first, second := <-results, <-results
 	require.NotNil(t, first)
-	// One transport means one handle, whose refresh concurrent requests share;
-	// internal/enclave tests that.
+	// One transport means one verification, whose refresh concurrent requests
+	// share; internal/transport tests that.
 	require.Same(t, first, second, "concurrent first uses share one replica transport")
 }
 
