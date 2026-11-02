@@ -48,8 +48,7 @@ type RouterOpenAIClient struct {
 
 // NewRouterOpenAIClient creates a RouterHTTPClient as NewRouterHTTPClient
 // does, and an OpenAI client over it. It applies openaiOpts, then sets the
-// HTTP client and base URL so that openaiOpts can't replace them. It exists
-// only while the router is Tinfoil's default route.
+// HTTP client and base URL so that openaiOpts can't replace them.
 func NewRouterOpenAIClient(ctx context.Context, opts *RouterOptions, openaiOpts ...option.RequestOption) (*RouterOpenAIClient, error) {
 	c, err := NewRouterHTTPClient(ctx, opts)
 	if err != nil {

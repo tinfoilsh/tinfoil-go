@@ -46,8 +46,7 @@ type RouterOptions struct {
 }
 
 // RouterHTTPClient is an *http.Client whose requests reach only the attested
-// router it discovered. It exists only while the router is Tinfoil's default
-// route.
+// router it discovered.
 type RouterHTTPClient struct {
 	*http.Client
 	attestedClient

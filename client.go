@@ -9,9 +9,7 @@ import (
 	"github.com/openai/openai-go/v3/option"
 )
 
-// Client is an OpenAI client for Tinfoil's recommended route. Which service
-// backs that route can change between releases without changing this API, so
-// rely only on what Client documents, not on how the route is served today.
+// Client is an OpenAI client for Tinfoil's recommended route.
 type Client struct {
 	*openai.Client
 	httpClient *http.Client
