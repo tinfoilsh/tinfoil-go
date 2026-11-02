@@ -32,9 +32,9 @@ func NewClient(ctx context.Context, openaiOpts ...option.RequestOption) (*Client
 // HTTPClient returns the underlying HTTP client used to reach the enclave. It
 // re-verifies before new requests when witnesses expire or the enclave rotates its key.
 // It is bound to the verified enclave: requests to any other origin are
-// refused to avoid disclosing sensitive headers. Under EHBP, only request and
-// response bodies are sealed to the enclave; a request without a body is not,
-// and a WebSocket upgrade is refused.
+// refused to avoid disclosing sensitive headers. Each connection is pinned to
+// the enclave's attested TLS key, so the whole request and response are
+// protected.
 func (c *Client) HTTPClient() *http.Client {
 	return c.httpClient
 }

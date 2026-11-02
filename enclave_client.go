@@ -18,7 +18,8 @@ import (
 )
 
 // TransportMode selects how a client protects its traffic to an enclave. The
-// zero value selects the route's default.
+// zero value selects TransportModeTLS, the stronger mode; a proxy BaseURL
+// requires choosing TransportModeEHBP.
 type TransportMode string
 
 const (
@@ -37,11 +38,11 @@ const (
 	TransportModeEHBP TransportMode = "ehbp"
 )
 
-// resolve returns m, or routeDefault for the zero value.
-func (m TransportMode) resolve(routeDefault TransportMode) (TransportMode, error) {
+// resolve returns m, or TransportModeTLS for the zero value.
+func (m TransportMode) resolve() (TransportMode, error) {
 	switch m {
 	case "":
-		return routeDefault, nil
+		return TransportModeTLS, nil
 	case TransportModeTLS, TransportModeEHBP:
 		return m, nil
 	}
@@ -50,8 +51,7 @@ func (m TransportMode) resolve(routeDefault TransportMode) (TransportMode, error
 
 // EnclaveOptions configures an EnclaveHTTPClient.
 type EnclaveOptions struct {
-	// TransportMode defaults to TransportModeTLS for NewEnclaveHTTPClient and
-	// to TransportModeEHBP for NewRouterHTTPClient.
+	// TransportMode defaults to TransportModeTLS.
 	TransportMode TransportMode
 	// BaseURL is a path on the enclave's own HTTPS origin, or a proxy on
 	// another origin, which requires TransportModeEHBP. Requests to a proxy
@@ -120,7 +120,7 @@ func unverifiedEnclaveHTTPClient(host, repo string, opts *EnclaveOptions) (*Encl
 	if opts == nil {
 		opts = &EnclaveOptions{}
 	}
-	mode, err := opts.TransportMode.resolve(TransportModeTLS)
+	mode, err := opts.TransportMode.resolve()
 	if err != nil {
 		return nil, err
 	}
@@ -146,7 +146,7 @@ func NewRouterHTTPClient(ctx context.Context, opts *EnclaveOptions) (*EnclaveHTT
 	if opts == nil {
 		opts = &EnclaveOptions{}
 	}
-	mode, err := opts.TransportMode.resolve(TransportModeEHBP)
+	mode, err := opts.TransportMode.resolve()
 	if err != nil {
 		return nil, err
 	}
@@ -155,7 +155,7 @@ func NewRouterHTTPClient(ctx context.Context, opts *EnclaveOptions) (*EnclaveHTT
 			return nil, err
 		}
 		if mode == TransportModeTLS {
-			return nil, &ConfigurationError{Err: errors.New("a base URL requires TransportModeEHBP when discovering the router")}
+			return nil, &ConfigurationError{Err: errors.New("a base URL is a proxy when discovering the router, which requires TransportModeEHBP")}
 		}
 	}
 	if opts.Verifier != nil && opts.Verifier.CallerAuthorizesConfig() {
@@ -306,7 +306,7 @@ func validateTLSBaseURL(baseURL, enclave string) error {
 		return err
 	}
 	if baseOrigin != enclaveOrigin {
-		return fmt.Errorf("TLS base URL must use the verified enclave origin %q", enclaveOrigin)
+		return fmt.Errorf("a base URL off the verified enclave origin %q is a proxy, which requires TransportModeEHBP", enclaveOrigin)
 	}
 	return nil
 }

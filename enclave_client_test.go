@@ -167,7 +167,8 @@ func TestNewRouterHTTPClientRejectsInvalidOptionsBeforeDiscovery(t *testing.T) {
 	cancel()
 	for _, opts := range []*EnclaveOptions{
 		{TransportMode: "quic"},
-		{BaseURL: "http://proxy.example/v1/"},
+		{TransportMode: TransportModeEHBP, BaseURL: "http://proxy.example/v1/"},
+		{BaseURL: "https://proxy.example/v1/"},
 		{TransportMode: TransportModeTLS, BaseURL: "https://proxy.example/v1/"},
 		{Verifier: callerAuthorizedVerifier(t)},
 	} {
@@ -176,7 +177,9 @@ func TestNewRouterHTTPClientRejectsInvalidOptionsBeforeDiscovery(t *testing.T) {
 		var config *ConfigurationError
 		require.ErrorAs(t, err, &config)
 	}
-	_, err := NewRouterHTTPClient(ctx, &EnclaveOptions{BaseURL: "http://localhost:8080/v1/"})
+	_, err := NewRouterHTTPClient(ctx, &EnclaveOptions{BaseURL: "https://proxy.example/v1/"})
+	require.ErrorContains(t, err, "requires TransportModeEHBP", "a proxy never downgrades the default mode silently")
+	_, err = NewRouterHTTPClient(ctx, &EnclaveOptions{TransportMode: TransportModeEHBP, BaseURL: "http://localhost:8080/v1/"})
 	require.ErrorIs(t, err, context.Canceled, "a loopback proxy passes the checks and reaches discovery")
 }
 
@@ -212,18 +215,16 @@ func TestNewRouterHTTPClientVerifiesTheFallbackUnderItsContext(t *testing.T) {
 	})
 }
 
-func TestTransportModeDefaultsToTheRoutes(t *testing.T) {
+func TestTransportModeDefaultsToTLS(t *testing.T) {
 	for _, tc := range []struct {
-		mode         TransportMode
-		routeDefault TransportMode
-		want         TransportMode
+		mode TransportMode
+		want TransportMode
 	}{
-		{"", TransportModeTLS, TransportModeTLS},
-		{"", TransportModeEHBP, TransportModeEHBP},
-		{TransportModeTLS, TransportModeEHBP, TransportModeTLS},
-		{TransportModeEHBP, TransportModeTLS, TransportModeEHBP},
+		{"", TransportModeTLS},
+		{TransportModeTLS, TransportModeTLS},
+		{TransportModeEHBP, TransportModeEHBP},
 	} {
-		got, err := tc.mode.resolve(tc.routeDefault)
+		got, err := tc.mode.resolve()
 		require.NoError(t, err)
 		require.Equal(t, tc.want, got)
 	}
@@ -508,6 +509,7 @@ func TestValidateTLSBaseURL(t *testing.T) {
 	err := validateTLSBaseURL("https://proxy.example.com/v1", "enclave.example.com")
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "verified enclave origin")
+	require.Contains(t, err.Error(), "requires TransportModeEHBP", "the error names the mode a proxy needs")
 
 	err = validateTLSBaseURL("http://enclave.example.com/v1", "enclave.example.com")
 	require.Error(t, err)
