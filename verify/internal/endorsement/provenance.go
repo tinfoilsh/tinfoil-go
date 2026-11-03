@@ -6,6 +6,8 @@ import (
 	"cmp"
 	_ "embed"
 	"encoding/hex"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"fmt"
 	"math"
 	"regexp"
@@ -17,7 +19,6 @@ import (
 	"github.com/sigstore/sigstore-go/pkg/fulcio/certificate"
 	"github.com/sigstore/sigstore-go/pkg/root"
 	"github.com/sigstore/sigstore-go/pkg/verify"
-	"google.golang.org/protobuf/encoding/protojson"
 
 	in_toto "github.com/in-toto/attestation/go/v1"
 	"google.golang.org/protobuf/types/known/structpb"
@@ -397,14 +398,14 @@ func (c *Client) AuthenticatePlatformEndorsements(bundleJSON []byte, repo, tag, 
 	if repo != platformEndorsementsRepo {
 		return nil, fmt.Errorf("platform endorsements repo %q does not equal %q", repo, platformEndorsementsRepo)
 	}
-	result, _, err := c.verifyBundleWithIdentity(bundleJSON, platformEndorsementsIdentity, hexDigest)
+	result, payload, err := c.verifyBundleWithIdentity(bundleJSON, platformEndorsementsIdentity, hexDigest)
 	if err != nil {
 		return nil, fmt.Errorf("verifying platform endorsements bundle: %w", err)
 	}
 
-	predicateJSON, err := protojson.Marshal(result.Statement.Predicate)
+	predicateJSON, err := signedPredicate(payload)
 	if err != nil {
-		return nil, fmt.Errorf("encoding platform endorsements predicate: %w", err)
+		return nil, fmt.Errorf("platform endorsements statement: %w", err)
 	}
 	artifact, err := policy.Parse(predicateJSON)
 	if err != nil {
@@ -421,6 +422,26 @@ func (c *Client) AuthenticatePlatformEndorsements(bundleJSON []byte, repo, tag, 
 		AuthenticatedArtifact: authenticated,
 		Artifact:              artifact,
 	}, nil
+}
+
+// signedPredicate returns the predicate member of a verified in-toto payload
+// as it was signed. The decoded statement holds the predicate as a protobuf
+// Struct, whose numbers are float64: re-encoding it would alter integers
+// above 2^53 (the uint64 mitigation vectors) and turn fractional literals
+// into integers, so the strict policy parser must read the signed bytes.
+// Statement-level strictness was already enforced when the bundle was
+// verified; this only extracts the member.
+func signedPredicate(payload []byte) (jsontext.Value, error) {
+	var statement struct {
+		Predicate jsontext.Value `json:"predicate"`
+	}
+	if err := json.Unmarshal(payload, &statement); err != nil {
+		return nil, fmt.Errorf("parsing: %w", err)
+	}
+	if len(statement.Predicate) == 0 || statement.Predicate.Kind() != '{' {
+		return nil, fmt.Errorf("predicate is not an object")
+	}
+	return statement.Predicate, nil
 }
 
 func authenticatedArtifact(result *verify.VerificationResult, repo, tag, hexDigest, label string) (AuthenticatedArtifact, error) {
