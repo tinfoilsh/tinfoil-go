@@ -2,6 +2,7 @@ package endorsement
 
 import (
 	"encoding/hex"
+	"os"
 	"regexp"
 	"strings"
 	"testing"
@@ -17,6 +18,7 @@ import (
 	"github.com/tinfoilsh/tinfoil-go/verify/document/collateral"
 	"github.com/tinfoilsh/tinfoil-go/verify/internal/policy"
 	"github.com/tinfoilsh/tinfoil-go/verify/measurement"
+	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/types/known/structpb"
 )
 
@@ -251,6 +253,59 @@ func TestPlatformRejectsOtherSigningIdentity(t *testing.T) {
 			require.ErrorAs(t, err, &identityError)
 			require.ErrorContains(t, err, "expected SAN value to match regex")
 			require.Nil(t, got)
+		})
+	}
+}
+
+func TestSignedPredicateKeepsSignedBytes(t *testing.T) {
+	fixture, err := os.ReadFile("../policy/testdata/platform-endorsements.json")
+	require.NoError(t, err)
+	// A mitigation vector with bit 63 set does not survive a float64 round
+	// trip; the policy parser must see the signed literal.
+	const vector = "9223372036854775809"
+	predicate := strings.Replace(string(fixture), `"minimum_launch_mitigation_vector": 0`, `"minimum_launch_mitigation_vector": `+vector, 1)
+	require.NotEqual(t, string(fixture), predicate)
+	payload := func(predicate string) []byte {
+		return []byte(`{"_type":"https://in-toto.io/Statement/v1","subject":[{"name":"platform-endorsements.json","digest":{"sha256":"` +
+			strings.Repeat("ab", 32) + `"}}],"predicateType":"` + policy.ArtifactFormat + `","predicate":` + predicate + `}`)
+	}
+
+	// The protobuf decoding the bundle verifier performs rounds the vector.
+	var statement in_toto.Statement
+	require.NoError(t, protojson.Unmarshal(payload(predicate), &statement))
+	rounded, err := protojson.Marshal(statement.Predicate)
+	require.NoError(t, err)
+	require.NotContains(t, string(rounded), vector)
+
+	signed, err := signedPredicate(payload(predicate))
+	require.NoError(t, err)
+	artifact, err := policy.Parse(signed)
+	require.NoError(t, err)
+	var got uint64
+	for _, p := range artifact.Policies {
+		if p.SEVSNP != nil && *p.SEVSNP.MinimumLaunchMitigationVector != 0 {
+			got = *p.SEVSNP.MinimumLaunchMitigationVector
+		}
+	}
+	require.Equal(t, uint64(9223372036854775809), got)
+
+	// Literals the strict parser rejects for integer fields stay rejected
+	// instead of being normalized by the round trip.
+	fractional := strings.Replace(string(fixture), `"minimum_build": 21`, `"minimum_build": 21.0`, 1)
+	require.NotEqual(t, string(fixture), fractional)
+	signed, err = signedPredicate(payload(fractional))
+	require.NoError(t, err)
+	_, err = policy.Parse(signed)
+	require.ErrorContains(t, err, "parsing policy artifact")
+
+	for name, payload := range map[string][]byte{
+		"no predicate":   []byte(`{"_type":"https://in-toto.io/Statement/v1","subject":[],"predicateType":"t"}`),
+		"null predicate": []byte(`{"_type":"https://in-toto.io/Statement/v1","subject":[],"predicateType":"t","predicate":null}`),
+		"not JSON":       []byte(`{`),
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, err := signedPredicate(payload)
+			require.Error(t, err)
 		})
 	}
 }
