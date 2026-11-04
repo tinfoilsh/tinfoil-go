@@ -52,6 +52,9 @@ func DangerousTestOnlyVerifyApproval(trustRootJSON []byte, keysPEM []string, bun
 	if err != nil {
 		return "", fmt.Errorf("%w: %w", ErrDangerousTestOnlyInput, err)
 	}
+	// The bundle is the artifact under test: one that does not parse is a
+	// verification failure (its layout is part of what the stage checks),
+	// not a malformed adapter input.
 	b, err := parseEndorsementBundle(bundleJSON)
 	if err != nil {
 		return "", err
