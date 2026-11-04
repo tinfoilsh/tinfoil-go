@@ -17,6 +17,7 @@ import (
 const (
 	StatementType    = statement.StatementType
 	PredicateType    = "https://tinfoil.sh/predicate/config-endorsement/v1"
+	PredicateTypeV2  = "https://tinfoil.sh/predicate/config-endorsement/v2"
 	PayloadType      = statement.PayloadType
 	BundleType       = statement.BundleType
 	MaxConfigSize    = 1 << 20
@@ -28,6 +29,7 @@ const (
 	maxSlugLength          = 63
 	maxRevisionLength      = 128
 	freshnessDomain        = "tinfoil-config-freshness/v1\x00"
+	freshnessDomainV2      = "tinfoil-config-freshness/v2\x00"
 )
 
 var (
@@ -49,7 +51,8 @@ type Subject struct {
 }
 
 type Predicate struct {
-	Freshness *Freshness `json:"freshness,omitempty"`
+	Runtime   *RuntimeReference `json:"runtime,omitempty"`
+	Freshness *Freshness        `json:"freshness,omitempty"`
 }
 
 type Freshness struct {
@@ -71,6 +74,21 @@ func NewStatement(name string, config []byte) (*Statement, error) {
 	if err := s.validate(false); err != nil {
 		return nil, err
 	}
+	return s, nil
+}
+
+// NewDeploymentStatement binds the exact config digest and runtime for verification without config bytes.
+func NewDeploymentStatement(name string, config []byte) (*Statement, error) {
+	s, err := NewStatement(name, config)
+	if err != nil {
+		return nil, err
+	}
+	runtime, err := RuntimeFromConfig(config)
+	if err != nil {
+		return nil, err
+	}
+	s.PredicateType = PredicateTypeV2
+	s.Predicate.Runtime = &runtime
 	return s, nil
 }
 
@@ -108,8 +126,18 @@ func ParseName(name string) (identity, revision string, err error) {
 }
 
 func (s *Statement) validate(requireTimestamp bool) error {
-	if s == nil || s.Type != StatementType || s.PredicateType != PredicateType {
+	if s == nil || s.Type != StatementType || (s.PredicateType != PredicateType && s.PredicateType != PredicateTypeV2) {
 		return fmt.Errorf("unsupported config endorsement statement type")
+	}
+	if s.PredicateType == PredicateTypeV2 {
+		if s.Predicate.Runtime == nil {
+			return fmt.Errorf("config endorsement requires a runtime reference")
+		}
+		if err := s.Predicate.Runtime.Validate(); err != nil {
+			return err
+		}
+	} else if s.Predicate.Runtime != nil {
+		return fmt.Errorf("v1 config endorsement cannot contain a runtime reference")
 	}
 	if len(s.Subject) != 1 {
 		return fmt.Errorf("config endorsement requires exactly one subject")
@@ -137,7 +165,11 @@ func (s *Statement) TimestampInput() ([]byte, error) {
 	}
 	core := *s
 	core.Predicate.Freshness = nil
-	return statement.TimestampInput(freshnessDomain, core)
+	domain := freshnessDomain
+	if s.PredicateType == PredicateTypeV2 {
+		domain = freshnessDomainV2
+	}
+	return statement.TimestampInput(domain, core)
 }
 
 func (s *Statement) TimestampImprint() ([sha256.Size]byte, error) {

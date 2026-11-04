@@ -11,6 +11,7 @@ import (
 
 	configendorsement "github.com/tinfoilsh/tinfoil-go/endorsement/config"
 	"github.com/tinfoilsh/tinfoil-go/endorsement/freshness"
+	"github.com/tinfoilsh/tinfoil-go/internal/canonical"
 	"github.com/tinfoilsh/tinfoil-go/verify/document"
 	"github.com/tinfoilsh/tinfoil-go/verify/document/collateral"
 	"github.com/tinfoilsh/tinfoil-go/verify/internal/endorsement"
@@ -67,14 +68,14 @@ func (v *Verifier) referencePins(ref string) (endorsement.ConfigPolicy, error) {
 	if v.configAuthorizer != nil && ref != "" {
 		return pins, usageError(fmt.Errorf("config authorizer cannot authenticate repository or revision pins; enforce them in caller policy"))
 	}
-	if ref != "" || (v.embedded.Config == nil && v.configAuthorizer == nil) {
+	if ref != "" || (v.embedded.ConfigReference == nil && v.configAuthorizer == nil) {
 		parsed, err := endorsement.ParseReference(ref)
 		if err != nil {
 			return pins, usageError(err)
 		}
 		pins.Identity, pins.Revision, pins.Digest = "/"+parsed.Repo, parsed.Tag, parsed.Digest
 	}
-	if embedded := v.embedded.Config; embedded != nil {
+	if embedded := v.embedded.ConfigReference; embedded != nil {
 		var identity, revision string
 		if embedded.Name != "" {
 			var err error
@@ -82,8 +83,7 @@ func (v *Verifier) referencePins(ref string) (endorsement.ConfigPolicy, error) {
 				return pins, usageError(err)
 			}
 		}
-		digest := sha256.Sum256(embedded.Bytes)
-		if (pins.Identity != "" && pins.Identity != identity) || (pins.Revision != "" && pins.Revision != revision) || (pins.Digest != "" && pins.Digest != hex.EncodeToString(digest[:])) {
+		if (pins.Identity != "" && pins.Identity != identity) || (pins.Revision != "" && pins.Revision != revision) || (pins.Digest != "" && pins.Digest != embedded.Digest) {
 			return pins, usageError(fmt.Errorf("embedded config does not match the caller's pins"))
 		}
 	}
@@ -103,11 +103,11 @@ func (v *Verifier) configReferences(doc *document.Document, ref string, now time
 		}
 	}
 	pins.Now, pins.MaxAge = now, v.freshnessMaxAge
-	config, approved, err := v.resolveConfig(doc, pins)
+	expectedRuntime, approved, err := v.resolveConfig(doc, pins)
 	if err != nil {
 		return nil, err
 	}
-	expectedRuntime, err := runtime.ConfigRuntime(config)
+	digest, err := canonical.DecodeLowerHex("config digest", approved.Digest, sha256.Size)
 	if err != nil {
 		return nil, err
 	}
@@ -123,7 +123,7 @@ func (v *Verifier) configReferences(doc *document.Document, ref string, now time
 		quote: quote.ConfigReferenceValues{
 			Endorsements: platform,
 			Runtime:      manifest.Measurements,
-			Hash:         sha256.Sum256(config),
+			Hash:         [sha256.Size]byte(digest),
 		},
 		artifact: runtimeTrust,
 		platform: &platformTrust,
@@ -133,37 +133,46 @@ func (v *Verifier) configReferences(doc *document.Document, ref string, now time
 	return result, nil
 }
 
-func (v *Verifier) resolveConfig(doc *document.Document, pins endorsement.ConfigPolicy) ([]byte, *ConfigVerification, error) {
-	if embedded := v.embedded.Config; embedded != nil {
+func (v *Verifier) resolveConfig(doc *document.Document, pins endorsement.ConfigPolicy) (collateral.RuntimeReference, *ConfigVerification, error) {
+	var expected collateral.RuntimeReference
+	if embedded := v.embedded.ConfigReference; embedded != nil {
 		// referencePins matched the pins against it.
-		digest := sha256.Sum256(embedded.Bytes)
-		return embedded.Bytes, &ConfigVerification{Source: SourceEmbedded, Name: embedded.Name, Digest: hex.EncodeToString(digest[:])}, nil
+		return embedded.Runtime, &ConfigVerification{Source: SourceEmbedded, Name: embedded.Name, Digest: embedded.Digest}, nil
 	}
 	config, err := doc.ConfigEndorsement()
 	if err != nil {
-		return nil, nil, err
+		return expected, nil, err
 	}
 	if v.configAuthorizer != nil {
 		if len(config.Config) == 0 || len(config.Config) > configendorsement.MaxConfigSize {
-			return nil, nil, fmt.Errorf("config size is outside allowed bounds")
+			return expected, nil, fmt.Errorf("config size is outside allowed bounds")
 		}
 		if err := v.configAuthorizer(config.Clone()); err != nil {
-			return nil, nil, &VerificationError{Layer: LayerProvenance, Err: fmt.Errorf("authorizing config: %w", err)}
+			return expected, nil, &VerificationError{Layer: LayerProvenance, Err: fmt.Errorf("authorizing config: %w", err)}
 		}
 		digest := sha256.Sum256(config.Config)
-		return config.Config, &ConfigVerification{Source: SourcePolicy, Digest: hex.EncodeToString(digest[:])}, nil
+		expected, err := configendorsement.RuntimeFromConfig(config.Config)
+		return expected, &ConfigVerification{Source: SourcePolicy, Digest: hex.EncodeToString(digest[:])}, err
 	}
 	if len(config.Bundle) == 0 {
-		return nil, nil, fmt.Errorf("unsigned config requires a config authorizer")
+		return expected, nil, fmt.Errorf("unsigned config requires a config authorizer")
 	}
 	approved, err := v.configVerifier.Verify(config.Config, config.Bundle, pins)
 	if err != nil {
-		return nil, nil, fmt.Errorf("verifying config approval: %w", err)
+		return expected, nil, fmt.Errorf("verifying config approval: %w", err)
 	}
 	if config.Reference != approved.Reference {
-		return nil, nil, fmt.Errorf("config endorsement reference does not match the verified approval")
+		return expected, nil, fmt.Errorf("config endorsement reference does not match the verified approval")
 	}
-	return config.Config, &ConfigVerification{
+	if approved.Runtime != nil {
+		expected = *approved.Runtime
+	} else {
+		expected, err = configendorsement.RuntimeFromConfig(config.Config)
+		if err != nil {
+			return expected, nil, err
+		}
+	}
+	return expected, &ConfigVerification{
 		Source: SourceEndorsement, Name: approved.Name, Digest: approved.Digest,
 		Reference: approved.Reference, SigningKeyHint: approved.SigningKeyHint, ApprovalTime: approved.ApprovalTime,
 	}, nil

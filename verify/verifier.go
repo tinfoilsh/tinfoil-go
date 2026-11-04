@@ -82,10 +82,10 @@ func NewVerifier(opts ...Option) (*Verifier, error) {
 			return nil, usageError(err)
 		}
 	}
-	if v.embedded.Config != nil && v.configKeys != nil {
+	if v.embedded.ConfigReference != nil && v.configKeys != nil {
 		return nil, usageError(fmt.Errorf("embedded config and config signing keys select conflicting trust sources"))
 	}
-	if v.configAuthorizer != nil && (v.embedded.Config != nil || v.configKeys != nil) {
+	if v.configAuthorizer != nil && (v.embedded.ConfigReference != nil || v.configKeys != nil) {
 		return nil, usageError(fmt.Errorf("config authorizer conflicts with embedded config or config signing keys"))
 	}
 	if v.embedded.Runtime != nil && v.embedded.Platform != nil && v.freshnessKeys != nil {
@@ -145,7 +145,7 @@ func (v *Verifier) CheckRepoVerifiability(repo string) error {
 // an embedded config, or authorizes it, with a config authorizer, instead of
 // a repository pin authenticating it.
 func (v *Verifier) CallerAuthorizesConfig() bool {
-	return v.embedded.Config != nil || v.configAuthorizer != nil
+	return v.embedded.ConfigReference != nil || v.configAuthorizer != nil
 }
 
 // PinnedRegisters returns a copy of the configured register pins, or nil.

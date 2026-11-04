@@ -46,6 +46,9 @@ func decodeConfigEndorsement(entry *Entry) (ConfigEndorsement, error) {
 			return ConfigEndorsement{}, fmt.Errorf("sigstore_bundle must be an object")
 		}
 	}
+	if entry.Format == ConfigEndorsementV2Format && c.Config == "" {
+		return ConfigEndorsement{Reference: c.Reference, Bundle: c.Bundle}, nil
+	}
 	config, err := canonical.DecodeBase64("config_base64", c.Config)
 	if err != nil {
 		return ConfigEndorsement{}, err

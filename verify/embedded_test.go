@@ -73,6 +73,49 @@ func embeddedInputs(t *testing.T) EmbeddedReferences {
 	}
 }
 
+func TestEmbeddedConfigReferenceWithoutConfigBytes(t *testing.T) {
+	inputs := embeddedInputs(t)
+	digest := sha256.Sum256(inputs.Config.Bytes)
+	runtime, err := configendorsement.RuntimeFromConfig(inputs.Config.Bytes)
+	require.NoError(t, err)
+	reference := EmbeddedConfigReference{Name: embeddedConfigName, Digest: hex.EncodeToString(digest[:]), Runtime: runtime}
+	inputs.ConfigReference = &reference
+	_, err = NewVerifier(WithEmbeddedReferences(inputs))
+	require.ErrorContains(t, err, "mutually exclusive")
+	inputs.Config = nil
+	v, err := NewVerifier(WithEmbeddedReferences(inputs))
+	require.NoError(t, err)
+	require.True(t, v.CallerAuthorizesConfig())
+	require.NoError(t, v.CheckRepoVerifiability(""))
+	require.NoError(t, v.CheckRepoVerifiability("org/project@v1@sha256:"+reference.Digest))
+	require.ErrorAs(t, v.CheckRepoVerifiability("org/project@v2"), new(*UsageError))
+	require.ErrorAs(t, v.CheckRepoVerifiability("org/project@sha256:"+strings.Repeat("ab", sha256.Size)), new(*UsageError))
+	raw, nonce, doc := embeddedDocument(t, collateral.FormatV3)
+	refs, err := v.configReferences(doc, "org/project@v1", time.Now())
+	require.NoError(t, err)
+	require.Equal(t, digest, refs.quote.(quote.ConfigReferenceValues).Hash)
+	require.Equal(t, runtime.Digest, refs.artifact.Digest)
+	_, err = v.VerifyV3(raw, nonce, "org/project@v1")
+	requireRejectedAt(t, err, LayerQuote)
+	_, err = v.VerifyV3(raw, nonce, "")
+	requireRejectedAt(t, err, LayerQuote)
+	for _, mutate := range []func(*EmbeddedConfigReference){
+		func(r *EmbeddedConfigReference) { r.Digest = "" },
+		func(r *EmbeddedConfigReference) { r.Runtime.Digest = strings.Repeat("cd", sha256.Size) },
+		func(r *EmbeddedConfigReference) { r.Name = "/invalid" },
+	} {
+		bad := reference
+		mutate(&bad)
+		inputs.ConfigReference = &bad
+		_, err = NewVerifier(WithEmbeddedReferences(inputs))
+		require.Error(t, err)
+	}
+	reference.Digest = strings.Repeat("ab", sha256.Size)
+	got, err := v.configReferences(doc, "org/project@v1", time.Now())
+	require.NoError(t, err)
+	require.Equal(t, refs, got)
+}
+
 func embeddedDocument(t *testing.T, format string, entries ...collateral.Entry) ([]byte, []byte, *document.Document) {
 	t.Helper()
 	nonce := make([]byte, document.NonceSize)

@@ -54,6 +54,35 @@ func TestTimestampCoreCanonicalization(t *testing.T) {
 	require.Equal(t, got, withFreshness)
 }
 
+func TestDeploymentStatementRequiresRuntimeBinding(t *testing.T) {
+	_, err := configendorsement.NewDeploymentStatement(testName, testConfig)
+	require.ErrorContains(t, err, "cvm-version must pin")
+	f := sigstoretest.New(t)
+	config := []byte("cvm-version: 0.15.0@sha256:" + strings.Repeat("ab", sha256.Size) + "\n")
+	s, err := configendorsement.NewDeploymentStatement(testName, config)
+	require.NoError(t, err)
+	input, err := s.TimestampInput()
+	require.NoError(t, err)
+	payload, err := s.Complete(f.Timestamp(t, input, f.Now))
+	require.NoError(t, err)
+	for name, mutate := range map[string]func(*configendorsement.Statement){
+		"missing runtime":  func(s *configendorsement.Statement) { s.Predicate.Runtime = nil },
+		"wrong repository": func(s *configendorsement.Statement) { s.Predicate.Runtime.Repo = "other/runtime" },
+		"invalid digest":   func(s *configendorsement.Statement) { s.Predicate.Runtime.Digest = "ab" },
+		"v1 runtime":       func(s *configendorsement.Statement) { s.PredicateType = configendorsement.PredicateType },
+	} {
+		t.Run(name, func(t *testing.T) {
+			s, err := configendorsement.ParseStatement(payload)
+			require.NoError(t, err)
+			mutate(s)
+			encoded, err := json.Marshal(s)
+			require.NoError(t, err)
+			_, err = configendorsement.ParseStatement(encoded)
+			require.Error(t, err)
+		})
+	}
+}
+
 func TestNamesAreCanonical(t *testing.T) {
 	for _, invalid := range []string{
 		"/org/project",
