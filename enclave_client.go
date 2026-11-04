@@ -85,8 +85,9 @@ type EnclaveHTTPClient struct {
 }
 
 // NewEnclaveHTTPClient returns a client for the enclave at host, verified
-// against repo, owner/name[@tag][@sha256:digest]. An empty repo leaves config
-// authorization to opts.Verifier. It checks opts before any network I/O, then
+// against repo, owner/name[@tag][@sha256:digest]. An empty repo accepts configs
+// authorized by opts.Verifier, which defaults to public registry trust.
+// It checks opts before any network I/O, then
 // verifies the enclave under ctx before returning, so a misconfigured client
 // fails here rather than on its first request. The client verifies again by
 // itself when the verification expires or is rejected.

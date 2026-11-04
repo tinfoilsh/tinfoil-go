@@ -47,7 +47,7 @@ func TestDigestEndorsementBindsQuoteAndRuntimeWithoutConfig(t *testing.T) {
 	f := sigstoretest.New(t)
 	inputs := embeddedInputs(t)
 	config := inputs.Config.Bytes
-	s, err := configendorsement.NewDeploymentStatement(embeddedConfigName, config)
+	s, err := configendorsement.NewDeploymentStatement(embeddedConfigName, configendorsement.PublicScope, config)
 	require.NoError(t, err)
 	input, err := s.TimestampInput()
 	require.NoError(t, err)
@@ -108,6 +108,91 @@ func TestDigestEndorsementBindsQuoteAndRuntimeWithoutConfig(t *testing.T) {
 	require.ErrorContains(t, err, "digest pin")
 }
 
+const privateScope = configendorsement.ScopePrefix + "9c4a7f21e0b836d56a13c8fe42d907ab"
+
+func TestScopedConfigRetainsFreshnessAfterCertificateExpiry(t *testing.T) {
+	f := sigstoretest.New(t)
+	rootKey := f.Key
+	leaf := sigstoretest.New(t).Key
+	certificate := f.ScopeCertificate(t, leaf.Public(), privateScope, f.Now)
+	f.Key = leaf
+	inputs := embeddedInputs(t)
+	s, err := configendorsement.NewDeploymentStatement(embeddedConfigName, privateScope, inputs.Config.Bytes)
+	require.NoError(t, err)
+	input, err := s.TimestampInput()
+	require.NoError(t, err)
+	payload, err := s.Complete(f.Timestamp(t, input, f.Now))
+	require.NoError(t, err)
+	reference, err := configendorsement.EndorsementReference(payload)
+	require.NoError(t, err)
+	data, err := json.Marshal(map[string]any{"endorsement_ref": reference, "issuer_certificate_der": certificate.Issuer,
+		"sigstore_bundle": jsontext.Value(sigstoretest.MarshalBundle(t, f.CertifiedBundle(t, payload, certificate, f.Now)))})
+	require.NoError(t, err)
+	_, _, doc := embeddedDocument(t, collateral.FormatV3, collateral.Entry{ID: collateral.ConfigID, Role: collateral.RoleReferenceValues, Format: collateral.ConfigEndorsementV2Format, Data: data})
+	inputs.Config = nil
+	for _, test := range []struct {
+		name     string
+		options  []Option
+		accepted bool
+	}{
+		{"default", nil, false},
+		{"exclusive", []Option{WithConfigScopes(privateScope)}, true},
+		{"additive", []Option{WithAdditionalConfigScopes(privateScope)}, true},
+		{"other scope", []Option{WithConfigScopes(configendorsement.PublicScope)}, false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			v, err := NewVerifier(append(test.options, WithEmbeddedReferences(inputs))...)
+			require.NoError(t, err)
+			v.configVerifier, err = endorsement.NewRegistryVerifier(&f.Trust, []crypto.PublicKey{rootKey.Public()})
+			require.NoError(t, err)
+			refs, err := v.configReferences(doc, "org/project@v1", f.Now.Add(24*time.Hour))
+			if !test.accepted {
+				require.ErrorContains(t, err, "scope is not accepted")
+				return
+			}
+			require.NoError(t, err)
+			require.Equal(t, privateScope, refs.config.Scope)
+			require.Equal(t, f.Now, refs.config.SignatureTime)
+			require.Equal(t, f.Now.Add(v.freshnessMaxAge), refs.freshnessExpiresAt)
+			_, err = v.configReferences(doc, "org/other", f.Now)
+			require.ErrorContains(t, err, "pinned identity")
+		})
+	}
+}
+
+func TestConfigScopeOptionsRejectAmbiguousTrust(t *testing.T) {
+	f := sigstoretest.New(t)
+	for _, test := range []struct {
+		options []Option
+		want    string
+	}{
+		{[]Option{WithConfigScopes()}, "must not be empty"},
+		{[]Option{WithAdditionalConfigScopes()}, "must not be empty"},
+		{[]Option{WithConfigScopes("")}, "canonical registry scope"},
+		{[]Option{WithConfigScopes(privateScope, privateScope)}, "duplicate config scope"},
+		{[]Option{WithConfigScopes(privateScope), WithAdditionalConfigScopes(privateScope)}, "must be supplied once"},
+		{[]Option{WithAdditionalConfigScopes(privateScope), WithConfigScopes(privateScope)}, "must be supplied once"},
+		{[]Option{WithConfigScopes(privateScope), WithConfigSigningKeys([]crypto.PublicKey{f.Key.Public()})}, "requires Tinfoil registry root"},
+		{[]Option{WithConfigScopes(privateScope), WithEmbeddedReferences(embeddedInputs(t))}, "require endorsement verification"},
+	} {
+		_, err := NewVerifier(test.options...)
+		require.ErrorContains(t, err, test.want)
+	}
+	scopes := []string{privateScope}
+	option := WithConfigScopes(scopes...)
+	scopes[0] = configendorsement.PublicScope
+	v, err := NewVerifier(option)
+	require.NoError(t, err)
+	pins, err := v.referencePins("")
+	require.NoError(t, err)
+	require.Equal(t, []string{privateScope}, pins.Scopes)
+	nonce := make([]byte, document.NonceSize)
+	raw, err := document.Build(document.BuildInput{Nonce: nonce, CollateralFormat: collateral.FormatV2}, func([64]byte) (string, []byte, error) { return document.SEVSNPReportV1Format, []byte("quote"), nil })
+	require.NoError(t, err)
+	_, err = v.VerifyV3(raw, nonce, "org/project")
+	require.ErrorContains(t, err, "configured trust requires")
+}
+
 func TestCollateralVersionSelectsVerification(t *testing.T) {
 	v, err := NewVerifier()
 	require.NoError(t, err)
@@ -135,11 +220,11 @@ func TestConfigReferencePins(t *testing.T) {
 	require.NoError(t, err)
 	const repo = "org/project"
 	digest := strings.Repeat("ab", sha256.Size)
-	for _, ref := range []string{repo, repo + "@v1", repo + "@sha256:" + digest, repo + "@v1@sha256:" + digest} {
+	for _, ref := range []string{"", repo, repo + "@v1", repo + "@sha256:" + digest, repo + "@v1@sha256:" + digest} {
 		_, err := v.VerifyV3(raw, nonce, ref)
 		require.ErrorIs(t, err, collateral.ErrNotFound, "valid pins must reach endorsement verification")
 	}
-	for _, ref := range []string{"", "/org/project", "Org/project", "org/project_name", "org/project@v1/path", "org/project@sha256:bad", "org/project@v1@v2"} {
+	for _, ref := range []string{"/org/project", "Org/project", "org/project_name", "org/project@v1/path", "org/project@sha256:bad", "org/project@v1@v2"} {
 		_, err := v.VerifyV3(raw, nonce, ref)
 		var usage *UsageError
 		require.ErrorAs(t, err, &usage, ref)

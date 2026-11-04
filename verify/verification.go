@@ -27,6 +27,9 @@ type ConfigVerification struct {
 	Reference      string
 	SigningKeyHint string
 	ApprovalTime   time.Time
+	// Scope is authenticated by the certificate, or public for legacy registry approvals.
+	Scope         string
+	SignatureTime time.Time
 }
 
 // ArtifactVerification describes accepted reference values and their authority.
@@ -143,8 +146,8 @@ func (v *Verification) CryptoMaterial() []document.CryptoMaterialItem {
 // deadline. Cached verification must not authorize new requests at or after
 // this time; re-verifying the same witness does not extend it. Config
 // verification uses the earliest nonzero config, platform, or runtime approval
-// deadline. Embedded components add no deadline; all-embedded verification
-// returns zero.
+// deadline. Short-lived certificates are checked at the signature timestamp. Embedded components
+// add no deadline; all-embedded verification returns zero.
 func (v *Verification) FreshnessExpiresAt() time.Time { return v.freshnessExpiresAt }
 
 // Metadata describes the verification rather than the document.

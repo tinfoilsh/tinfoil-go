@@ -11,6 +11,7 @@ import (
 	"github.com/sigstore/sigstore-go/pkg/verify"
 	"github.com/sigstore/sigstore/pkg/signature"
 
+	configendorsement "github.com/tinfoilsh/tinfoil-go/endorsement/config"
 	"github.com/tinfoilsh/tinfoil-go/internal/statement"
 )
 
@@ -108,27 +109,51 @@ func validateEndorsementBundle(b *bundle.Bundle) error {
 		return fmt.Errorf("expected a v0.3 approval DSSE bundle")
 	}
 	vm := b.GetVerificationMaterial()
-	if vm.GetPublicKey() == nil || vm.GetPublicKey().GetHint() == "" {
+	if vm.GetCertificate() == nil && (vm.GetPublicKey() == nil || vm.GetPublicKey().GetHint() == "") {
 		return fmt.Errorf("expected an independently trusted public-key hint")
 	}
 	sigs := b.GetDsseEnvelope().GetSignatures()
 	if len(sigs) != 1 || len(sigs[0].GetSig()) == 0 {
 		return fmt.Errorf("approval requires exactly one signature")
 	}
-	if sigs[0].GetKeyid() != "" && sigs[0].GetKeyid() != vm.GetPublicKey().GetHint() {
+	hint := vm.GetPublicKey().GetHint()
+	if cert := vm.GetCertificate(); cert != nil {
+		if len(cert.RawBytes) == 0 || len(cert.RawBytes) > configendorsement.MaxCertificateSize {
+			return fmt.Errorf("invalid signing certificate size")
+		}
+		parsed, err := x509.ParseCertificate(cert.RawBytes)
+		if err != nil {
+			return err
+		}
+		hint, err = statement.KeyHint(parsed.PublicKey)
+		if err != nil {
+			return err
+		}
+	}
+	if sigs[0].GetKeyid() != "" && sigs[0].GetKeyid() != hint {
 		return fmt.Errorf("DSSE key ID disagrees with key hint")
 	}
+	return validateLogMaterial(b)
+}
+
+func validateLogMaterial(b *bundle.Bundle) error {
+	vm := b.GetVerificationMaterial()
 	entries := vm.GetTlogEntries()
 	if len(entries) == 0 || len(entries) > maxLogReceipts {
-		return fmt.Errorf("approval requires bounded Rekor inclusion evidence")
+		return fmt.Errorf("signed bundle requires bounded Rekor inclusion evidence")
 	}
 	for _, entry := range entries {
 		if entry.GetKindVersion().GetKind() != "hashedrekord" || entry.GetKindVersion().GetVersion() != "0.0.2" || entry.GetIntegratedTime() != 0 || entry.GetInclusionProof() == nil || entry.GetInclusionPromise() != nil {
-			return fmt.Errorf("approval requires Rekor v2 inclusion proofs")
+			return fmt.Errorf("signed bundle requires Rekor v2 inclusion proofs")
 		}
 	}
-	if len(vm.GetTimestampVerificationData().GetRfc3161Timestamps()) != 0 {
-		return fmt.Errorf("approval uses only its signed approval timestamp")
+	timestamps := vm.GetTimestampVerificationData().GetRfc3161Timestamps()
+	if vm.GetCertificate() != nil {
+		if len(timestamps) != 1 || len(timestamps[0].SignedTimestamp) == 0 || len(timestamps[0].SignedTimestamp) > statement.MaxTimestampSize {
+			return fmt.Errorf("scoped endorsement requires one bounded signature timestamp")
+		}
+	} else if len(timestamps) != 0 {
+		return fmt.Errorf("signed bundle cannot contain observer timestamps")
 	}
 	return nil
 }

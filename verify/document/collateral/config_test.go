@@ -103,3 +103,37 @@ func TestConfigEndorsement(t *testing.T) {
 		})
 	}
 }
+
+func TestIssuerCertificateEncodingIsCanonical(t *testing.T) {
+	data := configCollateral{
+		Reference: "sha256:" + strings.Repeat("ab", 32), Bundle: []byte(`{"mediaType":"test"}`),
+		Issuer: "Yg==",
+	}
+	encoded, err := json.Marshal(data)
+	require.NoError(t, err)
+	entry := Entry{ID: ConfigID, Role: RoleReferenceValues, Format: ConfigEndorsementV2Format, Data: encoded}
+	set, err := Decode([]Entry{entry})
+	require.NoError(t, err)
+	require.Equal(t, []byte("b"), set.Config.Issuer)
+	data.Config = "Y29uZmln"
+	entry.Data, err = json.Marshal(data)
+	require.NoError(t, err)
+	set, err = Decode([]Entry{entry})
+	require.NoError(t, err)
+	require.Equal(t, []byte("config"), set.Config.Config)
+	cloned := set.Config.Clone()
+	cloned.Issuer[0] = '!'
+	require.Equal(t, []byte("b"), set.Config.Issuer)
+	for _, noncanonical := range []string{"YR==", "YQ==\n"} {
+		bad := data
+		bad.Issuer = noncanonical
+		entry.Data, err = json.Marshal(bad)
+		require.NoError(t, err)
+		_, err = Decode([]Entry{entry})
+		require.ErrorContains(t, err, "issuer_certificate_der")
+	}
+	entry.Format = ConfigEndorsementV1Format
+	entry.Data = encoded
+	_, err = Decode([]Entry{entry})
+	require.ErrorContains(t, err, "issuer certificates require v2")
+}

@@ -254,7 +254,7 @@ func TestEndorsedConfigWithEmbeddedArtifactsRetainsFreshnessAndAuthority(t *test
 	payload, err := s.Complete(f.Timestamp(t, timestampInput, at))
 	require.NoError(t, err)
 	bundle := sigstoretest.MarshalBundle(t, f.Bundle(t, payload))
-	v, err := NewVerifier(WithEmbeddedReferences(EmbeddedReferences{Runtime: inputs.Runtime, Platform: inputs.Platform}))
+	v, err := NewVerifier(WithEmbeddedReferences(EmbeddedReferences{Runtime: inputs.Runtime, Platform: inputs.Platform}), WithConfigSigningKeys([]crypto.PublicKey{f.Key.Public()}))
 	require.NoError(t, err)
 	v.configVerifier, err = endorsement.NewConfigVerifier(&f.Trust, []crypto.PublicKey{f.Key.Public()})
 	require.NoError(t, err)

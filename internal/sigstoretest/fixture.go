@@ -15,6 +15,7 @@ import (
 	"encoding/hex"
 	"encoding/json/jsontext"
 	"math/big"
+	"net/url"
 	"testing"
 	"time"
 
@@ -30,6 +31,7 @@ import (
 	"github.com/sigstore/sigstore-go/pkg/root"
 	"github.com/sigstore/sigstore/pkg/signature"
 	"github.com/stretchr/testify/require"
+	configendorsement "github.com/tinfoilsh/tinfoil-go/endorsement/config"
 	"github.com/tinfoilsh/tinfoil-go/internal/statement"
 	f_log "github.com/transparency-dev/formats/log"
 	"github.com/transparency-dev/merkle/rfc6962"
@@ -38,6 +40,9 @@ import (
 )
 
 const logOrigin = "rekor.test.invalid"
+
+const scopeRootLifetime = 365 * 24 * time.Hour
+const timestampLifetime = 30 * 24 * time.Hour
 
 type Trust struct {
 	root.BaseTrustedMaterial
@@ -80,7 +85,7 @@ func New(t *testing.T) *Fixture {
 	rootKey := newKey()
 	rootTemplate := &x509.Certificate{
 		SerialNumber: big.NewInt(rootSerial), Subject: pkix.Name{CommonName: "test timestamp root"},
-		NotBefore: f.Now.Add(-time.Hour), NotAfter: f.Now.Add(time.Hour),
+		NotBefore: f.Now.Add(-timestampLifetime), NotAfter: f.Now.Add(timestampLifetime),
 		KeyUsage: x509.KeyUsageCertSign, BasicConstraintsValid: true, IsCA: true,
 	}
 	rootCert := createCert(rootTemplate, rootTemplate, &rootKey.PublicKey, rootKey)
@@ -90,14 +95,14 @@ func New(t *testing.T) *Fixture {
 	require.NoError(t, err)
 	leafTemplate := &x509.Certificate{
 		SerialNumber: big.NewInt(leafSerial), Subject: pkix.Name{CommonName: "test timestamp signer"},
-		NotBefore: f.Now.Add(-time.Minute), NotAfter: f.Now.Add(time.Hour),
+		NotBefore: f.Now.Add(-timestampLifetime), NotAfter: f.Now.Add(timestampLifetime),
 		KeyUsage:        x509.KeyUsageDigitalSignature,
 		ExtraExtensions: []pkix.Extension{{Id: ekuOID, Critical: true, Value: eku}},
 	}
 	leaf := createCert(leafTemplate, rootCert, &f.TSAKey.PublicKey, rootKey)
 	f.Trust.TSA = &root.SigstoreTimestampingAuthority{
 		Root: rootCert, Leaf: leaf,
-		URI: "https://tsa.test.invalid", ValidityPeriodStart: f.Now.Add(-time.Hour),
+		URI: "https://tsa.test.invalid", ValidityPeriodStart: f.Now.Add(-timestampLifetime),
 	}
 	logDER, err := x509.MarshalPKIXPublicKey(f.LogKey.Public())
 	require.NoError(t, err)
@@ -105,7 +110,7 @@ func New(t *testing.T) *Fixture {
 	f.Trust.Log = &root.TransparencyLog{
 		BaseURL: "https://" + logOrigin, ID: logID[:], PublicKey: f.LogKey.Public(),
 		HashFunc: crypto.SHA256, SignatureHashFunc: crypto.SHA256,
-		ValidityPeriodStart: f.Now.Add(-time.Hour),
+		ValidityPeriodStart: f.Now.Add(-timestampLifetime),
 	}
 	return f
 }
@@ -146,16 +151,72 @@ func (f *Fixture) Bundle(t *testing.T, payload []byte) *protobundle.Bundle {
 			Content: &protobundle.VerificationMaterial_PublicKey{PublicKey: &common.PublicKeyIdentifier{Hint: hint}},
 		},
 	}
+	return f.logBundle(t, b, digest[:], sig)
+}
+
+type SigningCertificate struct{ Certificate, Issuer []byte }
+
+func (f *Fixture) SigningCertificate(t *testing.T, key crypto.PublicKey) SigningCertificate {
+	t.Helper()
+	return f.SigningCertificateAt(t, key, f.Now)
+}
+
+func (f *Fixture) SigningCertificateAt(t *testing.T, key crypto.PublicKey, now time.Time) SigningCertificate {
+	return f.ScopeCertificate(t, key, configendorsement.PublicScope, now)
+}
+
+func (f *Fixture) ScopeCertificate(t *testing.T, key crypto.PublicKey, scope string, now time.Time) SigningCertificate {
+	t.Helper()
+	template := &x509.Certificate{
+		SerialNumber: big.NewInt(1), Subject: pkix.Name{CommonName: "registry test root"},
+		NotBefore: now.Add(-time.Hour), NotAfter: now.Add(scopeRootLifetime),
+		BasicConstraintsValid: true, IsCA: true, MaxPathLenZero: true,
+		KeyUsage: x509.KeyUsageCertSign | x509.KeyUsageDigitalSignature,
+	}
+	rootDER, err := x509.CreateCertificate(rand.Reader, template, template, f.Key.Public(), f.Key)
+	require.NoError(t, err)
+	issuer, err := x509.ParseCertificate(rootDER)
+	require.NoError(t, err)
+	scopeURI, err := url.Parse(scope)
+	require.NoError(t, err)
+	leaf := &x509.Certificate{
+		URIs:         []*url.URL{scopeURI},
+		SerialNumber: big.NewInt(1),
+		NotBefore:    now.Add(-configendorsement.CertificateClockSkew), NotAfter: now.Add(configendorsement.CertificateValidity - configendorsement.CertificateClockSkew),
+		SignatureAlgorithm: x509.ECDSAWithSHA256,
+		KeyUsage:           x509.KeyUsageDigitalSignature, ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageCodeSigning},
+		BasicConstraintsValid: true,
+	}
+	der, err := x509.CreateCertificate(rand.Reader, leaf, issuer, key, f.Key)
+	require.NoError(t, err)
+	return SigningCertificate{Certificate: der, Issuer: rootDER}
+}
+
+func (f *Fixture) CertifiedBundle(t *testing.T, payload []byte, certificate SigningCertificate, at time.Time) *protobundle.Bundle {
+	b := f.Bundle(t, payload)
+	b.VerificationMaterial.Content = &protobundle.VerificationMaterial_Certificate{Certificate: &common.X509Certificate{RawBytes: certificate.Certificate}}
+	b.VerificationMaterial.TimestampVerificationData = &protobundle.TimestampVerificationData{Rfc3161Timestamps: []*common.RFC3161SignedTimestamp{{SignedTimestamp: f.Timestamp(t, b.GetDsseEnvelope().Signatures[0].Sig, at)}}}
+	return f.LogBundle(t, b)
+}
+
+func (f *Fixture) LogBundle(t *testing.T, b *protobundle.Bundle) *protobundle.Bundle {
+	digest := sha256.Sum256(dsse.PAE(b.GetDsseEnvelope().PayloadType, b.GetDsseEnvelope().Payload))
+	return f.logBundle(t, b, digest[:], b.GetDsseEnvelope().Signatures[0].Sig)
+}
+
+func (f *Fixture) logBundle(t *testing.T, b *protobundle.Bundle, digest, sig []byte) *protobundle.Bundle {
+	t.Helper()
 	keyDER, err := x509.MarshalPKIXPublicKey(f.Key.Public())
 	require.NoError(t, err)
 	algorithms, err := signature.NewAlgorithmRegistryConfig([]common.PublicKeyDetails{common.PublicKeyDetails_PKIX_ECDSA_P256_SHA_256})
 	require.NoError(t, err)
+	verifier := &rekor.Verifier{KeyDetails: common.PublicKeyDetails_PKIX_ECDSA_P256_SHA_256, Verifier: &rekor.Verifier_PublicKey{PublicKey: &rekor.PublicKey{RawBytes: keyDER}}}
+	if cert := b.GetVerificationMaterial().GetCertificate(); cert != nil {
+		verifier.Verifier = &rekor.Verifier_X509Certificate{X509Certificate: cert}
+	}
 	entry, err := hashedrekord.ToLogEntry(&rekor.HashedRekordRequestV002{
-		Digest: digest[:],
-		Signature: &rekor.Signature{Content: sig, Verifier: &rekor.Verifier{
-			KeyDetails: common.PublicKeyDetails_PKIX_ECDSA_P256_SHA_256,
-			Verifier:   &rekor.Verifier_PublicKey{PublicKey: &rekor.PublicKey{RawBytes: keyDER}},
-		}},
+		Digest:    digest,
+		Signature: &rekor.Signature{Content: sig, Verifier: verifier},
 	}, algorithms)
 	require.NoError(t, err)
 	entryJSON, err := protojson.Marshal(entry)
