@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"slices"
 	"time"
 
 	"golang.org/x/mod/semver"
@@ -19,6 +20,35 @@ import (
 	"github.com/tinfoilsh/tinfoil-go/verify/internal/quote"
 	"github.com/tinfoilsh/tinfoil-go/verify/internal/runtime"
 )
+
+// WithConfigScopes accepts exactly these registry scopes, replacing public-only trust.
+func WithConfigScopes(scopes ...string) Option {
+	scopes = slices.Clone(scopes)
+	return func(v *Verifier) error {
+		if len(scopes) == 0 {
+			return fmt.Errorf("config scopes must not be empty")
+		}
+		if err := (endorsement.ConfigPolicy{Scopes: scopes}).ValidatePins(); err != nil {
+			return err
+		}
+		if v.configScopes != nil {
+			return fmt.Errorf("config scopes must be supplied once")
+		}
+		v.configScopes = slices.Clone(scopes)
+		return nil
+	}
+}
+
+// WithAdditionalConfigScopes accepts these scopes alongside the public registry.
+func WithAdditionalConfigScopes(scopes ...string) Option {
+	scopes = slices.Clone(scopes)
+	return func(v *Verifier) error {
+		if len(scopes) == 0 {
+			return fmt.Errorf("additional config scopes must not be empty")
+		}
+		return WithConfigScopes(append([]string{configendorsement.PublicScope}, scopes...)...)(v)
+	}
+}
 
 // WithConfigAuthorizer replaces config endorsement verification with caller policy.
 // The callback receives detached, untrusted material and must reject unauthorized
@@ -35,7 +65,7 @@ func WithConfigAuthorizer(authorize func(collateral.ConfigEndorsement) error) Op
 }
 
 // WithConfigSigningKeys replaces public config trust with the supplied keys.
-// These keys define the accepted audit scope and do not authorize artifact freshness.
+// This explicit trust path does not use registry scopes or authorize artifact freshness.
 // An explicit key set requires attestation-collaterals/v3.
 func WithConfigSigningKeys(keys []crypto.PublicKey) Option {
 	return func(v *Verifier) error {
@@ -64,11 +94,14 @@ func WithFreshnessSigningKeys(keys []crypto.PublicKey) Option {
 // error if VerifyV3 rejects ref whatever the document. Every check of that
 // kind belongs here, so CheckRepoVerifiability makes it too.
 func (v *Verifier) referencePins(ref string) (endorsement.ConfigPolicy, error) {
-	var pins endorsement.ConfigPolicy
+	pins := endorsement.ConfigPolicy{Scopes: v.configScopes}
+	if pins.Scopes == nil && v.configKeys == nil {
+		pins.Scopes = []string{configendorsement.PublicScope}
+	}
 	if v.configAuthorizer != nil && ref != "" {
 		return pins, usageError(fmt.Errorf("config authorizer cannot authenticate repository or revision pins; enforce them in caller policy"))
 	}
-	if ref != "" || (v.embedded.ConfigReference == nil && v.configAuthorizer == nil) {
+	if ref != "" {
 		parsed, err := endorsement.ParseReference(ref)
 		if err != nil {
 			return pins, usageError(err)
@@ -130,6 +163,7 @@ func (v *Verifier) configReferences(doc *document.Document, ref string, now time
 		config:   approved,
 	}
 	result.freshnessExpiresAt = freshnessExpiration(v.freshnessMaxAge, approved.ApprovalTime, platformTrust.ApprovalTime, runtimeTrust.ApprovalTime)
+
 	return result, nil
 }
 
@@ -157,7 +191,12 @@ func (v *Verifier) resolveConfig(doc *document.Document, pins endorsement.Config
 	if len(config.Bundle) == 0 {
 		return expected, nil, fmt.Errorf("unsigned config requires a config authorizer")
 	}
-	approved, err := v.configVerifier.Verify(config.Config, config.Bundle, pins)
+	var approved *endorsement.ConfigVerified
+	if config.Issuer != nil && v.configKeys == nil {
+		approved, err = v.configVerifier.VerifyCertified(config.Config, config.Bundle, config.Issuer, pins)
+	} else {
+		approved, err = v.configVerifier.Verify(config.Config, config.Bundle, pins)
+	}
 	if err != nil {
 		return expected, nil, fmt.Errorf("verifying config approval: %w", err)
 	}
@@ -175,6 +214,7 @@ func (v *Verifier) resolveConfig(doc *document.Document, pins endorsement.Config
 	return expected, &ConfigVerification{
 		Source: SourceEndorsement, Name: approved.Name, Digest: approved.Digest,
 		Reference: approved.Reference, SigningKeyHint: approved.SigningKeyHint, ApprovalTime: approved.ApprovalTime,
+		Scope: approved.Scope, SignatureTime: approved.SignatureTime,
 	}, nil
 }
 

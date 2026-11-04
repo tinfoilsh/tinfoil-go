@@ -10,21 +10,28 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/tinfoilsh/tinfoil-go/internal/statement"
 )
 
 const (
-	StatementType    = statement.StatementType
-	PredicateType    = "https://tinfoil.sh/predicate/config-endorsement/v1"
-	PredicateTypeV2  = "https://tinfoil.sh/predicate/config-endorsement/v2"
-	PayloadType      = statement.PayloadType
-	BundleType       = statement.BundleType
-	MaxConfigSize    = 1 << 20
-	MaxBundleSize    = statement.MaxBundleSize
-	MaxStatementSize = statement.MaxStatementSize
-	MaxTimestampSize = statement.MaxTimestampSize
+	StatementType        = statement.StatementType
+	PredicateType        = "https://tinfoil.sh/predicate/config-endorsement/v1"
+	PredicateTypeV2      = "https://tinfoil.sh/predicate/config-endorsement/v2"
+	PayloadType          = statement.PayloadType
+	BundleType           = statement.BundleType
+	MaxConfigSize        = 1 << 20
+	MaxBundleSize        = statement.MaxBundleSize
+	MaxStatementSize     = statement.MaxStatementSize
+	MaxTimestampSize     = statement.MaxTimestampSize
+	MaxCertificateSize   = 16 << 10
+	CertificateValidity  = 10 * time.Minute
+	CertificateClockSkew = time.Minute
+	ScopePrefix          = "https://registry.tinfoil.sh/scopes/"
+	PublicScope          = ScopePrefix + "public"
 
+	scopeIDSize            = 16
 	identityComponentCount = 2
 	maxSlugLength          = 63
 	maxRevisionLength      = 128
@@ -51,6 +58,7 @@ type Subject struct {
 }
 
 type Predicate struct {
+	Scope     string            `json:"scope,omitempty"`
 	Runtime   *RuntimeReference `json:"runtime,omitempty"`
 	Freshness *Freshness        `json:"freshness,omitempty"`
 }
@@ -78,7 +86,10 @@ func NewStatement(name string, config []byte) (*Statement, error) {
 }
 
 // NewDeploymentStatement binds the exact config digest and runtime for verification without config bytes.
-func NewDeploymentStatement(name string, config []byte) (*Statement, error) {
+func NewDeploymentStatement(name, scope string, config []byte) (*Statement, error) {
+	if err := ValidateScope(scope); err != nil {
+		return nil, err
+	}
 	s, err := NewStatement(name, config)
 	if err != nil {
 		return nil, err
@@ -88,8 +99,24 @@ func NewDeploymentStatement(name string, config []byte) (*Statement, error) {
 		return nil, err
 	}
 	s.PredicateType = PredicateTypeV2
+	s.Predicate.Scope = scope
 	s.Predicate.Runtime = &runtime
 	return s, nil
+}
+
+// ValidateScope accepts the public scope or a canonical 128-bit hexadecimal scope URI.
+func ValidateScope(scope string) error {
+	if scope == PublicScope {
+		return nil
+	}
+	identifier, ok := strings.CutPrefix(scope, ScopePrefix)
+	if ok && len(identifier) == hex.EncodedLen(scopeIDSize) {
+		decoded, err := hex.DecodeString(identifier)
+		if err == nil && hex.EncodeToString(decoded) == identifier {
+			return nil
+		}
+	}
+	return fmt.Errorf("scope must be a canonical registry scope URI")
 }
 
 // ValidateIdentity accepts a canonical /org/project identity.
@@ -99,9 +126,16 @@ func ValidateIdentity(identity string) error {
 		return fmt.Errorf("invalid config identity %q", identity)
 	}
 	for _, part := range parts[1:] {
-		if len(part) > maxSlugLength || !slugPattern.MatchString(part) {
-			return fmt.Errorf("invalid config identity component %q", part)
+		if err := ValidateIdentityComponent(part); err != nil {
+			return err
 		}
+	}
+	return nil
+}
+
+func ValidateIdentityComponent(part string) error {
+	if len(part) > maxSlugLength || !slugPattern.MatchString(part) {
+		return fmt.Errorf("invalid config identity component %q", part)
 	}
 	return nil
 }
@@ -119,10 +153,17 @@ func ParseName(name string) (identity, revision string, err error) {
 	if err := ValidateIdentity(identity); err != nil {
 		return "", "", err
 	}
-	if len(revision) > maxRevisionLength || !revisionPattern.MatchString(revision) {
-		return "", "", fmt.Errorf("invalid config revision %q", revision)
+	if err := ValidateRevision(revision); err != nil {
+		return "", "", err
 	}
 	return identity, revision, nil
+}
+
+func ValidateRevision(revision string) error {
+	if len(revision) > maxRevisionLength || !revisionPattern.MatchString(revision) {
+		return fmt.Errorf("invalid config revision %q", revision)
+	}
+	return nil
 }
 
 func (s *Statement) validate(requireTimestamp bool) error {
@@ -130,13 +171,16 @@ func (s *Statement) validate(requireTimestamp bool) error {
 		return fmt.Errorf("unsupported config endorsement statement type")
 	}
 	if s.PredicateType == PredicateTypeV2 {
+		if err := ValidateScope(s.Predicate.Scope); err != nil {
+			return err
+		}
 		if s.Predicate.Runtime == nil {
 			return fmt.Errorf("config endorsement requires a runtime reference")
 		}
 		if err := s.Predicate.Runtime.Validate(); err != nil {
 			return err
 		}
-	} else if s.Predicate.Runtime != nil {
+	} else if s.Predicate.Runtime != nil || s.Predicate.Scope != "" {
 		return fmt.Errorf("v1 config endorsement cannot contain a runtime reference")
 	}
 	if len(s.Subject) != 1 {

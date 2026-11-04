@@ -3,11 +3,14 @@ package endorsement
 import (
 	"crypto"
 	"crypto/sha256"
+	"crypto/x509"
 	"encoding/hex"
 	"fmt"
+	"slices"
 	"time"
 
 	"github.com/sigstore/sigstore-go/pkg/root"
+	"github.com/sigstore/sigstore-go/pkg/verify"
 	configendorsement "github.com/tinfoilsh/tinfoil-go/endorsement/config"
 	"github.com/tinfoilsh/tinfoil-go/internal/statement"
 )
@@ -22,6 +25,7 @@ type ConfigPolicy struct {
 	Now        time.Time
 	MaxAge     time.Duration
 	FutureSkew time.Duration
+	Scopes     []string
 }
 
 type ConfigVerified struct {
@@ -31,10 +35,13 @@ type ConfigVerified struct {
 	SigningKeyHint string
 	ApprovalTime   time.Time
 	Runtime        *configendorsement.RuntimeReference
+	Scope          string
+	SignatureTime  time.Time
 }
 
 type ConfigVerifier struct {
 	cryptographic *endorsementVerifier
+	rootKeys      []crypto.PublicKey
 }
 
 // NewConfigVerifier builds an offline verifier. The supplied roots authenticate TSA
@@ -49,16 +56,29 @@ func NewConfigVerifier(trust root.TrustedMaterial, keys []crypto.PublicKey) (*Co
 
 // ValidatePins checks config expectations independently of clock and freshness settings.
 func (p ConfigPolicy) ValidatePins() error {
-	if err := configendorsement.ValidateIdentity(p.Identity); err != nil {
-		return err
+	if p.Identity != "" {
+		if err := configendorsement.ValidateIdentity(p.Identity); err != nil {
+			return err
+		}
 	}
 	if p.Revision != "" {
-		if _, _, err := configendorsement.ParseName(p.Identity + "/" + p.Revision); err != nil {
+		if err := configendorsement.ValidateRevision(p.Revision); err != nil {
 			return err
 		}
 	}
 	if p.Digest != "" && !sha256DigestRE.MatchString(p.Digest) {
 		return fmt.Errorf("digest pin must be lowercase SHA-256")
+	}
+	if p.Scopes != nil && len(p.Scopes) == 0 {
+		return fmt.Errorf("config scopes must not be empty")
+	}
+	for i, scope := range p.Scopes {
+		if err := configendorsement.ValidateScope(scope); err != nil {
+			return err
+		}
+		if slices.Contains(p.Scopes[:i], scope) {
+			return fmt.Errorf("duplicate config scope")
+		}
 	}
 	return nil
 }
@@ -73,6 +93,20 @@ func (p ConfigPolicy) timePolicy() (timePolicy, error) {
 // Verify authenticates the config digest, any supplied bytes, approval identity, signing authority,
 // an independent approval timestamp, and Rekor v2 inclusion. It never accesses a network.
 func (v *ConfigVerifier) Verify(config, bundleJSON []byte, policy ConfigPolicy) (*ConfigVerified, error) {
+	return v.verify(config, bundleJSON, nil, policy)
+}
+
+func (v *ConfigVerifier) VerifyCertified(config, bundleJSON []byte, issuerDER []byte, policy ConfigPolicy) (*ConfigVerified, error) {
+	if len(v.rootKeys) == 0 {
+		return nil, fmt.Errorf("registry root trust is not configured")
+	}
+	if len(issuerDER) == 0 {
+		return nil, fmt.Errorf("certified registry verification requires an issuer certificate")
+	}
+	return v.verify(config, bundleJSON, issuerDER, policy)
+}
+
+func (v *ConfigVerifier) verify(config, bundleJSON []byte, issuerDER []byte, policy ConfigPolicy) (*ConfigVerified, error) {
 	if config != nil && (len(config) == 0 || len(config) > configendorsement.MaxConfigSize) {
 		return nil, fmt.Errorf("config size is outside allowed bounds")
 	}
@@ -93,7 +127,7 @@ func (v *ConfigVerifier) Verify(config, bundleJSON []byte, policy ConfigPolicy) 
 	if err != nil {
 		return nil, err
 	}
-	if identity != policy.Identity || (policy.Revision != "" && revision != policy.Revision) {
+	if (policy.Identity != "" && identity != policy.Identity) || (policy.Revision != "" && revision != policy.Revision) {
 		return nil, fmt.Errorf("config endorsement does not match the pinned identity or revision")
 	}
 	hexDigest := s.Subject[0].Digest[statement.DigestAlgorithm]
@@ -123,9 +157,58 @@ func (v *ConfigVerifier) Verify(config, bundleJSON []byte, policy ConfigPolicy) 
 	if err != nil {
 		return nil, err
 	}
-	hint, err := v.cryptographic.Verify(b, digest)
-	if err != nil {
-		return nil, err
+	var scope, hint string
+	var signedAt time.Time
+	if issuerDER != nil {
+		if s.PredicateType != configendorsement.PredicateTypeV2 {
+			return nil, fmt.Errorf("scoped endorsement requires a v2 statement")
+		}
+		timestamps, err := verify.VerifySignedTimestampWithThreshold(b, v.cryptographic.trust, 1)
+		if err != nil {
+			return nil, err
+		}
+		signedAt = timestamps[0].Time
+		if err := timePolicy.verify(signedAt); err != nil {
+			return nil, err
+		}
+		cert, issuer, err := configendorsement.VerifySigningCertificate(b.GetVerificationMaterial().GetCertificate().GetRawBytes(), issuerDER, v.rootKeys, signedAt)
+		if err != nil {
+			return nil, err
+		}
+		scope = cert.URIs[0].String()
+		if scope != s.Predicate.Scope {
+			return nil, fmt.Errorf("certificate scope does not match signed scope")
+		}
+		material := certificateMaterial{TrustedMaterial: v.cryptographic.trust, issuer: issuer}
+		verifier, err := verify.NewSignedEntityVerifier(material, verify.WithSignedTimestamps(1), verify.WithTransparencyLog(1))
+		if err != nil {
+			return nil, err
+		}
+		identity, err := verify.NewShortCertificateIdentity("", "^$", scope, "")
+		if err != nil {
+			return nil, err
+		}
+		if _, err := verifier.Verify(b, verify.NewPolicy(verify.WithArtifactDigest(statement.DigestAlgorithm, digest), verify.WithCertificateIdentity(identity))); err != nil {
+			return nil, err
+		}
+		hint, err = statement.KeyHint(cert.PublicKey)
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		if len(v.rootKeys) != 0 && s.PredicateType == configendorsement.PredicateTypeV2 {
+			return nil, fmt.Errorf("v2 registry endorsement requires an issuer certificate")
+		}
+		hint, err = v.cryptographic.Verify(b, digest)
+		if err != nil {
+			return nil, err
+		}
+		if len(v.rootKeys) != 0 {
+			scope = configendorsement.PublicScope
+		}
+	}
+	if policy.Scopes != nil && !slices.Contains(policy.Scopes, scope) {
+		return nil, fmt.Errorf("config scope is not accepted by the caller")
 	}
 	input, err := s.TimestampInput()
 	if err != nil {
@@ -135,13 +218,39 @@ func (v *ConfigVerifier) Verify(config, bundleJSON []byte, policy ConfigPolicy) 
 	if err != nil {
 		return nil, fmt.Errorf("inner timestamp: %w", err)
 	}
-	return &ConfigVerified{
+	if !signedAt.IsZero() && inner.After(signedAt.Add(configendorsement.CertificateClockSkew)) {
+		return nil, fmt.Errorf("approval timestamp follows signature timestamp")
+	}
+	verified := &ConfigVerified{
 		Name: s.Subject[0].Name, Digest: hexDigest,
 		Reference: statement.EndorsementReference(payload), SigningKeyHint: hint, ApprovalTime: inner,
-		Runtime: s.Predicate.Runtime,
-	}, nil
+		Runtime: s.Predicate.Runtime, Scope: scope, SignatureTime: signedAt,
+	}
+	return verified, nil
 }
 
 func (c *Client) ConfigVerifier(keys []crypto.PublicKey) (*ConfigVerifier, error) {
 	return NewConfigVerifier(c.trustRoot, keys)
+}
+
+func (c *Client) RegistryVerifier(rootKeys []crypto.PublicKey) (*ConfigVerifier, error) {
+	return NewRegistryVerifier(c.trustRoot, rootKeys)
+}
+
+func NewRegistryVerifier(trust root.TrustedMaterial, rootKeys []crypto.PublicKey) (*ConfigVerifier, error) {
+	v, err := NewConfigVerifier(trust, rootKeys)
+	if err != nil {
+		return nil, err
+	}
+	v.rootKeys = slices.Clone(rootKeys)
+	return v, nil
+}
+
+type certificateMaterial struct {
+	root.TrustedMaterial
+	issuer *x509.Certificate
+}
+
+func (m certificateMaterial) FulcioCertificateAuthorities() []root.CertificateAuthority {
+	return []root.CertificateAuthority{&root.FulcioCertificateAuthority{Root: m.issuer}}
 }

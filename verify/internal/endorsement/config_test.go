@@ -7,6 +7,8 @@ import (
 	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/sha256"
+	"crypto/x509"
+	"crypto/x509/pkix"
 	"encoding/asn1"
 	"encoding/hex"
 	"encoding/json/v2"
@@ -23,6 +25,7 @@ import (
 	"github.com/tinfoilsh/tinfoil-go/endorsement/freshness"
 	"github.com/tinfoilsh/tinfoil-go/internal/sigstoretest"
 	"github.com/tinfoilsh/tinfoil-go/verify/internal/endorsement"
+	"google.golang.org/protobuf/proto"
 )
 
 const (
@@ -31,6 +34,123 @@ const (
 )
 
 var testConfig = []byte("# Approved config bytes\nname: gpt-oss-120b\n")
+
+func TestScopedConfigCertificateAndTimestampBindings(t *testing.T) {
+	f := sigstoretest.New(t)
+	rootKey := f.Key
+	leaf := sigstoretest.New(t).Key
+	certificate := f.SigningCertificate(t, leaf.Public())
+	f.Key = leaf
+	config := []byte("cvm-version: 0.15.3-rc.1@sha256:" + strings.Repeat("ab", sha256.Size) + "\n")
+	s, err := configendorsement.NewDeploymentStatement(testName, configendorsement.PublicScope, config)
+	require.NoError(t, err)
+	input, err := s.TimestampInput()
+	require.NoError(t, err)
+	payload, err := s.Complete(f.Timestamp(t, input, f.Now))
+	require.NoError(t, err)
+	b := f.CertifiedBundle(t, payload, certificate, f.Now)
+	v, err := endorsement.NewRegistryVerifier(&f.Trust, []crypto.PublicKey{rootKey.Public()})
+	require.NoError(t, err)
+	policy := endorsement.ConfigPolicy{Identity: testIdentity, Now: f.Now.Add(24 * time.Hour), Scopes: []string{configendorsement.PublicScope}}
+	check := func(b *protobundle.Bundle, issuer []byte, policy endorsement.ConfigPolicy) error {
+		_, err := v.VerifyCertified(nil, sigstoretest.MarshalBundle(t, b), issuer, policy)
+		return err
+	}
+	approved, err := v.VerifyCertified(nil, sigstoretest.MarshalBundle(t, b), certificate.Issuer, policy)
+	require.NoError(t, err)
+	require.Equal(t, configendorsement.PublicScope, approved.Scope)
+	require.Equal(t, f.Now, approved.SignatureTime)
+	_, err = v.Verify(nil, sigstoretest.MarshalBundle(t, b), policy)
+	require.ErrorContains(t, err, "requires an issuer certificate")
+	_, _, err = configendorsement.VerifySigningCertificate(certificate.Certificate, certificate.Issuer, []crypto.PublicKey{leaf.Public()}, f.Now)
+	require.ErrorContains(t, err, "untrusted registry root")
+	f.Key = rootKey
+	rootLeaf := f.SigningCertificate(t, rootKey.Public())
+	replacement := f.SigningCertificate(t, leaf.Public())
+	f.Key = leaf
+	_, _, err = configendorsement.VerifySigningCertificate(rootLeaf.Certificate, rootLeaf.Issuer, []crypto.PublicKey{rootKey.Public()}, f.Now)
+	require.ErrorContains(t, err, "registry root cannot serve")
+	for _, test := range []struct {
+		name   string
+		mutate func(*protobundle.Bundle)
+		want   string
+	}{
+		{"missing signature timestamp", func(b *protobundle.Bundle) { b.VerificationMaterial.TimestampVerificationData = nil }, "signature timestamp"},
+		{"wrong signature timestamp", func(b *protobundle.Bundle) {
+			b.VerificationMaterial.TimestampVerificationData.Rfc3161Timestamps[0].SignedTimestamp = f.Timestamp(t, []byte("other signature"), f.Now)
+		}, "threshold"},
+		{"certificate log substitution", func(b *protobundle.Bundle) {
+			b.VerificationMaterial.Content = &protobundle.VerificationMaterial_Certificate{Certificate: &common.X509Certificate{RawBytes: replacement.Certificate}}
+		}, "verifying log entry"},
+		{"raw key log substitution", func(b *protobundle.Bundle) {
+			cert := b.VerificationMaterial.Content
+			b.VerificationMaterial.Content = &protobundle.VerificationMaterial_PublicKey{PublicKey: &common.PublicKeyIdentifier{Hint: approved.SigningKeyHint}}
+			f.LogBundle(t, b)
+			b.VerificationMaterial.Content = cert
+		}, "verifying log entry"},
+		{"timestamp before certificate", func(b *protobundle.Bundle) {
+			b.VerificationMaterial.TimestampVerificationData.Rfc3161Timestamps[0].SignedTimestamp = f.Timestamp(t, b.GetDsseEnvelope().Signatures[0].Sig, f.Now.Add(-time.Hour))
+		}, "not yet valid"},
+		{"timestamp after certificate", func(b *protobundle.Bundle) {
+			b.VerificationMaterial.TimestampVerificationData.Rfc3161Timestamps[0].SignedTimestamp = f.Timestamp(t, b.GetDsseEnvelope().Signatures[0].Sig, f.Now.Add(time.Hour))
+		}, "expired"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			copy := proto.Clone(b).(*protobundle.Bundle)
+			test.mutate(copy)
+			require.ErrorContains(t, check(copy, certificate.Issuer, policy), test.want)
+		})
+	}
+	f.Key = rootKey
+	otherScope := configendorsement.ScopePrefix + "9c4a7f21e0b836d56a13c8fe42d907ab"
+	other := f.ScopeCertificate(t, leaf.Public(), otherScope, f.Now)
+	f.Key = leaf
+	relogged := proto.Clone(b).(*protobundle.Bundle)
+	relogged.VerificationMaterial.Content = &protobundle.VerificationMaterial_Certificate{Certificate: &common.X509Certificate{RawBytes: other.Certificate}}
+	f.LogBundle(t, relogged)
+	require.ErrorContains(t, check(relogged, other.Issuer, policy), "does not match signed scope")
+	stale, err := s.Complete(f.Timestamp(t, input, f.Now.Add(-8*24*time.Hour)))
+	require.NoError(t, err)
+	require.ErrorContains(t, check(f.CertifiedBundle(t, stale, certificate, f.Now), certificate.Issuer, policy), "too old")
+	issuer, err := x509.ParseCertificate(certificate.Issuer)
+	require.NoError(t, err)
+	for name, mutate := range map[string]func(*x509.Certificate){
+		"CA":                 func(c *x509.Certificate) { c.IsCA = true; c.KeyUsage |= x509.KeyUsageCertSign },
+		"TLS purpose":        func(c *x509.Certificate) { c.ExtKeyUsage = []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth} },
+		"long lifetime":      func(c *x509.Certificate) { c.NotAfter = f.Now.Add(time.Hour) },
+		"identity subject":   func(c *x509.Certificate) { c.Subject = pkix.Name{CommonName: "customer"} },
+		"extra DNS identity": func(c *x509.Certificate) { c.DNSNames = []string{"customer.example"} },
+		"missing scope":      func(c *x509.Certificate) { c.URIs = nil },
+		"duplicate scope":    func(c *x509.Certificate) { c.URIs = append(c.URIs, c.URIs[0]) },
+		"noncritical SAN": func(c *x509.Certificate) {
+			for _, ext := range c.Extensions {
+				if ext.Id.Equal(asn1.ObjectIdentifier{2, 5, 29, 17}) {
+					ext.Critical = false
+					c.ExtraExtensions = []pkix.Extension{ext}
+				}
+			}
+		},
+		"hidden SAN identity": func(c *x509.Certificate) {
+			value, err := asn1.Marshal([]asn1.RawValue{{Class: asn1.ClassContextSpecific, Tag: 6, Bytes: []byte(configendorsement.PublicScope)}, {Class: asn1.ClassContextSpecific, Tag: 4, IsCompound: true, Bytes: []byte{0x30, 0}}})
+			require.NoError(t, err)
+			c.ExtraExtensions = []pkix.Extension{{Id: asn1.ObjectIdentifier{2, 5, 29, 17}, Critical: true, Value: value}}
+		},
+		"unknown critical extension": func(c *x509.Certificate) {
+			c.ExtraExtensions = []pkix.Extension{{Id: asn1.ObjectIdentifier{1, 2, 3, 4}, Critical: true, Value: []byte{5, 0}}}
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			cert, err := x509.ParseCertificate(certificate.Certificate)
+			require.NoError(t, err)
+			cert.RawSubject = nil
+			mutate(cert)
+			der, err := x509.CreateCertificate(rand.Reader, cert, issuer, leaf.Public(), rootKey)
+			require.NoError(t, err)
+			_, _, err = configendorsement.VerifySigningCertificate(der, certificate.Issuer, []crypto.PublicKey{rootKey.Public()}, f.Now)
+			require.Error(t, err)
+		})
+	}
+}
 
 type fixture struct{ *sigstoretest.Fixture }
 
@@ -80,7 +200,7 @@ func TestVerifyConfigApproval(t *testing.T) {
 func TestVerifyConfigDigestAndRuntime(t *testing.T) {
 	f := newFixture(t)
 	config := []byte("cvm-version: 0.15.0@sha256:" + strings.Repeat("ab", sha256.Size) + "\n")
-	s, err := configendorsement.NewDeploymentStatement(testName, config)
+	s, err := configendorsement.NewDeploymentStatement(testName, configendorsement.PublicScope, config)
 	require.NoError(t, err)
 	input, err := s.TimestampInput()
 	require.NoError(t, err)
@@ -131,7 +251,7 @@ func TestVerifyConfigDigestAndRuntime(t *testing.T) {
 func TestDeploymentRuntimeRequiresApprovalAndMatchesConfig(t *testing.T) {
 	f := newFixture(t)
 	config := []byte("cvm-version: 0.15.0@sha256:" + strings.Repeat("ab", sha256.Size) + "\n")
-	s, err := configendorsement.NewDeploymentStatement(testName, config)
+	s, err := configendorsement.NewDeploymentStatement(testName, configendorsement.PublicScope, config)
 	require.NoError(t, err)
 	input, err := s.TimestampInput()
 	require.NoError(t, err)
@@ -362,4 +482,21 @@ func TestSigningKeyRotationAllowsOverlapAndRejectsRemovedKeys(t *testing.T) {
 	require.ErrorContains(t, err, "untrusted approval signing key")
 	_, err = verifier.Verify(testConfig, newBundle, f.policy())
 	require.NoError(t, err)
+}
+
+func TestRegistryLegacyPublicCannotSatisfyPrivateScopePolicy(t *testing.T) {
+	f := newFixture(t)
+	v, err := endorsement.NewRegistryVerifier(&f.Trust, []crypto.PublicKey{f.Key.Public()})
+	require.NoError(t, err)
+	raw := sigstoretest.MarshalBundle(t, f.Bundle(t, f.statement(t, f.Now)))
+	policy := f.policy()
+	policy.Scopes = []string{configendorsement.PublicScope}
+	approved, err := v.Verify(testConfig, raw, policy)
+	require.NoError(t, err)
+	require.Equal(t, configendorsement.PublicScope, approved.Scope)
+	_, err = v.VerifyCertified(testConfig, raw, nil, policy)
+	require.ErrorContains(t, err, "requires an issuer certificate")
+	policy.Scopes = []string{configendorsement.ScopePrefix + "9c4a7f21e0b836d56a13c8fe42d907ab"}
+	_, err = v.Verify(testConfig, raw, policy)
+	require.ErrorContains(t, err, "scope is not accepted")
 }

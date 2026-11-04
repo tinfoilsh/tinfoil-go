@@ -65,8 +65,8 @@ func TestPublicInputErrors(t *testing.T) {
 	require.ErrorAs(t, err, &usage)
 	_, err = verifier.VerifyV3(nil, nil, "org/repo")
 	require.ErrorAs(t, err, &usage)
-	_, err = tinfoil.NewEnclaveHTTPClient(t.Context(), "enclave.example", "", nil)
-	require.ErrorIs(t, err, tinfoil.ErrConfiguration, "reject missing trust configuration before fetching")
+	_, err = tinfoil.NewEnclaveHTTPClient(t.Context(), "", "", nil)
+	require.ErrorIs(t, err, tinfoil.ErrConfiguration, "reject a missing enclave before fetching")
 	for _, repo := range []string{"owner", "owner/repo/extra", "owner/repo@sha256:bad"} {
 		_, err = tinfoil.NewEnclaveHTTPClient(t.Context(), "enclave.example", repo, nil)
 		require.ErrorIs(t, err, tinfoil.ErrConfiguration)

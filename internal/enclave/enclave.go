@@ -40,7 +40,7 @@ type Config struct {
 	// org/project[@revision][@sha256:digest].
 	Repo string
 	// Verifier is the policy, which several enclaves can share; nil selects the
-	// defaults, which require Repo.
+	// defaults, which accept public registry configs when Repo is empty.
 	Verifier *verify.Verifier
 	// VerificationCheck, when set, is called with each verification that
 	// passes Verifier. An error rejects the verification without a retry.
