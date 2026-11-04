@@ -17,6 +17,7 @@ package conformance
 import (
 	"encoding/base64"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -47,16 +48,30 @@ const (
 	StageAuthenticateProvenance = "v3-authenticate-provenance" // sigstore-code identity + measurement
 	StageAssemblePolicy         = "v3-assemble-policy"         // sigstore-platform endorsements artifact
 	StageAuthenticateQuote      = "v3-authenticate-quote"      // CPU quote signature chain to the vendor root
+	StageAuthenticateApproval   = "v3-authenticate-approval"   // key-signed approval bundle under pinned keys
+	StageVerifyTimestamp        = "v3-verify-timestamp"        // RFC 3161 response against the trusted TSAs
 )
 
 // Input is the stdin JSON: a v3 document, the verifier-supplied nonce, the
 // pinned repo, and the synthetic roots it was produced under. Empty root fields
 // select the embedded production roots (so real-frozen fixtures need none).
+// The approval and timestamp stages take their own inputs instead of a
+// document.
 type Input struct {
 	SchemaVersion string `json:"schema_version"`
 	DocumentB64   string `json:"document_b64"`
 	NonceHex      string `json:"nonce_hex"`
 	Repo          string `json:"repo"`
+
+	// v3-authenticate-approval: the key-signed bundle, the keys the adapter
+	// pins, and the SHA-256 a statement subject must carry.
+	BundleJSONB64     string   `json:"bundle_json_b64,omitempty"`
+	SigningKeysPEM    []string `json:"signing_keys_pem,omitempty"`
+	ArtifactDigestHex string   `json:"artifact_digest_hex,omitempty"`
+	// v3-verify-timestamp: the DER TimeStampResp and the bytes its message
+	// imprint covers.
+	TimestampResponseB64 string `json:"timestamp_response_b64,omitempty"`
+	TimestampInputB64    string `json:"timestamp_input_b64,omitempty"`
 
 	// AMD SEV-SNP anchor, supplied as the ARK plus its ASK (KDS convention).
 	AMDRootCAPEM string `json:"amd_root_ca_pem,omitempty"`
@@ -98,6 +113,12 @@ type AcceptOutputs struct {
 	// ChannelBinding is set by the live-verify integration lane after the
 	// live transport key was matched against the endorsed one.
 	ChannelBinding string `json:"channel_binding,omitempty"`
+	// SigningKeyHint is the hint of the pinned key that verified an approval
+	// (v3-authenticate-approval).
+	SigningKeyHint string `json:"signing_key_hint,omitempty"`
+	// Timestamp is the authenticated genTime, RFC 3339 in UTC at second
+	// precision (v3-verify-timestamp).
+	Timestamp string `json:"timestamp,omitempty"`
 }
 
 // Measurement mirrors verify/measurement.Measurement as plain JSON.
@@ -126,15 +147,28 @@ func Run(stage string, in Input) (Output, int) {
 	if in.SchemaVersion != SchemaVersion {
 		return malformed(stage)
 	}
+	rts, err := in.roots()
+	if err != nil {
+		return malformed(stage)
+	}
+
+	// The approval and timestamp stages verify their own inputs against the
+	// Sigstore root alone; no document, nonce, or vendor root is involved.
+	switch stage {
+	case StageAuthenticateApproval:
+		return authenticateApproval(in, rts.sigstore)
+	case StageVerifyTimestamp:
+		if in.VerificationTimeUnix == 0 {
+			return malformed(stage)
+		}
+		return verifyTimestamp(in, rts.sigstore, appraisal)
+	}
+
 	doc, err := base64.StdEncoding.DecodeString(in.DocumentB64)
 	if err != nil {
 		return malformed(stage)
 	}
 	nonce, err := hex.DecodeString(in.NonceHex)
-	if err != nil {
-		return malformed(stage)
-	}
-	rts, err := in.roots()
 	if err != nil {
 		return malformed(stage)
 	}
@@ -243,6 +277,51 @@ func verifyFull(doc, nonce []byte, repo string, verifier *verify.Verifier, appra
 		TLSPublicKeyFP:     tlsFP,
 		HPKEPublicKey:      hpke,
 	}}, ExitAccepted
+}
+
+// authenticateApproval runs the key-signed approval verifier (the one behind
+// config endorsements and artifact-freshness approvals) over a bundle, under
+// the keys the fixture pins. Undecodable fields and unusable keys are
+// malformed; every verifier rejection is a provenance rejection.
+func authenticateApproval(in Input, sigstoreRootJSON []byte) (Output, int) {
+	bundleJSON, err := base64.StdEncoding.DecodeString(in.BundleJSONB64)
+	if err != nil {
+		return malformed(StageAuthenticateApproval)
+	}
+	digest, err := hex.DecodeString(in.ArtifactDigestHex)
+	if err != nil {
+		return malformed(StageAuthenticateApproval)
+	}
+	hint, err := endorsement.DangerousTestOnlyVerifyApproval(sigstoreRootJSON, in.SigningKeysPEM, bundleJSON, digest)
+	if errors.Is(err, endorsement.ErrDangerousTestOnlyInput) {
+		return malformed(StageAuthenticateApproval)
+	}
+	if err != nil {
+		return reject(StageAuthenticateApproval, "PROVENANCE_REJECTED")
+	}
+	return Output{Stage: StageAuthenticateApproval, Accepted: true, Outputs: &AcceptOutputs{SigningKeyHint: hint}}, ExitAccepted
+}
+
+// verifyTimestamp runs the approval timestamp verifier over an RFC 3161
+// response at the appraisal clock. Undecodable fields are malformed; every
+// verifier rejection is a provenance rejection.
+func verifyTimestamp(in Input, sigstoreRootJSON []byte, appraisal time.Time) (Output, int) {
+	response, err := base64.StdEncoding.DecodeString(in.TimestampResponseB64)
+	if err != nil {
+		return malformed(StageVerifyTimestamp)
+	}
+	input, err := base64.StdEncoding.DecodeString(in.TimestampInputB64)
+	if err != nil {
+		return malformed(StageVerifyTimestamp)
+	}
+	at, err := endorsement.DangerousTestOnlyVerifyTimestamp(sigstoreRootJSON, response, input, appraisal)
+	if errors.Is(err, endorsement.ErrDangerousTestOnlyInput) {
+		return malformed(StageVerifyTimestamp)
+	}
+	if err != nil {
+		return reject(StageVerifyTimestamp, "PROVENANCE_REJECTED")
+	}
+	return Output{Stage: StageVerifyTimestamp, Accepted: true, Outputs: &AcceptOutputs{Timestamp: at.UTC().Format(time.RFC3339)}}, ExitAccepted
 }
 
 // roots are the injected synthetic anchors; a nil field selects the embedded
