@@ -281,8 +281,9 @@ func verifyFull(doc, nonce []byte, repo string, verifier *verify.Verifier, appra
 
 // authenticateApproval runs the key-signed approval verifier (the one behind
 // config endorsements and artifact-freshness approvals) over a bundle, under
-// the keys the fixture pins. Undecodable fields and unusable keys are
-// malformed; every verifier rejection is a provenance rejection.
+// the keys the fixture pins. Undecodable fields, an unusable key set
+// (unparseable, repeated or unsupported keys) and an unparseable trust root
+// are malformed; every verifier rejection is a provenance rejection.
 func authenticateApproval(in Input, sigstoreRootJSON []byte) (Output, int) {
 	bundleJSON, err := base64.StdEncoding.DecodeString(in.BundleJSONB64)
 	if err != nil {

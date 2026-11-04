@@ -13,10 +13,10 @@ import (
 )
 
 // ErrDangerousTestOnlyInput marks an argument the conformance entry points
-// below could not even parse (a trust root that is not a trusted-root
-// document, an empty key set, a PEM block that is not a public key, a zero
-// clock). The adapter reports those as MALFORMED_INPUT; every other error is
-// a verification failure.
+// below could not even use (a trust root that is not a trusted-root
+// document, an empty key set, a PEM block that is not a public key, a key
+// set with a repeated or unsupported key, a zero clock). The adapter reports
+// those as MALFORMED_INPUT; every other error is a verification failure.
 var ErrDangerousTestOnlyInput = errors.New("conformance input")
 
 // DangerousTestOnlyVerifyApproval verifies a key-signed approval bundle the
@@ -42,9 +42,15 @@ func DangerousTestOnlyVerifyApproval(trustRootJSON []byte, keysPEM []string, bun
 		}
 		keys = append(keys, key)
 	}
+	// A trust root without transparency logs is a verification failure, like
+	// every other shortfall of the root; once the logs are present, the only
+	// way the verifier fails to assemble is a key set it cannot use.
+	if len(trust.RekorLogs()) == 0 {
+		return "", fmt.Errorf("Rekor trust is required")
+	}
 	verifier, err := newEndorsementVerifier(trust, keys)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("%w: %w", ErrDangerousTestOnlyInput, err)
 	}
 	b, err := parseEndorsementBundle(bundleJSON)
 	if err != nil {
