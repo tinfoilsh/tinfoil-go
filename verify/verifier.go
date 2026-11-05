@@ -54,7 +54,7 @@ type Verifier struct {
 	endorsements      *endorsement.Client
 	configKeys        []crypto.PublicKey
 	configVerifier    *endorsement.ConfigVerifier
-	configScopes      []string
+	configRegistryIDs []string
 	freshnessKeys     []crypto.PublicKey
 	freshnessVerifier *endorsement.FreshnessVerifier
 
@@ -89,11 +89,11 @@ func NewVerifier(opts ...Option) (*Verifier, error) {
 	if v.configAuthorizer != nil && (v.embedded.ConfigReference != nil || v.configKeys != nil) {
 		return nil, usageError(fmt.Errorf("config authorizer conflicts with embedded config or config signing keys"))
 	}
-	if v.configScopes != nil && (v.embedded.ConfigReference != nil || v.configAuthorizer != nil) {
+	if v.configRegistryIDs != nil && (v.embedded.ConfigReference != nil || v.configAuthorizer != nil) {
 		return nil, usageError(fmt.Errorf("config authority pins require endorsement verification"))
 	}
-	if v.configScopes != nil && v.configKeys != nil {
-		return nil, usageError(fmt.Errorf("config scope policy requires Tinfoil registry root verification"))
+	if v.configRegistryIDs != nil && v.configKeys != nil {
+		return nil, usageError(fmt.Errorf("config registry ID policy requires Tinfoil registry root verification"))
 	}
 	if v.embedded.Runtime != nil && v.embedded.Platform != nil && v.freshnessKeys != nil {
 		return nil, usageError(fmt.Errorf("freshness signing keys have no endorsed artifact to verify"))
@@ -166,7 +166,7 @@ func (v *Verifier) PinnedRegisters() measurement.Expected {
 // VerifyV3 appraises a nonce-bound v3 attestation document using its collateral
 // version. repo pins the expected repository or registry project as
 // org/project[@revision][@sha256:digest]. An empty repo accepts authorized registry
-// scopes. An embedded config instead authorizes its exact caller-supplied bytes.
+// registry IDs. An embedded config instead authorizes its exact caller-supplied bytes.
 // A config authorizer requires an empty repo and owns config authorization.
 //
 // The caller owns both expectations that cannot come from the document: the

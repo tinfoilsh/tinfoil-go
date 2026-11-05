@@ -13,7 +13,7 @@ const uriGeneralNameTag = 6
 
 var subjectAlternativeNameOID = asn1.ObjectIdentifier{2, 5, 29, 17}
 
-// VerifySigningCertificate authenticates the scope assignment at at. The caller
+// VerifySigningCertificate authenticates the registry identity at at. The caller
 // must independently authenticate that time when verifying a signed endorsement.
 func VerifySigningCertificate(certificateDER, issuerDER []byte, roots []crypto.PublicKey, at time.Time) (*x509.Certificate, *x509.Certificate, error) {
 	if at.IsZero() || len(certificateDER) == 0 || len(certificateDER) > MaxCertificateSize || len(issuerDER) == 0 || len(issuerDER) > MaxCertificateSize {
@@ -52,7 +52,7 @@ func VerifySigningCertificate(certificateDER, issuerDER []byte, roots []crypto.P
 		len(cert.URIs) != 1 || len(cert.DNSNames) != 0 || len(cert.IPAddresses) != 0 || len(cert.EmailAddresses) != 0 {
 		return nil, nil, fmt.Errorf("invalid config signing certificate profile")
 	}
-	if err := ValidateScope(cert.URIs[0].String()); err != nil {
+	if err := ValidateRegistryID(cert.URIs[0].String()); err != nil {
 		return nil, nil, err
 	}
 	for _, extension := range cert.Extensions {
@@ -62,7 +62,7 @@ func VerifySigningCertificate(certificateDER, issuerDER []byte, roots []crypto.P
 		var names []asn1.RawValue
 		rest, err := asn1.Unmarshal(extension.Value, &names)
 		if !extension.Critical || err != nil || len(rest) != 0 || len(names) != 1 || names[0].Class != asn1.ClassContextSpecific || names[0].Tag != uriGeneralNameTag || names[0].IsCompound || string(names[0].Bytes) != cert.URIs[0].String() {
-			return nil, nil, fmt.Errorf("scope requires exactly one critical URI SAN")
+			return nil, nil, fmt.Errorf("registry identity requires exactly one critical URI SAN")
 		}
 	}
 	hint, err := KeyHint(cert.PublicKey)

@@ -28,10 +28,10 @@ const (
 	MaxCertificateSize   = 16 << 10
 	CertificateValidity  = 10 * time.Minute
 	CertificateClockSkew = time.Minute
-	ScopePrefix          = "https://registry.tinfoil.sh/scopes/"
-	PublicScope          = ScopePrefix + "public"
+	RegistryIDPrefix     = "https://registry.tinfoil.sh/scopes/"
+	PublicRegistryID     = RegistryIDPrefix + "public"
 
-	scopeIDSize            = 16
+	registryIDSize         = 16
 	identityComponentCount = 2
 	maxSlugLength          = 63
 	maxRevisionLength      = 128
@@ -58,9 +58,9 @@ type Subject struct {
 }
 
 type Predicate struct {
-	Scope     string            `json:"scope,omitempty"`
-	Runtime   *RuntimeReference `json:"runtime,omitempty"`
-	Freshness *Freshness        `json:"freshness,omitempty"`
+	RegistryID string            `json:"scope,omitempty"`
+	Runtime    *RuntimeReference `json:"runtime,omitempty"`
+	Freshness  *Freshness        `json:"freshness,omitempty"`
 }
 
 type Freshness struct {
@@ -86,8 +86,8 @@ func NewStatement(name string, config []byte) (*Statement, error) {
 }
 
 // NewDeploymentStatement binds the exact config digest and runtime for verification without config bytes.
-func NewDeploymentStatement(name, scope string, config []byte) (*Statement, error) {
-	if err := ValidateScope(scope); err != nil {
+func NewDeploymentStatement(name, registryID string, config []byte) (*Statement, error) {
+	if err := ValidateRegistryID(registryID); err != nil {
 		return nil, err
 	}
 	s, err := NewStatement(name, config)
@@ -99,24 +99,24 @@ func NewDeploymentStatement(name, scope string, config []byte) (*Statement, erro
 		return nil, err
 	}
 	s.PredicateType = PredicateTypeV2
-	s.Predicate.Scope = scope
+	s.Predicate.RegistryID = registryID
 	s.Predicate.Runtime = &runtime
 	return s, nil
 }
 
-// ValidateScope accepts the public scope or a canonical 128-bit hexadecimal scope URI.
-func ValidateScope(scope string) error {
-	if scope == PublicScope {
+// ValidateRegistryID accepts the public registry ID or a canonical private registry ID URI.
+func ValidateRegistryID(registryID string) error {
+	if registryID == PublicRegistryID {
 		return nil
 	}
-	identifier, ok := strings.CutPrefix(scope, ScopePrefix)
-	if ok && len(identifier) == hex.EncodedLen(scopeIDSize) {
+	identifier, ok := strings.CutPrefix(registryID, RegistryIDPrefix)
+	if ok && len(identifier) == hex.EncodedLen(registryIDSize) {
 		decoded, err := hex.DecodeString(identifier)
 		if err == nil && hex.EncodeToString(decoded) == identifier {
 			return nil
 		}
 	}
-	return fmt.Errorf("scope must be a canonical registry scope URI")
+	return fmt.Errorf("registry ID must be a canonical registry URI")
 }
 
 // ValidateIdentity accepts a canonical /org/project identity.
@@ -171,7 +171,7 @@ func (s *Statement) validate(requireTimestamp bool) error {
 		return fmt.Errorf("unsupported config endorsement statement type")
 	}
 	if s.PredicateType == PredicateTypeV2 {
-		if err := ValidateScope(s.Predicate.Scope); err != nil {
+		if err := ValidateRegistryID(s.Predicate.RegistryID); err != nil {
 			return err
 		}
 		if s.Predicate.Runtime == nil {
@@ -180,7 +180,7 @@ func (s *Statement) validate(requireTimestamp bool) error {
 		if err := s.Predicate.Runtime.Validate(); err != nil {
 			return err
 		}
-	} else if s.Predicate.Runtime != nil || s.Predicate.Scope != "" {
+	} else if s.Predicate.Runtime != nil || s.Predicate.RegistryID != "" {
 		return fmt.Errorf("v1 config endorsement cannot contain a runtime reference")
 	}
 	if len(s.Subject) != 1 {

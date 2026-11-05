@@ -21,32 +21,32 @@ import (
 	"github.com/tinfoilsh/tinfoil-go/verify/internal/runtime"
 )
 
-// WithConfigScopes accepts exactly these registry scopes, replacing public-only trust.
-func WithConfigScopes(scopes ...string) Option {
-	scopes = slices.Clone(scopes)
+// WithConfigRegistryIDs accepts exactly these registry IDs, replacing public-only trust.
+func WithConfigRegistryIDs(registryIDs ...string) Option {
+	registryIDs = slices.Clone(registryIDs)
 	return func(v *Verifier) error {
-		if len(scopes) == 0 {
-			return fmt.Errorf("config scopes must not be empty")
+		if len(registryIDs) == 0 {
+			return fmt.Errorf("config registry IDs must not be empty")
 		}
-		if err := (endorsement.ConfigPolicy{Scopes: scopes}).ValidatePins(); err != nil {
+		if err := (endorsement.ConfigPolicy{RegistryIDs: registryIDs}).ValidatePins(); err != nil {
 			return err
 		}
-		if v.configScopes != nil {
-			return fmt.Errorf("config scopes must be supplied once")
+		if v.configRegistryIDs != nil {
+			return fmt.Errorf("config registry IDs must be supplied once")
 		}
-		v.configScopes = slices.Clone(scopes)
+		v.configRegistryIDs = slices.Clone(registryIDs)
 		return nil
 	}
 }
 
-// WithAdditionalConfigScopes accepts these scopes alongside the public registry.
-func WithAdditionalConfigScopes(scopes ...string) Option {
-	scopes = slices.Clone(scopes)
+// WithAdditionalConfigRegistryIDs accepts these registry IDs alongside the public registry.
+func WithAdditionalConfigRegistryIDs(registryIDs ...string) Option {
+	registryIDs = slices.Clone(registryIDs)
 	return func(v *Verifier) error {
-		if len(scopes) == 0 {
-			return fmt.Errorf("additional config scopes must not be empty")
+		if len(registryIDs) == 0 {
+			return fmt.Errorf("additional config registry IDs must not be empty")
 		}
-		return WithConfigScopes(append([]string{configendorsement.PublicScope}, scopes...)...)(v)
+		return WithConfigRegistryIDs(append([]string{configendorsement.PublicRegistryID}, registryIDs...)...)(v)
 	}
 }
 
@@ -65,7 +65,7 @@ func WithConfigAuthorizer(authorize func(collateral.ConfigEndorsement) error) Op
 }
 
 // WithConfigSigningKeys replaces public config trust with the supplied keys.
-// This explicit trust path does not use registry scopes or authorize artifact freshness.
+// This explicit trust path does not use registry IDs or authorize artifact freshness.
 // An explicit key set requires attestation-collaterals/v3.
 func WithConfigSigningKeys(keys []crypto.PublicKey) Option {
 	return func(v *Verifier) error {
@@ -94,9 +94,9 @@ func WithFreshnessSigningKeys(keys []crypto.PublicKey) Option {
 // error if VerifyV3 rejects ref whatever the document. Every check of that
 // kind belongs here, so CheckRepoVerifiability makes it too.
 func (v *Verifier) referencePins(ref string) (endorsement.ConfigPolicy, error) {
-	pins := endorsement.ConfigPolicy{Scopes: v.configScopes}
-	if pins.Scopes == nil && v.configKeys == nil {
-		pins.Scopes = []string{configendorsement.PublicScope}
+	pins := endorsement.ConfigPolicy{RegistryIDs: v.configRegistryIDs}
+	if pins.RegistryIDs == nil && v.configKeys == nil {
+		pins.RegistryIDs = []string{configendorsement.PublicRegistryID}
 	}
 	if v.configAuthorizer != nil && ref != "" {
 		return pins, usageError(fmt.Errorf("config authorizer cannot authenticate repository or revision pins; enforce them in caller policy"))
@@ -214,7 +214,7 @@ func (v *Verifier) resolveConfig(doc *document.Document, pins endorsement.Config
 	return expected, &ConfigVerification{
 		Source: SourceEndorsement, Name: approved.Name, Digest: approved.Digest,
 		Reference: approved.Reference, SigningKeyHint: approved.SigningKeyHint, ApprovalTime: approved.ApprovalTime,
-		Scope: approved.Scope, SignatureTime: approved.SignatureTime,
+		RegistryID: approved.RegistryID, SignatureTime: approved.SignatureTime,
 	}, nil
 }
 

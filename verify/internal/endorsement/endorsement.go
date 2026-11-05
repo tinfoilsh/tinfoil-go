@@ -150,7 +150,7 @@ func validateLogMaterial(b *bundle.Bundle) error {
 	timestamps := vm.GetTimestampVerificationData().GetRfc3161Timestamps()
 	if vm.GetCertificate() != nil {
 		if len(timestamps) != 1 || len(timestamps[0].SignedTimestamp) == 0 || len(timestamps[0].SignedTimestamp) > statement.MaxTimestampSize {
-			return fmt.Errorf("scoped endorsement requires one bounded signature timestamp")
+			return fmt.Errorf("certified registry endorsement requires one bounded signature timestamp")
 		}
 	} else if len(timestamps) != 0 {
 		return fmt.Errorf("signed bundle cannot contain observer timestamps")
