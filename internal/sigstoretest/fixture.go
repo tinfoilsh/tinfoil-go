@@ -162,10 +162,10 @@ func (f *Fixture) SigningCertificate(t *testing.T, key crypto.PublicKey) Signing
 }
 
 func (f *Fixture) SigningCertificateAt(t *testing.T, key crypto.PublicKey, now time.Time) SigningCertificate {
-	return f.ScopeCertificate(t, key, configendorsement.PublicScope, now)
+	return f.ScopeCertificate(t, key, configendorsement.PublicRegistryID, now)
 }
 
-func (f *Fixture) ScopeCertificate(t *testing.T, key crypto.PublicKey, scope string, now time.Time) SigningCertificate {
+func (f *Fixture) ScopeCertificate(t *testing.T, key crypto.PublicKey, registryID string, now time.Time) SigningCertificate {
 	t.Helper()
 	template := &x509.Certificate{
 		SerialNumber: big.NewInt(1), Subject: pkix.Name{CommonName: "registry test root"},
@@ -177,7 +177,7 @@ func (f *Fixture) ScopeCertificate(t *testing.T, key crypto.PublicKey, scope str
 	require.NoError(t, err)
 	issuer, err := x509.ParseCertificate(rootDER)
 	require.NoError(t, err)
-	scopeURI, err := url.Parse(scope)
+	scopeURI, err := url.Parse(registryID)
 	require.NoError(t, err)
 	leaf := &x509.Certificate{
 		URIs:         []*url.URL{scopeURI},

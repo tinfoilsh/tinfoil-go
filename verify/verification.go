@@ -27,8 +27,8 @@ type ConfigVerification struct {
 	Reference      string
 	SigningKeyHint string
 	ApprovalTime   time.Time
-	// Scope is authenticated by the certificate, or public for legacy registry approvals.
-	Scope         string
+	// RegistryID is authenticated by the certificate, or public for legacy registry approvals.
+	RegistryID    string `json:"Scope"`
 	SignatureTime time.Time
 }
 

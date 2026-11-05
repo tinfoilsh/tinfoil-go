@@ -19,13 +19,13 @@ import (
 // Zero MaxAge and FutureSkew select the defaults; Now is required.
 // ConfigVerified.ApprovalTime reports the authenticated time.
 type ConfigPolicy struct {
-	Identity   string
-	Revision   string
-	Digest     string
-	Now        time.Time
-	MaxAge     time.Duration
-	FutureSkew time.Duration
-	Scopes     []string
+	Identity    string
+	Revision    string
+	Digest      string
+	Now         time.Time
+	MaxAge      time.Duration
+	FutureSkew  time.Duration
+	RegistryIDs []string
 }
 
 type ConfigVerified struct {
@@ -35,7 +35,7 @@ type ConfigVerified struct {
 	SigningKeyHint string
 	ApprovalTime   time.Time
 	Runtime        *configendorsement.RuntimeReference
-	Scope          string
+	RegistryID     string
 	SignatureTime  time.Time
 }
 
@@ -69,15 +69,15 @@ func (p ConfigPolicy) ValidatePins() error {
 	if p.Digest != "" && !sha256DigestRE.MatchString(p.Digest) {
 		return fmt.Errorf("digest pin must be lowercase SHA-256")
 	}
-	if p.Scopes != nil && len(p.Scopes) == 0 {
-		return fmt.Errorf("config scopes must not be empty")
+	if p.RegistryIDs != nil && len(p.RegistryIDs) == 0 {
+		return fmt.Errorf("config registry IDs must not be empty")
 	}
-	for i, scope := range p.Scopes {
-		if err := configendorsement.ValidateScope(scope); err != nil {
+	for i, registryID := range p.RegistryIDs {
+		if err := configendorsement.ValidateRegistryID(registryID); err != nil {
 			return err
 		}
-		if slices.Contains(p.Scopes[:i], scope) {
-			return fmt.Errorf("duplicate config scope")
+		if slices.Contains(p.RegistryIDs[:i], registryID) {
+			return fmt.Errorf("duplicate config registry ID")
 		}
 	}
 	return nil
@@ -157,11 +157,11 @@ func (v *ConfigVerifier) verify(config, bundleJSON []byte, issuerDER []byte, pol
 	if err != nil {
 		return nil, err
 	}
-	var scope, hint string
+	var registryID, hint string
 	var signedAt time.Time
 	if issuerDER != nil {
 		if s.PredicateType != configendorsement.PredicateTypeV2 {
-			return nil, fmt.Errorf("scoped endorsement requires a v2 statement")
+			return nil, fmt.Errorf("certified registry endorsement requires a v2 statement")
 		}
 		timestamps, err := verify.VerifySignedTimestampWithThreshold(b, v.cryptographic.trust, 1)
 		if err != nil {
@@ -175,16 +175,16 @@ func (v *ConfigVerifier) verify(config, bundleJSON []byte, issuerDER []byte, pol
 		if err != nil {
 			return nil, err
 		}
-		scope = cert.URIs[0].String()
-		if scope != s.Predicate.Scope {
-			return nil, fmt.Errorf("certificate scope does not match signed scope")
+		registryID = cert.URIs[0].String()
+		if registryID != s.Predicate.RegistryID {
+			return nil, fmt.Errorf("certificate registry ID does not match signed registry ID")
 		}
 		material := certificateMaterial{TrustedMaterial: v.cryptographic.trust, issuer: issuer}
 		verifier, err := verify.NewSignedEntityVerifier(material, verify.WithSignedTimestamps(1), verify.WithTransparencyLog(1))
 		if err != nil {
 			return nil, err
 		}
-		identity, err := verify.NewShortCertificateIdentity("", "^$", scope, "")
+		identity, err := verify.NewShortCertificateIdentity("", "^$", registryID, "")
 		if err != nil {
 			return nil, err
 		}
@@ -204,11 +204,11 @@ func (v *ConfigVerifier) verify(config, bundleJSON []byte, issuerDER []byte, pol
 			return nil, err
 		}
 		if len(v.rootKeys) != 0 {
-			scope = configendorsement.PublicScope
+			registryID = configendorsement.PublicRegistryID
 		}
 	}
-	if policy.Scopes != nil && !slices.Contains(policy.Scopes, scope) {
-		return nil, fmt.Errorf("config scope is not accepted by the caller")
+	if policy.RegistryIDs != nil && !slices.Contains(policy.RegistryIDs, registryID) {
+		return nil, fmt.Errorf("config registry ID is not accepted by the caller")
 	}
 	input, err := s.TimestampInput()
 	if err != nil {
@@ -224,7 +224,7 @@ func (v *ConfigVerifier) verify(config, bundleJSON []byte, issuerDER []byte, pol
 	verified := &ConfigVerified{
 		Name: s.Subject[0].Name, Digest: hexDigest,
 		Reference: statement.EndorsementReference(payload), SigningKeyHint: hint, ApprovalTime: inner,
-		Runtime: s.Predicate.Runtime, Scope: scope, SignatureTime: signedAt,
+		Runtime: s.Predicate.Runtime, RegistryID: registryID, SignatureTime: signedAt,
 	}
 	return verified, nil
 }

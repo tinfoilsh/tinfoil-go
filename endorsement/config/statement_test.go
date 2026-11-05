@@ -55,23 +55,23 @@ func TestTimestampCoreCanonicalization(t *testing.T) {
 }
 
 func TestDeploymentStatementRequiresRuntimeBinding(t *testing.T) {
-	_, err := configendorsement.NewDeploymentStatement(testName, configendorsement.PublicScope, testConfig)
+	_, err := configendorsement.NewDeploymentStatement(testName, configendorsement.PublicRegistryID, testConfig)
 	require.ErrorContains(t, err, "cvm-version must pin")
 	f := sigstoretest.New(t)
 	config := []byte("cvm-version: 0.15.0@sha256:" + strings.Repeat("ab", sha256.Size) + "\n")
-	s, err := configendorsement.NewDeploymentStatement(testName, configendorsement.PublicScope, config)
+	s, err := configendorsement.NewDeploymentStatement(testName, configendorsement.PublicRegistryID, config)
 	require.NoError(t, err)
 	input, err := s.TimestampInput()
 	require.NoError(t, err)
 	payload, err := s.Complete(f.Timestamp(t, input, f.Now))
 	require.NoError(t, err)
 	for name, mutate := range map[string]func(*configendorsement.Statement){
-		"missing scope":      func(s *configendorsement.Statement) { s.Predicate.Scope = "" },
-		"noncanonical scope": func(s *configendorsement.Statement) { s.Predicate.Scope += "/" },
-		"missing runtime":    func(s *configendorsement.Statement) { s.Predicate.Runtime = nil },
-		"wrong repository":   func(s *configendorsement.Statement) { s.Predicate.Runtime.Repo = "other/runtime" },
-		"invalid digest":     func(s *configendorsement.Statement) { s.Predicate.Runtime.Digest = "ab" },
-		"v1 runtime":         func(s *configendorsement.Statement) { s.PredicateType = configendorsement.PredicateType },
+		"missing registry ID":      func(s *configendorsement.Statement) { s.Predicate.RegistryID = "" },
+		"noncanonical registry ID": func(s *configendorsement.Statement) { s.Predicate.RegistryID += "/" },
+		"missing runtime":          func(s *configendorsement.Statement) { s.Predicate.Runtime = nil },
+		"wrong repository":         func(s *configendorsement.Statement) { s.Predicate.Runtime.Repo = "other/runtime" },
+		"invalid digest":           func(s *configendorsement.Statement) { s.Predicate.Runtime.Digest = "ab" },
+		"v1 runtime":               func(s *configendorsement.Statement) { s.PredicateType = configendorsement.PredicateType },
 	} {
 		t.Run(name, func(t *testing.T) {
 			s, err := configendorsement.ParseStatement(payload)
@@ -192,17 +192,17 @@ func TestRenewalChangesApprovalWithoutChangingArtifact(t *testing.T) {
 	require.ErrorContains(t, err, "does not match")
 }
 
-func TestScopeCanonicalization(t *testing.T) {
+func TestRegistryIDCanonicalization(t *testing.T) {
 	const private = "https://registry.tinfoil.sh/scopes/9c4a7f21e0b836d56a13c8fe42d907ab"
-	for _, scope := range []string{configendorsement.PublicScope, private,
-		configendorsement.ScopePrefix + "00000000000000000000000000000000",
-		configendorsement.ScopePrefix + "ffffffffffffffffffffffffffffffff",
+	for _, registryID := range []string{configendorsement.PublicRegistryID, private,
+		configendorsement.RegistryIDPrefix + "00000000000000000000000000000000",
+		configendorsement.RegistryIDPrefix + "ffffffffffffffffffffffffffffffff",
 	} {
-		require.NoError(t, configendorsement.ValidateScope(scope))
+		require.NoError(t, configendorsement.ValidateRegistryID(registryID))
 	}
-	for _, scope := range []string{
+	for _, registryID := range []string{
 		"", private + "/", private + "?x=1", private + "#x", private + "\n", " " + private,
-		configendorsement.PublicScope + "\n", private[:len(private)-1], private + "a",
+		configendorsement.PublicRegistryID + "\n", private[:len(private)-1], private + "a",
 		strings.Replace(private, "9c4a", "9C4A", 1), strings.Replace(private, "9c4a", "9g4a", 1),
 		strings.Replace(private, "9c4a", "9 4a", 1), strings.Replace(private, "9c4a", "%39c4a", 1),
 		strings.Replace(private, "https:", "http:", 1), strings.Replace(private, "https:", "HTTPS:", 1),
@@ -211,6 +211,6 @@ func TestScopeCanonicalization(t *testing.T) {
 		strings.Replace(private, "scopes/", "scopes/v1/", 1),
 		strings.Replace(private, "9c4a", "9c-4a", 1),
 	} {
-		require.Error(t, configendorsement.ValidateScope(scope), scope)
+		require.Error(t, configendorsement.ValidateRegistryID(registryID), registryID)
 	}
 }

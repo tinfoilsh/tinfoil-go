@@ -47,7 +47,7 @@ func TestDigestEndorsementBindsQuoteAndRuntimeWithoutConfig(t *testing.T) {
 	f := sigstoretest.New(t)
 	inputs := embeddedInputs(t)
 	config := inputs.Config.Bytes
-	s, err := configendorsement.NewDeploymentStatement(embeddedConfigName, configendorsement.PublicScope, config)
+	s, err := configendorsement.NewDeploymentStatement(embeddedConfigName, configendorsement.PublicRegistryID, config)
 	require.NoError(t, err)
 	input, err := s.TimestampInput()
 	require.NoError(t, err)
@@ -108,16 +108,16 @@ func TestDigestEndorsementBindsQuoteAndRuntimeWithoutConfig(t *testing.T) {
 	require.ErrorContains(t, err, "digest pin")
 }
 
-const privateScope = configendorsement.ScopePrefix + "9c4a7f21e0b836d56a13c8fe42d907ab"
+const privateRegistryID = configendorsement.RegistryIDPrefix + "9c4a7f21e0b836d56a13c8fe42d907ab"
 
 func TestScopedConfigRetainsFreshnessAfterCertificateExpiry(t *testing.T) {
 	f := sigstoretest.New(t)
 	rootKey := f.Key
 	leaf := sigstoretest.New(t).Key
-	certificate := f.ScopeCertificate(t, leaf.Public(), privateScope, f.Now)
+	certificate := f.ScopeCertificate(t, leaf.Public(), privateRegistryID, f.Now)
 	f.Key = leaf
 	inputs := embeddedInputs(t)
-	s, err := configendorsement.NewDeploymentStatement(embeddedConfigName, privateScope, inputs.Config.Bytes)
+	s, err := configendorsement.NewDeploymentStatement(embeddedConfigName, privateRegistryID, inputs.Config.Bytes)
 	require.NoError(t, err)
 	input, err := s.TimestampInput()
 	require.NoError(t, err)
@@ -136,9 +136,9 @@ func TestScopedConfigRetainsFreshnessAfterCertificateExpiry(t *testing.T) {
 		accepted bool
 	}{
 		{"default", nil, false},
-		{"exclusive", []Option{WithConfigScopes(privateScope)}, true},
-		{"additive", []Option{WithAdditionalConfigScopes(privateScope)}, true},
-		{"other scope", []Option{WithConfigScopes(configendorsement.PublicScope)}, false},
+		{"exclusive", []Option{WithConfigRegistryIDs(privateRegistryID)}, true},
+		{"additive", []Option{WithAdditionalConfigRegistryIDs(privateRegistryID)}, true},
+		{"other registry", []Option{WithConfigRegistryIDs(configendorsement.PublicRegistryID)}, false},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			v, err := NewVerifier(append(test.options, WithEmbeddedReferences(inputs))...)
@@ -147,11 +147,11 @@ func TestScopedConfigRetainsFreshnessAfterCertificateExpiry(t *testing.T) {
 			require.NoError(t, err)
 			refs, err := v.configReferences(doc, "org/project@v1", f.Now.Add(24*time.Hour))
 			if !test.accepted {
-				require.ErrorContains(t, err, "scope is not accepted")
+				require.ErrorContains(t, err, "registry ID is not accepted")
 				return
 			}
 			require.NoError(t, err)
-			require.Equal(t, privateScope, refs.config.Scope)
+			require.Equal(t, privateRegistryID, refs.config.RegistryID)
 			require.Equal(t, f.Now, refs.config.SignatureTime)
 			require.Equal(t, f.Now.Add(v.freshnessMaxAge), refs.freshnessExpiresAt)
 			_, err = v.configReferences(doc, "org/other", f.Now)
@@ -160,32 +160,32 @@ func TestScopedConfigRetainsFreshnessAfterCertificateExpiry(t *testing.T) {
 	}
 }
 
-func TestConfigScopeOptionsRejectAmbiguousTrust(t *testing.T) {
+func TestConfigRegistryIDOptionsRejectAmbiguousTrust(t *testing.T) {
 	f := sigstoretest.New(t)
 	for _, test := range []struct {
 		options []Option
 		want    string
 	}{
-		{[]Option{WithConfigScopes()}, "must not be empty"},
-		{[]Option{WithAdditionalConfigScopes()}, "must not be empty"},
-		{[]Option{WithConfigScopes("")}, "canonical registry scope"},
-		{[]Option{WithConfigScopes(privateScope, privateScope)}, "duplicate config scope"},
-		{[]Option{WithConfigScopes(privateScope), WithAdditionalConfigScopes(privateScope)}, "must be supplied once"},
-		{[]Option{WithAdditionalConfigScopes(privateScope), WithConfigScopes(privateScope)}, "must be supplied once"},
-		{[]Option{WithConfigScopes(privateScope), WithConfigSigningKeys([]crypto.PublicKey{f.Key.Public()})}, "requires Tinfoil registry root"},
-		{[]Option{WithConfigScopes(privateScope), WithEmbeddedReferences(embeddedInputs(t))}, "require endorsement verification"},
+		{[]Option{WithConfigRegistryIDs()}, "must not be empty"},
+		{[]Option{WithAdditionalConfigRegistryIDs()}, "must not be empty"},
+		{[]Option{WithConfigRegistryIDs("")}, "canonical registry URI"},
+		{[]Option{WithConfigRegistryIDs(privateRegistryID, privateRegistryID)}, "duplicate config registry ID"},
+		{[]Option{WithConfigRegistryIDs(privateRegistryID), WithAdditionalConfigRegistryIDs(privateRegistryID)}, "must be supplied once"},
+		{[]Option{WithAdditionalConfigRegistryIDs(privateRegistryID), WithConfigRegistryIDs(privateRegistryID)}, "must be supplied once"},
+		{[]Option{WithConfigRegistryIDs(privateRegistryID), WithConfigSigningKeys([]crypto.PublicKey{f.Key.Public()})}, "requires Tinfoil registry root"},
+		{[]Option{WithConfigRegistryIDs(privateRegistryID), WithEmbeddedReferences(embeddedInputs(t))}, "require endorsement verification"},
 	} {
 		_, err := NewVerifier(test.options...)
 		require.ErrorContains(t, err, test.want)
 	}
-	scopes := []string{privateScope}
-	option := WithConfigScopes(scopes...)
-	scopes[0] = configendorsement.PublicScope
+	registryIDs := []string{privateRegistryID}
+	option := WithConfigRegistryIDs(registryIDs...)
+	registryIDs[0] = configendorsement.PublicRegistryID
 	v, err := NewVerifier(option)
 	require.NoError(t, err)
 	pins, err := v.referencePins("")
 	require.NoError(t, err)
-	require.Equal(t, []string{privateScope}, pins.Scopes)
+	require.Equal(t, []string{privateRegistryID}, pins.RegistryIDs)
 	nonce := make([]byte, document.NonceSize)
 	raw, err := document.Build(document.BuildInput{Nonce: nonce, CollateralFormat: collateral.FormatV2}, func([64]byte) (string, []byte, error) { return document.SEVSNPReportV1Format, []byte("quote"), nil })
 	require.NoError(t, err)

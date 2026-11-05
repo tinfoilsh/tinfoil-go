@@ -32,9 +32,9 @@ func TestNewChecksConfig(t *testing.T) {
 	require.Equal(t, "relay.example", s.relay)
 }
 
-func TestConfigScopeRequiresRegistryEvidence(t *testing.T) {
-	const scope = "https://registry.tinfoil.sh/scopes/9c4a7f21e0b836d56a13c8fe42d907ab"
-	verifier, err := verify.NewVerifier(verify.WithConfigScopes(scope))
+func TestConfigRegistryIDRequiresRegistryEvidence(t *testing.T) {
+	const registryID = "https://registry.tinfoil.sh/scopes/9c4a7f21e0b836d56a13c8fe42d907ab"
+	verifier, err := verify.NewVerifier(verify.WithConfigRegistryIDs(registryID))
 	require.NoError(t, err)
 	nonce := make([]byte, document.NonceSize)
 	raw, err := document.Build(document.BuildInput{Nonce: nonce, CollateralFormat: collateral.FormatV2}, func([64]byte) (string, []byte, error) {

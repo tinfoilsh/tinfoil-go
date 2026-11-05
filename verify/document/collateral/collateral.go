@@ -81,7 +81,7 @@ type Entry struct {
 }
 
 // ConfigReference identifies immutable registry bytes; it does not select the
-// signing keys or audit scope trusted by a verifier.
+// signing keys or registry identity trusted by a verifier.
 type ConfigReference struct {
 	Name   string `json:"name"`
 	Digest string `json:"digest"`
