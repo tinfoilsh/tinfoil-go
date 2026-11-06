@@ -35,6 +35,7 @@ type Authenticated struct {
 	identity string
 	// Measurement is the authenticated launch measurement (SEV) or MRTD and RTMRs (TDX).
 	Measurement measurement.Measurement
+	ExpiresAt   time.Time
 
 	// evidence is the CPU evidence that was authenticated, so Assemble can
 	// check it appraises the quote against the document it came from.
@@ -137,6 +138,7 @@ func Authenticate(ev document.CPUEvidence, en collateral.CPUEndorsements, now ti
 			platform:    policy.PlatformSEVSNP,
 			identity:    q.Identity(),
 			Measurement: q.Measurement,
+			ExpiresAt:   q.ExpiresAt,
 			evidence:    ev.Clone(),
 			sev:         q,
 		}, nil
@@ -152,6 +154,7 @@ func Authenticate(ev document.CPUEvidence, en collateral.CPUEndorsements, now ti
 			platform:    policy.PlatformTDX,
 			identity:    q.Identity(),
 			Measurement: q.Measurement,
+			ExpiresAt:   q.ExpiresAt,
 			evidence:    ev.Clone(),
 			tdx:         q,
 		}, nil

@@ -60,6 +60,10 @@ func TestScopedConfigCertificateAndTimestampBindings(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, configendorsement.PublicRegistryID, approved.RegistryID)
 	require.Equal(t, f.Now, approved.SignatureTime)
+	futurePolicy := policy
+	futurePolicy.Now = f.Now
+	futureSignature := f.CertifiedBundle(t, payload, certificate, f.Now.Add(endorsement.DefaultFutureSkew+time.Second))
+	require.ErrorContains(t, check(futureSignature, certificate.Issuer, futurePolicy), "signature timestamp is in the future")
 	_, err = v.Verify(nil, sigstoretest.MarshalBundle(t, b), policy)
 	require.ErrorContains(t, err, "requires an issuer certificate")
 	_, _, err = configendorsement.VerifySigningCertificate(certificate.Certificate, certificate.Issuer, []crypto.PublicKey{leaf.Public()}, f.Now)
