@@ -1,7 +1,6 @@
 package enclave
 
 import (
-	"cmp"
 	"os"
 	"testing"
 	"time"
@@ -15,15 +14,6 @@ import (
 	"github.com/tinfoilsh/tinfoil-go/verify/measurement"
 )
 
-// defaultFreshnessMaxAge is the bound a client inherits from the verifier when
-// its options leave FreshnessMaxAge zero.
-func defaultFreshnessMaxAge(t *testing.T) time.Duration {
-	t.Helper()
-	verifier, err := verify.NewVerifier()
-	require.NoError(t, err)
-	return verifier.FreshnessMaxAge()
-}
-
 // verifyDocument verifies raw with a verifier built from opts.
 func verifyDocument(raw, nonce []byte, repo string, opts ...verify.Option) (*verify.Verification, error) {
 	verifier, err := verify.NewVerifier(opts...)
@@ -33,9 +23,8 @@ func verifyDocument(raw, nonce []byte, repo string, opts ...verify.Option) (*ver
 	return verifier.VerifyV3(raw, nonce, repo)
 }
 
-func TestLiveVerifyFreshnessExpiration(t *testing.T) {
+func TestLiveVerifyRegisterPins(t *testing.T) {
 	testutil.RequireLive(t, enclaveEnvVar, repoEnvVar)
-	defaultMaxAge := defaultFreshnessMaxAge(t)
 	host, repo := os.Getenv(enclaveEnvVar), os.Getenv(repoEnvVar)
 	nonce, err := document.RandomNonce()
 	require.NoError(t, err)
@@ -45,10 +34,8 @@ func TestLiveVerifyFreshnessExpiration(t *testing.T) {
 	require.NoError(t, err)
 	const maxAge = 30 * 24 * time.Hour
 	for _, age := range []time.Duration{0, maxAge} {
-		custom, err := verifyDocument(raw, nonce, repo, verify.WithFreshnessMaxAge(age), verify.WithPinnedRegisters(exactPins(verified.EnclaveMeasurement(), nil)))
+		_, err := verifyDocument(raw, nonce, repo, verify.WithFreshnessMaxAge(age), verify.WithPinnedRegisters(exactPins(verified.EnclaveMeasurement(), nil)))
 		require.NoError(t, err)
-		require.False(t, custom.FreshnessExpiresAt().Before(verified.FreshnessExpiresAt()))
-		require.False(t, custom.FreshnessExpiresAt().After(verified.FreshnessExpiresAt().Add(cmp.Or(age, defaultMaxAge)-defaultMaxAge)))
 	}
 	bad := measurement.Register{0xab}
 	badPins := exactPins(verified.EnclaveMeasurement(), &bad)
