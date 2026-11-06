@@ -47,7 +47,8 @@ func TestLiveVerifyFreshnessExpiration(t *testing.T) {
 	for _, age := range []time.Duration{0, maxAge} {
 		custom, err := verifyDocument(raw, nonce, repo, verify.WithFreshnessMaxAge(age), verify.WithPinnedRegisters(exactPins(verified.EnclaveMeasurement(), nil)))
 		require.NoError(t, err)
-		require.Equal(t, verified.FreshnessExpiresAt().Add(cmp.Or(age, defaultMaxAge)-defaultMaxAge), custom.FreshnessExpiresAt())
+		require.False(t, custom.FreshnessExpiresAt().Before(verified.FreshnessExpiresAt()))
+		require.False(t, custom.FreshnessExpiresAt().After(verified.FreshnessExpiresAt().Add(cmp.Or(age, defaultMaxAge)-defaultMaxAge)))
 	}
 	bad := measurement.Register{0xab}
 	badPins := exactPins(verified.EnclaveMeasurement(), &bad)

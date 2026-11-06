@@ -16,6 +16,7 @@ import (
 	"github.com/tinfoilsh/tinfoil-go/verify/document/collateral"
 	"github.com/tinfoilsh/tinfoil-go/verify/internal/endorsement"
 	"github.com/tinfoilsh/tinfoil-go/verify/internal/policy"
+	"github.com/tinfoilsh/tinfoil-go/verify/internal/quote"
 )
 
 func TestFreshnessExpiration(t *testing.T) {
@@ -62,7 +63,7 @@ func TestLiveArchivedVerification(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, want, got)
 	_, err = defaults.VerifyV3At(raw, nonce, repo, want.FreshnessExpiresAt().Add(time.Second))
-	require.ErrorContains(t, err, "stale")
+	require.Error(t, err)
 
 	changeCollateral := func(format string, remove bool) func(map[string]any) {
 		return func(doc map[string]any) {
@@ -160,7 +161,10 @@ func TestLiveFreshnessWitnessExpiration(t *testing.T) {
 	require.NoError(t, err)
 	platform, err := provClient.AuthenticatePlatformEndorsements(platformRef.Bundle, platformRef.Repo, platformRef.Tag, platformRef.Digest, policy.ArtifactFormat)
 	require.NoError(t, err)
-	matched := false
+	cpu, err := quote.Authenticate(doc.CPUEvidence(), doc.CPUEndorsements(), verified.Metadata().VerifiedAt, nil)
+	require.NoError(t, err)
+	require.False(t, verified.FreshnessExpiresAt().After(cpu.ExpiresAt))
+	matched := verified.FreshnessExpiresAt().Equal(cpu.ExpiresAt)
 	for id, artifact := range map[string]*endorsement.AuthenticatedArtifact{
 		collateral.FreshnessIDCode:     &code.AuthenticatedArtifact,
 		collateral.FreshnessIDPlatform: &platform.AuthenticatedArtifact,
@@ -181,5 +185,5 @@ func TestLiveFreshnessWitnessExpiration(t *testing.T) {
 		require.False(t, verified.FreshnessExpiresAt().After(expiresAt), "%s witness expires before public deadline", id)
 		matched = matched || verified.FreshnessExpiresAt().Equal(expiresAt)
 	}
-	require.True(t, matched, "public deadline must equal one of the authenticated witness expirations")
+	require.True(t, matched, "public deadline must equal an authenticated witness or CPU collateral expiration")
 }

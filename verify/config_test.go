@@ -112,6 +112,7 @@ const privateRegistryID = configendorsement.RegistryIDPrefix + "9c4a7f21e0b836d5
 
 func TestScopedConfigRetainsFreshnessAfterCertificateExpiry(t *testing.T) {
 	f := sigstoretest.New(t)
+	approvalTime := f.Now.Add(configendorsement.CertificateClockSkew / 2)
 	rootKey := f.Key
 	leaf := sigstoretest.New(t).Key
 	certificate := f.ScopeCertificate(t, leaf.Public(), privateRegistryID, f.Now)
@@ -121,7 +122,7 @@ func TestScopedConfigRetainsFreshnessAfterCertificateExpiry(t *testing.T) {
 	require.NoError(t, err)
 	input, err := s.TimestampInput()
 	require.NoError(t, err)
-	payload, err := s.Complete(f.Timestamp(t, input, f.Now))
+	payload, err := s.Complete(f.Timestamp(t, input, approvalTime))
 	require.NoError(t, err)
 	reference, err := configendorsement.EndorsementReference(payload)
 	require.NoError(t, err)
@@ -153,7 +154,10 @@ func TestScopedConfigRetainsFreshnessAfterCertificateExpiry(t *testing.T) {
 			require.NoError(t, err)
 			require.Equal(t, privateRegistryID, refs.config.RegistryID)
 			require.Equal(t, f.Now, refs.config.SignatureTime)
+			require.Equal(t, approvalTime, refs.config.ApprovalTime)
 			require.Equal(t, f.Now.Add(v.freshnessMaxAge), refs.freshnessExpiresAt)
+			_, err = v.configReferences(doc, "org/project@v1", refs.freshnessExpiresAt.Add(time.Second))
+			require.ErrorContains(t, err, "approval is too old")
 			_, err = v.configReferences(doc, "org/other", f.Now)
 			require.ErrorContains(t, err, "pinned identity")
 		})

@@ -24,6 +24,7 @@ import (
 	"github.com/tinfoilsh/tinfoil-go/verify/internal/endorsement"
 	"github.com/tinfoilsh/tinfoil-go/verify/internal/policy"
 	"github.com/tinfoilsh/tinfoil-go/verify/internal/quote"
+	"github.com/tinfoilsh/tinfoil-go/verify/internal/validity"
 	"github.com/tinfoilsh/tinfoil-go/verify/measurement"
 )
 
@@ -172,8 +173,8 @@ func (v *Verifier) PinnedRegisters() measurement.Expected {
 // The caller owns both expectations that cannot come from the document: the
 // nonce it generated, and any additional workload constraints.
 // On success it must bind traffic to the returned keys and enforce any nonzero
-// FreshnessExpiresAt. With all references embedded, the caller owns renewal
-// and cache lifetime; zero is not a guarantee of unlimited evidence validity.
+// FreshnessExpiresAt. Hardware collateral bounds the result even when all
+// reference values are embedded.
 func (v *Verifier) VerifyV3(docBytes, nonce []byte, repo string) (*Verification, error) {
 	// The only clock read.
 	return v.VerifyV3At(docBytes, nonce, repo, time.Now())
@@ -262,7 +263,7 @@ func (v *Verifier) verifyV3(docBytes, nonce []byte, repo string, now time.Time) 
 		platform:           refs.platform,
 		enclaveMeasurement: authenticated.Measurement,
 		cryptoMaterial:     doc.CryptoMaterialItems(),
-		freshnessExpiresAt: refs.freshnessExpiresAt,
+		freshnessExpiresAt: validity.Earliest(refs.freshnessExpiresAt, authenticated.ExpiresAt),
 		metadata: VerificationMetadata{
 			Verifier:   SoftwareIdentity{Name: sdkinfo.Name, Version: sdkinfo.Version()},
 			VerifiedAt: now.UTC(),
@@ -328,12 +329,8 @@ func (v *Verifier) authenticateFreshness(doc *document.Document, id string, arti
 }
 
 // freshnessExpiration uses authenticated witness times, never local verification time.
-func freshnessExpiration(maxAge time.Duration, first time.Time, rest ...time.Time) time.Time {
-	for _, issuedAt := range rest {
-		if !issuedAt.IsZero() && (first.IsZero() || issuedAt.Before(first)) {
-			first = issuedAt
-		}
-	}
+func freshnessExpiration(maxAge time.Duration, times ...time.Time) time.Time {
+	first := validity.Earliest(times...)
 	if first.IsZero() {
 		return time.Time{}
 	}
