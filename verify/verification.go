@@ -144,9 +144,9 @@ func (v *Verification) CryptoMaterial() []document.CryptoMaterialItem {
 
 // FreshnessExpiresAt is the earliest authenticated approval or CPU collateral
 // deadline. Cached verification must not authorize new requests at or after
-// this time; re-verifying unchanged material does not extend it. Config
-// verification includes approval and signature-timestamp freshness. Short-lived
-// signing certificates are checked at the signature timestamp. Embedded reference
+// this time; re-verifying unchanged material does not extend it. Short-lived
+// signing certificates are checked at the authenticated signature timestamp; their
+// historical validity does not add an approval deadline. Embedded reference
 // values add no deadline; hardware collateral still bounds the result.
 func (v *Verification) FreshnessExpiresAt() time.Time { return v.freshnessExpiresAt }
 

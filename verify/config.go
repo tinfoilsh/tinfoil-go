@@ -162,7 +162,7 @@ func (v *Verifier) configReferences(doc *document.Document, ref string, now time
 		platform: &platformTrust,
 		config:   approved,
 	}
-	result.freshnessExpiresAt = freshnessExpiration(v.freshnessMaxAge, approved.ApprovalTime, approved.SignatureTime, platformTrust.ApprovalTime, runtimeTrust.ApprovalTime)
+	result.freshnessExpiresAt = freshnessExpiration(v.freshnessMaxAge, approved.ApprovalTime, platformTrust.ApprovalTime, runtimeTrust.ApprovalTime)
 
 	return result, nil
 }

@@ -168,8 +168,8 @@ func (v *ConfigVerifier) verify(config, bundleJSON []byte, issuerDER []byte, pol
 			return nil, err
 		}
 		signedAt = timestamps[0].Time
-		if err := timePolicy.verify(signedAt); err != nil {
-			return nil, err
+		if signedAt.After(timePolicy.latest) {
+			return nil, fmt.Errorf("signature timestamp is in the future")
 		}
 		cert, issuer, err := configendorsement.VerifySigningCertificate(b.GetVerificationMaterial().GetCertificate().GetRawBytes(), issuerDER, v.rootKeys, signedAt)
 		if err != nil {
