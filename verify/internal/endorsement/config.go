@@ -143,15 +143,6 @@ func (v *ConfigVerifier) verify(config, bundleJSON []byte, issuerDER []byte, pol
 		if hex.EncodeToString(digest[:]) != hexDigest {
 			return nil, fmt.Errorf("config bytes do not match the endorsed digest")
 		}
-		if s.Predicate.Runtime != nil {
-			runtime, err := configendorsement.RuntimeFromConfig(config)
-			if err != nil {
-				return nil, err
-			}
-			if runtime != *s.Predicate.Runtime {
-				return nil, fmt.Errorf("config runtime does not match the endorsed runtime")
-			}
-		}
 	}
 	digest, err := hex.DecodeString(hexDigest)
 	if err != nil {
@@ -220,6 +211,17 @@ func (v *ConfigVerifier) verify(config, bundleJSON []byte, issuerDER []byte, pol
 	}
 	if !signedAt.IsZero() && inner.After(signedAt.Add(configendorsement.CertificateClockSkew)) {
 		return nil, fmt.Errorf("approval timestamp follows signature timestamp")
+	}
+	// The config is parsed only once the statement that pins it is
+	// authenticated, so unauthenticated bytes never reach the YAML decoder.
+	if config != nil && s.Predicate.Runtime != nil {
+		runtime, err := configendorsement.RuntimeFromConfig(config)
+		if err != nil {
+			return nil, err
+		}
+		if runtime != *s.Predicate.Runtime {
+			return nil, fmt.Errorf("config runtime does not match the endorsed runtime")
+		}
 	}
 	verified := &ConfigVerified{
 		Name: s.Subject[0].Name, Digest: hexDigest,
