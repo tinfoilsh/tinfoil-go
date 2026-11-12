@@ -18,7 +18,7 @@ import (
 )
 
 func TestPCSReplayGetter(t *testing.T) {
-	body := []byte(`{"tcbInfo":{"tcbEvaluationDataNumber":19}}`)
+	body := []byte(`{"tcbInfo":{"tcbEvaluationDataNumber":19},"signature":""}`)
 	getter, err := newPCSReplayGetter([]collateral.PCSResponse{{
 		URL:     "https://api.trustedservices.intel.com/tdx/certification/v4/tcb?fmspc=90c06f000000&tcbEvaluationDataNumber=19",
 		Headers: map[string][]string{"tcb-info-issuer-chain": {"chain"}},
@@ -41,11 +41,11 @@ func TestTCBEvaluationRecorder(t *testing.T) {
 	inner, err := newPCSReplayGetter([]collateral.PCSResponse{
 		{
 			URL:  "https://api.trustedservices.intel.com/tdx/certification/v4/tcb?fmspc=90c06f000000",
-			Body: []byte(`{"tcbInfo":{"tcbEvaluationDataNumber":20}}`),
+			Body: []byte(`{"tcbInfo":{"tcbEvaluationDataNumber":20},"signature":""}`),
 		},
 		{
 			URL:  "https://api.trustedservices.intel.com/tdx/certification/v4/qe/identity",
-			Body: []byte(`{"enclaveIdentity":{"tcbEvaluationDataNumber":19}}`),
+			Body: []byte(`{"enclaveIdentity":{"tcbEvaluationDataNumber":19},"signature":""}`),
 		},
 	}, time.Now())
 	require.NoError(t, err)
@@ -73,9 +73,9 @@ func TestTCBEvaluationRecorderRejectsCollateralIssuedLater(t *testing.T) {
 	later := now.Add(time.Second)
 	body := func(object string, issued time.Time) []byte {
 		if issued.IsZero() {
-			return fmt.Appendf(nil, `{%q:{"tcbEvaluationDataNumber":20}}`, object)
+			return fmt.Appendf(nil, `{%q:{"tcbEvaluationDataNumber":20},"signature":""}`, object)
 		}
-		return fmt.Appendf(nil, `{%q:{"tcbEvaluationDataNumber":20,"issueDate":%q}}`, object, issued.Format(time.RFC3339))
+		return fmt.Appendf(nil, `{%q:{"tcbEvaluationDataNumber":20,"issueDate":%q},"signature":""}`, object, issued.Format(time.RFC3339))
 	}
 	for _, tt := range []struct {
 		name                string
@@ -180,7 +180,7 @@ func testCRL(t *testing.T, thisUpdate, nextUpdate time.Time) []byte {
 }
 
 func TestPCSReplayGetterReturnsPrivateBuffers(t *testing.T) {
-	body := []byte(`{"tcbInfo":{"tcbEvaluationDataNumber":19}}`)
+	body := []byte(`{"tcbInfo":{"tcbEvaluationDataNumber":19},"signature":""}`)
 	url := "https://api.trustedservices.intel.com/tdx/certification/v4/tcb?fmspc=90c06f000000"
 	getter, err := newPCSReplayGetter([]collateral.PCSResponse{{URL: url, Body: body}}, time.Now())
 	require.NoError(t, err)
