@@ -97,6 +97,13 @@ func TestParseArtifactFailClosed(t *testing.T) {
 	require.NotEqual(t, string(data), negativeMin)
 	_, err = Parse([]byte(negativeMin))
 	assert.ErrorContains(t, err, "must not be negative")
+
+	// A host can zero an SEV-SNP CHIP_ID, so an all-zero machine would match
+	// any chip.
+	zeroMachine := strings.Replace(string(data), box2TurinID, strings.Repeat("0", len(box2TurinID)), 1)
+	require.NotEqual(t, string(data), zeroMachine)
+	_, err = Parse([]byte(zeroMachine))
+	assert.ErrorContains(t, err, "must not be all zeros")
 }
 
 func TestPolicyLookup(t *testing.T) {

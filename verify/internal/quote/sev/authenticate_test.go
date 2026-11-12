@@ -1,6 +1,7 @@
 package sev
 
 import (
+	"bytes"
 	"encoding/pem"
 	"testing"
 	"time"
@@ -87,4 +88,25 @@ func TestDecodeCertChainRejectsEmptyCertificate(t *testing.T) {
 
 	_, _, err := decodeCertChain(chain)
 	assert.ErrorContains(t, err, "empty CERTIFICATE block")
+}
+
+// go-sev-guest verifies the signature over a re-encoding of the report that
+// drops the high four bits of the CPUID stepping byte, so those bits must be
+// refused rather than left unsigned.
+func TestVerifySignatureRejectsNonCanonicalReport(t *testing.T) {
+	reportRaw, err := sevtestdata.Box2TurinReport()
+	require.NoError(t, err)
+	parsed, err := sevabi.ReportToProto(reportRaw)
+	require.NoError(t, err)
+	reencoded, err := sevabi.ReportToAbiBytes(parsed)
+	require.NoError(t, err)
+	require.Equal(t, reportRaw, reencoded, "a genuine report is canonical")
+
+	const steppingOffset = 0x18A
+	for _, bit := range []byte{0x10, 0x20, 0x40, 0x80} {
+		report := bytes.Clone(reportRaw)
+		report[steppingOffset] |= bit
+		_, err := verifySignature(report, nil, nil, nil, nil, time.Now(), nil)
+		assert.ErrorContains(t, err, "not in canonical form", "stepping bit %#x", bit)
+	}
 }
