@@ -14,6 +14,11 @@ import (
 	"github.com/tinfoilsh/tinfoil-go/verify/document/collateral"
 )
 
+// jsonEscape replaces each %XX in s with the JSON escape for the byte 0xXX.
+func jsonEscape(s string) string {
+	return strings.ReplaceAll(s, "%", `\`+"u00")
+}
+
 func TestCheckSignedCollateralBody(t *testing.T) {
 	const tcbURL = "https://api.trustedservices.intel.com/tdx/certification/v4/tcb?fmspc=50806f000000"
 	const qeURL = "https://api.trustedservices.intel.com/tdx/certification/v4/qe/identity"
@@ -30,7 +35,9 @@ func TestCheckSignedCollateralBody(t *testing.T) {
 		{"case variant in place of the signed member", qeURL, `{"EnclaveIdentity":{},"signature":"00"}`, "exactly"},
 		{"missing signature", tcbURL, `{"tcbInfo":{}}`, "exactly"},
 		{"exact duplicate", tcbURL, `{"tcbInfo":{},"tcbInfo":{},"signature":"00"}`, "duplicate"},
-		{"escaped duplicate", tcbURL, `{"tcbInfo":{},"tcbInfo":{},"signature":"00"}`, "duplicate"},
+		{"escaped duplicate", tcbURL, jsonEscape(`{"tcbInfo":{},"tcb%49nfo":{},"signature":"00"}`), "duplicate"},
+		{"escaped case variant", tcbURL, jsonEscape(`{"tcbInfo":{},"signature":"00","%54cbInfo":{}}`), "exactly"},
+		{"escaped signed member", tcbURL, jsonEscape(`{"%74cbInfo":{},"signature":"00"}`), ""},
 		{"not an object", tcbURL, `[]`, "parsing"},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
