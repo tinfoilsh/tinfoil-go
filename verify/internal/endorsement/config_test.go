@@ -500,3 +500,28 @@ func TestRegistryLegacyPublicCannotSatisfyPrivateRegistryIDPolicy(t *testing.T) 
 	_, err = v.Verify(testConfig, raw, policy)
 	require.ErrorContains(t, err, "registry ID is not accepted")
 }
+
+// yaml.v3 panics on some malformed configs, so the config is parsed only
+// after the statement that pins its digest is authenticated, and a panic
+// becomes an error.
+func TestConfigRuntimeParsedOnlyAfterAuthentication(t *testing.T) {
+	f := newFixture(t)
+	config := []byte("? [a]\n: 1\n<<: {b: 2}\n")
+	s, err := configendorsement.NewDeploymentStatement(testName, configendorsement.PublicRegistryID,
+		[]byte("cvm-version: 0.15.0@sha256:"+strings.Repeat("ab", sha256.Size)+"\n"))
+	require.NoError(t, err)
+	digest := sha256.Sum256(config)
+	s.Subject[0].Digest["sha256"] = hex.EncodeToString(digest[:])
+	input, err := s.TimestampInput()
+	require.NoError(t, err)
+	payload, err := s.Complete(f.Timestamp(t, input, f.Now))
+	require.NoError(t, err)
+
+	stranger := newFixture(t)
+	_, err = f.verifier(t).Verify(config, sigstoretest.MarshalBundle(t, stranger.Bundle(t, payload)), f.policy())
+	require.Error(t, err)
+	require.NotContains(t, err.Error(), "parsing config runtime pin")
+
+	_, err = f.verifier(t).Verify(config, sigstoretest.MarshalBundle(t, f.Bundle(t, payload)), f.policy())
+	require.ErrorContains(t, err, "parsing config runtime pin")
+}

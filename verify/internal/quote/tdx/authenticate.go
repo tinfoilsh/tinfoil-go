@@ -74,8 +74,11 @@ func Authenticate(ev Evidence, now time.Time, opts *Options) (result *Quote, err
 	if err != nil {
 		return nil, err
 	}
-	parsed, err := tdxabi.QuoteToProto(ev.Quote)
-	if err != nil {
+	var parsed any
+	if err := recoverPanic(func() (err error) {
+		parsed, err = tdxabi.QuoteToProto(ev.Quote)
+		return err
+	}); err != nil {
 		return nil, fmt.Errorf("parsing TDX quote: %w", err)
 	}
 	quote, ok := parsed.(*tdxpb.QuoteV4)
@@ -115,7 +118,7 @@ func Authenticate(ev Evidence, now time.Time, opts *Options) (result *Quote, err
 		CheckRevocations: true,
 		Now:              now,
 	}
-	if err := tdxverify.TdxQuote(parsed, verifyOpts); err != nil {
+	if err := recoverPanic(func() error { return tdxverify.TdxQuote(parsed, verifyOpts) }); err != nil {
 		return nil, fmt.Errorf("verifying TDX quote: %w", err)
 	}
 	if err := recorder.checkIssueDates(now); err != nil {
@@ -153,6 +156,19 @@ func Authenticate(ev Evidence, now time.Time, opts *Options) (result *Quote, err
 		tcbEvaluationDataNumber: tcbEvaluationDataNumber,
 		quote:                   quote,
 	}, nil
+}
+
+// recoverPanic runs a go-tdx-guest call on unauthenticated bytes and reports
+// a panic as an error. The library decodes the quote at fixed offsets without
+// checking all of its length fields, and panics on some short or
+// inconsistent quotes.
+func recoverPanic(f func() error) (err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			err = fmt.Errorf("go-tdx-guest panicked: %v", r)
+		}
+	}()
+	return f()
 }
 
 // pcsCollateralKey canonicalizes an Intel PCS URL for replay lookup: the
