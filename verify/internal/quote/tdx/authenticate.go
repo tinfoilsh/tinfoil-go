@@ -8,6 +8,7 @@ import (
 	"crypto/x509"
 	_ "embed"
 	"encoding/hex"
+	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"encoding/pem"
 	"fmt"
@@ -211,6 +212,9 @@ func (g *pcsReplayGetter) Get(requestURL string) (map[string][]string, []byte, e
 	} else if strings.Contains(key, "crl") {
 		return nil, nil, fmt.Errorf("parsing captured CRL for %s: %w", requestURL, crlErr)
 	}
+	if err := checkSignedCollateralBody(requestURL, body); err != nil {
+		return nil, nil, err
+	}
 	// Header keys are matched verbatim by go-tdx-guest (canonical MIME form),
 	// so normalize whatever casing the capture used.
 	headers := make(map[string][]string, len(resp.Headers))
@@ -218,6 +222,37 @@ func (g *pcsReplayGetter) Get(requestURL string) (map[string][]string, []byte, e
 		headers[textproto.CanonicalMIMEHeaderKey(k)] = v
 	}
 	return headers, body, nil
+}
+
+// checkSignedCollateralBody requires a TCB Info or QE Identity response to
+// have exactly the shape that Intel's PCS serves:
+// {"<signed member>": ..., "signature": ...}. Captured bodies come from the
+// document, so nothing outside the signed member reaches the library.
+func checkSignedCollateralBody(requestURL string, body []byte) error {
+	u, err := url.Parse(requestURL)
+	if err != nil {
+		return fmt.Errorf("parsing PCS URL %q: %w", requestURL, err)
+	}
+	var signed string
+	switch {
+	case strings.HasSuffix(u.Path, "/tcb"):
+		signed = "tcbInfo"
+	case strings.HasSuffix(u.Path, "/qe/identity"):
+		signed = "enclaveIdentity"
+	default:
+		return nil
+	}
+	// json/v2 rejects duplicate names and matches map keys exactly.
+	var members map[string]jsontext.Value
+	if err := json.Unmarshal(body, &members); err != nil {
+		return fmt.Errorf("parsing captured %s response for %s: %w", signed, requestURL, err)
+	}
+	_, hasSigned := members[signed]
+	_, hasSignature := members["signature"]
+	if len(members) != 2 || !hasSigned || !hasSignature {
+		return fmt.Errorf("captured %s response for %s must contain exactly the %q and \"signature\" members", signed, requestURL, signed)
+	}
+	return nil
 }
 
 // tcbEvaluationRecorder observes the evaluation numbers and issue dates carried
