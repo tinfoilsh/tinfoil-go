@@ -66,6 +66,14 @@ type Evidence struct {
 // whole verification. Callers must assemble a policy and validate before
 // trusting the platform.
 func Authenticate(ev Evidence, now time.Time, opts *Options) (result *Quote, err error) {
+	// go-tdx-guest decodes the unauthenticated quote at fixed offsets
+	// without checking all of its length fields, and panics on some short or
+	// inconsistent quotes. Report those as verification failures.
+	defer func() {
+		if r := recover(); r != nil {
+			result, err = nil, fmt.Errorf("parsing TDX quote: %v", r)
+		}
+	}()
 	// The library substitutes its own clock for a zero instant.
 	if now.IsZero() {
 		return nil, fmt.Errorf("verification time is required")
