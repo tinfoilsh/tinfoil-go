@@ -13,6 +13,7 @@ import (
 	"encoding/json/v2"
 	"fmt"
 	"regexp"
+	"strings"
 )
 
 const (
@@ -142,6 +143,11 @@ func (a *Artifact) validate() error {
 		}
 		if !lowerHexRE.MatchString(identifier) {
 			return fmt.Errorf("machine %s...: identifier is not lowercase hex", truncID(identifier))
+		}
+		// A host can zero an SEV-SNP CHIP_ID, so an all-zero identifier
+		// would match any chip rather than one machine.
+		if strings.Trim(identifier, "0") == "" {
+			return fmt.Errorf("machine %s...: identifier must not be all zeros", truncID(identifier))
 		}
 		switch p.Platform {
 		case PlatformSEVSNP:

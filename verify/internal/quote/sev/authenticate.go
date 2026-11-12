@@ -10,6 +10,7 @@ import (
 	"encoding/pem"
 	"fmt"
 	"net/url"
+	"slices"
 	"strings"
 	"time"
 
@@ -220,12 +221,21 @@ func Authenticate(ev Evidence, now time.Time, opts *Options) (result *Quote, err
 	}, nil
 }
 
+// rejectMaskedChipID refuses a report whose CHIP_ID the host masked. The
+// host's MASK_CHIP_ID setting zeroes CHIP_ID without marking SIGNER_INFO, and
+// go-sev-guest then skips the comparison between CHIP_ID and the VCEK's
+// hardware ID, so the report would no longer identify a specific chip.
+// SIGNER_INFO's MASK_CHIP_KEY bit is a different setting: reports that are
+// not signed with the chip key.
 func rejectMaskedChipID(report *sevsnp.Report) error {
 	signer, err := abi.ParseSignerInfo(report.GetSignerInfo())
 	if err != nil {
 		return fmt.Errorf("parsing report SIGNER_INFO: %w", err)
 	}
 	if signer.MaskChipKey {
+		return fmt.Errorf("report is not signed with the chip key (MASK_CHIP_KEY is set)")
+	}
+	if !slices.ContainsFunc(report.GetChipId(), func(b byte) bool { return b != 0 }) {
 		return fmt.Errorf("report masks CHIP_ID; masked platform identities are unsupported")
 	}
 	return nil

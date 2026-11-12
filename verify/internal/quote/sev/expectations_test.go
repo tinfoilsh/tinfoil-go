@@ -203,14 +203,21 @@ func TestIdentity(t *testing.T) {
 }
 
 func TestCheckSignerRejectsMaskedChipID(t *testing.T) {
-	report := &sevsnp.Report{
-		SignerInfo: sevabi.ComposeSignerInfo(sevabi.SignerInfo{
-			SigningKey:  sevabi.VcekReportSigner,
-			MaskChipKey: true,
-		}),
-	}
-	err := checkSigner(report)
+	chipID, err := hex.DecodeString(box2TurinID)
+	require.NoError(t, err)
+	vcekSigned := sevabi.ComposeSignerInfo(sevabi.SignerInfo{SigningKey: sevabi.VcekReportSigner})
+	require.NoError(t, checkSigner(&sevsnp.Report{SignerInfo: vcekSigned, ChipId: chipID}))
+
+	// The host's MASK_CHIP_ID setting zeroes CHIP_ID and leaves SIGNER_INFO
+	// unmarked.
+	err = checkSigner(&sevsnp.Report{SignerInfo: vcekSigned, ChipId: make([]byte, len(chipID))})
 	assert.ErrorContains(t, err, "masks CHIP_ID")
+
+	err = checkSigner(&sevsnp.Report{
+		SignerInfo: sevabi.ComposeSignerInfo(sevabi.SignerInfo{SigningKey: sevabi.VcekReportSigner, MaskChipKey: true}),
+		ChipId:     chipID,
+	})
+	assert.ErrorContains(t, err, "MASK_CHIP_KEY")
 }
 
 func ptr[T any](v T) *T { return &v }
