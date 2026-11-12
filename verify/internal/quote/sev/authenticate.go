@@ -253,6 +253,18 @@ func verifySignature(reportBytes, vcekDER, askDER, arkDER, crlDER []byte, now ti
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse report: %w", err)
 	}
+	// go-sev-guest verifies the signature over the report re-encoded from
+	// parsedReport, not over reportBytes. Require the two to be identical,
+	// so that every received byte is covered by the signature. The
+	// re-encoding drops, for example, the high four bits of the CPUID
+	// stepping byte.
+	reencoded, err := abi.ReportToAbiBytes(parsedReport)
+	if err != nil {
+		return nil, fmt.Errorf("re-encoding report: %w", err)
+	}
+	if !bytes.Equal(reencoded, reportBytes) {
+		return nil, fmt.Errorf("SEV-SNP report is not in canonical form")
+	}
 
 	product, err := productFromReport(parsedReport)
 	if err != nil {
