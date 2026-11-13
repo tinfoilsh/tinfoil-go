@@ -530,3 +530,19 @@ func TestPrepareForwardsOtherBodiesWithRepeats(t *testing.T) {
 		require.Equal(t, []string{tc.body}, got, "the body is forwarded as it was sent")
 	}
 }
+
+func TestNewTransportCacheSecret(t *testing.T) {
+	t.Setenv("TINFOIL_USER_CACHE_SECRET", "from-env")
+	catalog := func() Catalog { return Catalog{} }
+	first, err := NewTransport(Config{Catalog: catalog})
+	require.NoError(t, err)
+	second, err := NewTransport(Config{Catalog: catalog})
+	require.NoError(t, err)
+	require.Len(t, first.secret, 64)
+	require.Equal(t, first.secret, second.secret, "clients in one process share the generated secret")
+	require.NotEqual(t, "from-env", first.secret, "the environment is not read")
+
+	explicit, err := NewTransport(Config{Catalog: catalog, UserCacheSecret: "from-option"})
+	require.NoError(t, err)
+	require.Equal(t, "from-option", explicit.secret)
+}

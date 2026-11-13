@@ -5,7 +5,6 @@ import (
 	"errors"
 	"io"
 	"net/http"
-	"os"
 	"strings"
 	"testing"
 	"testing/synctest"
@@ -14,8 +13,8 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestNewRouterHTTPClientResolvesTheCacheSecret(t *testing.T) {
-	path := unsetCacheSecretSources(t)
+func TestNewRouterHTTPClientWritesNoCacheSecretFile(t *testing.T) {
+	home := emptyHome(t)
 	original := http.DefaultClient
 	defer func() { http.DefaultClient = original }()
 	synctest.Test(t, func(t *testing.T) {
@@ -28,8 +27,7 @@ func TestNewRouterHTTPClientResolvesTheCacheSecret(t *testing.T) {
 		_, err := NewRouterHTTPClient(context.Background(), nil)
 		require.Error(t, err, "the fallback can't be verified")
 	})
-	_, err := os.Stat(path)
-	require.NoError(t, err, "the router route provisions the shared secret")
+	requireEmptyDir(t, home)
 }
 
 func TestNewRouterHTTPClientRejectsInvalidOptionsBeforeDiscovery(t *testing.T) {

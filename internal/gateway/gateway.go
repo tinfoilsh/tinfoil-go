@@ -135,8 +135,8 @@ type Config struct {
 	Verifier *verify.Verifier
 	// VerificationCheck, when set, can reject each replica's verification.
 	VerificationCheck func(v *verify.Verification) error
-	// UserCacheSecret is the explicit secret; empty resolves it from the
-	// environment or the persisted file.
+	// UserCacheSecret is the explicit secret; empty selects the secret that
+	// is generated once per process.
 	UserCacheSecret string
 }
 
@@ -154,7 +154,7 @@ func NewTransport(c Config) (*Transport, error) {
 	return &Transport{
 		catalog: catalog,
 		policy:  policy,
-		secret:  cachesecret.Resolve(c.UserCacheSecret, c.UserCacheSecret != ""),
+		secret:  cachesecret.Resolve(c.UserCacheSecret),
 		build: func(r replica) (*verifiedReplicaTransport, error) {
 			e, err := enclave.New(enclave.Config{Host: r.host, Relay: c.Relay, Repo: r.ref, Verifier: policy.verifierFor(r), VerificationCheck: c.VerificationCheck})
 			if err != nil {

@@ -5,11 +5,9 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
-	"io/fs"
 	"net/http"
 	"net/url"
 	"os"
-	"path/filepath"
 	"slices"
 	"strings"
 	"sync"
@@ -111,21 +109,31 @@ func TestConstructorsVerifyBeforeReturning(t *testing.T) {
 	})
 }
 
-// unsetCacheSecretSources points the cache-secret lookup at an empty home
-// and no environment value, and returns where it would persist the secret.
-func unsetCacheSecretSources(t *testing.T) string {
+// emptyHome points HOME at an empty directory, where earlier versions
+// persisted a generated cache secret, and returns that directory. It clears
+// the environment variable that earlier versions read first, so that such a
+// version would reach the file.
+func emptyHome(t *testing.T) string {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
 	t.Setenv("TINFOIL_USER_CACHE_SECRET", "")
-	return filepath.Join(home, ".tinfoil", "user_cache_secret")
+	return home
+}
+
+// requireEmptyDir fails unless dir is still empty.
+func requireEmptyDir(t *testing.T, dir string) {
+	t.Helper()
+	entries, err := os.ReadDir(dir)
+	require.NoError(t, err)
+	require.Empty(t, entries, "no cache-secret file is written")
 }
 
 func TestNewEnclaveHTTPClientResolvesNoCacheSecret(t *testing.T) {
-	path := unsetCacheSecretSources(t)
+	home := emptyHome(t)
 	_, err := unverifiedEnclaveHTTPClient("enclave.example", "org/repo", nil)
 	require.NoError(t, err)
-	_, err = os.Stat(filepath.Dir(path))
-	require.ErrorIs(t, err, fs.ErrNotExist, "only Tinfoil's inference routes provision the shared secret")
+	requireEmptyDir(t, home)
 }
 
 func TestEnclaveHTTPClientReportsItsEnclaveAndRepo(t *testing.T) {

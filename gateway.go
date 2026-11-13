@@ -28,10 +28,13 @@ type GatewayOptions struct {
 	// A replica it rejects is skipped for the next replica of the model.
 	VerificationCheck func(v *verify.Verification) error
 	// UserCacheSecret is the default prompt-cache scope for the client's
-	// requests; empty resolves it from TINFOIL_USER_CACHE_SECRET or
-	// ~/.tinfoil/user_cache_secret. A non-empty user_cache_secret string in a
-	// request's JSON body overrides it, so a server can scope the cache to each
-	// end user, for example with option.WithJSONSet("user_cache_secret", s).
+	// requests. A non-empty user_cache_secret string in a request's JSON body
+	// overrides it, so a server can scope the cache to each end user, for
+	// example with option.WithJSONSet("user_cache_secret", s). When it is
+	// empty, the client uses a random secret that is generated in memory once
+	// per process and that every client in the process shares; no environment
+	// variable or file is read. Applications that want a stable secret across
+	// processes or machines pass it here.
 	// Use an opaque random value, not a raw user ID or API key: the gateway
 	// sees a cache prefix keyed on it, and could test guesses of a guessable
 	// secret and then of the prompt.
