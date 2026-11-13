@@ -109,13 +109,18 @@ func (v *Verifier) CallerAuthorizesConfig() bool {
 // repo, a trusted owner/name[@tag][@sha256:digest] reference, and returns what
 // it proved as the JSON described in verification.go. A result that can no
 // longer authorize a request is an error, as in the Go SDK.
-func (v *Verifier) Verify(doc, nonce []byte, repo string) (_ string, err error) {
+func (v *Verifier) Verify(doc, nonce []byte, repo string) (string, error) {
+	return v.verifyAt(doc, nonce, repo, time.Now())
+}
+
+// verifyAt is Verify with the appraisal clock given.
+func (v *Verifier) verifyAt(doc, nonce []byte, repo string, now time.Time) (_ string, err error) {
 	defer func() { err = toMobileError(err) }()
-	verified, err := v.inner.VerifyV3(doc, nonce, repo)
+	verified, err := v.inner.VerifyV3At(doc, nonce, repo, now)
 	if err != nil {
 		return "", err
 	}
-	if err := checkFresh(verified, time.Now()); err != nil {
+	if err := checkFresh(verified, now); err != nil {
 		return "", err
 	}
 	return encode(verified)

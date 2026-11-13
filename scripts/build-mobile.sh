@@ -11,12 +11,22 @@ output="${1:-TinfoilGo.xcframework}"
 # declares, currently macOS 14 and iOS 17.
 ios_version="${IOS_MIN_VERSION:-17.0}"
 macos_version="${MACOS_MIN_VERSION:-14.0}"
+# MOBILE_BUILD_TAGS=tinfoil_conformance builds the test-only framework that
+# tinfoil-swift runs the conformance vectors through (mobile/conformance.go).
+# A release never sets it, and the header check below refuses its symbols
+# unless it is set.
+build_tags="${MOBILE_BUILD_TAGS:-}"
+tag_args=()
+if [[ -n "$build_tags" ]]; then
+  tag_args=(-tags="$build_tags")
+fi
 packages=()
 while IFS= read -r package; do
   packages+=("$package")
 done < scripts/mobile-packages.txt
 gomobile bind -v -target=ios,iossimulator,macos \
   -iosversion="$ios_version" -macosversion="$macos_version" \
+  ${tag_args[@]+"${tag_args[@]}"} \
   -o "$output" "${packages[@]}"
 shopt -s nullglob
 frameworks=("$output"/*/*.framework)
@@ -40,6 +50,12 @@ done
 unexpected_headers="$(find "$output" -type f -name '*.objc.h' "${header_exclusions[@]}")"
 if [[ -n "$unexpected_headers" ]]; then
   printf 'internal verifier headers unexpectedly exported:\n%s\n' "$unexpected_headers" >&2
+  exit 1
+fi
+# The test-only entry points replace trust anchors; only a framework built for
+# the conformance tests may carry them.
+if [[ "$build_tags" != *tinfoil_conformance* ]] && grep -rqi DangerousTestOnly "$output"/*/*.framework/Headers; then
+  printf 'test-only entry points in a framework built without tinfoil_conformance\n' >&2
   exit 1
 fi
 
