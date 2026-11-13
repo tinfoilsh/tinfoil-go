@@ -102,5 +102,8 @@ scripts/build-mobile.sh`), the framework also exports
 ([`conformance.go`](conformance.go)). tinfoil-swift runs the suite's
 full-verify vectors through them. A released framework never carries them, and
 `scripts/build-mobile.sh` refuses a build without the tag that does.
-`TestConformanceVectorsMatchTheAdapter` asserts that each vector gets the same
-verdict through them as through Go's own adapter.
+`TestConformanceVectorsMatchTheAdapter` asserts that each full-verify vector gets
+the same verdict through them as through Go's own adapter, with one expected
+exception: like the Go client, the binding treats a result as expired at the
+instant that its freshness witnesses reach their maximum age, which the
+verifier still accepts, and `fr2-pos-at-max-age` replays that instant.

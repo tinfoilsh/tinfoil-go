@@ -53,11 +53,22 @@ if [[ -n "$unexpected_headers" ]]; then
   exit 1
 fi
 # The test-only entry points replace trust anchors; only a framework built for
-# the conformance tests may carry them.
-if [[ "$build_tags" != *tinfoil_conformance* ]] && grep -rqi DangerousTestOnly "$output"/*/*.framework/Headers; then
-  printf 'test-only entry points in a framework built without tinfoil_conformance\n' >&2
-  exit 1
-fi
+# the conformance tests may carry them, and it must carry both, since gomobile
+# drops what it cannot bind without failing the build.
+for framework in "${frameworks[@]}"; do
+  header="$framework/Headers/Mobile.objc.h"
+  if [[ "$build_tags" == *tinfoil_conformance* ]]; then
+    for symbol in MobileNewDangerousTestOnlyVerifier dangerousTestOnlyVerifyAt; do
+      if ! grep -q "$symbol" "$header"; then
+        printf '%s: missing test-only entry point %s\n' "$header" "$symbol" >&2
+        exit 1
+      fi
+    done
+  elif grep -qi DangerousTestOnly "$header"; then
+    printf '%s: test-only entry points in a framework built without tinfoil_conformance\n' "$header" >&2
+    exit 1
+  fi
+done
 
 # Assert no slice demands a newer OS than the versions pinned above. Such a
 # slice will not load on the OS versions the Swift package declares support

@@ -3,13 +3,12 @@
 package mobile
 
 import (
-	"encoding/base64"
 	"encoding/json/v2"
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/tinfoilsh/tinfoil-go/verify"
+	"github.com/tinfoilsh/tinfoil-go/verify/conformance"
 )
 
 // This file exists only in a framework built with -tags tinfoil_conformance,
@@ -18,8 +17,9 @@ import (
 // anchor can be replaced and the clock cannot be set.
 
 // conformanceRoots are the trust anchors of a conformance vector, in the
-// adapter's wire form (tinfoil-conformance docs/CONFORMANCE_ADAPTER_SPEC.md).
-// An absent anchor keeps the embedded one.
+// adapter's wire form (tinfoil-conformance docs/CONFORMANCE_ADAPTER_SPEC.md),
+// parsed as verify/conformance parses them. An absent anchor keeps the
+// embedded one.
 type conformanceRoots struct {
 	// SigstoreTrustedRootB64 is the Sigstore trusted-root document, base64.
 	SigstoreTrustedRootB64 string `json:"sigstore_trusted_root_json_b64,omitempty"`
@@ -40,21 +40,14 @@ func NewDangerousTestOnlyVerifier(rootsJSON string) (_ *Verifier, err error) {
 	if err := json.Unmarshal([]byte(rootsJSON), &roots, json.RejectUnknownMembers(true)); err != nil {
 		return nil, &verify.UsageError{Err: fmt.Errorf("conformance roots: %w", err)}
 	}
-	var sigstore, amd, intel []byte
-	if roots.SigstoreTrustedRootB64 != "" {
-		if sigstore, err = base64.StdEncoding.Strict().DecodeString(roots.SigstoreTrustedRootB64); err != nil {
-			return nil, &verify.UsageError{Err: fmt.Errorf("sigstore_trusted_root_json_b64: %w", err)}
-		}
-	}
-	switch {
-	case roots.AMDRootCAPEM != "" && roots.ASKPEM != "":
-		// The chain is ASK then ARK, as AMD's KDS serves it.
-		amd = []byte(strings.TrimSpace(roots.ASKPEM) + "\n" + strings.TrimSpace(roots.AMDRootCAPEM) + "\n")
-	case roots.AMDRootCAPEM != "" || roots.ASKPEM != "":
-		return nil, &verify.UsageError{Err: fmt.Errorf("amd_root_ca_pem and ask_pem must be given together")}
-	}
-	if roots.IntelSGXRootPEM != "" {
-		intel = []byte(roots.IntelSGXRootPEM)
+	sigstore, amd, intel, err := conformance.Input{
+		SigstoreTrustedRootB64: roots.SigstoreTrustedRootB64,
+		AMDRootCAPEM:           roots.AMDRootCAPEM,
+		ASKPEM:                 roots.ASKPEM,
+		IntelSGXRootPEM:        roots.IntelSGXRootPEM,
+	}.TrustAnchors()
+	if err != nil {
+		return nil, &verify.UsageError{Err: fmt.Errorf("conformance roots: %w", err)}
 	}
 	inner, err := verify.NewVerifier(
 		verify.DangerousTestOnlyWithSigstoreRoot(sigstore),
@@ -69,5 +62,6 @@ func NewDangerousTestOnlyVerifier(rootsJSON string) (_ *Verifier, err error) {
 // DangerousTestOnlyVerifyAt is Verify with the appraisal clock set to
 // unixSeconds, so that a frozen document replays at its capture time.
 func (v *Verifier) DangerousTestOnlyVerifyAt(doc, nonce []byte, repo string, unixSeconds int64) (string, error) {
-	return v.verifyAt(doc, nonce, repo, time.Unix(unixSeconds, 0))
+	at := time.Unix(unixSeconds, 0)
+	return v.verifyAt(doc, nonce, repo, at, func() time.Time { return at })
 }

@@ -5,6 +5,7 @@ package mobile
 import (
 	"encoding/base64"
 	"encoding/hex"
+	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"os"
 	"path/filepath"
@@ -45,13 +46,22 @@ func TestConformanceVectorsMatchTheAdapter(t *testing.T) {
 	for _, file := range files {
 		data, err := os.ReadFile(file)
 		require.NoError(t, err)
-		var vector struct {
-			Stage string            `json:"stage"`
-			Input conformance.Input `json:"input"`
+		// Every file must parse, so that a vector broken by an edit fails
+		// here rather than drops out; only full-verify vectors are run.
+		var fixture struct {
+			Stage string         `json:"stage"`
+			Input jsontext.Value `json:"input"`
 		}
-		if json.Unmarshal(data, &vector) != nil || vector.Stage != conformance.StageVerify {
+		require.NoError(t, json.Unmarshal(data, &fixture), file)
+		if fixture.Stage != conformance.StageVerify {
 			continue
 		}
+		var vector struct {
+			Stage string
+			Input conformance.Input
+		}
+		vector.Stage = fixture.Stage
+		require.NoError(t, json.Unmarshal(fixture.Input, &vector.Input), file)
 		ran++
 		t.Run(filepath.Base(file), func(t *testing.T) {
 			want, _ := conformance.Run(vector.Stage, vector.Input)
