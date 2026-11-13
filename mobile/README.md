@@ -47,6 +47,14 @@ gomobile also emits a proxy class named `MobileConfigAuthorizer`. Go calls
 once, with the document's untrusted config material as JSON. A thrown error
 rejects the document at the provenance layer with the error's message.
 
+## Checks before I/O
+
+`Verifier.CheckRepoVerifiability(repo)` returns the usage error that `Verify`
+would return for `repo` whatever the document, so that a client can refuse a
+pin before fetching anything. `Verifier.CallerAuthorizesConfig()` reports a
+verifier that takes an embedded config or a config authorizer; such a verifier
+needs an explicit enclave and cannot be used to discover a router.
+
 ## Result
 
 `Verify` returns the JSON declared in `verification.go`. A verification against
