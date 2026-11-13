@@ -14,9 +14,18 @@ func checkMobileSurface() throws {
     var error: NSError?
     let _: Int64 = MobileVerificationSchemaVersion
 
-    // Options travel as JSON: pinned_registers, and freshness_max_age_ns in
-    // integer nanoseconds. An empty string selects the default policy.
+    // Options travel as JSON (see mobile/options.go). An empty string selects
+    // the default policy.
+    let _: String = MobilePublicRegistryID
     guard let verifier = MobileNewVerifier("{}", &error) else {
+        if let error { throw error }
+        return
+    }
+
+    // A config authorizer is a Swift object that Go calls back during
+    // verify. gomobile also emits a proxy class named MobileConfigAuthorizer,
+    // so Swift imports the protocol as MobileConfigAuthorizerProtocol.
+    guard let _ = MobileNewVerifierWithConfigAuthorizer("", SmokeAuthorizer(), &error) else {
         if let error { throw error }
         return
     }
@@ -39,6 +48,12 @@ func checkMobileSurface() throws {
     ]
 }
 
+final class SmokeAuthorizer: NSObject, MobileConfigAuthorizerProtocol {
+    func authorizeConfig(_ endorsementJSON: String?) throws {
+        throw NSError(domain: "smoke", code: 1, userInfo: [NSLocalizedDescriptionKey: "rejected"])
+    }
+}
+
 /// The fields a caller is expected to find in a verification payload.
 /// `mobile/verification.go` owns the shape; this mirrors it so the Swift side
 /// of the contract is written down next to the surface that carries it.
@@ -49,6 +64,9 @@ struct Verification: Decodable {
     let codeTag: String?
     let codeMeasurement: Measurement?
     let enclaveMeasurement: Measurement?
+    let config: Config?
+    let runtime: Artifact?
+    let platform: Artifact?
     let tlsPublicKeyFP: String
     let hpkePublicKey: String?
     let cryptoMaterial: [CryptoMaterial]
@@ -58,6 +76,40 @@ struct Verification: Decodable {
     struct Measurement: Decodable {
         let type: String
         let registers: [String]
+    }
+
+    struct Config: Decodable {
+        let source: String
+        let name: String?
+        let digest: String
+        let reference: String?
+        let signingKeyHint: String?
+        let approvalTime: String?
+        let registryID: String?
+        let signatureTime: String?
+
+        private enum CodingKeys: String, CodingKey {
+            case source, name, digest, reference
+            case signingKeyHint = "signing_key_hint"
+            case approvalTime = "approval_time"
+            case registryID = "registry_id"
+            case signatureTime = "signature_time"
+        }
+    }
+
+    struct Artifact: Decodable {
+        let source: String
+        let repo: String?
+        let tag: String?
+        let digest: String
+        let name: String?
+        let commit: String?
+        let approvalTime: String?
+
+        private enum CodingKeys: String, CodingKey {
+            case source, repo, tag, digest, name, commit
+            case approvalTime = "approval_time"
+        }
     }
 
     struct CryptoMaterial: Decodable {
@@ -73,6 +125,7 @@ struct Verification: Decodable {
         case codeTag = "code_tag"
         case codeMeasurement = "code_measurement"
         case enclaveMeasurement = "enclave_measurement"
+        case config, runtime, platform
         case tlsPublicKeyFP = "tls_public_key_fp"
         case hpkePublicKey = "hpke_public_key"
         case cryptoMaterial = "crypto_material"

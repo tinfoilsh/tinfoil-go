@@ -19,9 +19,40 @@ This package performs no I/O. The caller:
   verification returns, and stops authorizing new requests at
   `freshness_expires_at`.
 
-`NewVerifier` takes the policy as a JSON object with `pinned_registers` and
-integer `freshness_max_age_ns`; any other member is rejected, and an empty
-string selects the default policy.
+## Options
+
+`NewVerifier` takes the policy as a JSON object; an empty string selects the
+default policy. Every member is optional, `null` counts as absent, and an
+unknown or malformed member is rejected. Byte strings are standard base64 with
+padding.
+
+| member | verifier option |
+|---|---|
+| `pinned_registers` (`{type, registers}`) | `WithPinnedRegisters` |
+| `freshness_max_age_ns` (integer) | `WithFreshnessMaxAge` |
+| `config_registry_ids` (strings; include `PublicRegistryID` to keep the public registry) | `WithConfigRegistryIDs` |
+| `config_signing_keys_pem`, `freshness_signing_keys_pem` (PEM `PUBLIC KEY` blocks) | `WithConfigSigningKeys`, `WithFreshnessSigningKeys` |
+| `embedded_config` (`{name?, bytes}` or `{name?, digest, runtime: {repo, tag, digest}}`), `embedded_runtime`, `embedded_platform` | `WithEmbeddedReferences` |
+
+The verifier's own checks apply on top, including the conflicts between trust
+sources (for example, registry IDs with config signing keys).
+
+## Config authorizer
+
+`NewVerifierWithConfigAuthorizer` adds `WithConfigAuthorizer`. gomobile cannot
+carry a Go function, so the callback is the `ConfigAuthorizer` interface, which
+Swift implements; Swift imports it as `MobileConfigAuthorizerProtocol`, because
+gomobile also emits a proxy class named `MobileConfigAuthorizer`. Go calls
+`authorizeConfig` synchronously inside `verify`, possibly on several threads at
+once, with the document's untrusted config material as JSON. A thrown error
+rejects the document at the provenance layer with the error's message.
+
+## Result
+
+`Verify` returns the JSON declared in `verification.go`. A verification against
+a config also carries `config`, `runtime` and `platform`, each with the
+`source` that it was accepted from (`endorsement`, `embedded`, or `policy` for
+a config that an authorizer approved).
 
 ## Errors
 

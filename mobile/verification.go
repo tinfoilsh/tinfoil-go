@@ -33,6 +33,12 @@ type verificationJSON struct {
 	CodeMeasurement    *measurementJSON `json:"code_measurement,omitempty"`
 	EnclaveMeasurement *measurementJSON `json:"enclave_measurement,omitempty"`
 
+	// Config, Runtime and Platform describe a deployment verified from its
+	// config, and are absent for one verified against a code release.
+	Config   *configJSON   `json:"config,omitempty"`
+	Runtime  *artifactJSON `json:"runtime,omitempty"`
+	Platform *artifactJSON `json:"platform,omitempty"`
+
 	// TLSPublicKeyFP and HPKEPublicKey are lifted out of CryptoMaterial by ID
 	// and format, because binding a channel to them is what a caller does with
 	// a verification. A TLS-only enclave endorses no HPKE key.
@@ -65,6 +71,34 @@ const (
 	tdxMeasurementType    = "https://tinfoil.sh/predicate/tdx-guest/v2"
 )
 
+// configJSON is the config bound to the hardware. Source is "endorsement",
+// "embedded" or "policy" (a ConfigAuthorizer approved it). Only an endorsed
+// config has a reference, signing key hint, registry ID or times; an absent
+// one is omitted. Times are RFC 3339.
+type configJSON struct {
+	Source         string `json:"source"`
+	Name           string `json:"name,omitempty"`
+	Digest         string `json:"digest"`
+	Reference      string `json:"reference,omitempty"`
+	SigningKeyHint string `json:"signing_key_hint,omitempty"`
+	ApprovalTime   string `json:"approval_time,omitempty"`
+	RegistryID     string `json:"registry_id,omitempty"`
+	SignatureTime  string `json:"signature_time,omitempty"`
+}
+
+// artifactJSON is a runtime or platform artifact a config-based verification
+// accepted. Source is "endorsement" or "embedded"; an embedded artifact has no
+// name, commit or approval time, and an embedded platform has only a digest.
+type artifactJSON struct {
+	Source       string `json:"source"`
+	Repo         string `json:"repo,omitempty"`
+	Tag          string `json:"tag,omitempty"`
+	Digest       string `json:"digest"`
+	Name         string `json:"name,omitempty"`
+	Commit       string `json:"commit,omitempty"`
+	ApprovalTime string `json:"approval_time,omitempty"`
+}
+
 type cryptoMaterialJSON struct {
 	ID     string `json:"id"`
 	Format string `json:"format"`
@@ -87,12 +121,41 @@ func toVerificationJSON(v *verify.Verification) verificationJSON {
 		FreshnessExpiresAt: v.FreshnessExpiresAt().UTC().Format(time.RFC3339Nano),
 		VerifiedAt:         v.Metadata().VerifiedAt.UTC().Format(time.RFC3339Nano),
 	}
+	if config, ok := v.Config(); ok {
+		out.Config = &configJSON{
+			Source: string(config.Source), Name: config.Name, Digest: config.Digest,
+			Reference: config.Reference, SigningKeyHint: config.SigningKeyHint,
+			ApprovalTime: formatTime(config.ApprovalTime), RegistryID: config.RegistryID,
+			SignatureTime: formatTime(config.SignatureTime),
+		}
+	}
+	if runtime, ok := v.Runtime(); ok {
+		out.Runtime = toArtifactJSON(runtime)
+	}
+	if platform, ok := v.Platform(); ok {
+		out.Platform = toArtifactJSON(platform)
+	}
 	out.TLSPublicKeyFP, _ = v.CryptoMaterialData(document.CryptoMaterialIDTLS, document.KeySPKIFPSHA256V1Format)
 	out.HPKEPublicKey, _ = v.CryptoMaterialData(document.CryptoMaterialIDHPKE, document.KeyX25519HPKEV1Format)
 	for _, item := range items {
 		out.CryptoMaterial = append(out.CryptoMaterial, cryptoMaterialJSON{ID: item.ID, Format: item.Format, Data: item.Data})
 	}
 	return out
+}
+
+func toArtifactJSON(a verify.ArtifactVerification) *artifactJSON {
+	return &artifactJSON{
+		Source: string(a.Source), Repo: a.Repo, Tag: a.Tag, Digest: a.Digest,
+		Name: a.Name, Commit: a.Commit, ApprovalTime: formatTime(a.ApprovalTime),
+	}
+}
+
+// formatTime is RFC 3339, or "" for the zero time of an absent fact.
+func formatTime(t time.Time) string {
+	if t.IsZero() {
+		return ""
+	}
+	return t.UTC().Format(time.RFC3339Nano)
 }
 
 func toMeasurementJSON(m measurement.Measurement) *measurementJSON {
