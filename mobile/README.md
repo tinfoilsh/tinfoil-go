@@ -51,7 +51,9 @@ rejects the document at the provenance layer with the error's message.
 
 `Verifier.CheckRepoVerifiability(repo)` returns the usage error that `Verify`
 would return for `repo` whatever the document, so that a client can refuse a
-pin before fetching anything. `Verifier.CallerAuthorizesConfig()` reports a
+pin before fetching anything. It is not the whole check: v3 collateral also
+requires the repo to be a valid config identity, so `Verify` can still return a
+usage error for a repo that passed. `Verifier.CallerAuthorizesConfig()` reports a
 verifier that takes an embedded config or a config authorizer; such a verifier
 needs an explicit enclave and cannot be used to discover a router.
 

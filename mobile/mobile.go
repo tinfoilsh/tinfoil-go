@@ -89,8 +89,10 @@ func newVerifier(optionsJSON string, authorizer ConfigAuthorizer) (_ *Verifier, 
 // CheckRepoVerifiability reports, without a document or network I/O, whether
 // the verifier can verify an enclave against repo, so that a caller can refuse
 // a pin before fetching anything. It returns a usage error for a malformed
-// repo, for any repo when a config authorizer is set, and for a repo that an
-// embedded config's name or digest doesn't match.
+// repo, for any non-empty repo when a config authorizer is set, and for a repo
+// that an embedded config's name or digest doesn't match. Verify can still
+// return a usage error for a repo that passes: v3 collateral also requires the
+// repo to be a valid config identity, which waits for the document.
 func (v *Verifier) CheckRepoVerifiability(repo string) error {
 	return toMobileError(v.inner.CheckRepoVerifiability(repo))
 }
