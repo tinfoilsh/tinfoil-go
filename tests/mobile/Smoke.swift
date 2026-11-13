@@ -36,6 +36,10 @@ func checkMobileSurface() throws {
     let _: String = MobileAttestationURL("enclave.example", "relay.example:8443", nonce, &error)
     if let error { throw error }
 
+    // Checks a client makes before any I/O.
+    let _: Bool = verifier.callerAuthorizesConfig()
+    try verifier.checkRepoVerifiability("org/repo")
+
     // Verifying performs no I/O; it appraises the fetched bytes.
     let payload: String = verifier.verify(Data(), nonce: nonce, repo: "org/repo", error: &error)
     if let error { throw error }

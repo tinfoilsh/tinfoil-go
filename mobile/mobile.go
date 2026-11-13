@@ -86,6 +86,25 @@ func newVerifier(optionsJSON string, authorizer ConfigAuthorizer) (_ *Verifier, 
 	return &Verifier{inner: inner}, nil
 }
 
+// CheckRepoVerifiability reports, without a document or network I/O, whether
+// the verifier can verify an enclave against repo, so that a caller can refuse
+// a pin before fetching anything. It returns a usage error for a malformed
+// repo, for any non-empty repo when a config authorizer is set, and for a repo
+// that an embedded config's name or digest doesn't match. Verify can still
+// return a usage error for a repo that passes: v3 collateral also requires the
+// repo to be a valid config identity, which waits for the document.
+func (v *Verifier) CheckRepoVerifiability(repo string) error {
+	return toMobileError(v.inner.CheckRepoVerifiability(repo))
+}
+
+// CallerAuthorizesConfig reports whether the caller supplies the config, with
+// an embedded config, or approves it, with a config authorizer, rather than a
+// repo pin authenticating it. Such a verifier needs an explicit enclave: it
+// cannot be used to discover a router.
+func (v *Verifier) CallerAuthorizesConfig() bool {
+	return v.inner.CallerAuthorizesConfig()
+}
+
 // Verify appraises doc, the attestation document fetched with nonce, against
 // repo, a trusted owner/name[@tag][@sha256:digest] reference, and returns what
 // it proved as the JSON described in verification.go. A result that can no
