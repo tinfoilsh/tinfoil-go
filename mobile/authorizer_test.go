@@ -71,8 +71,9 @@ func TestAuthorizerPayload(t *testing.T) {
 		},
 		{
 			"certified config",
-			collateral.ConfigEndorsement{Config: []byte("c"), Reference: "sha256:ab", Bundle: jsontext.Value(`{"k":1}`), Issuer: []byte{1, 2}},
-			map[string]any{"config": b64("c"), "reference": "sha256:ab", "sigstore_bundle": map[string]any{"k": float64(1)}, "issuer_certificate_der": "AQI="},
+			// The bundle keeps its exact bytes, including spacing and key order.
+			collateral.ConfigEndorsement{Config: []byte("c"), Reference: "sha256:ab", Bundle: jsontext.Value(`{"k": 1, "a":2}`), Issuer: []byte{1, 2}},
+			map[string]any{"config": b64("c"), "reference": "sha256:ab", "sigstore_bundle": b64(`{"k": 1, "a":2}`), "issuer_certificate_der": "AQI="},
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

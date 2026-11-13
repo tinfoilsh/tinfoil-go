@@ -44,7 +44,9 @@ carry a Go function, so the callback is the `ConfigAuthorizer` interface, which
 Swift implements; Swift imports it as `MobileConfigAuthorizerProtocol`, because
 gomobile also emits a proxy class named `MobileConfigAuthorizer`. Go calls
 `authorizeConfig` synchronously inside `verify`, possibly on several threads at
-once, with the document's untrusted config material as JSON. A thrown error
+once, with the document's untrusted config material as JSON, whose byte
+strings (the config, the Sigstore bundle and the issuer certificate) are base64
+of the document's exact bytes. A thrown error
 rejects the document at the provenance layer with the error's message.
 
 ## Checks before I/O
