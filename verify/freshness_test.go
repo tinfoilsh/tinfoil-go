@@ -16,6 +16,8 @@ import (
 	"github.com/tinfoilsh/tinfoil-go/verify/document/collateral"
 	"github.com/tinfoilsh/tinfoil-go/verify/internal/endorsement"
 	"github.com/tinfoilsh/tinfoil-go/verify/internal/policy"
+	"github.com/tinfoilsh/tinfoil-go/verify/internal/quote"
+	"github.com/tinfoilsh/tinfoil-go/verify/internal/validity"
 )
 
 func TestFreshnessExpiration(t *testing.T) {
@@ -62,7 +64,7 @@ func TestLiveArchivedVerification(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, want, got)
 	_, err = defaults.VerifyV3At(raw, nonce, repo, want.FreshnessExpiresAt().Add(time.Second))
-	require.ErrorContains(t, err, "stale")
+	require.Error(t, err)
 
 	changeCollateral := func(format string, remove bool) func(map[string]any) {
 		return func(doc map[string]any) {
@@ -160,15 +162,19 @@ func TestLiveFreshnessWitnessExpiration(t *testing.T) {
 	require.NoError(t, err)
 	platform, err := provClient.AuthenticatePlatformEndorsements(platformRef.Bundle, platformRef.Repo, platformRef.Tag, platformRef.Digest, policy.ArtifactFormat)
 	require.NoError(t, err)
-	matched := false
+	appraisalTime := verified.Metadata().VerifiedAt
+	cpu, err := quote.Authenticate(doc.CPUEvidence(), doc.CPUEndorsements(), appraisalTime, nil)
+	require.NoError(t, err)
+	var firstWitness time.Time
 	for id, artifact := range map[string]*endorsement.AuthenticatedArtifact{
 		collateral.FreshnessIDCode:     &code.AuthenticatedArtifact,
 		collateral.FreshnessIDPlatform: &platform.AuthenticatedArtifact,
 	} {
 		witness, err := doc.Freshness(id)
 		require.NoError(t, err)
-		loggedAt, err := provClient.AuthenticateFreshness(witness.Bundle, artifact, time.Now(), 0)
+		loggedAt, err := provClient.AuthenticateFreshness(witness.Bundle, artifact, appraisalTime, 0)
 		require.NoError(t, err)
+		firstWitness = validity.Earliest(firstWitness, loggedAt)
 		_, err = provClient.AuthenticateFreshness(witness.Bundle, artifact, loggedAt.Add(8*24*time.Hour), 0)
 		require.ErrorContains(t, err, "stale")
 		_, err = provClient.AuthenticateFreshness(witness.Bundle, artifact, loggedAt.Add(8*24*time.Hour), maxAge)
@@ -177,9 +183,14 @@ func TestLiveFreshnessWitnessExpiration(t *testing.T) {
 		require.NoError(t, err)
 		_, err = provClient.AuthenticateFreshness(witness.Bundle, artifact, loggedAt.Add(7*24*time.Hour+time.Nanosecond), 0)
 		require.ErrorContains(t, err, "stale")
-		expiresAt := loggedAt.Add(endorsement.MaxFreshnessAge)
-		require.False(t, verified.FreshnessExpiresAt().After(expiresAt), "%s witness expires before public deadline", id)
-		matched = matched || verified.FreshnessExpiresAt().Equal(expiresAt)
 	}
-	require.True(t, matched, "public deadline must equal one of the authenticated witness expirations")
+	require.Equal(t, validity.Earliest(firstWitness.Add(endorsement.MaxFreshnessAge), cpu.ExpiresAt), verified.FreshnessExpiresAt())
+	shortAge := max(appraisalTime.Sub(firstWitness), time.Nanosecond)
+	for _, age := range []time.Duration{shortAge, maxAge} {
+		custom, err := NewVerifier(WithFreshnessMaxAge(age))
+		require.NoError(t, err)
+		got, err := custom.VerifyV3At(raw, nonce, repo, appraisalTime)
+		require.NoError(t, err)
+		require.Equal(t, validity.Earliest(firstWitness.Add(age), cpu.ExpiresAt), got.FreshnessExpiresAt())
+	}
 }

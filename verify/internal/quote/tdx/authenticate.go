@@ -25,6 +25,7 @@ import (
 	tdxtrust "github.com/google/go-tdx-guest/verify/trust"
 
 	"github.com/tinfoilsh/tinfoil-go/verify/document/collateral"
+	"github.com/tinfoilsh/tinfoil-go/verify/internal/validity"
 	"github.com/tinfoilsh/tinfoil-go/verify/measurement"
 )
 
@@ -34,6 +35,7 @@ type Quote struct {
 	identity string
 	// Measurement is the authenticated MRTD and four RTMRs.
 	Measurement measurement.TDX
+	ExpiresAt   time.Time
 	// tcbEvaluationDataNumber is the minimum tcbEvaluationDataNumber
 	// observed in the verified Intel collateral.
 	tcbEvaluationDataNumber int
@@ -125,6 +127,15 @@ func Authenticate(ev Evidence, now time.Time, opts *Options) (result *Quote, err
 	if err := recorder.checkIssueDates(now); err != nil {
 		return nil, err
 	}
+	rootPEM := sgxRootCACertPEM
+	if opts != nil && opts.overrides.root() != nil {
+		rootPEM = opts.overrides.root()
+	}
+	chain := quote.GetSignedData().GetCertificationData().GetQeReportCertificationData().GetPckCertificateChainData()
+	certExpiresAt, err := certificateChainExpiry(rootPEM, chain.GetPckCertChain())
+	if err != nil {
+		return nil, err
+	}
 
 	identity, err := Identity(quote)
 	if err != nil {
@@ -155,6 +166,7 @@ func Authenticate(ev Evidence, now time.Time, opts *Options) (result *Quote, err
 			RTMR3: measurement.Register(rtmrs[3]),
 		},
 		tcbEvaluationDataNumber: tcbEvaluationDataNumber,
+		ExpiresAt:               validity.Earliest(certExpiresAt, inner.expiresAt, recorder.expiresAt),
 		quote:                   quote,
 	}, nil
 }
@@ -190,6 +202,7 @@ func pcsCollateralKey(rawURL string) (string, error) {
 type pcsReplayGetter struct {
 	responses map[string]*collateral.PCSResponse
 	now       time.Time
+	expiresAt time.Time
 }
 
 func newPCSReplayGetter(responses []collateral.PCSResponse, now time.Time) (*pcsReplayGetter, error) {
@@ -225,6 +238,7 @@ func (g *pcsReplayGetter) Get(requestURL string) (map[string][]string, []byte, e
 		if g.now.Before(crl.ThisUpdate) || g.now.After(crl.NextUpdate) {
 			return nil, nil, fmt.Errorf("captured CRL for %s is outside its validity window", requestURL)
 		}
+		g.expiresAt = validity.Earliest(g.expiresAt, crl.NextUpdate)
 	} else if strings.Contains(key, "crl") {
 		return nil, nil, fmt.Errorf("parsing captured CRL for %s: %w", requestURL, crlErr)
 	}
@@ -271,14 +285,21 @@ func checkSignedCollateralBody(requestURL string, body []byte) error {
 	return nil
 }
 
-// tcbEvaluationRecorder observes the evaluation numbers and issue dates carried
-// by the TCB Info and QE Identity responses that quote verification consumes.
+const (
+	pckCRLIssuerChainHeader     = "Sgx-Pck-Crl-Issuer-Chain"
+	tcbInfoIssuerChainHeader    = "Tcb-Info-Issuer-Chain"
+	qeIdentityIssuerChainHeader = "Sgx-Enclave-Identity-Issuer-Chain"
+)
+
+// tcbEvaluationRecorder observes the evaluation numbers and validity windows
+// of the collateral that quote verification consumes.
 type tcbEvaluationRecorder struct {
 	inner              tdxtrust.HTTPSGetter
 	tcbInfo            *int
 	qeIdentity         *int
 	tcbInfoIssuedAt    *time.Time
 	qeIdentityIssuedAt *time.Time
+	expiresAt          time.Time
 }
 
 func (r *tcbEvaluationRecorder) Get(requestURL string) (map[string][]string, []byte, error) {
@@ -295,31 +316,70 @@ func (r *tcbEvaluationRecorder) Get(requestURL string) (map[string][]string, []b
 	if parseErr != nil {
 		return headers, body, nil
 	}
+	var issuerChainHeader string
 	switch {
 	case strings.HasSuffix(u.Path, "/tcb"):
+		issuerChainHeader = tcbInfoIssuerChainHeader
 		var resp struct {
 			TcbInfo struct {
 				TcbEvaluationDataNumber *int       `json:"tcbEvaluationDataNumber"`
 				IssueDate               *time.Time `json:"issueDate"`
+				NextUpdate              time.Time  `json:"nextUpdate"`
 			} `json:"tcbInfo"`
 		}
 		if json.Unmarshal(body, &resp) == nil && resp.TcbInfo.TcbEvaluationDataNumber != nil {
 			r.tcbInfo = resp.TcbInfo.TcbEvaluationDataNumber
 			r.tcbInfoIssuedAt = resp.TcbInfo.IssueDate
+			r.expiresAt = validity.Earliest(r.expiresAt, resp.TcbInfo.NextUpdate)
 		}
 	case strings.HasSuffix(u.Path, "/qe/identity"):
+		issuerChainHeader = qeIdentityIssuerChainHeader
 		var resp struct {
 			EnclaveIdentity struct {
 				TcbEvaluationDataNumber *int       `json:"tcbEvaluationDataNumber"`
 				IssueDate               *time.Time `json:"issueDate"`
+				NextUpdate              time.Time  `json:"nextUpdate"`
 			} `json:"enclaveIdentity"`
 		}
 		if json.Unmarshal(body, &resp) == nil && resp.EnclaveIdentity.TcbEvaluationDataNumber != nil {
 			r.qeIdentity = resp.EnclaveIdentity.TcbEvaluationDataNumber
 			r.qeIdentityIssuedAt = resp.EnclaveIdentity.IssueDate
+			r.expiresAt = validity.Earliest(r.expiresAt, resp.EnclaveIdentity.NextUpdate)
 		}
+	case strings.HasSuffix(u.Path, "/pckcrl"):
+		issuerChainHeader = pckCRLIssuerChainHeader
+	}
+	if chain := headers[issuerChainHeader]; issuerChainHeader != "" && len(chain) == 1 {
+		decoded, err := url.QueryUnescape(chain[0])
+		if err != nil {
+			return nil, nil, err
+		}
+		expiresAt, err := certificateChainExpiry([]byte(decoded))
+		if err != nil {
+			return nil, nil, err
+		}
+		r.expiresAt = validity.Earliest(r.expiresAt, expiresAt)
 	}
 	return headers, body, nil
+}
+
+func certificateChainExpiry(chains ...[]byte) (time.Time, error) {
+	var expiresAt time.Time
+	for _, chain := range chains {
+		for len(bytes.TrimSpace(chain)) != 0 {
+			block, rest := pem.Decode(chain)
+			if block == nil || block.Type != "CERTIFICATE" {
+				return time.Time{}, fmt.Errorf("certificate chain is not PEM")
+			}
+			cert, err := x509.ParseCertificate(block.Bytes)
+			if err != nil {
+				return time.Time{}, err
+			}
+			expiresAt = validity.Earliest(expiresAt, cert.NotAfter)
+			chain = rest
+		}
+	}
+	return expiresAt, nil
 }
 
 func (r *tcbEvaluationRecorder) checkIssueDates(now time.Time) error {
