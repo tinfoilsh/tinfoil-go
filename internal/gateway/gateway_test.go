@@ -463,3 +463,70 @@ func TestReplicaChainReplaysAndNamesTheReplica(t *testing.T) {
 		require.Equal(t, "https://replica.example", attempt.Header.Get("X-Tinfoil-Enclave-Url"), "SPEC 14.7: every attempt names the replica")
 	}
 }
+
+func TestPrepareRefusesRepeatedRoutedMembers(t *testing.T) {
+	for body, want := range map[string]string{
+		`{"model":"test-model","model":"other-model"}`:                                    `request body repeats the "model" member`,
+		`{"model":"test-model","user_cache_secret":"a","user_cache_secret":"b"}`:          `request body repeats the "user_cache_secret" member`,
+		`{"model":"test-model","cache_salt":"a","cache_salt":"b"}`:                        `request body repeats the "cache_salt" member`,
+		`{"model":"test-model","mod\u0065l":"other-model"}`:                               `request body repeats the "model" member`,
+		`{"cache_salt":"a","model":"x","cache_salt":"b","model":"y","messages":[]}`:       `request body repeats the "model", "cache_salt" members`,
+		`{"model":"m","user_cache_secret":"a","model":"m","user_cache_secret":"a","x":1}`: `request body repeats the "model", "user_cache_secret" members`,
+	} {
+		for _, path := range []string{"/v1/chat/completions", "/v1/embeddings"} {
+			tr := sealTestTransport(func(string) (http.RoundTripper, error) {
+				t.Error("a request with a repeated member reached a replica")
+				return nil, errors.New("unreachable")
+			})
+			tr.catalog = func(context.Context) (Catalog, error) {
+				t.Error("a request with a repeated member read the catalog")
+				return nil, errors.New("unreachable")
+			}
+			tr.secret = "test-secret"
+			req, err := http.NewRequest(http.MethodPost, "https://gateway.example"+path, strings.NewReader(body))
+			require.NoError(t, err)
+			req.Header.Set("Content-Type", "application/json")
+			req.Header.Set(modelHeader, sealTestModel)
+			_, err = tr.RoundTrip(req)
+			require.ErrorIs(t, err, errs.ErrConfiguration, "%s %s", path, body)
+			require.EqualError(t, err, "configuration error: "+want, "%s %s", path, body)
+		}
+	}
+}
+
+func TestPrepareForwardsOtherBodiesWithRepeats(t *testing.T) {
+	for _, tc := range []struct {
+		body string
+		// header is the X-Tinfoil-Model that the caller sets, if any.
+		header string
+	}{
+		{body: `{"model":"test-model","temperature":0,"temperature":1}`},
+		{body: `{"model":"test-model","n":{"model":"a","model":"b"}}`},
+		{body: `[{"model":"a"},{"model":"b"}]`, header: sealTestModel},
+		{body: `"model"`, header: sealTestModel},
+		{body: `{"model":"a","model":"b"`, header: sealTestModel},
+		{body: `{"model":"a","model":"b"} {}`, header: sealTestModel},
+	} {
+		var got []string
+		tr := sealTestTransport(func(string) (http.RoundTripper, error) {
+			return roundTripFunc(func(req *http.Request) (*http.Response, error) {
+				defer req.Body.Close()
+				body, err := io.ReadAll(req.Body)
+				require.NoError(t, err)
+				got = append(got, string(body))
+				require.Equal(t, sealTestModel, req.Header.Get(modelHeader))
+				return newResponse(http.StatusNoContent, ""), nil
+			}), nil
+		})
+		req, err := http.NewRequest(http.MethodPost, "https://gateway.example/v1/embeddings", strings.NewReader(tc.body))
+		require.NoError(t, err)
+		req.Header.Set("Content-Type", "application/json")
+		if tc.header != "" {
+			req.Header.Set(modelHeader, tc.header)
+		}
+		resp, err := tr.RoundTrip(req)
+		require.NoError(t, err, tc.body)
+		resp.Body.Close()
+		require.Equal(t, []string{tc.body}, got, "the body is forwarded as it was sent")
+	}
+}

@@ -61,7 +61,10 @@ type ReplicaVerification = gateway.ReplicaVerification
 // GatewayHTTPClient is an *http.Client for Tinfoil inference through the gateway.
 // Each request is sealed to a verified replica of the model it names, as with
 // TransportModeEHBP: the gateway sees the method, URL and headers, and
-// WebSocket upgrades are refused.
+// WebSocket upgrades are refused. A JSON object body that repeats its model,
+// user_cache_secret or cache_salt member is refused with ErrConfiguration
+// before it is sent, since a server could read a different repeat from the one
+// that the client routed on.
 type GatewayHTTPClient struct {
 	*http.Client
 	// secure is the client OpenAI clients use, which changes to the embedded

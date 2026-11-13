@@ -266,3 +266,18 @@ func TestUserCacheSecretFallsBackWhenHomeNotADirectory(t *testing.T) {
 
 // captureTransport returns a userCacheSecretTransport whose inner round
 // tripper records the outgoing body.
+
+func TestObjectKeys(t *testing.T) {
+	keys, ok := ObjectKeys([]byte(` {"model":"a", "n":{"model":"b"}, "mod\u0065l":[1,{"x":2}]} ` + "\n"))
+	require.True(t, ok)
+	require.Equal(t, []string{"model", "n", "model"}, keys, "repeats are kept, nested members are skipped and names are decoded")
+
+	keys, ok = ObjectKeys([]byte(`{}`))
+	require.True(t, ok)
+	require.Empty(t, keys)
+
+	for _, body := range []string{``, `[]`, `"model"`, `null`, `{"model":"a"`, `{"model":"a"}}`, `{"model":"a"} {}`, `{"model":}`, `{"a":1,}`} {
+		_, ok := ObjectKeys([]byte(body))
+		require.False(t, ok, "%q is not exactly one JSON object", body)
+	}
+}

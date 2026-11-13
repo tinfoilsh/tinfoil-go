@@ -4,8 +4,10 @@
 package cachesecret
 
 import (
+	"bytes"
 	"crypto/rand"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"io"
 	"io/fs"
@@ -242,4 +244,39 @@ func PathEligible(req *http.Request) bool {
 		}
 	}
 	return false
+}
+
+// ObjectKeys returns the names of the top-level members of raw, in the order
+// that they appear and with repeats kept, which a decode into a map would
+// hide. Names are decoded, so an escaped spelling of a name matches it. It
+// reports false unless raw is exactly one JSON object with optional
+// whitespace around it.
+func ObjectKeys(raw []byte) ([]string, bool) {
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	if start, err := dec.Token(); err != nil || start != json.Delim('{') {
+		return nil, false
+	}
+	keys := []string{}
+	for dec.More() {
+		token, err := dec.Token()
+		if err != nil {
+			return nil, false
+		}
+		key, ok := token.(string)
+		if !ok {
+			return nil, false
+		}
+		var value json.RawMessage
+		if err := dec.Decode(&value); err != nil {
+			return nil, false
+		}
+		keys = append(keys, key)
+	}
+	if end, err := dec.Token(); err != nil || end != json.Delim('}') {
+		return nil, false
+	}
+	if _, err := dec.Token(); err != io.EOF {
+		return nil, false
+	}
+	return keys, true
 }
