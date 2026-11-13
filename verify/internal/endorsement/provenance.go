@@ -172,7 +172,7 @@ func (c *Client) verifyBundleForSubject(bundleJSON []byte, sanRegex, hexDigest, 
 	}
 
 	verifier, err := verify.NewSignedEntityVerifier(
-		c.trustRoot,
+		timestampMaterial{c.trustRoot},
 		c.verifierOptions...,
 	)
 	if err != nil {

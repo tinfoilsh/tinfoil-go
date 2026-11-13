@@ -77,7 +77,7 @@ func DangerousTestOnlyVerifyTimestamp(trustRootJSON []byte, response, input []by
 	if err != nil {
 		return time.Time{}, fmt.Errorf("%w: %w", ErrDangerousTestOnlyInput, err)
 	}
-	verifier := &endorsementVerifier{trust: trust}
+	verifier := &endorsementVerifier{trust: timestampMaterial{trust}}
 	return verifier.VerifyTimestamp(response, input, policy)
 }
 
