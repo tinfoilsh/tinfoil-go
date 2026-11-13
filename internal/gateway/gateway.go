@@ -21,6 +21,7 @@ import (
 	"mime/multipart"
 	"net/http"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -436,6 +437,9 @@ func (t *Transport) prepare(req *http.Request) error {
 	if err != nil {
 		return err
 	}
+	if err := refuseRepeatedMembers(body); err != nil {
+		return err
+	}
 	var fields map[string]json.RawMessage
 	if json.Unmarshal(body, &fields) == nil && fields != nil {
 		var model string
@@ -451,6 +455,42 @@ func (t *Transport) prepare(req *http.Request) error {
 	}
 	setGatewayBody(req, body)
 	return nil
+}
+
+// refuseRepeatedMembers refuses a JSON object body that repeats a member that
+// the client reads. A decode into a map keeps the last of the repeats, while a
+// server may read the first, so the model that the client verified, or the
+// cache scope that it derived, could differ from the one that the server uses.
+// Other bodies are left for the caller to handle.
+func refuseRepeatedMembers(body []byte) error {
+	keys, ok := cachesecret.ObjectKeys(body)
+	if !ok {
+		return nil
+	}
+	var repeated []string
+	for _, name := range []string{"model", cachesecret.Field, cacheSaltField} {
+		if count(keys, name) > 1 {
+			repeated = append(repeated, strconv.Quote(name))
+		}
+	}
+	if len(repeated) == 0 {
+		return nil
+	}
+	plural := ""
+	if len(repeated) > 1 {
+		plural = "s"
+	}
+	return errs.Configuration(fmt.Errorf("request body repeats the %s member%s", strings.Join(repeated, ", "), plural))
+}
+
+func count(keys []string, name string) int {
+	n := 0
+	for _, key := range keys {
+		if key == name {
+			n++
+		}
+	}
+	return n
 }
 
 func setGatewayBody(req *http.Request, body []byte) {
