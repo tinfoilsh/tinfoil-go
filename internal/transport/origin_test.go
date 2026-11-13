@@ -119,6 +119,12 @@ func TestOriginOfRefusesUserInfoWithoutEchoingIt(t *testing.T) {
 		"https://secret@proxy.example/v1",
 		"https://@proxy.example/v1",
 		"https://user:secret@proxy.example:bad/v1",
+		// No authority, so url.URL has no User: the credentials are in the
+		// opaque part or the path, or the scheme is the user name.
+		"https:user:secret@proxy.example/v1",
+		"https:/user:secret@proxy.example/v1",
+		"user:secret@proxy.example/v1",
+		"ftp://user:secret@proxy.example/v1",
 	} {
 		_, err := OriginOf(rawURL)
 		require.Error(t, err, rawURL)

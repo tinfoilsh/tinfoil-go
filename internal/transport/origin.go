@@ -64,8 +64,9 @@ func (t *originGuard) RoundTrip(req *http.Request) (*http.Response, error) {
 }
 
 // OriginOf returns the normalized origin of an absolute http or https URL
-// without user information. Its errors don't echo a URL that carries user
-// information, so that the credentials don't reach logs or error text.
+// without user information. Its errors never echo the URL, since one that it
+// refuses may carry credentials in a form that it can't recognize as user
+// information (for example "https:user:secret@host", which has no authority).
 func OriginOf(rawURL string) (string, error) {
 	u, err := url.Parse(rawURL)
 	if err != nil {
@@ -80,11 +81,11 @@ func OriginOf(rawURL string) (string, error) {
 		return "", errors.New("URL must not contain user information")
 	}
 	if u.Scheme == "" || u.Host == "" {
-		return "", fmt.Errorf("URL must be absolute: %q", rawURL)
+		return "", errors.New("URL must be absolute, with a scheme and a host")
 	}
 	scheme := strings.ToLower(u.Scheme)
 	if scheme != "https" && scheme != "http" {
-		return "", fmt.Errorf("URL must use http or https: %q", rawURL)
+		return "", errors.New("URL must use http or https")
 	}
 	return normalizedOrigin(u), nil
 }
