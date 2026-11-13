@@ -23,7 +23,9 @@ type RouterOptions struct {
 	// X-Tinfoil-Enclave-Url so the proxy can forward them. The proxy must use
 	// HTTPS, since EHBP doesn't seal headers such as the API key; http:// is
 	// accepted only when its host is localhost or a loopback IP address, for a
-	// local development proxy or a sidecar.
+	// local development proxy or a sidecar. Request paths join under it, so a
+	// BaseURL with user information, a query or a fragment, even an empty
+	// one, is an ErrConfiguration error.
 	BaseURL string
 	// Verifier is the verification policy; nil selects the defaults. A
 	// verifier that authorizes the config itself is an ErrConfiguration error,

@@ -111,3 +111,17 @@ func TestOriginRestrictionClosesIdleConnections(t *testing.T) {
 		require.Equal(t, expectedReuse, reused)
 	}
 }
+
+func TestOriginOfRefusesUserInfoWithoutEchoingIt(t *testing.T) {
+	for _, rawURL := range []string{
+		"https://user:secret@proxy.example/v1",
+		"https://user:@proxy.example/v1",
+		"https://secret@proxy.example/v1",
+		"https://@proxy.example/v1",
+		"https://user:secret@proxy.example:bad/v1",
+	} {
+		_, err := OriginOf(rawURL)
+		require.Error(t, err, rawURL)
+		require.NotContains(t, err.Error(), "secret", rawURL)
+	}
+}

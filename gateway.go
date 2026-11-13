@@ -36,7 +36,9 @@ type GatewayOptions struct {
 	// sees a cache prefix keyed on it, and could test guesses of a guessable
 	// secret and then of the prompt.
 	UserCacheSecret string
-	// URL is the gateway's base URL; empty selects Tinfoil's gateway.
+	// URL is the gateway's base URL; empty selects Tinfoil's gateway. It must
+	// use HTTPS. Request paths join under it, so a URL with user information,
+	// a query or a fragment, even an empty one, is an ErrConfiguration error.
 	URL string
 	// Catalog is read on every request and must return an immutable map safe
 	// for concurrent readers. nil fetches the gateway's catalog when the client
@@ -95,9 +97,9 @@ func unverifiedGatewayHTTPClient(opts *GatewayOptions) (*GatewayHTTPClient, erro
 		opts = &GatewayOptions{}
 	}
 	baseURL := cmp.Or(opts.URL, defaultGatewayURL)
-	base, err := url.Parse(baseURL)
-	if err != nil || base.Scheme != "https" || base.Host == "" {
-		return nil, errs.Configuration(fmt.Errorf("gateway base URL must be an absolute HTTPS URL: %q", baseURL))
+	base, err := validateGatewayURL(baseURL)
+	if err != nil {
+		return nil, err
 	}
 	pins := make(map[string]gateway.ModelPin, len(opts.ModelPins))
 	for model, pin := range opts.ModelPins {
@@ -122,6 +124,22 @@ func unverifiedGatewayHTTPClient(opts *GatewayOptions) (*GatewayHTTPClient, erro
 	}
 	secure := &http.Client{Transport: guarded}
 	return &GatewayHTTPClient{Client: &http.Client{Transport: secure.Transport}, secure: secure, baseURL: baseURL, transport: gatewayTransport}, nil
+}
+
+// validateGatewayURL requires an absolute HTTPS URL without user
+// information, a query or a fragment, and returns it parsed.
+func validateGatewayURL(baseURL string) (*url.URL, error) {
+	if _, err := transport.OriginOf(baseURL); err != nil {
+		return nil, errs.Configuration(fmt.Errorf("invalid base URL: %w", err))
+	}
+	if err := refuseQueryOrFragment(baseURL); err != nil {
+		return nil, err
+	}
+	base, _ := url.Parse(baseURL) // OriginOf parsed it
+	if base.Scheme != "https" {
+		return nil, errs.Configuration(fmt.Errorf("invalid base URL: the gateway base URL must use HTTPS: %q", baseURL))
+	}
+	return base, nil
 }
 
 // BaseURL returns the gateway's base URL, which requests are sent to.

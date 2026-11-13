@@ -406,6 +406,66 @@ func TestValidateBaseURL(t *testing.T) {
 	}
 }
 
+// refusedBaseURLParts are base URLs with user information, a query or a
+// fragment, each of which every option that takes a base URL refuses.
+var refusedBaseURLParts = map[string]string{
+	"user information":          "https://user:secret@proxy.example/v1/",
+	"user with empty password":  "https://user:@proxy.example/v1/",
+	"user without password":     "https://user@proxy.example/v1/",
+	"empty user information":    "https://@proxy.example/v1/",
+	"query":                     "https://proxy.example/v1/?a=1",
+	"empty query":               "https://proxy.example/v1/?",
+	"fragment":                  "https://proxy.example/v1/#x",
+	"empty fragment":            "https://proxy.example/v1/#",
+	"loopback HTTP with a user": "http://user:secret@localhost:8080/v1/",
+	"loopback HTTP with query":  "http://localhost:8080/v1/?a=1",
+}
+
+func TestBaseURLRefusesUserInfoQueryAndFragment(t *testing.T) {
+	original := http.DefaultTransport
+	t.Cleanup(func() { http.DefaultTransport = original })
+	http.DefaultTransport = roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		t.Errorf("a refused base URL sent %s %s", req.Method, req.URL)
+		return nil, errors.New("no network in this test")
+	})
+	requireRefused := func(t *testing.T, err error) {
+		t.Helper()
+		require.ErrorIs(t, err, ErrConfiguration)
+		require.ErrorContains(t, err, "invalid base URL:")
+		require.NotContains(t, err.Error(), "secret", "the error doesn't echo the credentials")
+	}
+	for name, baseURL := range refusedBaseURLParts {
+		t.Run(name, func(t *testing.T) {
+			requireRefused(t, validateBaseURL(baseURL))
+			for _, mode := range []TransportMode{TransportModeEHBP, TransportModeTLS} {
+				c, err := NewEnclaveHTTPClient(t.Context(), "proxy.example", "org/repo", &EnclaveOptions{TransportMode: mode, BaseURL: baseURL})
+				require.Nil(t, c)
+				requireRefused(t, err)
+				r, err := NewRouterHTTPClient(t.Context(), &RouterOptions{TransportMode: mode, BaseURL: baseURL})
+				require.Nil(t, r)
+				requireRefused(t, err)
+			}
+			gw, err := NewGatewayHTTPClient(t.Context(), &GatewayOptions{URL: baseURL, Catalog: func() Catalog { return Catalog{} }})
+			require.Nil(t, gw)
+			requireRefused(t, err)
+		})
+	}
+}
+
+func TestBaseURLWithAPathIsAccepted(t *testing.T) {
+	for _, baseURL := range []string{"https://proxy.example/custom/v1/", "http://localhost:8080/custom/v1/"} {
+		c, err := unverifiedEnclaveHTTPClient("enclave.example", "org/repo", &EnclaveOptions{TransportMode: TransportModeEHBP, BaseURL: baseURL})
+		require.NoError(t, err, baseURL)
+		require.Equal(t, baseURL, c.BaseURL())
+	}
+	c, err := unverifiedEnclaveHTTPClient("enclave.example", "org/repo", &EnclaveOptions{BaseURL: "https://enclave.example/custom/v1/"})
+	require.NoError(t, err, "a TLS base URL on the enclave's origin may carry a path")
+	require.Equal(t, "https://enclave.example/custom/v1/", c.BaseURL())
+	gw, err := unverifiedGatewayHTTPClient(&GatewayOptions{URL: "https://gateway.example/custom/v1/", Catalog: func() Catalog { return Catalog{} }})
+	require.NoError(t, err)
+	require.Equal(t, "https://gateway.example/custom/v1/", gw.BaseURL())
+}
+
 func TestLoopbackProxyAuthorizesOnlyItsOrigin(t *testing.T) {
 	c, err := unverifiedEnclaveHTTPClient("enclave.example", "org/repo", &EnclaveOptions{TransportMode: TransportModeEHBP, BaseURL: "http://localhost:8080/v1/"})
 	require.NoError(t, err)
