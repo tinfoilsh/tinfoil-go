@@ -81,6 +81,18 @@ func init() {
 		if f.CodeMeasurement != nil {
 			v.codeMeasurement = f.CodeMeasurement.Clone()
 		}
+		if config, ok := f.Config.(*ConfigVerification); ok && config != nil {
+			copied := *config
+			v.config = &copied
+		}
+		if runtime, ok := f.Runtime.(*ArtifactVerification); ok && runtime != nil {
+			copied := *runtime
+			v.runtime = &copied
+		}
+		if platform, ok := f.Platform.(*ArtifactVerification); ok && platform != nil {
+			copied := *platform
+			v.platform = &copied
+		}
 		return v
 	}
 }

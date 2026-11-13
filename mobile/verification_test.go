@@ -110,3 +110,63 @@ func TestVerificationMeasurements(t *testing.T) {
 		"registers": []any{measurement.Register{0xdd}.String(), measurement.Register{}.String(), rtmr1, rtmr2, measurement.Register{}.String()},
 	}, got["enclave_measurement"])
 }
+
+// A code-release verification has no config, runtime or platform.
+func TestVerificationOmitsConfigFactsForCodeRelease(t *testing.T) {
+	encoded, err := encode(sampleVerification())
+	require.NoError(t, err)
+
+	var got map[string]any
+	require.NoError(t, json.Unmarshal([]byte(encoded), &got))
+	assert.NotContains(t, got, "config")
+	assert.NotContains(t, got, "runtime")
+	assert.NotContains(t, got, "platform")
+}
+
+// A config-based verification reports what it accepted for each component and
+// why, with absent facts omitted rather than written as zero values.
+func TestVerificationConfigFacts(t *testing.T) {
+	approved := time.Date(2026, 9, 20, 8, 0, 0, 500, time.UTC)
+	f := sampleFields()
+	f.Config = &verify.ConfigVerification{
+		Source: verify.SourceEndorsement, Name: "/org/project/v1", Digest: "c0",
+		Reference: "sha256:c0", SigningKeyHint: "hint", ApprovalTime: approved,
+		RegistryID: "registry", SignatureTime: approved.Add(time.Minute),
+	}
+	f.Runtime = &verify.ArtifactVerification{
+		Source: verify.SourceEndorsement, Repo: "tinfoilsh/cvmimage", Tag: "v0.15.0",
+		Digest: "r0", Name: "runtime", Commit: "abc", ApprovalTime: approved,
+	}
+	f.Platform = &verify.ArtifactVerification{Source: verify.SourceEmbedded, Digest: "p0"}
+
+	encoded, err := encode(verifytest.New(f))
+	require.NoError(t, err)
+
+	var got map[string]any
+	require.NoError(t, json.Unmarshal([]byte(encoded), &got))
+	assert.Equal(t, map[string]any{
+		"source": "endorsement", "name": "/org/project/v1", "digest": "c0",
+		"reference": "sha256:c0", "signing_key_hint": "hint",
+		"approval_time": "2026-09-20T08:00:00.0000005Z", "registry_id": "registry",
+		"signature_time": "2026-09-20T08:01:00.0000005Z",
+	}, got["config"])
+	assert.Equal(t, map[string]any{
+		"source": "endorsement", "repo": "tinfoilsh/cvmimage", "tag": "v0.15.0",
+		"digest": "r0", "name": "runtime", "commit": "abc",
+		"approval_time": "2026-09-20T08:00:00.0000005Z",
+	}, got["runtime"])
+	assert.Equal(t, map[string]any{"source": "embedded", "digest": "p0"}, got["platform"])
+}
+
+// A config a ConfigAuthorizer approved has only its source and digest.
+func TestVerificationPolicyConfig(t *testing.T) {
+	f := sampleFields()
+	f.Config = &verify.ConfigVerification{Source: verify.SourcePolicy, Digest: "c0"}
+
+	encoded, err := encode(verifytest.New(f))
+	require.NoError(t, err)
+
+	var got map[string]any
+	require.NoError(t, json.Unmarshal([]byte(encoded), &got))
+	assert.Equal(t, map[string]any{"source": "policy", "digest": "c0"}, got["config"])
+}

@@ -52,36 +52,34 @@ type Verifier struct {
 	inner *verify.Verifier
 }
 
-// options is the policy NewVerifier accepts as JSON.
-type options struct {
-	PinnedRegisters   *measurementJSON `json:"pinned_registers,omitempty"`
-	FreshnessMaxAgeNs int64            `json:"freshness_max_age_ns,omitempty"`
+// NewVerifier builds a verifier from optionsJSON, a JSON object whose members
+// are described on the options type in options.go; an empty string selects the
+// defaults. Any unknown or malformed member is rejected.
+func NewVerifier(optionsJSON string) (*Verifier, error) {
+	return newVerifier(optionsJSON, nil)
 }
 
-// NewVerifier builds a verifier from options, a JSON object with
-// pinned_registers and freshness_max_age_ns, a freshness bound in integer
-// nanoseconds. Any other member is rejected, and an empty string selects the
-// defaults.
-func NewVerifier(optionsJSON string) (_ *Verifier, err error) {
-	defer func() { err = toMobileError(err) }()
-	opts := &options{}
-	if optionsJSON != "" {
-		opts = nil
-		if err := json.Unmarshal([]byte(optionsJSON), &opts, json.RejectUnknownMembers(true)); err != nil {
-			return nil, &verify.UsageError{Err: fmt.Errorf("parsing verification options: %w", err)}
-		}
-		if opts == nil {
-			return nil, &verify.UsageError{Err: fmt.Errorf("verification options must be a JSON object")}
-		}
+// NewVerifierWithConfigAuthorizer builds a verifier as NewVerifier does, with
+// authorizer deciding which configs are authorized in place of their
+// endorsements. It conflicts with config_signing_keys_pem, config_registry_ids
+// and embedded_config, and a repo passed to Verify must then be empty.
+func NewVerifierWithConfigAuthorizer(optionsJSON string, authorizer ConfigAuthorizer) (*Verifier, error) {
+	if authorizer == nil {
+		return nil, toMobileError(&verify.UsageError{Err: fmt.Errorf("config authorizer must not be nil")})
 	}
-	pins, err := opts.PinnedRegisters.expected()
+	return newVerifier(optionsJSON, authorizer)
+}
+
+func newVerifier(optionsJSON string, authorizer ConfigAuthorizer) (_ *Verifier, err error) {
+	defer func() { err = toMobileError(err) }()
+	opts, err := parseOptions(optionsJSON)
 	if err != nil {
 		return nil, &verify.UsageError{Err: err}
 	}
-	inner, err := verify.NewVerifier(
-		verify.WithPinnedRegisters(pins),
-		verify.WithFreshnessMaxAge(time.Duration(opts.FreshnessMaxAgeNs)),
-	)
+	if authorizer != nil {
+		opts = append(opts, verify.WithConfigAuthorizer(authorizeWith(authorizer)))
+	}
+	inner, err := verify.NewVerifier(opts...)
 	if err != nil {
 		return nil, err
 	}

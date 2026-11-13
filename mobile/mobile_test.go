@@ -65,7 +65,7 @@ func TestErrorsLeadWithCategory(t *testing.T) {
 		{"unknown option", UsageErrorPrefix, func() error { _, err := NewVerifier(`{"enclave":"x"}`); return err }},
 		{"misspelled option", UsageErrorPrefix, func() error { _, err := NewVerifier(`{"freshness_max_age":1}`); return err }},
 		{"options not an object", UsageErrorPrefix, func() error { _, err := NewVerifier(`null`); return err }},
-		{"option mobile cannot apply", UsageErrorPrefix, func() error { _, err := NewVerifier(`{"embedded_config":{}}`); return err }},
+		{"malformed trust option", UsageErrorPrefix, func() error { _, err := NewVerifier(`{"embedded_config":{}}`); return err }},
 		{"URL as host", UsageErrorPrefix, func() error { _, err := AttestationURL("https://enclave.example", "", nonce); return err }},
 		{"invalid repo", UsageErrorPrefix, func() error { _, err := verifier.Verify(doc, nonce, "owner"); return err }},
 		{"short nonce", UsageErrorPrefix, func() error { _, err := verifier.Verify([]byte("{}"), nonce[1:], routerRepo); return err }},

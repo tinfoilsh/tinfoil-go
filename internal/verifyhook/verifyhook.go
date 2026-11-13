@@ -22,6 +22,12 @@ type Fields struct {
 	VerifierName       string
 	VerifierVersion    string
 	VerifiedAt         time.Time
+	// Config, Runtime and Platform are a *verify.ConfigVerification and two
+	// *verify.ArtifactVerification, or nil for a code-release verification.
+	// They are untyped because package verify imports this one.
+	Config   any
+	Runtime  any
+	Platform any
 }
 
 // NewVerification is installed by package verify and returns a
