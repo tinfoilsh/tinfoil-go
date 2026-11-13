@@ -154,12 +154,12 @@ func (v *Verification) CryptoMaterial() []document.CryptoMaterialItem {
 	return slices.Clone(v.cryptoMaterial)
 }
 
-// FreshnessExpiresAt is the earlier authenticated code/platform witness
+// FreshnessExpiresAt is the earliest authenticated approval or CPU collateral
 // deadline. Cached verification must not authorize new requests at or after
-// this time; re-verifying the same witness does not extend it. Config
-// verification uses the earliest nonzero config, platform, or runtime approval
-// deadline. Short-lived certificates are checked at the signature timestamp. Embedded components
-// add no deadline; all-embedded verification returns zero.
+// this time; re-verifying unchanged material does not extend it. Short-lived
+// signing certificates are checked at the authenticated signature timestamp; their
+// historical validity does not add an approval deadline. Embedded reference
+// values add no deadline; hardware collateral still bounds the result.
 func (v *Verification) FreshnessExpiresAt() time.Time { return v.freshnessExpiresAt }
 
 // Metadata describes the verification rather than the document.

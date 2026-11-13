@@ -6,8 +6,11 @@ import (
 	"crypto/rand"
 	"crypto/x509"
 	"crypto/x509/pkix"
+	"encoding/pem"
 	"fmt"
 	"math/big"
+	"net/url"
+	"slices"
 	"testing"
 	"time"
 
@@ -15,7 +18,67 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/tinfoilsh/tinfoil-go/verify/document/collateral"
+	"github.com/tinfoilsh/tinfoil-go/verify/internal/validity"
 )
+
+func TestRecordedCollateralExpiry(t *testing.T) {
+	const (
+		tcbURL    = "https://api.trustedservices.intel.com/tdx/certification/v4/tcb?fmspc=90c06f000000"
+		qeURL     = "https://api.trustedservices.intel.com/tdx/certification/v4/qe/identity"
+		pckURL    = "https://api.trustedservices.intel.com/sgx/certification/v4/pckcrl?ca=platform"
+		rootURL   = "https://certificates.trustedservices.intel.com/root.der"
+		unusedURL = "https://example.test/unused.der"
+	)
+	now := time.Date(2026, time.November, 6, 0, 0, 0, 0, time.UTC)
+	early, later := now.Add(time.Hour), now.Add(24*time.Hour)
+	for first, name := range []string{"TCB Info", "QE Identity", "PCK CRL", "root CRL", "TCB issuer", "QE issuer", "PCK CRL issuer"} {
+		t.Run(name, func(t *testing.T) {
+			deadlines := []time.Time{later, later, later, later, later, later, later}
+			deadlines[first] = early
+			responses := []collateral.PCSResponse{
+				{URL: tcbURL, Headers: map[string][]string{tcbInfoIssuerChainHeader: {url.QueryEscape(string(expiringCertificate(t, now, deadlines[4])))}}, Body: fmt.Appendf(nil, `{"tcbInfo":{"tcbEvaluationDataNumber":20,"nextUpdate":%q},"signature":""}`, deadlines[0].Format(time.RFC3339))},
+				{URL: qeURL, Headers: map[string][]string{qeIdentityIssuerChainHeader: {url.QueryEscape(string(expiringCertificate(t, now, deadlines[5])))}}, Body: fmt.Appendf(nil, `{"enclaveIdentity":{"tcbEvaluationDataNumber":20,"nextUpdate":%q},"signature":""}`, deadlines[1].Format(time.RFC3339))},
+				{URL: pckURL, Headers: map[string][]string{pckCRLIssuerChainHeader: {url.QueryEscape(string(expiringCertificate(t, now, deadlines[6])))}}, Body: testCRL(t, now, deadlines[2])},
+				{URL: rootURL, Headers: map[string][]string{"": {"unused"}}, Body: testCRL(t, now, deadlines[3])},
+				{URL: unusedURL, Body: testCRL(t, now, now.Add(time.Minute))},
+			}
+			getter, err := newPCSReplayGetter(responses, now)
+			require.NoError(t, err)
+			recorder := &tcbEvaluationRecorder{inner: getter}
+			for _, target := range []string{tcbURL, qeURL, pckURL, rootURL} {
+				_, _, err := recorder.Get(target)
+				require.NoError(t, err)
+			}
+			require.Equal(t, early, validity.Earliest(getter.expiresAt, recorder.expiresAt))
+		})
+	}
+}
+
+func TestCertificateChainExpiry(t *testing.T) {
+	now := time.Date(2026, time.November, 6, 0, 0, 0, 0, time.UTC)
+	early, later := now.Add(time.Hour), now.Add(24*time.Hour)
+	for _, deadlines := range [][3]time.Time{{early, later, later}, {later, early, later}, {later, later, early}} {
+		var chain []byte
+		for _, deadline := range deadlines {
+			chain = append(chain, expiringCertificate(t, now, deadline)...)
+		}
+		for _, suffix := range [][]byte{nil, {0}} {
+			expiresAt, err := certificateChainExpiry(append(slices.Clone(chain), suffix...))
+			require.NoError(t, err)
+			require.Equal(t, early, expiresAt)
+		}
+	}
+}
+
+func expiringCertificate(t *testing.T, now, expiresAt time.Time) []byte {
+	t.Helper()
+	public, private, err := ed25519.GenerateKey(rand.Reader)
+	require.NoError(t, err)
+	template := &x509.Certificate{SerialNumber: big.NewInt(1), NotBefore: now, NotAfter: expiresAt}
+	der, err := x509.CreateCertificate(rand.Reader, template, template, public, private)
+	require.NoError(t, err)
+	return pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der})
+}
 
 func TestPCSReplayGetter(t *testing.T) {
 	body := []byte(`{"tcbInfo":{"tcbEvaluationDataNumber":19},"signature":""}`)

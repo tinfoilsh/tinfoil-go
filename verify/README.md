@@ -41,7 +41,7 @@ collateral. Verification then runs offline using the embedded trust roots:
    when selecting EHBP. A TLS-only enclave may omit HPKE material.
 
 Code and platform witnesses have a seven-day maximum age by default; the
-earliest authenticated expiry is exposed by `VerifyV3` and the clients'
+earliest approval or CPU collateral expiry is exposed by `VerifyV3` and the clients'
 `EnsureVerified` as `FreshnessExpiresAt`.
 Callers using these APIs must retain the deadline and stop authorizing new
 requests at or after it, then verify again before accepting more requests.
@@ -60,7 +60,8 @@ freshness witnesses and the vendor certificate and CRL validity windows
 against that instant. So the same document is accepted today and rejected once
 its witnesses go stale. What a
 successful verification reports does not drift, though: `FreshnessExpiresAt` is
-derived from the authenticated witness timestamps, never from the local clock.
+derived from authenticated approval timestamps and CPU collateral validity
+windows, never from the local clock.
 
 To appraise an archived document as of an earlier instant, `VerifyV3At` takes
 that instant in place of the clock for every one of those checks, and reports

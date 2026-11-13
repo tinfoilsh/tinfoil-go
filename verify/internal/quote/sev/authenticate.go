@@ -20,6 +20,7 @@ import (
 	"github.com/tinfoilsh/go-sev-guest/verify"
 	"github.com/tinfoilsh/go-sev-guest/verify/trust"
 
+	"github.com/tinfoilsh/tinfoil-go/verify/internal/validity"
 	"github.com/tinfoilsh/tinfoil-go/verify/measurement"
 )
 
@@ -143,6 +144,7 @@ type Quote struct {
 	identity string
 	// Measurement is the authenticated launch measurement.
 	Measurement measurement.SEVSNP
+	ExpiresAt   time.Time
 
 	attestation *sevsnp.Attestation
 }
@@ -195,7 +197,7 @@ func Authenticate(ev Evidence, now time.Time, opts *Options) (result *Quote, err
 			parsedCRL.ThisUpdate.Format(time.RFC3339), parsedCRL.NextUpdate.Format(time.RFC3339))
 	}
 
-	att, err := verifySignature(ev.Report, ev.VCEKDER, askDER, arkDER, ev.CRLDER, now, opts.rootPEM())
+	att, expiresAt, err := verifySignature(ev.Report, ev.VCEKDER, askDER, arkDER, ev.CRLDER, now, opts.rootPEM())
 	if err != nil {
 		return nil, err
 	}
@@ -217,6 +219,7 @@ func Authenticate(ev Evidence, now time.Time, opts *Options) (result *Quote, err
 	return &Quote{
 		identity:    identity,
 		Measurement: measurement.SEVSNP{Launch: measurement.Register(launch)},
+		ExpiresAt:   validity.Earliest(expiresAt, parsedCRL.NextUpdate),
 		attestation: att,
 	}, nil
 }
@@ -244,14 +247,14 @@ func rejectMaskedChipID(report *sevsnp.Report) error {
 // verifySignature verifies the report signature under the AMD roots with
 // the provided VCEK and ASK/ARK chain, checking VCEK revocation against
 // the provided CRL. No policy validation.
-func verifySignature(reportBytes, vcekDER, askDER, arkDER, crlDER []byte, now time.Time, rootPEM []byte) (*sevsnp.Attestation, error) {
+func verifySignature(reportBytes, vcekDER, askDER, arkDER, crlDER []byte, now time.Time, rootPEM []byte) (*sevsnp.Attestation, time.Time, error) {
 	if len(reportBytes) != abi.ReportSize {
-		return nil, fmt.Errorf("SEV-SNP report must be exactly %d bytes, got %d", abi.ReportSize, len(reportBytes))
+		return nil, time.Time{}, fmt.Errorf("SEV-SNP report must be exactly %d bytes, got %d", abi.ReportSize, len(reportBytes))
 	}
 
 	parsedReport, err := abi.ReportToProto(reportBytes)
 	if err != nil {
-		return nil, fmt.Errorf("failed to parse report: %w", err)
+		return nil, time.Time{}, fmt.Errorf("failed to parse report: %w", err)
 	}
 	// go-sev-guest verifies the signature over the report re-encoded from
 	// parsedReport, not over reportBytes. Require the two to be identical,
@@ -260,20 +263,20 @@ func verifySignature(reportBytes, vcekDER, askDER, arkDER, crlDER []byte, now ti
 	// stepping byte.
 	reencoded, err := abi.ReportToAbiBytes(parsedReport)
 	if err != nil {
-		return nil, fmt.Errorf("re-encoding report: %w", err)
+		return nil, time.Time{}, fmt.Errorf("re-encoding report: %w", err)
 	}
 	if !bytes.Equal(reencoded, reportBytes) {
-		return nil, fmt.Errorf("SEV-SNP report is not in canonical form")
+		return nil, time.Time{}, fmt.Errorf("SEV-SNP report is not in canonical form")
 	}
 
 	product, err := productFromReport(parsedReport)
 	if err != nil {
-		return nil, err
+		return nil, time.Time{}, err
 	}
 	productLine := kds.ProductLine(product)
 	roots, err := trustedRoots(productLine, rootPEM)
 	if err != nil {
-		return nil, err
+		return nil, time.Time{}, err
 	}
 	// All options explicit. Fetching stays enabled because it is how the
 	// library asks for the CRL; the offline getter answers from local
@@ -297,7 +300,13 @@ func verifySignature(reportBytes, vcekDER, askDER, arkDER, crlDER []byte, now ti
 	}
 
 	if err := verify.SnpAttestation(attestation, opts); err != nil {
-		return nil, err
+		return nil, time.Time{}, err
 	}
-	return attestation, nil
+	vcek, err := x509.ParseCertificate(vcekDER)
+	if err != nil {
+		return nil, time.Time{}, err
+	}
+	// Verification uses the pinned ASK/ARK, not the document's copies.
+	certs := roots[productLine][0].ProductCerts
+	return attestation, validity.Earliest(vcek.NotAfter, certs.Ask.NotAfter, certs.Ark.NotAfter), nil
 }
