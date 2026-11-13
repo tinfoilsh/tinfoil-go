@@ -92,3 +92,18 @@ With Xcode, `scripts/build-mobile.sh` builds the framework and asserts the
 header set, and CI type-checks [`tests/mobile/Smoke.swift`](../tests/mobile/Smoke.swift)
 against it. Neither catches an export gomobile silently dropped; only the
 listing above does.
+
+## Conformance build
+
+Built with `-tags tinfoil_conformance` (`MOBILE_BUILD_TAGS=tinfoil_conformance
+scripts/build-mobile.sh`), the framework also exports
+`NewDangerousTestOnlyVerifier`, which trusts a conformance vector's anchors, and
+`Verifier.DangerousTestOnlyVerifyAt`, which sets the appraisal clock
+([`conformance.go`](conformance.go)). tinfoil-swift runs the suite's
+full-verify vectors through them. A released framework never carries them, and
+`scripts/build-mobile.sh` refuses a build without the tag that does.
+`TestConformanceVectorsMatchTheAdapter` asserts that each full-verify vector gets
+the same verdict through them as through Go's own adapter, with one expected
+exception: like the Go client, the binding treats a result as expired at the
+instant that its freshness witnesses reach their maximum age, which the
+verifier still accepts, and `fr2-pos-at-max-age` replays that instant.

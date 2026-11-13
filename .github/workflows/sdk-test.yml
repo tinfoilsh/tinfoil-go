@@ -99,6 +99,11 @@ jobs:
               go test -count=1 -tags tinfoil_conformance -run TestFixtures ./verify/conformance/
           done
 
+      - name: Run the full-verify vectors through the mobile binding
+        env:
+          TINFOIL_CONFORMANCE_VECTORS: ${{ github.workspace }}/tinfoil-conformance/vectors
+        run: go test -count=1 -tags tinfoil_conformance -run 'TestConformanceVectors|TestDangerousTestOnly' ./mobile/
+
   live:
     name: Live integration
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
