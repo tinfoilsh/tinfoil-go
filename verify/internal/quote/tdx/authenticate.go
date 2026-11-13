@@ -366,6 +366,7 @@ func (r *tcbEvaluationRecorder) Get(requestURL string) (map[string][]string, []b
 func certificateChainExpiry(chains ...[]byte) (time.Time, error) {
 	var expiresAt time.Time
 	for _, chain := range chains {
+		chain = bytes.TrimSuffix(chain, []byte{0})
 		for len(bytes.TrimSpace(chain)) != 0 {
 			block, rest := pem.Decode(chain)
 			if block == nil || block.Type != "CERTIFICATE" {

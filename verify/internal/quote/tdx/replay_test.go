@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"math/big"
 	"net/url"
+	"slices"
 	"testing"
 	"time"
 
@@ -61,9 +62,11 @@ func TestCertificateChainExpiry(t *testing.T) {
 		for _, deadline := range deadlines {
 			chain = append(chain, expiringCertificate(t, now, deadline)...)
 		}
-		expiresAt, err := certificateChainExpiry(chain)
-		require.NoError(t, err)
-		require.Equal(t, early, expiresAt)
+		for _, suffix := range [][]byte{nil, {0}} {
+			expiresAt, err := certificateChainExpiry(append(slices.Clone(chain), suffix...))
+			require.NoError(t, err)
+			require.Equal(t, early, expiresAt)
+		}
 	}
 }
 
