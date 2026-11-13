@@ -333,10 +333,10 @@ type roots struct {
 	sigstore []byte // Sigstore trusted-root JSON
 }
 
-// TrustAnchors returns the anchors that in supplies, in the form that
+// TrustAnchors returns the anchors that the input supplies, in the form that
 // verify.DangerousTestOnlyWithSigstoreRoot and DangerousTestOnlyWithVendorRoots
 // take: the Sigstore trusted-root JSON, the AMD ASK+ARK chain and the Intel
-// root, each nil when in keeps the embedded one. The mobile binding's
+// root, each nil when the input keeps the embedded one. The mobile binding's
 // conformance build reads anchors through it, so both parse them alike.
 func (in Input) TrustAnchors() (sigstore, amd, intel []byte, err error) {
 	r, err := in.roots()
