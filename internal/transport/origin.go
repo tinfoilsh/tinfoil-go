@@ -1,6 +1,7 @@
 package transport
 
 import (
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
@@ -62,18 +63,29 @@ func (t *originGuard) RoundTrip(req *http.Request) (*http.Response, error) {
 	return t.transport.RoundTrip(req)
 }
 
-// OriginOf returns the normalized origin of an absolute http or https URL.
+// OriginOf returns the normalized origin of an absolute http or https URL
+// without user information. Its errors never echo the URL, since one that it
+// refuses may carry credentials in a form that it can't recognize as user
+// information (for example "https:user:secret@host", which has no authority).
 func OriginOf(rawURL string) (string, error) {
 	u, err := url.Parse(rawURL)
 	if err != nil {
+		var urlErr *url.Error
+		if errors.As(err, &urlErr) {
+			// A *url.Error quotes the whole URL, user information included.
+			return "", fmt.Errorf("URL does not parse: %w", urlErr.Err)
+		}
 		return "", err
 	}
+	if u.User != nil {
+		return "", errors.New("URL must not contain user information")
+	}
 	if u.Scheme == "" || u.Host == "" {
-		return "", fmt.Errorf("URL must be absolute: %q", rawURL)
+		return "", errors.New("URL must be absolute, with a scheme and a host")
 	}
 	scheme := strings.ToLower(u.Scheme)
 	if scheme != "https" && scheme != "http" {
-		return "", fmt.Errorf("URL must use http or https: %q", rawURL)
+		return "", errors.New("URL must use http or https")
 	}
 	return normalizedOrigin(u), nil
 }

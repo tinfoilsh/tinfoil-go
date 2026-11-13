@@ -57,7 +57,9 @@ type EnclaveOptions struct {
 	// carry X-Tinfoil-Enclave-Url so it can forward them to the enclave. A
 	// proxy must use HTTPS, since EHBP doesn't seal headers such as the API
 	// key; http:// is accepted only when its host is localhost or a loopback
-	// IP address, for a local development proxy or a sidecar.
+	// IP address, for a local development proxy or a sidecar. Request paths
+	// join under it, so a BaseURL with user information, a query or a
+	// fragment, even an empty one, is an ErrConfiguration error.
 	BaseURL string
 	// Verifier is the verification policy; nil selects the defaults.
 	Verifier *verify.Verifier
@@ -227,11 +229,16 @@ func (c *attestedClient) Current() *verify.Verification {
 
 // validateBaseURL requires an absolute URL that keeps request headers private
 // on the way to the enclave or proxy: HTTPS, or HTTP to a loopback host, whose
-// traffic never leaves the machine.
+// traffic never leaves the machine. It refuses user information (through
+// transport.OriginOf) and a query or a fragment (through
+// refuseQueryOrFragment).
 func validateBaseURL(baseURL string) error {
 	origin, err := transport.OriginOf(baseURL)
 	if err != nil {
 		return errs.Configuration(fmt.Errorf("invalid base URL: %w", err))
+	}
+	if err := refuseQueryOrFragment(baseURL); err != nil {
+		return err
 	}
 	if strings.HasPrefix(origin, "https://") {
 		return nil
@@ -239,6 +246,18 @@ func validateBaseURL(baseURL string) error {
 	u, _ := url.Parse(baseURL) // OriginOf parsed it
 	if !isLoopback(u.Hostname()) {
 		return errs.Configuration(errors.New("invalid base URL: HTTP is allowed only for localhost or a loopback IP address; use HTTPS to protect request headers"))
+	}
+	return nil
+}
+
+// refuseQueryOrFragment refuses a base URL that carries a query or a
+// fragment, even an empty one: request paths join under a base URL, so either
+// would make request URLs that the caller didn't intend. It checks the text,
+// since url.URL doesn't record an empty fragment; once the URL has parsed, a
+// '?' or '#' in it can only start a query or a fragment.
+func refuseQueryOrFragment(baseURL string) error {
+	if strings.ContainsAny(baseURL, "?#") {
+		return errs.Configuration(errors.New("invalid base URL: a base URL must not carry a query or a fragment"))
 	}
 	return nil
 }
