@@ -89,7 +89,10 @@ if err != nil {
 The nonce and the repository reference are caller-owned expectations; the
 document cannot supply either. After success, bind service traffic to the
 returned TLS/HPKE material and stop authorizing new requests at
-`FreshnessExpiresAt()`. The returned `Verification` cannot be changed: its
+`FreshnessExpiresAt()`. To pin your own TLS connections, set
+`tls.Config.VerifyConnection` to `tinfoil.PinTLSKey(fp)`, where `fp` is the
+fingerprint that `TLSPublicKeyFP()` returns; this package takes no connection
+state itself. The returned `Verification` cannot be changed: its
 accessors return copies. Only verification creates one, so a `Verification`
 that holds data always came from `VerifyV3` or `VerifyV3At`. To test code that
 takes one, verify a captured document with `VerifyV3At` at its capture time.

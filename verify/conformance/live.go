@@ -8,6 +8,7 @@ import (
 	"net"
 	"time"
 
+	tinfoil "github.com/tinfoilsh/tinfoil-go"
 	"github.com/tinfoilsh/tinfoil-go/verify"
 )
 
@@ -39,8 +40,8 @@ func RejectionCode(err error) (code string, exit int) {
 }
 
 // TLSSPKIFingerprint dials host:443 and returns the SDK's canonical SPKI
-// fingerprint of the presented leaf (verify.ConnectionCertFP — the same
-// computation TLSBoundRoundTripper enforces). Certificate-chain verification
+// fingerprint of the presented leaf (tinfoil.ConnectionCertFP — the same
+// computation that TLSBoundRoundTripper enforces). Certificate-chain verification
 // is skipped on purpose: trust comes from matching the attested fingerprint,
 // not the public PKI.
 func TLSSPKIFingerprint(host string) (string, error) {
@@ -57,5 +58,5 @@ func TLSSPKIFingerprint(host string) (string, error) {
 		return "", err
 	}
 	defer conn.Close()
-	return verify.ConnectionCertFP(conn.ConnectionState())
+	return tinfoil.ConnectionCertFP(conn.ConnectionState())
 }
