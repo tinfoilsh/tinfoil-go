@@ -63,8 +63,13 @@ func TestLiveArchivedVerification(t *testing.T) {
 	got, err := defaults.VerifyV3At(raw, nonce, repo, verifiedAt)
 	require.NoError(t, err)
 	require.Equal(t, want, got)
+	_, err = defaults.VerifyV3At(raw, nonce, repo, want.FreshnessExpiresAt().Add(-time.Nanosecond))
+	require.NoError(t, err)
 	_, err = defaults.VerifyV3At(raw, nonce, repo, want.FreshnessExpiresAt().Add(time.Second))
-	require.Error(t, err)
+	var expired *VerificationError
+	require.ErrorAs(t, err, &expired)
+	require.Contains(t, []Layer{LayerProvenance, LayerQuote}, expired.Layer)
+	require.Regexp(t, "(?i)stale|expired|outside its validity window|past its next update", err.Error())
 
 	changeCollateral := func(format string, remove bool) func(map[string]any) {
 		return func(doc map[string]any) {
