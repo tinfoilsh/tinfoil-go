@@ -120,7 +120,7 @@ func pinnedTransport(dt *http.Transport, key string) (*http.Transport, error) {
 			}
 		}
 
-		certFP, err := verify.ConnectionCertFP(state)
+		certFP, err := ConnectionCertFP(state)
 		if err != nil {
 			return errs.Attestation(err)
 		}
@@ -194,4 +194,15 @@ func isCertificateError(err error) bool {
 	return errors.Is(err, errCertMismatch) ||
 		errors.As(err, &certInvalidErr) || errors.As(err, &unknownAuthErr) ||
 		errors.As(err, &hostnameErr) || errors.As(err, &certVerifyErr)
+}
+
+// ConnectionCertFP returns the verify.CertPubkeyFP of the leaf certificate
+// that a TLS connection presented, or a *verify.UsageError if the connection
+// presented none. It is the one implementation behind the pin that
+// TLSBoundRoundTripper enforces and the conformance adapter's live-verify check.
+func ConnectionCertFP(state tls.ConnectionState) (string, error) {
+	if len(state.PeerCertificates) == 0 {
+		return "", &verify.UsageError{Err: errors.New("no peer certificates")}
+	}
+	return verify.CertPubkeyFP(state.PeerCertificates[0])
 }

@@ -89,7 +89,35 @@ if err != nil {
 The nonce and the repository reference are caller-owned expectations; the
 document cannot supply either. After success, bind service traffic to the
 returned TLS/HPKE material and stop authorizing new requests at
-`FreshnessExpiresAt()`. The returned `Verification` cannot be changed: its
+`FreshnessExpiresAt()`. This package takes no connection state; to pin
+your own TLS connection, compare `CertPubkeyFP` of the presented leaf with
+`TLSPublicKeyFP()` in `tls.Config.VerifyConnection`, which runs after the
+normal certificate checks and before any request is sent:
+
+```go
+fp, ok := verified.TLSPublicKeyFP()
+if !ok {
+    return errors.New("the document endorses no TLS key")
+}
+config := &tls.Config{
+    ServerName: host,
+    VerifyConnection: func(cs tls.ConnectionState) error {
+        if len(cs.PeerCertificates) == 0 {
+            return errors.New("no peer certificate")
+        }
+        got, err := verify.CertPubkeyFP(cs.PeerCertificates[0])
+        if err != nil {
+            return err
+        }
+        if got != fp {
+            return fmt.Errorf("TLS key %s is not the attested key %s", got, fp)
+        }
+        return nil
+    },
+}
+```
+
+The returned `Verification` cannot be changed: its
 accessors return copies. Only verification creates one, so a `Verification`
 that holds data always came from `VerifyV3` or `VerifyV3At`. To test code that
 takes one, verify a captured document with `VerifyV3At` at its capture time.
