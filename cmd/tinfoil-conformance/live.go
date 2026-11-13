@@ -4,11 +4,15 @@ package main
 
 import (
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"os"
+	"time"
 
+	tinfoil "github.com/tinfoilsh/tinfoil-go"
 	"github.com/tinfoilsh/tinfoil-go/internal/fetch"
 	"github.com/tinfoilsh/tinfoil-go/verify"
 	"github.com/tinfoilsh/tinfoil-go/verify/conformance"
@@ -75,7 +79,7 @@ func runLive() int {
 
 	// Channel binding: the endorsed TLS key must be the key the live enclave
 	// actually presents on the wire.
-	live, err := conformance.TLSSPKIFingerprint(req.Host)
+	live, err := tlsSPKIFingerprint(req.Host)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "dialing %s for channel binding: %v\n", req.Host, err)
 		return conformance.ExitInternal
@@ -94,6 +98,28 @@ func runLive() int {
 		ChannelBinding:     "tls-spki",
 	}})
 	return conformance.ExitAccepted
+}
+
+// tlsSPKIFingerprint dials host (port 443 unless host names one) and returns
+// the SPKI fingerprint of the leaf certificate that it presents, computed by
+// tinfoil.ConnectionCertFP: the function that the client's pinned transport
+// uses. Certificate-chain verification is skipped on purpose: trust comes
+// from matching the attested fingerprint, not from the public PKI.
+func tlsSPKIFingerprint(host string) (string, error) {
+	addr, serverName := host, host
+	if h, _, err := net.SplitHostPort(host); err == nil {
+		serverName = h // host already carries a port
+	} else {
+		addr = net.JoinHostPort(host, "443")
+	}
+	dialer := &net.Dialer{Timeout: 10 * time.Second}
+	conn, err := tls.DialWithDialer(dialer, "tcp", addr,
+		&tls.Config{ServerName: serverName, InsecureSkipVerify: true}) //nolint:gosec // bound by SPKI, not PKI
+	if err != nil {
+		return "", err
+	}
+	defer conn.Close()
+	return tinfoil.ConnectionCertFP(conn.ConnectionState())
 }
 
 func rejectLive(code string) int {

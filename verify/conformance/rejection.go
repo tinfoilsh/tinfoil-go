@@ -3,12 +3,8 @@
 package conformance
 
 import (
-	"crypto/tls"
 	"errors"
-	"net"
-	"time"
 
-	tinfoil "github.com/tinfoilsh/tinfoil-go"
 	"github.com/tinfoilsh/tinfoil-go/verify"
 )
 
@@ -37,26 +33,4 @@ func RejectionCode(err error) (code string, exit int) {
 		}
 	}
 	return "", ExitInternal
-}
-
-// TLSSPKIFingerprint dials host:443 and returns the SDK's canonical SPKI
-// fingerprint of the presented leaf (tinfoil.ConnectionCertFP — the same
-// computation that TLSBoundRoundTripper enforces). Certificate-chain verification
-// is skipped on purpose: trust comes from matching the attested fingerprint,
-// not the public PKI.
-func TLSSPKIFingerprint(host string) (string, error) {
-	addr, serverName := host, host
-	if h, _, err := net.SplitHostPort(host); err == nil {
-		serverName = h // host already carries a port
-	} else {
-		addr = net.JoinHostPort(host, "443")
-	}
-	dialer := &net.Dialer{Timeout: 10 * time.Second}
-	conn, err := tls.DialWithDialer(dialer, "tcp", addr,
-		&tls.Config{ServerName: serverName, InsecureSkipVerify: true}) //nolint:gosec // bound by SPKI, not PKI
-	if err != nil {
-		return "", err
-	}
-	defer conn.Close()
-	return tinfoil.ConnectionCertFP(conn.ConnectionState())
 }

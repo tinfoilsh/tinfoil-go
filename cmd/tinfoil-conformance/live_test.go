@@ -1,6 +1,6 @@
 //go:build tinfoil_conformance
 
-package conformance
+package main
 
 import (
 	"encoding/base64"
@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/tinfoilsh/tinfoil-go/internal/fetch"
+	"github.com/tinfoilsh/tinfoil-go/verify/conformance"
 	"github.com/tinfoilsh/tinfoil-go/verify/document"
 )
 
@@ -19,7 +20,7 @@ import (
 // collateral. Opt-in via TINFOIL_LIVE_HOST so ordinary runs stay offline.
 //
 //	TINFOIL_LIVE_HOST=<enclave> TINFOIL_LIVE_REPO=<owner/name> \
-//	  go test -tags tinfoil_conformance -run TestLiveVerification ./verify/conformance/
+//	  go test -tags tinfoil_conformance -run TestLiveVerification ./cmd/tinfoil-conformance/
 func TestLiveVerification(t *testing.T) {
 	host := os.Getenv("TINFOIL_LIVE_HOST")
 	if host == "" {
@@ -36,14 +37,14 @@ func TestLiveVerification(t *testing.T) {
 		t.Fatalf("fetch from %s: %v", host, err)
 	}
 
-	in := Input{
+	in := conformance.Input{
 		SchemaVersion: "1",
 		DocumentB64:   base64.StdEncoding.EncodeToString(doc),
 		NonceHex:      hex.EncodeToString(nonce),
 		Repo:          repo,
 	}
-	out, code := Run(StageVerify, in) // empty anchors => embedded production roots
-	if code != ExitAccepted || out.Outputs == nil {
+	out, code := conformance.Run(conformance.StageVerify, in) // empty anchors => embedded production roots
+	if code != conformance.ExitAccepted || out.Outputs == nil {
 		reason := "unknown"
 		if out.Rejection != nil {
 			reason = out.Rejection.Code
@@ -56,7 +57,7 @@ func TestLiveVerification(t *testing.T) {
 	// actually presents on the wire. This is the whole point of attestation —
 	// verifying the document lets the caller trust this connection.
 	if fp := out.Outputs.TLSPublicKeyFP; fp != "" {
-		live, err := TLSSPKIFingerprint(host)
+		live, err := tlsSPKIFingerprint(host)
 		if err != nil {
 			t.Fatalf("dialing %s for channel binding: %v", host, err)
 		}
@@ -69,7 +70,7 @@ func TestLiveVerification(t *testing.T) {
 	// The same bytes must still verify with the clock pinned to now — the
 	// contract a frozen real-frozen fixture relies on, checked on live collateral.
 	in.VerificationTimeUnix = time.Now().Unix()
-	if _, code := Run(StageVerify, in); code != ExitAccepted {
+	if _, code := conformance.Run(conformance.StageVerify, in); code != conformance.ExitAccepted {
 		t.Fatalf("pinned-time replay of the live document did not accept (exit %d)", code)
 	}
 }
