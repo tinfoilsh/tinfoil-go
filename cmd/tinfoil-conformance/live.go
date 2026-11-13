@@ -12,8 +12,8 @@ import (
 	"os"
 	"time"
 
-	tinfoil "github.com/tinfoilsh/tinfoil-go"
 	"github.com/tinfoilsh/tinfoil-go/internal/fetch"
+	"github.com/tinfoilsh/tinfoil-go/internal/transport"
 	"github.com/tinfoilsh/tinfoil-go/verify"
 	"github.com/tinfoilsh/tinfoil-go/verify/conformance"
 	"github.com/tinfoilsh/tinfoil-go/verify/document"
@@ -102,7 +102,7 @@ func runLive() int {
 
 // tlsSPKIFingerprint dials host (port 443 unless host names one) and returns
 // the SPKI fingerprint of the leaf certificate that it presents, computed by
-// tinfoil.ConnectionCertFP: the function that the client's pinned transport
+// transport.ConnectionCertFP: the function that the client's pinned transport
 // uses. Certificate-chain verification is skipped on purpose: trust comes
 // from matching the attested fingerprint, not from the public PKI.
 func tlsSPKIFingerprint(host string) (string, error) {
@@ -119,7 +119,7 @@ func tlsSPKIFingerprint(host string) (string, error) {
 		return "", err
 	}
 	defer conn.Close()
-	return tinfoil.ConnectionCertFP(conn.ConnectionState())
+	return transport.ConnectionCertFP(conn.ConnectionState())
 }
 
 func rejectLive(code string) int {

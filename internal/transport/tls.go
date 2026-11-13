@@ -198,8 +198,8 @@ func isCertificateError(err error) bool {
 
 // ConnectionCertFP returns the verify.CertPubkeyFP of the leaf certificate
 // that a TLS connection presented, or a *verify.UsageError if the connection
-// presented none. It is the one implementation behind tinfoil.ConnectionCertFP
-// and the pin that TLSBoundRoundTripper enforces.
+// presented none. It is the one implementation behind the pin that
+// TLSBoundRoundTripper enforces and the conformance adapter's live-verify check.
 func ConnectionCertFP(state tls.ConnectionState) (string, error) {
 	if len(state.PeerCertificates) == 0 {
 		return "", &verify.UsageError{Err: errors.New("no peer certificates")}
