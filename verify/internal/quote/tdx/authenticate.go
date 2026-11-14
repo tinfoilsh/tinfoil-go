@@ -25,6 +25,7 @@ import (
 	tdxtrust "github.com/google/go-tdx-guest/verify/trust"
 
 	"github.com/tinfoilsh/tinfoil-go/verify/document/collateral"
+	crlext "github.com/tinfoilsh/tinfoil-go/verify/internal/crl"
 	"github.com/tinfoilsh/tinfoil-go/verify/internal/validity"
 	"github.com/tinfoilsh/tinfoil-go/verify/measurement"
 )
@@ -235,6 +236,9 @@ func (g *pcsReplayGetter) Get(requestURL string) (map[string][]string, []byte, e
 	// CRL from a .der URL that does not identify the body as a CRL.
 	crl, crlErr := x509.ParseRevocationList(body)
 	if crlErr == nil {
+		if err := crlext.CheckExtensions(crl); err != nil {
+			return nil, nil, fmt.Errorf("captured CRL for %s: %w", requestURL, err)
+		}
 		if g.now.Before(crl.ThisUpdate) || g.now.After(crl.NextUpdate) {
 			return nil, nil, fmt.Errorf("captured CRL for %s is outside its validity window", requestURL)
 		}

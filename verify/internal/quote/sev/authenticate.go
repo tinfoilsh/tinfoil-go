@@ -20,6 +20,7 @@ import (
 	"github.com/tinfoilsh/go-sev-guest/verify"
 	"github.com/tinfoilsh/go-sev-guest/verify/trust"
 
+	"github.com/tinfoilsh/tinfoil-go/verify/internal/crl"
 	"github.com/tinfoilsh/tinfoil-go/verify/internal/validity"
 	"github.com/tinfoilsh/tinfoil-go/verify/measurement"
 )
@@ -191,6 +192,9 @@ func Authenticate(ev Evidence, now time.Time, opts *Options) (result *Quote, err
 	parsedCRL, err := x509.ParseRevocationList(ev.CRLDER)
 	if err != nil {
 		return nil, fmt.Errorf("parsing amd-crl collateral: %w", err)
+	}
+	if err := crl.CheckExtensions(parsedCRL); err != nil {
+		return nil, fmt.Errorf("amd-crl collateral: %w", err)
 	}
 	if now.Before(parsedCRL.ThisUpdate) || now.After(parsedCRL.NextUpdate) {
 		return nil, fmt.Errorf("amd-crl collateral is outside its validity window (this_update %s, next_update %s)",
