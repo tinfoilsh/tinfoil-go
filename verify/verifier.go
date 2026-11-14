@@ -131,21 +131,48 @@ func ParseReference(ref string) (repo, tag, digest string, err error) {
 // FreshnessMaxAge reports the configured witness age bound.
 func (v *Verifier) FreshnessMaxAge() time.Duration { return v.freshnessMaxAge }
 
-// CheckRepoVerifiability reports whether v can verify an enclave against the
-// repository pin repo, without a document or network I/O, so a caller can
-// reject a pin before fetching a document. It returns a UsageError when:
-//   - repo is nonempty and is not an org/project[@revision][@sha256:digest] reference;
-//   - repo is set and v has a config authorizer, which can't authenticate a
-//     repository pin;
-//   - v has an embedded config whose name or digest repo doesn't match.
+// Pin names the workload a caller trusts and the namespace that vouches for
+// it. The two namespaces are unrelated: the same name can belong to different
+// owners in each, so a pin in one is never satisfied by the other.
 //
-// An empty repo accepts configs authorized by the configured registry trust.
-// VerifyV3 rejects every such repo, whatever the document. It can still reject
-// a repo that passes: v3 collateral also requires the repo and revision to be
-// valid config identity components, such as lowercase slugs, and v2
-// collateral doesn't, so that check waits for the document.
-func (v *Verifier) CheckRepoVerifiability(repo string) error {
-	_, err := v.referencePins(repo)
+// Setting both accepts a document that satisfies either. The zero Pin accepts
+// any config authorized by the verifier's registry trust, embedded config or
+// config authorizer.
+type Pin struct {
+	// Repo is a GitHub repository, owner/name[@tag][@sha256:digest]. Only a
+	// document carrying that repository's signed release satisfies it.
+	Repo string
+	// Project is a config registry project,
+	// org/project[@revision][@sha256:digest]. Only a document carrying a
+	// registry approval of that project satisfies it.
+	Project string
+}
+
+// CheckPinVerifiability reports whether v can verify an enclave against pin,
+// without a document or network I/O, so a caller can reject a pin before
+// fetching a document. It returns a UsageError when:
+//   - pin.Repo or pin.Project is nonempty and malformed;
+//   - pin.Repo is set alone and v verifies registry collateral only, through
+//     an embedded reference, explicit signing keys, registry IDs or a config
+//     authorizer;
+//   - pin.Project is set and v has a config authorizer, which can't
+//     authenticate a project pin;
+//   - v has an embedded config whose name or digest pin.Project doesn't match.
+//
+// VerifyV3 rejects every such pin, whatever the document. It can still reject
+// a pin that passes: registry collateral also requires the project and
+// revision to be valid config identity components, such as lowercase slugs,
+// and that check waits for the document.
+func (v *Verifier) CheckPinVerifiability(pin Pin) error {
+	if pin.Repo != "" {
+		if _, err := endorsement.ParseReference(pin.Repo); err != nil {
+			return usageError(err)
+		}
+		if pin.Project == "" && v.requiresConfigCollateral() {
+			return usageError(fmt.Errorf("configured trust verifies registry collateral only, which a GitHub repository pin cannot match"))
+		}
+	}
+	_, err := v.referencePins(pin.Project)
 	return err
 }
 
@@ -164,20 +191,20 @@ func (v *Verifier) PinnedRegisters() measurement.Expected {
 	return v.pinnedRegisters.Clone()
 }
 
-// VerifyV3 appraises a nonce-bound v3 attestation document using its collateral
-// version. repo pins the expected repository or registry project as
-// org/project[@revision][@sha256:digest]. An empty repo accepts authorized registry
-// registry IDs. An embedded config instead authorizes its exact caller-supplied bytes.
-// A config authorizer requires an empty repo and owns config authorization.
+// VerifyV3 appraises a nonce-bound v3 attestation document against pin. The
+// document's collateral decides which half of pin applies, and a document
+// whose collateral pin does not cover is rejected. An embedded config
+// authorizes its exact caller-supplied bytes, and a config authorizer owns
+// config authorization; both require an empty pin.Repo.
 //
 // The caller owns both expectations that cannot come from the document: the
 // nonce it generated, and any additional workload constraints.
 // On success it must bind traffic to the returned keys and enforce any nonzero
 // FreshnessExpiresAt. Hardware collateral bounds the result even when all
 // reference values are embedded.
-func (v *Verifier) VerifyV3(docBytes, nonce []byte, repo string) (*Verification, error) {
+func (v *Verifier) VerifyV3(docBytes, nonce []byte, pin Pin) (*Verification, error) {
 	// The only clock read.
-	return v.VerifyV3At(docBytes, nonce, repo, time.Now())
+	return v.VerifyV3At(docBytes, nonce, pin, time.Now())
 }
 
 // VerifyV3At is VerifyV3 for an archived document. verificationTime replaces
@@ -190,8 +217,8 @@ func (v *Verifier) VerifyV3(docBytes, nonce []byte, repo string) (*Verification,
 // from a trusted timestamp recorded when the document was received. An
 // earlier time accepts collateral that has since expired or been revoked, so
 // live clients use VerifyV3.
-func (v *Verifier) VerifyV3At(docBytes, nonce []byte, repo string, verificationTime time.Time) (*Verification, error) {
-	verified, rejectedAt, err := v.verifyV3(docBytes, nonce, repo, verificationTime)
+func (v *Verifier) VerifyV3At(docBytes, nonce []byte, pin Pin, verificationTime time.Time) (*Verification, error) {
+	verified, rejectedAt, err := v.verifyV3(docBytes, nonce, pin, verificationTime)
 	// An error already carrying a verify type, such as the UsageError for a
 	// caller's mistake, passes through; anything else becomes a
 	// VerificationError for the layer that rejected the document.
@@ -213,7 +240,7 @@ type endorsementResult struct {
 // verifyV3 is VerifyV3 before classification: it returns the error a stage
 // reported, a plain error for a rejected document or a UsageError for a
 // caller's mistake, and the layer of that stage.
-func (v *Verifier) verifyV3(docBytes, nonce []byte, repo string, now time.Time) (*Verification, Layer, error) {
+func (v *Verifier) verifyV3(docBytes, nonce []byte, pin Pin, now time.Time) (*Verification, Layer, error) {
 	if v == nil || v.endorsements == nil || v.configVerifier == nil || v.freshnessVerifier == nil {
 		return nil, "", &UsageError{Err: fmt.Errorf("verifier must be built with NewVerifier")}
 	}
@@ -228,13 +255,29 @@ func (v *Verifier) verifyV3(docBytes, nonce []byte, repo string, now time.Time) 
 		return nil, LayerEnvelope, err
 	}
 
+	// A malformed pin is the caller's mistake whichever collateral the document carries.
+	if pin.Repo != "" {
+		if _, err := endorsement.ParseReference(pin.Repo); err != nil {
+			return nil, LayerProvenance, usageError(err)
+		}
+	}
+	if _, err := v.referencePins(pin.Project); err != nil {
+		return nil, LayerProvenance, err
+	}
+
 	// Reference values and CPU evidence are appraised against the same instant.
 	var refs *endorsementResult
 	switch doc.CollateralFormat() {
 	case collateral.FormatV3:
-		refs, err = v.configReferences(doc, repo, now)
+		if pin.Project == "" && pin.Repo != "" {
+			return nil, LayerProvenance, fmt.Errorf("document carries config registry collateral, but only a GitHub repository is pinned")
+		}
+		refs, err = v.configReferences(doc, pin.Project, now)
 	case collateral.FormatV2:
-		refs, err = v.codeReferences(doc, repo, now)
+		if pin.Repo == "" && !v.requiresConfigCollateral() {
+			return nil, LayerProvenance, fmt.Errorf("document carries GitHub repository collateral, but no GitHub repository is pinned")
+		}
+		refs, err = v.codeReferences(doc, pin.Repo, now)
 	default:
 		return nil, LayerProvenance, fmt.Errorf("unsupported collateral format %q", doc.CollateralFormat())
 	}

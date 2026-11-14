@@ -56,24 +56,24 @@ func TestErrorContract(t *testing.T) {
 }
 
 func TestPublicInputErrors(t *testing.T) {
-	_, err := tinfoil.NewEnclaveHTTPClient(t.Context(), "enclave.example", "org/repo", &tinfoil.EnclaveOptions{TransportMode: "invalid"})
+	_, err := tinfoil.NewEnclaveHTTPClient(t.Context(), "enclave.example", tinfoil.Pin{Repo: "org/repo"}, &tinfoil.EnclaveOptions{TransportMode: "invalid"})
 	require.ErrorIs(t, err, tinfoil.ErrConfiguration)
 	var usage *verify.UsageError
 	verifier, err := verify.NewVerifier()
 	require.NoError(t, err)
-	_, err = verifier.VerifyV3(nil, nil, "")
+	_, err = verifier.VerifyV3(nil, nil, verify.Pin{})
 	require.ErrorAs(t, err, &usage)
-	_, err = verifier.VerifyV3(nil, nil, "org/repo")
+	_, err = verifier.VerifyV3(nil, nil, verify.Pin{Repo: "org/repo"})
 	require.ErrorAs(t, err, &usage)
-	_, err = tinfoil.NewEnclaveHTTPClient(t.Context(), "", "", nil)
+	_, err = tinfoil.NewEnclaveHTTPClient(t.Context(), "", tinfoil.Pin{}, nil)
 	require.ErrorIs(t, err, tinfoil.ErrConfiguration, "reject a missing enclave before fetching")
 	for _, repo := range []string{"owner", "owner/repo/extra", "owner/repo@sha256:bad"} {
-		_, err = tinfoil.NewEnclaveHTTPClient(t.Context(), "enclave.example", repo, nil)
+		_, err = tinfoil.NewEnclaveHTTPClient(t.Context(), "enclave.example", tinfoil.Pin{Repo: repo}, nil)
 		require.ErrorIs(t, err, tinfoil.ErrConfiguration)
-		_, err = verifier.VerifyV3(nil, nil, repo)
+		_, err = verifier.VerifyV3(nil, nil, verify.Pin{Repo: repo})
 		require.ErrorAs(t, err, &usage)
 	}
-	_, err = enclave.New(enclave.Config{Host: "enclave.example", Repo: "org/repo@v1@sha256:" + strings.Repeat("a", 64)})
+	_, err = enclave.New(enclave.Config{Host: "enclave.example", Pin: tinfoil.Pin{Repo: "org/repo@v1@sha256:" + strings.Repeat("a", 64)}})
 	require.NoError(t, err)
 	_, err = fetch.Document(t.Context(), "", "", make([]byte, document.NonceSize))
 	require.ErrorIs(t, err, tinfoil.ErrConfiguration)
@@ -82,7 +82,7 @@ func TestPublicInputErrors(t *testing.T) {
 	require.False(t, ok, "a nil verification endorses nothing")
 
 	var rejected *verify.VerificationError
-	_, err = verifier.VerifyV3([]byte(`{}`), make([]byte, document.NonceSize), "org/repo")
+	_, err = verifier.VerifyV3([]byte(`{}`), make([]byte, document.NonceSize), verify.Pin{Repo: "org/repo"})
 	require.ErrorAs(t, err, &rejected, "malformed evidence is not a usage error")
 }
 

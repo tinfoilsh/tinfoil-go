@@ -25,6 +25,9 @@ const stageLive = "live-verify"
 type liveRequest struct {
 	Host string `json:"host"`
 	Repo string `json:"repo"`
+	// Project is absent in requests that predate separate pins, where repo
+	// names the workload in either namespace.
+	Project *string `json:"project,omitempty"`
 }
 
 // runLive verifies a live enclave through the SDK's production verifier —
@@ -57,7 +60,11 @@ func runLive() int {
 		return conformance.ExitInternal
 	}
 
-	verified, err := v.VerifyV3(doc, nonce, req.Repo)
+	pin := verify.Pin{Repo: req.Repo, Project: req.Repo}
+	if req.Project != nil {
+		pin.Project = *req.Project
+	}
+	verified, err := v.VerifyV3(doc, nonce, pin)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "live verification: %v\n", err)
 		code, exit := conformance.RejectionCode(err)

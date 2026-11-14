@@ -53,7 +53,7 @@ const (
 )
 
 // Input is the stdin JSON: a v3 document, the verifier-supplied nonce, the
-// pinned repo, and the synthetic roots it was produced under. Empty root fields
+// pinned repo and project, and the synthetic roots it was produced under. Empty root fields
 // select the embedded production roots (so real-frozen fixtures need none).
 // The approval and timestamp stages take their own inputs instead of a
 // document.
@@ -62,6 +62,9 @@ type Input struct {
 	DocumentB64   string `json:"document_b64"`
 	NonceHex      string `json:"nonce_hex"`
 	Repo          string `json:"repo"`
+	// Project is absent in inputs that predate separate pins, where repo
+	// names the workload in either namespace.
+	Project *string `json:"project,omitempty"`
 
 	// v3-authenticate-approval: the key-signed bundle, the keys the adapter
 	// pins, and the SHA-256 a statement subject must carry.
@@ -188,7 +191,7 @@ func Run(stage string, in Input) (Output, int) {
 
 	switch stage {
 	case StageVerify:
-		return verifyFull(doc, nonce, in.Repo, verifier, appraisal)
+		return verifyFull(doc, nonce, in.pin(), verifier, appraisal)
 	case StageCheckEnvelope:
 		if _, err := document.Parse(doc, nonce); err != nil {
 			return reject(stage, "ENVELOPE_REJECTED")
@@ -248,10 +251,17 @@ func Run(stage string, in Input) (Output, int) {
 	}
 }
 
+func (in Input) pin() verify.Pin {
+	if in.Project == nil {
+		return verify.Pin{Repo: in.Repo, Project: in.Repo}
+	}
+	return verify.Pin{Repo: in.Repo, Project: *in.Project}
+}
+
 // verifyFull runs the whole flow through the verifier; the layer on its
 // VerificationError names the rejection.
-func verifyFull(doc, nonce []byte, repo string, verifier *verify.Verifier, appraisal time.Time) (Output, int) {
-	verified, err := verifier.VerifyV3At(doc, nonce, repo, appraisal)
+func verifyFull(doc, nonce []byte, pin verify.Pin, verifier *verify.Verifier, appraisal time.Time) (Output, int) {
+	verified, err := verifier.VerifyV3At(doc, nonce, pin, appraisal)
 	if err != nil {
 		code, exit := RejectionCode(err)
 		if exit == ExitInternal {

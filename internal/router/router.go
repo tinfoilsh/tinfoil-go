@@ -17,7 +17,9 @@ import (
 )
 
 var (
-	defaultRouterRepo = "tinfoilsh/confidential-model-router"
+	// The router is published under one name in both namespaces, each owned by Tinfoil.
+	defaultRouterName = "tinfoilsh/confidential-model-router"
+	defaultRouterPin  = verify.Pin{Repo: defaultRouterName, Project: defaultRouterName}
 	defaultRouterURL  = "https://atc.tinfoil.sh/routers"
 )
 
@@ -74,7 +76,7 @@ func fetchRouters(ctx context.Context) ([]string, error) {
 // selects the default policy, and nil check accepts every router. It stops
 // trying routers after discoveryTimeout, or sooner when ctx ends.
 func Discover(ctx context.Context, v *verify.Verifier, check func(v *verify.Verification) error, newTransport func(*enclave.Enclave) *transport.Transport) (*transport.Transport, error) {
-	fallback, err := enclave.New(enclave.Config{Host: "inference.tinfoil.sh", Repo: defaultRouterRepo, Verifier: v, VerificationCheck: check})
+	fallback, err := enclave.New(enclave.Config{Host: "inference.tinfoil.sh", Pin: defaultRouterPin, Verifier: v, VerificationCheck: check})
 	if err != nil {
 		return nil, err
 	}
@@ -90,7 +92,7 @@ func Discover(ctx context.Context, v *verify.Verifier, check func(v *verify.Veri
 		if !time.Now().Before(deadline) {
 			break
 		}
-		e, err := enclave.New(enclave.Config{Host: router, Repo: fallback.Repo(), Verifier: fallback.Verifier(), VerificationCheck: check})
+		e, err := enclave.New(enclave.Config{Host: router, Pin: fallback.Pin(), Verifier: fallback.Verifier(), VerificationCheck: check})
 		if err != nil {
 			return nil, err
 		}

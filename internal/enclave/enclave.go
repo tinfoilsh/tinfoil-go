@@ -36,11 +36,11 @@ type Config struct {
 	// Relay, when set, is a host that fetches attestation from the enclave on
 	// the client's behalf.
 	Relay string
-	// Repo pins a repository or registry project,
-	// org/project[@revision][@sha256:digest].
-	Repo string
+	// Pin names the GitHub repository, the registry project, or both, that
+	// the enclave is verified against.
+	Pin verify.Pin
 	// Verifier is the policy, which several enclaves can share; nil selects the
-	// defaults, which accept public registry configs when Repo is empty.
+	// defaults, which accept public registry configs when Pin is empty.
 	Verifier *verify.Verifier
 	// VerificationCheck, when set, is called with each verification that
 	// passes Verifier. An error rejects the verification without a retry.
@@ -49,7 +49,8 @@ type Config struct {
 
 // Enclave is one enclave and the policy its attestation is verified against.
 type Enclave struct {
-	host, repo, relay string
+	host, relay string
+	pin         verify.Pin
 	// verifier is the immutable verification policy, shareable across enclaves.
 	verifier *verify.Verifier
 	// check is the caller's VerificationCheck, or nil.
@@ -58,8 +59,8 @@ type Enclave struct {
 	fetch func() (*verify.Verification, error)
 }
 
-// New checks c.Repo against the verifier's rules for a repository pin and
-// does no network I/O.
+// New checks c.Pin against the verifier's rules for a pin and does no network
+// I/O.
 func New(c Config) (*Enclave, error) {
 	v := c.Verifier
 	if v == nil {
@@ -68,10 +69,10 @@ func New(c Config) (*Enclave, error) {
 			return nil, fromVerify(err)
 		}
 	}
-	if err := v.CheckRepoVerifiability(c.Repo); err != nil {
+	if err := v.CheckPinVerifiability(c.Pin); err != nil {
 		return nil, fromVerify(err)
 	}
-	return &Enclave{host: c.Host, repo: c.Repo, relay: c.Relay, verifier: v, check: c.VerificationCheck}, nil
+	return &Enclave{host: c.Host, pin: c.Pin, relay: c.Relay, verifier: v, check: c.VerificationCheck}, nil
 }
 
 // NewForTest returns an Enclave for host that verifies by calling fetch
@@ -86,9 +87,9 @@ func (e *Enclave) Host() string {
 	return e.host
 }
 
-// Repo returns the trusted repository or registry reference, including version and digest pins.
-func (e *Enclave) Repo() string {
-	return e.repo
+// Pin returns the trusted repository and registry project references, including version and digest pins.
+func (e *Enclave) Pin() verify.Pin {
+	return e.pin
 }
 
 // Verifier returns the verification policy, which several enclaves can share.
@@ -156,7 +157,7 @@ func (e *Enclave) fetchVerification() (*verify.Verification, error) {
 		return nil, err
 	}
 
-	verified, err := e.verifier.VerifyV3(docBytes, nonce, e.repo)
+	verified, err := e.verifier.VerifyV3(docBytes, nonce, e.pin)
 	if err != nil {
 		return nil, fromVerify(err)
 	}

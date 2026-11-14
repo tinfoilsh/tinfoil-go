@@ -86,18 +86,18 @@ func TestEmbeddedConfigReferenceWithoutConfigBytes(t *testing.T) {
 	v, err := NewVerifier(WithEmbeddedReferences(inputs))
 	require.NoError(t, err)
 	require.True(t, v.CallerAuthorizesConfig())
-	require.NoError(t, v.CheckRepoVerifiability(""))
-	require.NoError(t, v.CheckRepoVerifiability("org/project@v1@sha256:"+reference.Digest))
-	require.ErrorAs(t, v.CheckRepoVerifiability("org/project@v2"), new(*UsageError))
-	require.ErrorAs(t, v.CheckRepoVerifiability("org/project@sha256:"+strings.Repeat("ab", sha256.Size)), new(*UsageError))
+	require.NoError(t, v.CheckPinVerifiability(Pin{}))
+	require.NoError(t, v.CheckPinVerifiability(Pin{Project: "org/project@v1@sha256:" + reference.Digest}))
+	require.ErrorAs(t, v.CheckPinVerifiability(Pin{Project: "org/project@v2"}), new(*UsageError))
+	require.ErrorAs(t, v.CheckPinVerifiability(Pin{Project: "org/project@sha256:" + strings.Repeat("ab", sha256.Size)}), new(*UsageError))
 	raw, nonce, doc := embeddedDocument(t, collateral.FormatV3)
 	refs, err := v.configReferences(doc, "org/project@v1", time.Now())
 	require.NoError(t, err)
 	require.Equal(t, digest, refs.quote.(quote.ConfigReferenceValues).Hash)
 	require.Equal(t, runtime.Digest, refs.artifact.Digest)
-	_, err = v.VerifyV3(raw, nonce, "org/project@v1")
+	_, err = v.VerifyV3(raw, nonce, Pin{Project: "org/project@v1"})
 	requireRejectedAt(t, err, LayerQuote)
-	_, err = v.VerifyV3(raw, nonce, "")
+	_, err = v.VerifyV3(raw, nonce, Pin{})
 	requireRejectedAt(t, err, LayerQuote)
 	for _, mutate := range []func(*EmbeddedConfigReference){
 		func(r *EmbeddedConfigReference) { r.Digest = "" },
@@ -151,10 +151,10 @@ func TestEmbeddedReferencesPreserveBindingsAndOwnTheirBytes(t *testing.T) {
 	require.Empty(t, refs.config.SigningKeyHint)
 	require.True(t, refs.config.ApprovalTime.IsZero())
 	require.True(t, refs.freshnessExpiresAt.IsZero())
-	result, err := v.VerifyV3(raw, nonce, "org/project@v1")
+	result, err := v.VerifyV3(raw, nonce, Pin{Project: "org/project@v1"})
 	require.Nil(t, result)
 	requireRejectedAt(t, err, LayerQuote, "embedding must never bypass hardware authentication")
-	_, err = v.VerifyV3(raw, nonce, "")
+	_, err = v.VerifyV3(raw, nonce, Pin{})
 	requireRejectedAt(t, err, LayerQuote, "exact local bytes can identify a workload without a registry pin")
 }
 
@@ -164,7 +164,7 @@ func TestEmbeddedReferencesCannotOverridePins(t *testing.T) {
 	require.NoError(t, err)
 	raw, nonce, _ := embeddedDocument(t, collateral.FormatV3)
 	for _, ref := range []string{"other/project", "org/project@v2", "org/project@sha256:" + strings.Repeat("00", sha256.Size)} {
-		_, err := v.VerifyV3(raw, nonce, ref)
+		_, err := v.VerifyV3(raw, nonce, Pin{Project: ref})
 		var usage *UsageError
 		require.ErrorAs(t, err, &usage, "a pin the embedded config cannot meet is the caller's mistake")
 		require.ErrorContains(t, err, "does not match the caller's pins")
@@ -178,11 +178,11 @@ func TestEmbeddedReferencesCannotOverridePins(t *testing.T) {
 	inputs.Config.Name = ""
 	v, err = NewVerifier(WithEmbeddedReferences(inputs))
 	require.NoError(t, err)
-	_, err = v.VerifyV3(raw, nonce, "org/project")
+	_, err = v.VerifyV3(raw, nonce, Pin{Project: "org/project"})
 	var usage *UsageError
 	require.ErrorAs(t, err, &usage)
 	require.ErrorContains(t, err, "does not match the caller's pins")
-	_, err = v.VerifyV3(raw, nonce, "")
+	_, err = v.VerifyV3(raw, nonce, Pin{})
 	requireRejectedAt(t, err, LayerQuote)
 }
 
@@ -238,7 +238,7 @@ func TestEmbeddedTrustRejectsInvalidOrUnusedInputs(t *testing.T) {
 	for _, option := range []Option{WithEmbeddedReferences(inputs), WithConfigSigningKeys(keys), WithFreshnessSigningKeys(keys)} {
 		v, err := NewVerifier(option)
 		require.NoError(t, err)
-		_, err = v.VerifyV3(raw, nonce, "org/project")
+		_, err = v.VerifyV3(raw, nonce, Pin{Project: "org/project"})
 		require.ErrorContains(t, err, "configured trust requires")
 	}
 }

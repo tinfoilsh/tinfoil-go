@@ -86,15 +86,19 @@ type EnclaveHTTPClient struct {
 	attestedClient
 }
 
+// Pin names the workload an enclave is verified against: a GitHub repository,
+// a config registry project, or both.
+type Pin = verify.Pin
+
 // NewEnclaveHTTPClient returns a client for the enclave at host, verified
-// against repo, owner/name[@tag][@sha256:digest]. An empty repo accepts configs
-// authorized by opts.Verifier, which defaults to public registry trust.
+// against pin. An empty pin accepts configs authorized by opts.Verifier, which
+// defaults to public registry trust.
 // It checks opts before any network I/O, then
 // verifies the enclave under ctx before returning, so a misconfigured client
 // fails here rather than on its first request. The client verifies again by
 // itself when the verification expires or is rejected.
-func NewEnclaveHTTPClient(ctx context.Context, host, repo string, opts *EnclaveOptions) (*EnclaveHTTPClient, error) {
-	c, err := unverifiedEnclaveHTTPClient(host, repo, opts)
+func NewEnclaveHTTPClient(ctx context.Context, host string, pin Pin, opts *EnclaveOptions) (*EnclaveHTTPClient, error) {
+	c, err := unverifiedEnclaveHTTPClient(host, pin, opts)
 	if err != nil {
 		return nil, err
 	}
@@ -106,7 +110,7 @@ func NewEnclaveHTTPClient(ctx context.Context, host, repo string, opts *EnclaveO
 
 // unverifiedEnclaveHTTPClient is NewEnclaveHTTPClient without the network I/O:
 // the client verifies on its first request.
-func unverifiedEnclaveHTTPClient(host, repo string, opts *EnclaveOptions) (*EnclaveHTTPClient, error) {
+func unverifiedEnclaveHTTPClient(host string, pin Pin, opts *EnclaveOptions) (*EnclaveHTTPClient, error) {
 	if host == "" {
 		return nil, errs.Configuration(errors.New("enclave host is required"))
 	}
@@ -122,7 +126,7 @@ func unverifiedEnclaveHTTPClient(host, repo string, opts *EnclaveOptions) (*Encl
 			return nil, err
 		}
 	}
-	e, err := enclave.New(enclave.Config{Host: host, Repo: repo, Verifier: opts.Verifier, VerificationCheck: opts.VerificationCheck})
+	e, err := enclave.New(enclave.Config{Host: host, Pin: pin, Verifier: opts.Verifier, VerificationCheck: opts.VerificationCheck})
 	if err != nil {
 		return nil, err
 	}
@@ -201,11 +205,11 @@ func (c *attestedClient) Enclave() string {
 	return c.keyed.Enclave().Host()
 }
 
-// Repo returns the repository the enclave is verified against, with any tag
-// or digest pins. It is empty when the Verifier option authorizes the config
-// instead.
-func (c *attestedClient) Repo() string {
-	return c.keyed.Enclave().Repo()
+// Pin returns the repository and registry project the enclave is verified
+// against, with any revision or digest pins. It is empty when the Verifier
+// option authorizes the config instead.
+func (c *attestedClient) Pin() Pin {
+	return c.keyed.Enclave().Pin()
 }
 
 // EnsureVerified returns a verification that is valid now, verifying first

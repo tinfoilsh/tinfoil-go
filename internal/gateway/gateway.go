@@ -156,7 +156,8 @@ func NewTransport(c Config) (*Transport, error) {
 		policy:  policy,
 		secret:  cachesecret.Resolve(c.UserCacheSecret),
 		build: func(r replica) (*verifiedReplicaTransport, error) {
-			e, err := enclave.New(enclave.Config{Host: r.host, Relay: c.Relay, Repo: r.ref, Verifier: policy.verifierFor(r), VerificationCheck: c.VerificationCheck})
+			// Model references are confined to the owner whose names Tinfoil holds in both namespaces.
+			e, err := enclave.New(enclave.Config{Host: r.host, Relay: c.Relay, Pin: verify.Pin{Repo: r.ref, Project: r.ref}, Verifier: policy.verifierFor(r), VerificationCheck: c.VerificationCheck})
 			if err != nil {
 				return nil, err
 			}

@@ -67,9 +67,9 @@ func TestErrorsLeadWithCategory(t *testing.T) {
 		{"options not an object", UsageErrorPrefix, func() error { _, err := NewVerifier(`null`); return err }},
 		{"malformed trust option", UsageErrorPrefix, func() error { _, err := NewVerifier(`{"embedded_config":{}}`); return err }},
 		{"URL as host", UsageErrorPrefix, func() error { _, err := AttestationURL("https://enclave.example", "", nonce); return err }},
-		{"invalid repo", UsageErrorPrefix, func() error { _, err := verifier.Verify(doc, nonce, "owner"); return err }},
-		{"short nonce", UsageErrorPrefix, func() error { _, err := verifier.Verify([]byte("{}"), nonce[1:], routerRepo); return err }},
-		{"malformed document", VerificationErrorPrefix + "envelope: ", func() error { _, err := verifier.Verify([]byte("{}"), nonce, routerRepo); return err }},
+		{"invalid repo", UsageErrorPrefix, func() error { _, err := verifier.Verify(doc, nonce, "owner", ""); return err }},
+		{"short nonce", UsageErrorPrefix, func() error { _, err := verifier.Verify([]byte("{}"), nonce[1:], routerRepo, ""); return err }},
+		{"malformed document", VerificationErrorPrefix + "envelope: ", func() error { _, err := verifier.Verify([]byte("{}"), nonce, routerRepo, ""); return err }},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			err := tt.call()
@@ -137,7 +137,7 @@ func TestLiveVerify(t *testing.T) {
 	require.NoError(t, err)
 	verifier, err := NewVerifier("")
 	require.NoError(t, err)
-	payload, err := verifier.Verify(doc, nonce, routerRepo)
+	payload, err := verifier.Verify(doc, nonce, routerRepo, "")
 	require.NoError(t, err)
 
 	var got verificationJSON
@@ -145,8 +145,8 @@ func TestLiveVerify(t *testing.T) {
 	assert.Equal(t, routerRepo, got.ConfigRepo)
 	assert.NotEmpty(t, got.HPKEPublicKey)
 
-	_, err = verifier.Verify(doc, nonce[:len(nonce)-1], routerRepo)
+	_, err = verifier.Verify(doc, nonce[:len(nonce)-1], routerRepo, "")
 	require.Error(t, err, "a document verifies only against the nonce it was fetched with")
-	_, err = verifier.Verify(doc, NewNonce(), routerRepo)
+	_, err = verifier.Verify(doc, NewNonce(), routerRepo, "")
 	require.Error(t, err, "a document verifies only against the nonce it was fetched with")
 }

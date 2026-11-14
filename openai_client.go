@@ -20,8 +20,8 @@ type EnclaveOpenAIClient struct {
 // NewEnclaveOpenAIClient creates an EnclaveHTTPClient as NewEnclaveHTTPClient
 // does, and an OpenAI client over it. It applies openaiOpts, then sets the
 // HTTP client and base URL so that openaiOpts can't replace them.
-func NewEnclaveOpenAIClient(ctx context.Context, host, repo string, opts *EnclaveOptions, openaiOpts ...option.RequestOption) (*EnclaveOpenAIClient, error) {
-	c, err := NewEnclaveHTTPClient(ctx, host, repo, opts)
+func NewEnclaveOpenAIClient(ctx context.Context, host string, pin Pin, opts *EnclaveOptions, openaiOpts ...option.RequestOption) (*EnclaveOpenAIClient, error) {
+	c, err := NewEnclaveHTTPClient(ctx, host, pin, opts)
 	if err != nil {
 		return nil, err
 	}

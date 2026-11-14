@@ -90,7 +90,7 @@ func TestLivePinsForTheOtherPlatformReject(t *testing.T) {
 	require.NoError(t, err)
 	verifier, err := NewVerifier()
 	require.NoError(t, err)
-	verified, err := verifier.VerifyV3(raw, nonce, repo)
+	verified, err := verifier.VerifyV3(raw, nonce, Pin{Repo: repo})
 	require.NoError(t, err)
 
 	var own, other measurement.Expected
@@ -104,12 +104,12 @@ func TestLivePinsForTheOtherPlatformReject(t *testing.T) {
 	}
 	pinned, err := NewVerifier(WithPinnedRegisters(own))
 	require.NoError(t, err)
-	_, err = pinned.VerifyV3(raw, nonce, repo)
+	_, err = pinned.VerifyV3(raw, nonce, Pin{Repo: repo})
 	require.NoError(t, err)
 
 	pinned, err = NewVerifier(WithPinnedRegisters(other))
 	require.NoError(t, err)
-	_, err = pinned.VerifyV3(raw, nonce, repo)
+	_, err = pinned.VerifyV3(raw, nonce, Pin{Repo: repo})
 	var rejected *VerificationError
 	require.ErrorAs(t, err, &rejected)
 	require.Equal(t, LayerPolicy, rejected.Layer)
@@ -125,7 +125,7 @@ func TestVerifyV3RejectsBadRepo(t *testing.T) {
 		Data: []byte(`{"digest":"digest","sigstore_bundle":{}}`),
 	}}}, func([64]byte) (string, []byte, error) { return document.SEVSNPReportV1Format, []byte("quote"), nil })
 	require.NoError(t, err)
-	verified, err := v.VerifyV3(raw, nonce, "not a repo reference")
+	verified, err := v.VerifyV3(raw, nonce, Pin{Repo: "not a repo reference"})
 	require.Nil(t, verified)
 	var usage *UsageError
 	require.ErrorAs(t, err, &usage)
@@ -144,7 +144,7 @@ func TestNewIgnoresNilOption(t *testing.T) {
 func TestVerifyV3RejectsUnbuiltVerifier(t *testing.T) {
 	for name, v := range map[string]*Verifier{"nil": nil, "zero value": {}} {
 		t.Run(name, func(t *testing.T) {
-			verified, err := v.VerifyV3([]byte("{}"), make([]byte, 32), "org/repo")
+			verified, err := v.VerifyV3([]byte("{}"), make([]byte, 32), Pin{Repo: "org/repo"})
 			require.Nil(t, verified)
 			var usage *UsageError
 			require.ErrorAs(t, err, &usage)

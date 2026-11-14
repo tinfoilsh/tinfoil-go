@@ -81,7 +81,7 @@ func TestConformanceVectorsMatchTheAdapter(t *testing.T) {
 			at := vector.Input.VerificationTimeUnix
 			require.NotZero(t, at, "every full-verify vector is frozen")
 
-			payload, err := verifier.DangerousTestOnlyVerifyAt(doc, nonce, vector.Input.Repo, at)
+			payload, err := verifier.DangerousTestOnlyVerifyAt(doc, nonce, vector.Input.Repo, vector.Input.Repo, at)
 			if bindingRejectsAtExpiry[filepath.Base(file)] {
 				require.True(t, want.Accepted)
 				assert.ErrorContains(t, err, "freshness witnesses expired")
