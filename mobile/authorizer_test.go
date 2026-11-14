@@ -96,22 +96,24 @@ func TestAuthorizerRejectionPassesThrough(t *testing.T) {
 }
 
 // The checks a client makes before any I/O are reachable through the binding.
-func TestRepoChecksBeforeIO(t *testing.T) {
+func TestPinChecksBeforeIO(t *testing.T) {
 	authorized, err := NewVerifierWithConfigAuthorizer("", &recordingAuthorizer{})
 	require.NoError(t, err)
 	assert.True(t, authorized.CallerAuthorizesConfig())
-	assert.NoError(t, authorized.CheckRepoVerifiability(""))
-	requireUsageError(t, authorized.CheckRepoVerifiability("org/repo"), "config authorizer cannot authenticate")
+	assert.NoError(t, authorized.CheckPinVerifiability("", ""))
+	requireUsageError(t, authorized.CheckPinVerifiability("", "org/repo"), "config authorizer cannot authenticate")
 
 	embedded, err := NewVerifier(`{"embedded_config":{"name":"/org/project/v1","bytes":"` + b64(testConfig) + `"}}`)
 	require.NoError(t, err)
 	assert.True(t, embedded.CallerAuthorizesConfig())
-	assert.NoError(t, embedded.CheckRepoVerifiability("org/project@v1"))
-	requireUsageError(t, embedded.CheckRepoVerifiability("org/other"), "does not match")
+	assert.NoError(t, embedded.CheckPinVerifiability("", "org/project@v1"))
+	requireUsageError(t, embedded.CheckPinVerifiability("", "org/other"), "does not match")
 
 	defaults, err := NewVerifier("")
 	require.NoError(t, err)
 	assert.False(t, defaults.CallerAuthorizesConfig())
-	assert.NoError(t, defaults.CheckRepoVerifiability(routerRepo))
-	requireUsageError(t, defaults.CheckRepoVerifiability("not a reference"), "")
+	assert.NoError(t, defaults.CheckPinVerifiability(routerRepo, ""))
+	requireUsageError(t, defaults.CheckPinVerifiability("not a reference", ""), "")
+	requireUsageError(t, defaults.CheckPinVerifiability("", "not a reference"), "")
+	requireUsageError(t, embedded.CheckPinVerifiability("org/project", ""), "registry collateral only")
 }

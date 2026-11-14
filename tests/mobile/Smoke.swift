@@ -38,10 +38,10 @@ func checkMobileSurface() throws {
 
     // Checks a client makes before any I/O.
     let _: Bool = verifier.callerAuthorizesConfig()
-    try verifier.checkRepoVerifiability("org/repo")
+    try verifier.checkPinVerifiability("org/repo", project: "")
 
     // Verifying performs no I/O; it appraises the fetched bytes.
-    let payload: String = verifier.verify(Data(), nonce: nonce, repo: "org/repo", error: &error)
+    let payload: String = verifier.verify(Data(), nonce: nonce, repo: "org/repo", project: "", error: &error)
     if let error { throw error }
     _ = try decodeVerification(payload)
 

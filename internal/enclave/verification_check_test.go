@@ -13,7 +13,7 @@ import (
 
 func TestVerificationCheckSeesEveryVerification(t *testing.T) {
 	var checked []string
-	s, err := New(Config{Host: "enclave.example", Repo: "org/repo", VerificationCheck: func(v *verify.Verification) error {
+	s, err := New(Config{Host: "enclave.example", Pin: verify.Pin{Repo: "org/repo"}, VerificationCheck: func(v *verify.Verification) error {
 		checked = append(checked, v.CodeTag())
 		*v = verify.Verification{} // the check gets a copy
 		return nil
@@ -33,7 +33,7 @@ func TestVerificationCheckSeesEveryVerification(t *testing.T) {
 func TestVerificationCheckRejectsWithoutRetry(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		rejection := errors.New("unapproved release")
-		s, err := New(Config{Host: "enclave.example", Repo: "org/repo", VerificationCheck: func(*verify.Verification) error {
+		s, err := New(Config{Host: "enclave.example", Pin: verify.Pin{Repo: "org/repo"}, VerificationCheck: func(*verify.Verification) error {
 			return rejection
 		}})
 		require.NoError(t, err)
@@ -61,7 +61,7 @@ func TestSlowVerificationCheckFetchesFreshEvidence(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
 				var checks int
-				s, err := New(Config{Host: "enclave.example", Repo: "org/repo", VerificationCheck: func(*verify.Verification) error {
+				s, err := New(Config{Host: "enclave.example", Pin: verify.Pin{Repo: "org/repo"}, VerificationCheck: func(*verify.Verification) error {
 					checks++
 					if checks <= tc.slowCalls {
 						time.Sleep(2 * time.Minute) // outlasts the verification's deadline

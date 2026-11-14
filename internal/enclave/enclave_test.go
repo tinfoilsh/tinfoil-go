@@ -15,18 +15,18 @@ import (
 )
 
 func TestNewChecksConfig(t *testing.T) {
-	_, err := New(Config{Host: "enclave.example", Repo: "not a reference"})
+	_, err := New(Config{Host: "enclave.example", Pin: verify.Pin{Repo: "not a reference"}})
 	require.ErrorIs(t, err, errs.ErrConfiguration)
 	_, err = New(Config{Host: "enclave.example"})
 	require.NoError(t, err)
 	authorizer, err := verify.NewVerifier(verify.WithConfigAuthorizer(func(collateral.ConfigEndorsement) error { return nil }))
 	require.NoError(t, err)
-	_, err = New(Config{Host: "enclave.example", Repo: "org/repo", Verifier: authorizer})
+	_, err = New(Config{Host: "enclave.example", Pin: verify.Pin{Repo: "org/repo"}, Verifier: authorizer})
 	require.ErrorIs(t, err, errs.ErrConfiguration, "a config authorizer can't verify a repository pin")
 
 	v, err := verify.NewVerifier(verify.WithFreshnessMaxAge(time.Hour))
 	require.NoError(t, err)
-	s, err := New(Config{Host: "enclave.example", Relay: "relay.example", Repo: "org/repo", Verifier: v})
+	s, err := New(Config{Host: "enclave.example", Relay: "relay.example", Pin: verify.Pin{Repo: "org/repo"}, Verifier: v})
 	require.NoError(t, err)
 	require.Same(t, v, s.verifier, "enclaves share the caller's verifier")
 	require.Equal(t, "relay.example", s.relay)
@@ -47,14 +47,14 @@ func TestConfigRegistryIDRequiresRegistryEvidence(t *testing.T) {
 	} {
 		enclave, err := New(config)
 		require.NoError(t, err)
-		_, err = enclave.Verifier().VerifyV3(raw, nonce, "")
+		_, err = enclave.Verifier().VerifyV3(raw, nonce, verify.Pin{})
 		require.ErrorContains(t, err, "configured trust requires "+collateral.FormatV3)
 	}
 }
 
 func TestLiveVerify(t *testing.T) {
 	testutil.RequireLive(t, enclaveEnvVar, repoEnvVar)
-	client, err := New(Config{Host: os.Getenv(enclaveEnvVar), Repo: os.Getenv(repoEnvVar)})
+	client, err := New(Config{Host: os.Getenv(enclaveEnvVar), Pin: verify.Pin{Repo: os.Getenv(repoEnvVar)}})
 	require.NoError(t, err)
 	_, err = client.Verify()
 	assert.NoError(t, err)

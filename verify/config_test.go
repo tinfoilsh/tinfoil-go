@@ -39,7 +39,7 @@ func TestConfigTrustRequiresEndorsements(t *testing.T) {
 	nonce := make([]byte, document.NonceSize)
 	raw, err := document.Build(document.BuildInput{Nonce: nonce, CollateralFormat: collateral.FormatV3}, func([64]byte) (string, []byte, error) { return document.SEVSNPReportV1Format, []byte("quote"), nil })
 	require.NoError(t, err)
-	_, err = v.VerifyV3(raw, nonce, ref)
+	_, err = v.VerifyV3(raw, nonce, Pin{Project: ref})
 	require.ErrorIs(t, err, collateral.ErrNotFound)
 }
 
@@ -76,7 +76,7 @@ func TestDigestEndorsementBindsQuoteAndRuntimeWithoutConfig(t *testing.T) {
 	require.Equal(t, SourceEndorsement, refs.config.Source)
 	require.Equal(t, reference, refs.config.Reference)
 	require.Equal(t, f.Now.Add(v.freshnessMaxAge), refs.freshnessExpiresAt)
-	_, err = v.VerifyV3At(raw, nonce, "org/project@v1", f.Now)
+	_, err = v.VerifyV3At(raw, nonce, Pin{Project: "org/project@v1"}, f.Now)
 	requireRejectedAt(t, err, LayerQuote)
 	_, err = v.configReferences(doc, "org/other", f.Now)
 	require.ErrorContains(t, err, "pinned identity")
@@ -195,23 +195,39 @@ func TestConfigRegistryIDOptionsRejectAmbiguousTrust(t *testing.T) {
 	nonce := make([]byte, document.NonceSize)
 	raw, err := document.Build(document.BuildInput{Nonce: nonce, CollateralFormat: collateral.FormatV2}, func([64]byte) (string, []byte, error) { return document.SEVSNPReportV1Format, []byte("quote"), nil })
 	require.NoError(t, err)
-	_, err = v.VerifyV3(raw, nonce, "org/project")
+	_, err = v.VerifyV3(raw, nonce, Pin{Project: "org/project"})
 	require.ErrorContains(t, err, "configured trust requires")
 }
 
+// The document's collateral selects which half of the pin applies, and a pin
+// in one namespace never admits collateral from the other.
 func TestCollateralVersionSelectsVerification(t *testing.T) {
 	v, err := NewVerifier()
 	require.NoError(t, err)
 	nonce := make([]byte, document.NonceSize)
-	for _, tc := range []struct{ format, want string }{
-		{"", collateral.SigstoreCodeV1Format},
-		{collateral.FormatV2, collateral.SigstoreCodeV1Format},
-		{collateral.FormatV3, collateral.ConfigID},
+	const repositoryOnly, projectOnly = "only a GitHub repository is pinned", "no GitHub repository is pinned"
+	repo, project := Pin{Repo: "org/project"}, Pin{Project: "org/project"}
+	both := Pin{Repo: "org/project", Project: "org/project"}
+	for _, tc := range []struct {
+		name, format string
+		pin          Pin
+		want         string
+	}{
+		{"repository collateral, repository", collateral.FormatV2, repo, collateral.SigstoreCodeV1Format},
+		{"unversioned collateral, repository", "", repo, collateral.SigstoreCodeV1Format},
+		{"repository collateral, project", collateral.FormatV2, project, projectOnly},
+		{"unversioned collateral, project", "", project, projectOnly},
+		{"repository collateral, no pin", collateral.FormatV2, Pin{}, projectOnly},
+		{"repository collateral, both", collateral.FormatV2, both, collateral.SigstoreCodeV1Format},
+		{"registry collateral, project", collateral.FormatV3, project, collateral.ConfigID},
+		{"registry collateral, repository", collateral.FormatV3, repo, repositoryOnly},
+		{"registry collateral, no pin", collateral.FormatV3, Pin{}, collateral.ConfigID},
+		{"registry collateral, both", collateral.FormatV3, both, collateral.ConfigID},
 	} {
-		t.Run(tc.format, func(t *testing.T) {
+		t.Run(tc.name, func(t *testing.T) {
 			raw, err := document.Build(document.BuildInput{Nonce: nonce, CollateralFormat: tc.format}, func([64]byte) (string, []byte, error) { return document.SEVSNPReportV1Format, []byte("quote"), nil })
 			require.NoError(t, err)
-			_, err = v.VerifyV3(raw, nonce, "org/project")
+			_, err = v.VerifyV3(raw, nonce, tc.pin)
 			require.ErrorContains(t, err, tc.want)
 			requireRejectedAt(t, err, LayerProvenance)
 		})
@@ -227,11 +243,11 @@ func TestConfigReferencePins(t *testing.T) {
 	const repo = "org/project"
 	digest := strings.Repeat("ab", sha256.Size)
 	for _, ref := range []string{"", repo, repo + "@v1", repo + "@sha256:" + digest, repo + "@v1@sha256:" + digest} {
-		_, err := v.VerifyV3(raw, nonce, ref)
+		_, err := v.VerifyV3(raw, nonce, Pin{Project: ref})
 		require.ErrorIs(t, err, collateral.ErrNotFound, "valid pins must reach endorsement verification")
 	}
 	for _, ref := range []string{"/org/project", "Org/project", "org/project_name", "org/project@v1/path", "org/project@sha256:bad", "org/project@v1@v2"} {
-		_, err := v.VerifyV3(raw, nonce, ref)
+		_, err := v.VerifyV3(raw, nonce, Pin{Project: ref})
 		var usage *UsageError
 		require.ErrorAs(t, err, &usage, ref)
 	}

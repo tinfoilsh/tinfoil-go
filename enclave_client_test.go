@@ -44,20 +44,21 @@ func TestNewEnclaveHTTPClientRejectsInvalidOptions(t *testing.T) {
 		return nil, errors.New("no network in this test")
 	})
 	for name, tc := range map[string]struct {
-		host, repo string
-		opts       *EnclaveOptions
+		host string
+		pin  Pin
+		opts *EnclaveOptions
 	}{
-		"no host":                                 {"", "org/repo", nil},
-		"unknown transport mode":                  {"enclave.example", "org/repo", &EnclaveOptions{TransportMode: "quic"}},
-		"plaintext remote proxy":                  {"enclave.example", "org/repo", &EnclaveOptions{TransportMode: TransportModeEHBP, BaseURL: "http://proxy.example/v1/"}},
-		"TLS through a loopback proxy":            {"enclave.example", "org/repo", &EnclaveOptions{BaseURL: "http://localhost:8080/v1/"}},
-		"relative base URL":                       {"enclave.example", "org/repo", &EnclaveOptions{BaseURL: "/v1/"}},
-		"TLS through a proxy":                     {"enclave.example", "org/repo", &EnclaveOptions{BaseURL: "https://proxy.example/v1/"}},
-		"invalid repository":                      {"enclave.example", "not a reference", nil},
-		"config authorizer with a repository pin": {"enclave.example", "org/repo", &EnclaveOptions{Verifier: callerAuthorizedVerifier(t)}},
+		"no host":                                 {"", Pin{Repo: "org/repo"}, nil},
+		"unknown transport mode":                  {"enclave.example", Pin{Repo: "org/repo"}, &EnclaveOptions{TransportMode: "quic"}},
+		"plaintext remote proxy":                  {"enclave.example", Pin{Repo: "org/repo"}, &EnclaveOptions{TransportMode: TransportModeEHBP, BaseURL: "http://proxy.example/v1/"}},
+		"TLS through a loopback proxy":            {"enclave.example", Pin{Repo: "org/repo"}, &EnclaveOptions{BaseURL: "http://localhost:8080/v1/"}},
+		"relative base URL":                       {"enclave.example", Pin{Repo: "org/repo"}, &EnclaveOptions{BaseURL: "/v1/"}},
+		"TLS through a proxy":                     {"enclave.example", Pin{Repo: "org/repo"}, &EnclaveOptions{BaseURL: "https://proxy.example/v1/"}},
+		"invalid repository":                      {"enclave.example", Pin{Repo: "not a reference"}, nil},
+		"config authorizer with a repository pin": {"enclave.example", Pin{Repo: "org/repo"}, &EnclaveOptions{Verifier: callerAuthorizedVerifier(t)}},
 	} {
 		t.Run(name, func(t *testing.T) {
-			c, err := NewEnclaveHTTPClient(t.Context(), tc.host, tc.repo, tc.opts)
+			c, err := NewEnclaveHTTPClient(t.Context(), tc.host, tc.pin, tc.opts)
 			require.Nil(t, c)
 			require.ErrorIs(t, err, ErrConfiguration)
 		})
@@ -85,7 +86,7 @@ func TestConstructorsVerifyBeforeReturning(t *testing.T) {
 			return seen
 		}
 
-		enclaveClient, err := NewEnclaveHTTPClient(context.Background(), "enclave.example", "org/repo", nil)
+		enclaveClient, err := NewEnclaveHTTPClient(context.Background(), "enclave.example", Pin{Repo: "org/repo"}, nil)
 		require.Nil(t, enclaveClient)
 		require.ErrorIs(t, err, unreachable)
 		require.Contains(t, hosts(), "enclave.example", "the enclave is verified before the client is returned")
@@ -131,21 +132,21 @@ func requireEmptyDir(t *testing.T, dir string) {
 
 func TestNewEnclaveHTTPClientResolvesNoCacheSecret(t *testing.T) {
 	home := emptyHome(t)
-	_, err := unverifiedEnclaveHTTPClient("enclave.example", "org/repo", nil)
+	_, err := unverifiedEnclaveHTTPClient("enclave.example", Pin{Repo: "org/repo"}, nil)
 	require.NoError(t, err)
 	requireEmptyDir(t, home)
 }
 
 func TestEnclaveHTTPClientReportsItsEnclaveAndRepo(t *testing.T) {
 	repo := "org/repo@v1@sha256:" + strings.Repeat("a", 64)
-	c, err := unverifiedEnclaveHTTPClient("enclave.example:8443", repo, &EnclaveOptions{TransportMode: TransportModeEHBP, BaseURL: "https://proxy.example/v1/"})
+	c, err := unverifiedEnclaveHTTPClient("enclave.example:8443", Pin{Repo: repo}, &EnclaveOptions{TransportMode: TransportModeEHBP, BaseURL: "https://proxy.example/v1/"})
 	require.NoError(t, err)
 	require.Equal(t, "enclave.example:8443", c.Enclave(), "the enclave, not the proxy")
-	require.Equal(t, repo, c.Repo(), "with its pins")
+	require.Equal(t, Pin{Repo: repo}, c.Pin(), "with its pins")
 
-	authorized, err := unverifiedEnclaveHTTPClient("enclave.example", "", &EnclaveOptions{Verifier: callerAuthorizedVerifier(t)})
+	authorized, err := unverifiedEnclaveHTTPClient("enclave.example", Pin{}, &EnclaveOptions{Verifier: callerAuthorizedVerifier(t)})
 	require.NoError(t, err)
-	require.Empty(t, authorized.Repo())
+	require.Empty(t, authorized.Pin())
 }
 
 func TestTransportModeDefaultsToTLS(t *testing.T) {
@@ -194,13 +195,13 @@ func TestEnclaveHTTPClientUsesItsTransportMode(t *testing.T) {
 			req.Header.Set("Upgrade", "websocket")
 			return req
 		}
-		sealed, err := unverifiedEnclaveHTTPClient("enclave.example", "org/repo", &EnclaveOptions{TransportMode: TransportModeEHBP})
+		sealed, err := unverifiedEnclaveHTTPClient("enclave.example", Pin{Repo: "org/repo"}, &EnclaveOptions{TransportMode: TransportModeEHBP})
 		require.NoError(t, err)
 		_, err = sealed.Do(upgrade())
 		require.ErrorContains(t, err, "EHBP seals only request and response bodies")
 		require.Zero(t, fetches, "EHBP refuses an upgrade before verifying")
 
-		pinned, err := unverifiedEnclaveHTTPClient("enclave.example", "org/repo", nil)
+		pinned, err := unverifiedEnclaveHTTPClient("enclave.example", Pin{Repo: "org/repo"}, nil)
 		require.NoError(t, err)
 		_, err = pinned.Do(upgrade())
 		require.Error(t, err)
@@ -262,7 +263,7 @@ func TestLiveRouterClient(t *testing.T) {
 			require.NoError(t, err)
 			require.Equal(t, verified.FreshnessExpiresAt(), c.Current().FreshnessExpiresAt(), "a valid verification is reused")
 			require.Equal(t, "https://"+c.Enclave()+"/", c.BaseURL(), "Enclave is the router discovery chose")
-			require.Equal(t, "tinfoilsh/confidential-model-router", c.Repo())
+			require.Equal(t, Pin{Repo: "tinfoilsh/confidential-model-router", Project: "tinfoilsh/confidential-model-router"}, c.Pin())
 
 			completion, err := oc.Chat.Completions.New(context.Background(), openai.ChatCompletionNewParams{
 				Model:    "llama3-3-70b",
@@ -284,7 +285,7 @@ func TestLiveRouterClient(t *testing.T) {
 
 func TestLiveNewEnclaveHTTPClient(t *testing.T) {
 	testutil.RequireLive(t, "TINFOIL_ENCLAVE", "TINFOIL_REPO")
-	c, err := NewEnclaveHTTPClient(context.Background(), os.Getenv("TINFOIL_ENCLAVE"), os.Getenv("TINFOIL_REPO"), &EnclaveOptions{UserCacheSecret: "go-live-integration-cache-secret"})
+	c, err := NewEnclaveHTTPClient(context.Background(), os.Getenv("TINFOIL_ENCLAVE"), Pin{Repo: os.Getenv("TINFOIL_REPO")}, &EnclaveOptions{UserCacheSecret: "go-live-integration-cache-secret"})
 	require.NoError(t, err)
 	require.NotNil(t, c.Current(), "the client is verified when it's returned")
 	before, err := c.EnsureVerified(context.Background())
@@ -333,7 +334,7 @@ func TestLiveVerificationCheck(t *testing.T) {
 
 	t.Run("an explicit enclave is rejected once", func(t *testing.T) {
 		check, keys := recorder(func(int) bool { return true })
-		c, err := NewEnclaveHTTPClient(context.Background(), os.Getenv("TINFOIL_ENCLAVE"), os.Getenv("TINFOIL_REPO"), &EnclaveOptions{VerificationCheck: check})
+		c, err := NewEnclaveHTTPClient(context.Background(), os.Getenv("TINFOIL_ENCLAVE"), Pin{Repo: os.Getenv("TINFOIL_REPO")}, &EnclaveOptions{VerificationCheck: check})
 		require.Nil(t, c, "a rejected enclave fails the constructor")
 		require.ErrorIs(t, err, rejection)
 		require.ErrorIs(t, err, ErrAttestation)
@@ -446,7 +447,7 @@ func TestBaseURLRefusesUserInfoQueryAndFragment(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			requireRefused(t, validateBaseURL(baseURL))
 			for _, mode := range []TransportMode{TransportModeEHBP, TransportModeTLS} {
-				c, err := NewEnclaveHTTPClient(t.Context(), "proxy.example", "org/repo", &EnclaveOptions{TransportMode: mode, BaseURL: baseURL})
+				c, err := NewEnclaveHTTPClient(t.Context(), "proxy.example", Pin{Repo: "org/repo"}, &EnclaveOptions{TransportMode: mode, BaseURL: baseURL})
 				require.Nil(t, c)
 				requireRefused(t, err)
 				r, err := NewRouterHTTPClient(t.Context(), &RouterOptions{TransportMode: mode, BaseURL: baseURL})
@@ -462,11 +463,11 @@ func TestBaseURLRefusesUserInfoQueryAndFragment(t *testing.T) {
 
 func TestBaseURLWithAPathIsAccepted(t *testing.T) {
 	for _, baseURL := range []string{"https://proxy.example/custom/v1/", "http://localhost:8080/custom/v1/"} {
-		c, err := unverifiedEnclaveHTTPClient("enclave.example", "org/repo", &EnclaveOptions{TransportMode: TransportModeEHBP, BaseURL: baseURL})
+		c, err := unverifiedEnclaveHTTPClient("enclave.example", Pin{Repo: "org/repo"}, &EnclaveOptions{TransportMode: TransportModeEHBP, BaseURL: baseURL})
 		require.NoError(t, err, baseURL)
 		require.Equal(t, baseURL, c.BaseURL())
 	}
-	c, err := unverifiedEnclaveHTTPClient("enclave.example", "org/repo", &EnclaveOptions{BaseURL: "https://enclave.example/custom/v1/"})
+	c, err := unverifiedEnclaveHTTPClient("enclave.example", Pin{Repo: "org/repo"}, &EnclaveOptions{BaseURL: "https://enclave.example/custom/v1/"})
 	require.NoError(t, err, "a TLS base URL on the enclave's origin may carry a path")
 	require.Equal(t, "https://enclave.example/custom/v1/", c.BaseURL())
 	gw, err := unverifiedGatewayHTTPClient(&GatewayOptions{URL: "https://gateway.example/custom/v1/", Catalog: func() Catalog { return Catalog{} }})
@@ -475,7 +476,7 @@ func TestBaseURLWithAPathIsAccepted(t *testing.T) {
 }
 
 func TestLoopbackProxyAuthorizesOnlyItsOrigin(t *testing.T) {
-	c, err := unverifiedEnclaveHTTPClient("enclave.example", "org/repo", &EnclaveOptions{TransportMode: TransportModeEHBP, BaseURL: "http://localhost:8080/v1/"})
+	c, err := unverifiedEnclaveHTTPClient("enclave.example", Pin{Repo: "org/repo"}, &EnclaveOptions{TransportMode: TransportModeEHBP, BaseURL: "http://localhost:8080/v1/"})
 	require.NoError(t, err)
 	require.Equal(t, "http://localhost:8080/v1/", c.BaseURL())
 	for _, target := range []string{
@@ -549,7 +550,7 @@ func TestEnclaveChainStacksEveryLayer(t *testing.T) {
 
 func TestEnclaveHTTPClientRefusesOtherOrigins(t *testing.T) {
 	for _, mode := range []TransportMode{TransportModeTLS, TransportModeEHBP} {
-		c, err := unverifiedEnclaveHTTPClient("enclave.example", "org/repo", &EnclaveOptions{TransportMode: mode})
+		c, err := unverifiedEnclaveHTTPClient("enclave.example", Pin{Repo: "org/repo"}, &EnclaveOptions{TransportMode: mode})
 		require.NoError(t, err)
 		_, err = c.Get("https://elsewhere.example/v1/models")
 		require.ErrorIs(t, err, ErrConfiguration, "refused before verifying, so no network I/O")
