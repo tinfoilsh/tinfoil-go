@@ -32,7 +32,7 @@ func newEndorsementVerifier(trust root.TrustedMaterial, keys []crypto.PublicKey)
 	if len(keys) == 0 {
 		return nil, fmt.Errorf("at least one independently trusted signing key is required")
 	}
-	v := &endorsementVerifier{trust: timestampMaterial{trust}, keys: make(map[string]*root.ExpiringKey, len(keys))}
+	v := &endorsementVerifier{trust: trust, keys: make(map[string]*root.ExpiringKey, len(keys))}
 	for _, key := range keys {
 		hint, err := statement.KeyHint(key)
 		if err != nil {
