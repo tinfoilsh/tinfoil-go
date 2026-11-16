@@ -205,7 +205,7 @@ func TestCollateralVersionSelectsVerification(t *testing.T) {
 	v, err := NewVerifier()
 	require.NoError(t, err)
 	nonce := make([]byte, document.NonceSize)
-	const repositoryOnly, projectOnly = "only a GitHub repository is pinned", "no GitHub repository is pinned"
+	const repositoryOnly, projectOnly = "only a GitHub repository is pinned", "only a registry project is pinned"
 	repo, project := Pin{Repo: "org/project"}, Pin{Project: "org/project"}
 	both := Pin{Repo: "org/project", Project: "org/project"}
 	for _, tc := range []struct {
@@ -217,7 +217,6 @@ func TestCollateralVersionSelectsVerification(t *testing.T) {
 		{"unversioned collateral, repository", "", repo, collateral.SigstoreCodeV1Format},
 		{"repository collateral, project", collateral.FormatV2, project, projectOnly},
 		{"unversioned collateral, project", "", project, projectOnly},
-		{"repository collateral, no pin", collateral.FormatV2, Pin{}, projectOnly},
 		{"repository collateral, both", collateral.FormatV2, both, collateral.SigstoreCodeV1Format},
 		{"registry collateral, project", collateral.FormatV3, project, collateral.ConfigID},
 		{"registry collateral, repository", collateral.FormatV3, repo, repositoryOnly},

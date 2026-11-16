@@ -137,7 +137,7 @@ func TestLiveVerify(t *testing.T) {
 	require.NoError(t, err)
 	verifier, err := NewVerifier("")
 	require.NoError(t, err)
-	payload, err := verifier.Verify(doc, nonce, routerRepo, "")
+	payload, err := verifier.Verify(doc, nonce, routerRepo, routerRepo)
 	require.NoError(t, err)
 
 	var got verificationJSON

@@ -274,8 +274,8 @@ func (v *Verifier) verifyV3(docBytes, nonce []byte, pin Pin, now time.Time) (*Ve
 		}
 		refs, err = v.configReferences(doc, pin.Project, now)
 	case collateral.FormatV2:
-		if pin.Repo == "" && !v.requiresConfigCollateral() {
-			return nil, LayerProvenance, fmt.Errorf("document carries GitHub repository collateral, but no GitHub repository is pinned")
+		if pin.Repo == "" && pin.Project != "" && !v.requiresConfigCollateral() {
+			return nil, LayerProvenance, fmt.Errorf("document carries GitHub repository collateral, but only a registry project is pinned")
 		}
 		refs, err = v.codeReferences(doc, pin.Repo, now)
 	default:

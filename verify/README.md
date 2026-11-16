@@ -91,7 +91,7 @@ The nonce and the pin are caller-owned expectations; the document cannot
 supply either. A pin names the workload in one namespace: `Repo` is a GitHub
 repository and is satisfied only by that repository's signed release, and
 `Project` is a config registry project and is satisfied only by a registry
-approval. The same name can belong to different owners in each, so set the one
+approval of it, or by a matching config the caller embedded. The same name can belong to different owners in each, so set the one
 the enclave is published under; setting both accepts either. After success, bind service traffic to the
 returned TLS/HPKE material and stop authorizing new requests at
 `FreshnessExpiresAt()`. This package takes no connection state; to pin
