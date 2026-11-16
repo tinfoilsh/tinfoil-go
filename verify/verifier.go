@@ -144,7 +144,8 @@ type Pin struct {
 	Repo string
 	// Project is a config registry project,
 	// org/project[@revision][@sha256:digest]. Only a document carrying a
-	// registry approval of that project satisfies it.
+	// registry approval of that project, or a matching config the caller
+	// embedded, satisfies it.
 	Project string
 }
 
