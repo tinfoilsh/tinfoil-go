@@ -229,14 +229,6 @@ func (v *Verifier) verifyV3(docBytes, nonce []byte, pin Pin, now time.Time) (*Ve
 	if now.IsZero() {
 		return nil, "", &UsageError{Err: fmt.Errorf("verification time must not be zero")}
 	}
-	doc, err := document.Parse(docBytes, nonce)
-	if errors.Is(err, document.ErrInvalidInput) {
-		return nil, LayerEnvelope, &UsageError{Err: err}
-	}
-	if err != nil {
-		return nil, LayerEnvelope, err
-	}
-
 	// A malformed pin is a usage error for any document.
 	if pin.Repo != "" {
 		if _, err := endorsement.ParseReference(pin.Repo); err != nil {
@@ -245,6 +237,13 @@ func (v *Verifier) verifyV3(docBytes, nonce []byte, pin Pin, now time.Time) (*Ve
 	}
 	if _, err := v.referencePins(pin.Project); err != nil {
 		return nil, LayerProvenance, err
+	}
+	doc, err := document.Parse(docBytes, nonce)
+	if errors.Is(err, document.ErrInvalidInput) {
+		return nil, LayerEnvelope, &UsageError{Err: err}
+	}
+	if err != nil {
+		return nil, LayerEnvelope, err
 	}
 
 	// Reference values and CPU evidence are appraised against the same instant.
