@@ -63,10 +63,9 @@ func TestPublicInputErrors(t *testing.T) {
 	require.NoError(t, err)
 	_, err = verifier.VerifyV3(nil, nil, verify.Pin{})
 	require.ErrorAs(t, err, &usage)
-	require.ErrorContains(t, err, "pin names nothing")
 	_, err = verifier.VerifyV3(nil, nil, verify.Pin{Repo: "org/repo"})
 	require.ErrorAs(t, err, &usage)
-	_, err = tinfoil.NewEnclaveHTTPClient(t.Context(), "", tinfoil.Pin{Unpinned: true}, nil)
+	_, err = tinfoil.NewEnclaveHTTPClient(t.Context(), "", tinfoil.Pin{}, nil)
 	require.ErrorIs(t, err, tinfoil.ErrConfiguration, "reject a missing enclave before fetching")
 	for _, repo := range []string{"owner", "owner/repo/extra", "owner/repo@sha256:bad"} {
 		_, err = tinfoil.NewEnclaveHTTPClient(t.Context(), "enclave.example", tinfoil.Pin{Repo: repo}, nil)

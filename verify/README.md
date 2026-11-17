@@ -90,8 +90,8 @@ if err != nil {
 The nonce and the pin are caller-owned expectations; the document cannot
 supply either. `Repo` pins a GitHub repository and `Project` a config registry
 project; neither is satisfied by the other's collateral, and setting both
-accepts either. `verify.Pin{Unpinned: true}` accepts any config the verifier's
-trust authorizes; a pin that names nothing is an error. After success, bind service traffic to the
+accepts either. An empty pin is a usage error unless the verifier configures
+its own config trust. After success, bind service traffic to the
 returned TLS/HPKE material and stop authorizing new requests at
 `FreshnessExpiresAt()`. This package takes no connection state; to pin
 your own TLS connection, compare `CertPubkeyFP` of the presented leaf with
