@@ -62,8 +62,7 @@ type Input struct {
 	DocumentB64   string `json:"document_b64"`
 	NonceHex      string `json:"nonce_hex"`
 	Repo          string `json:"repo"`
-	// Project, when absent, takes Repo's value.
-	Project *string `json:"project,omitempty"`
+	Project       string `json:"project,omitempty"`
 
 	// v3-authenticate-approval: the key-signed bundle, the keys the adapter
 	// pins, and the SHA-256 a statement subject must carry.
@@ -190,7 +189,7 @@ func Run(stage string, in Input) (Output, int) {
 
 	switch stage {
 	case StageVerify:
-		return verifyFull(doc, nonce, in.Pin(), verifier, appraisal)
+		return verifyFull(doc, nonce, verify.Pin{Repo: in.Repo, Project: in.Project}, verifier, appraisal)
 	case StageCheckEnvelope:
 		if _, err := document.Parse(doc, nonce); err != nil {
 			return reject(stage, "ENVELOPE_REJECTED")
@@ -248,14 +247,6 @@ func Run(stage string, in Input) (Output, int) {
 	default:
 		return Output{Stage: stage}, ExitUnsupported
 	}
-}
-
-// Pin is the pin the input names.
-func (in Input) Pin() verify.Pin {
-	if in.Project == nil {
-		return verify.Pin{Repo: in.Repo, Project: in.Repo}
-	}
-	return verify.Pin{Repo: in.Repo, Project: *in.Project}
 }
 
 // verifyFull runs the whole flow through the verifier; the layer on its
