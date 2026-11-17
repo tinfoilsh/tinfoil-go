@@ -53,10 +53,8 @@ rejects the document at the provenance layer with the error's message.
 
 `Verifier.CheckPinVerifiability(repo, project)` returns the usage error that
 `Verify` would return for that pin whatever the document, so that a client can
-refuse a pin before fetching anything. `repo` is a GitHub repository and
-`project` a config registry project; either may be empty. It is not the whole
-check: registry collateral also requires the project to be a valid config
-identity, so `Verify` can still return a usage error for a pin that passed. `Verifier.CallerAuthorizesConfig()` reports a
+refuse a pin before fetching anything; either may be empty. `Verify` can still
+return a usage error for a pin that passed, once it has the document. `Verifier.CallerAuthorizesConfig()` reports a
 verifier that takes an embedded config or a config authorizer; such a verifier
 needs an explicit enclave and cannot be used to discover a router.
 

@@ -17,7 +17,7 @@ import (
 )
 
 var (
-	// The router is published under one name in both namespaces, each owned by Tinfoil.
+	// Tinfoil owns the router's name in both namespaces.
 	defaultRouterName = "tinfoilsh/confidential-model-router"
 	defaultRouterPin  = verify.Pin{Repo: defaultRouterName, Project: defaultRouterName}
 	defaultRouterURL  = "https://atc.tinfoil.sh/routers"

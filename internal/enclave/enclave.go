@@ -36,8 +36,7 @@ type Config struct {
 	// Relay, when set, is a host that fetches attestation from the enclave on
 	// the client's behalf.
 	Relay string
-	// Pin names the GitHub repository, the registry project, or both, that
-	// the enclave is verified against.
+	// Pin is what the enclave is verified against.
 	Pin verify.Pin
 	// Verifier is the policy, which several enclaves can share; nil selects the
 	// defaults, which accept public registry configs when Pin is empty.
@@ -59,8 +58,7 @@ type Enclave struct {
 	fetch func() (*verify.Verification, error)
 }
 
-// New checks c.Pin against the verifier's rules for a pin and does no network
-// I/O.
+// New checks c.Pin against the verifier's rules and does no network I/O.
 func New(c Config) (*Enclave, error) {
 	v := c.Verifier
 	if v == nil {
@@ -87,7 +85,7 @@ func (e *Enclave) Host() string {
 	return e.host
 }
 
-// Pin returns the trusted repository and registry project references, including version and digest pins.
+// Pin returns the pin the enclave is verified against.
 func (e *Enclave) Pin() verify.Pin {
 	return e.pin
 }

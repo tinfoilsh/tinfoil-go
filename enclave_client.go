@@ -86,8 +86,7 @@ type EnclaveHTTPClient struct {
 	attestedClient
 }
 
-// Pin names the workload an enclave is verified against: a GitHub repository,
-// a config registry project, or both.
+// Pin names the workload an enclave is verified against.
 type Pin = verify.Pin
 
 // NewEnclaveHTTPClient returns a client for the enclave at host, verified
@@ -205,9 +204,7 @@ func (c *attestedClient) Enclave() string {
 	return c.keyed.Enclave().Host()
 }
 
-// Pin returns the repository and registry project the enclave is verified
-// against, with any revision or digest pins. It is empty when the Verifier
-// option authorizes the config instead.
+// Pin returns the pin the enclave is verified against.
 func (c *attestedClient) Pin() Pin {
 	return c.keyed.Enclave().Pin()
 }

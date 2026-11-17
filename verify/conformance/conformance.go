@@ -62,8 +62,7 @@ type Input struct {
 	DocumentB64   string `json:"document_b64"`
 	NonceHex      string `json:"nonce_hex"`
 	Repo          string `json:"repo"`
-	// Project is absent in inputs that predate separate pins, where repo
-	// names the workload in either namespace.
+	// Project, when absent, takes Repo's value.
 	Project *string `json:"project,omitempty"`
 
 	// v3-authenticate-approval: the key-signed bundle, the keys the adapter

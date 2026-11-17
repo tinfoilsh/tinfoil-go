@@ -131,39 +131,23 @@ func ParseReference(ref string) (repo, tag, digest string, err error) {
 // FreshnessMaxAge reports the configured witness age bound.
 func (v *Verifier) FreshnessMaxAge() time.Duration { return v.freshnessMaxAge }
 
-// Pin names the workload a caller trusts and the namespace that vouches for
-// it. The two namespaces are unrelated: the same name can belong to different
-// owners in each, so a pin in one is never satisfied by the other.
-//
-// Setting both accepts a document that satisfies either. The zero Pin accepts
-// any config authorized by the verifier's registry trust, embedded config or
-// config authorizer.
+// Pin names the workload a caller trusts. Repo and Project are separate
+// namespaces with unrelated owners, so neither is satisfied by the other's
+// collateral. Setting both accepts either; the zero Pin accepts any config the
+// verifier's trust authorizes.
 type Pin struct {
-	// Repo is a GitHub repository, owner/name[@tag][@sha256:digest]. Only a
-	// document carrying that repository's signed release satisfies it.
+	// Repo is a GitHub repository, owner/name[@tag][@sha256:digest].
 	Repo string
-	// Project is a config registry project,
-	// org/project[@revision][@sha256:digest]. Only a document carrying a
-	// registry approval of that project, or a matching config the caller
-	// embedded, satisfies it.
+	// Project is a config registry project, org/project[@revision][@sha256:digest].
 	Project string
 }
 
-// CheckPinVerifiability reports whether v can verify an enclave against pin,
-// without a document or network I/O, so a caller can reject a pin before
-// fetching a document. It returns a UsageError when:
-//   - pin.Repo or pin.Project is nonempty and malformed;
-//   - pin.Repo is set alone and v verifies registry collateral only, through
-//     an embedded reference, explicit signing keys, registry IDs or a config
-//     authorizer;
-//   - pin.Project is set and v has a config authorizer, which can't
-//     authenticate a project pin;
-//   - v has an embedded config whose name or digest pin.Project doesn't match.
-//
-// VerifyV3 rejects every such pin, whatever the document. It can still reject
-// a pin that passes: registry collateral also requires the project and
-// revision to be valid config identity components, such as lowercase slugs,
-// and that check waits for the document.
+// CheckPinVerifiability reports, without a document or network I/O, a pin
+// that VerifyV3 rejects whatever the document: a malformed reference, a Repo
+// set alone when v verifies registry collateral only, or a Project that v's
+// config authorizer or embedded config cannot match. A pin that passes can
+// still be rejected once the document shows the project is not a valid config
+// identity.
 func (v *Verifier) CheckPinVerifiability(pin Pin) error {
 	if pin.Repo != "" {
 		if _, err := endorsement.ParseReference(pin.Repo); err != nil {
@@ -193,10 +177,7 @@ func (v *Verifier) PinnedRegisters() measurement.Expected {
 }
 
 // VerifyV3 appraises a nonce-bound v3 attestation document against pin. The
-// document's collateral decides which half of pin applies, and a document
-// whose collateral pin does not cover is rejected. An embedded config
-// authorizes its exact caller-supplied bytes, and a config authorizer owns
-// config authorization; both require an empty pin.Repo.
+// document's collateral decides which part of pin applies.
 //
 // The caller owns both expectations that cannot come from the document: the
 // nonce it generated, and any additional workload constraints.
@@ -256,7 +237,7 @@ func (v *Verifier) verifyV3(docBytes, nonce []byte, pin Pin, now time.Time) (*Ve
 		return nil, LayerEnvelope, err
 	}
 
-	// A malformed pin is the caller's mistake whichever collateral the document carries.
+	// A malformed pin is a usage error for any document.
 	if pin.Repo != "" {
 		if _, err := endorsement.ParseReference(pin.Repo); err != nil {
 			return nil, LayerProvenance, usageError(err)

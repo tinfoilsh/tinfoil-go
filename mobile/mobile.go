@@ -86,16 +86,9 @@ func newVerifier(optionsJSON string, authorizer ConfigAuthorizer) (_ *Verifier, 
 	return &Verifier{inner: inner}, nil
 }
 
-// CheckPinVerifiability reports, without a document or network I/O, whether
-// the verifier can verify an enclave against repo, a GitHub repository, and
-// project, a config registry project, so that a caller can refuse a pin before
-// fetching anything. Either may be empty. It returns a usage error for a
-// malformed reference, for a repo alone when the verifier's options verify
-// registry collateral only, for a project when a config authorizer is set, and
-// for a project that an embedded config's name or digest doesn't match. Verify
-// can still return a usage error for a pin that passes: registry collateral
-// also requires the project to be a valid config identity, which waits for the
-// document.
+// CheckPinVerifiability reports, without a document or network I/O, the usage
+// error Verify would return for repo and project whatever the document, so a
+// caller can refuse a pin before fetching. Either may be empty.
 func (v *Verifier) CheckPinVerifiability(repo, project string) error {
 	return toMobileError(v.inner.CheckPinVerifiability(verify.Pin{Repo: repo, Project: project}))
 }
@@ -109,13 +102,11 @@ func (v *Verifier) CallerAuthorizesConfig() bool {
 }
 
 // Verify appraises doc, the attestation document fetched with nonce, against
-// repo, a trusted GitHub owner/name[@tag][@sha256:digest] reference, and
-// project, a trusted registry org/project[@revision][@sha256:digest]
-// reference, and returns what it proved as the JSON described in
-// verification.go. Either may be empty; the document's collateral decides
-// which applies, and a repo is never satisfied by registry collateral or a
-// project by repository collateral. A result that can no longer authorize a
-// request is an error, as in the Go SDK.
+// repo, a GitHub owner/name[@tag][@sha256:digest], and project, a registry
+// org/project[@revision][@sha256:digest], and returns what it proved as the
+// JSON described in verification.go. Either may be empty; neither is satisfied
+// by the other's collateral. A result that can no longer authorize a request
+// is an error, as in the Go SDK.
 func (v *Verifier) Verify(doc, nonce []byte, repo, project string) (string, error) {
 	return v.verifyAt(doc, nonce, verify.Pin{Repo: repo, Project: project}, time.Now(), time.Now)
 }
