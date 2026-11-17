@@ -61,8 +61,9 @@ func TestPublicInputErrors(t *testing.T) {
 	var usage *verify.UsageError
 	verifier, err := verify.NewVerifier()
 	require.NoError(t, err)
-	_, err = verifier.VerifyV3(nil, nil, verify.Pin{Unpinned: true})
+	_, err = verifier.VerifyV3(nil, nil, verify.Pin{})
 	require.ErrorAs(t, err, &usage)
+	require.ErrorContains(t, err, "pin names nothing")
 	_, err = verifier.VerifyV3(nil, nil, verify.Pin{Repo: "org/repo"})
 	require.ErrorAs(t, err, &usage)
 	_, err = tinfoil.NewEnclaveHTTPClient(t.Context(), "", tinfoil.Pin{Unpinned: true}, nil)
