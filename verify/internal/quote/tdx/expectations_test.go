@@ -4,6 +4,7 @@ import (
 	"encoding/hex"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -90,6 +91,16 @@ func TestValidate(t *testing.T) {
 	}
 
 	require.NoError(t, assemble(matching).Validate(quote))
+
+	t.Run("debug", func(t *testing.T) {
+		attributes := slices.Clone(body.GetTdAttributes())
+		defer func() { body.TdAttributes = attributes }()
+		body.TdAttributes = slices.Clone(attributes)
+		body.TdAttributes[0] |= tdAttributesDebug
+		permissive := *matching
+		permissive.TDAttributes = hex.EncodeToString(body.TdAttributes)
+		require.ErrorContains(t, assemble(&permissive).Validate(quote), "debuggable", "no endorsed policy admits a debuggable TD")
+	})
 
 	for _, field := range []string{"mr_seam", "qe_vendor_id", "xfam", "td_attributes"} {
 		t.Run(field, func(t *testing.T) {
