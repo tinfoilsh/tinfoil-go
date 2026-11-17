@@ -85,7 +85,7 @@ func TestOpenAIClientsSendThroughTheirHTTPClient(t *testing.T) {
 }
 
 func TestOpenAIClientsRejectInvalidOptions(t *testing.T) {
-	enclave, err := NewEnclaveOpenAIClient(t.Context(), "", "org/repo", nil)
+	enclave, err := NewEnclaveOpenAIClient(t.Context(), "", Pin{Repo: "org/repo"}, nil)
 	require.Nil(t, enclave)
 	require.ErrorIs(t, err, ErrConfiguration)
 	router, err := NewRouterOpenAIClient(t.Context(), &RouterOptions{TransportMode: "quic"})

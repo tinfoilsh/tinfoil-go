@@ -62,7 +62,7 @@ func NewVerifier(optionsJSON string) (*Verifier, error) {
 // NewVerifierWithConfigAuthorizer builds a verifier as NewVerifier does, with
 // authorizer deciding which configs are authorized in place of their
 // endorsements. It conflicts with config_signing_keys_pem, config_registry_ids
-// and embedded_config, and a repo passed to Verify must then be empty.
+// and embedded_config, and a repo passed alone to Verify is then refused.
 func NewVerifierWithConfigAuthorizer(optionsJSON string, authorizer ConfigAuthorizer) (*Verifier, error) {
 	if authorizer == nil {
 		return nil, toMobileError(&verify.UsageError{Err: fmt.Errorf("config authorizer must not be nil")})
@@ -86,38 +86,36 @@ func newVerifier(optionsJSON string, authorizer ConfigAuthorizer) (_ *Verifier, 
 	return &Verifier{inner: inner}, nil
 }
 
-// CheckRepoVerifiability reports, without a document or network I/O, whether
-// the verifier can verify an enclave against repo, so that a caller can refuse
-// a pin before fetching anything. It returns a usage error for a malformed
-// repo, for any non-empty repo when a config authorizer is set, and for a repo
-// that an embedded config's name or digest doesn't match. Verify can still
-// return a usage error for a repo that passes: v3 collateral also requires the
-// repo to be a valid config identity, which waits for the document.
-func (v *Verifier) CheckRepoVerifiability(repo string) error {
-	return toMobileError(v.inner.CheckRepoVerifiability(repo))
+// CheckPinVerifiability reports, without a document or network I/O, the usage
+// error Verify would return for repo and project whatever the document, so a
+// caller can refuse a pin before fetching. Either may be empty.
+func (v *Verifier) CheckPinVerifiability(repo, project string) error {
+	return toMobileError(v.inner.CheckPinVerifiability(verify.Pin{Repo: repo, Project: project}))
 }
 
 // CallerAuthorizesConfig reports whether the caller supplies the config, with
 // an embedded config, or approves it, with a config authorizer, rather than a
-// repo pin authenticating it. Such a verifier needs an explicit enclave: it
+// pin authenticating it. Such a verifier needs an explicit enclave: it
 // cannot be used to discover a router.
 func (v *Verifier) CallerAuthorizesConfig() bool {
 	return v.inner.CallerAuthorizesConfig()
 }
 
 // Verify appraises doc, the attestation document fetched with nonce, against
-// repo, a trusted owner/name[@tag][@sha256:digest] reference, and returns what
-// it proved as the JSON described in verification.go. A result that can no
-// longer authorize a request is an error, as in the Go SDK.
-func (v *Verifier) Verify(doc, nonce []byte, repo string) (string, error) {
-	return v.verifyAt(doc, nonce, repo, time.Now(), time.Now)
+// repo, a GitHub owner/name[@tag][@sha256:digest], and project, a registry
+// org/project[@revision][@sha256:digest], and returns what it proved as the
+// JSON described in verification.go. Either may be empty; neither is satisfied
+// by the other's collateral. A result that can no longer authorize a request
+// is an error, as in the Go SDK.
+func (v *Verifier) Verify(doc, nonce []byte, repo, project string) (string, error) {
+	return v.verifyAt(doc, nonce, verify.Pin{Repo: repo, Project: project}, time.Now(), time.Now)
 }
 
 // verifyAt is Verify with the clocks given: the document is appraised at at,
 // and the result must still be fresh at now(), read once appraisal is done.
-func (v *Verifier) verifyAt(doc, nonce []byte, repo string, at time.Time, now func() time.Time) (_ string, err error) {
+func (v *Verifier) verifyAt(doc, nonce []byte, pin verify.Pin, at time.Time, now func() time.Time) (_ string, err error) {
 	defer func() { err = toMobileError(err) }()
-	verified, err := v.inner.VerifyV3At(doc, nonce, repo, at)
+	verified, err := v.inner.VerifyV3At(doc, nonce, pin, at)
 	if err != nil {
 		return "", err
 	}

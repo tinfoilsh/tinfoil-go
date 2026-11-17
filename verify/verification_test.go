@@ -38,7 +38,7 @@ func TestLiveVerificationRecordsRepoAndMetadata(t *testing.T) {
 	require.NoError(t, err)
 
 	before := time.Now()
-	verified, err := verifier.VerifyV3(raw, nonce, repo)
+	verified, err := verifier.VerifyV3(raw, nonce, Pin{Repo: repo})
 	after := time.Now()
 	require.NoError(t, err)
 	require.Equal(t, configRepo, verified.ConfigRepo())
@@ -48,7 +48,7 @@ func TestLiveVerificationRecordsRepoAndMetadata(t *testing.T) {
 
 	// A tag pin selects the release but is not part of the repository name.
 	require.NotEmpty(t, verified.CodeTag())
-	pinned, err := verifier.VerifyV3(raw, nonce, configRepo+"@"+verified.CodeTag())
+	pinned, err := verifier.VerifyV3(raw, nonce, Pin{Repo: configRepo + "@" + verified.CodeTag()})
 	require.NoError(t, err)
 	require.Equal(t, configRepo, pinned.ConfigRepo())
 }
@@ -79,11 +79,11 @@ func TestVerifyAppraisesCPUEvidenceAtTheVerificationInstant(t *testing.T) {
 
 	v, err := NewVerifier(WithEmbeddedReferences(embeddedInputs(t)))
 	require.NoError(t, err)
-	_, err = v.VerifyV3(raw, nonce, "")
+	_, err = v.VerifyV3(raw, nonce, Pin{})
 	requireRejectedAt(t, err, LayerQuote)
 	require.ErrorContains(t, err, "outside its validity window")
 
-	_, err = v.VerifyV3At(raw, nonce, "", appraisal)
+	_, err = v.VerifyV3At(raw, nonce, Pin{}, appraisal)
 	requireRejectedAt(t, err, LayerQuote)
 	require.ErrorContains(t, err, "must be exactly", "the CRL window passed at the caller's instant")
 }
@@ -92,12 +92,12 @@ func TestVerifyV3AtRequiresAnInstant(t *testing.T) {
 	v, err := NewVerifier(WithEmbeddedReferences(embeddedInputs(t)))
 	require.NoError(t, err)
 	raw, nonce, _ := embeddedDocument(t, collateral.FormatV3)
-	_, err = v.VerifyV3At(raw, nonce, "", time.Time{})
+	_, err = v.VerifyV3At(raw, nonce, Pin{}, time.Time{})
 	require.ErrorAs(t, err, new(*UsageError))
 	require.ErrorContains(t, err, "verification time must not be zero")
 
 	var unbuilt *Verifier
-	_, err = unbuilt.VerifyV3(raw, nonce, "")
+	_, err = unbuilt.VerifyV3(raw, nonce, Pin{})
 	require.ErrorAs(t, err, new(*UsageError))
 	require.ErrorContains(t, err, "verifier must be built with NewVerifier")
 }

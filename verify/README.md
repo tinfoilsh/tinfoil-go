@@ -81,14 +81,16 @@ verifier, err := verify.NewVerifier()
 if err != nil {
     return err
 }
-verified, err := verifier.VerifyV3(documentBytes, expectedNonce, trustedRepo)
+verified, err := verifier.VerifyV3(documentBytes, expectedNonce, verify.Pin{Project: trustedProject})
 if err != nil {
     return err
 }
 ```
 
-The nonce and the repository reference are caller-owned expectations; the
-document cannot supply either. After success, bind service traffic to the
+The nonce and the pin are caller-owned expectations; the document cannot
+supply either. `Repo` pins a GitHub repository and `Project` a config registry
+project; neither is satisfied by the other's collateral, and setting both
+accepts either. After success, bind service traffic to the
 returned TLS/HPKE material and stop authorizing new requests at
 `FreshnessExpiresAt()`. This package takes no connection state; to pin
 your own TLS connection, compare `CertPubkeyFP` of the presented leaf with

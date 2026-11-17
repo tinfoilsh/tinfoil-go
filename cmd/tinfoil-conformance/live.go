@@ -23,8 +23,9 @@ const stageLive = "live-verify"
 
 // liveRequest is the integration-lane stdin JSON (spec §7).
 type liveRequest struct {
-	Host string `json:"host"`
-	Repo string `json:"repo"`
+	Host    string `json:"host"`
+	Repo    string `json:"repo"`
+	Project string `json:"project,omitempty"`
 }
 
 // runLive verifies a live enclave through the SDK's production verifier —
@@ -35,7 +36,9 @@ type liveRequest struct {
 func runLive() int {
 	var req liveRequest
 	dec := json.NewDecoder(os.Stdin)
-	if err := dec.Decode(&req); err != nil || dec.Decode(new(any)) != io.EOF || req.Host == "" || req.Repo == "" {
+	malformed := dec.Decode(&req) != nil || dec.Decode(new(any)) != io.EOF || req.Host == ""
+	pin := verify.Pin{Repo: req.Repo, Project: req.Project}
+	if malformed || pin == (verify.Pin{}) {
 		writeJSON(conformance.Output{Stage: stageLive, Rejection: &conformance.Rejection{Code: "MALFORMED_INPUT"}})
 		return conformance.ExitMalformed
 	}
@@ -57,7 +60,7 @@ func runLive() int {
 		return conformance.ExitInternal
 	}
 
-	verified, err := v.VerifyV3(doc, nonce, req.Repo)
+	verified, err := v.VerifyV3(doc, nonce, pin)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "live verification: %v\n", err)
 		code, exit := conformance.RejectionCode(err)

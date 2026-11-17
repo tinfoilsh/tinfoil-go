@@ -25,7 +25,7 @@ func TestVerificationFetchStillTimesOut(t *testing.T) {
 			return nil, req.Context().Err()
 		})}
 		start := time.Now()
-		client, err := New(Config{Host: "enclave.example", Repo: "org/repo"})
+		client, err := New(Config{Host: "enclave.example", Pin: verify.Pin{Repo: "org/repo"}})
 		require.NoError(t, err)
 		_, err = client.Verify()
 		require.ErrorIs(t, err, context.DeadlineExceeded)
@@ -45,7 +45,7 @@ func TestRejectedDocumentIsAttestationError(t *testing.T) {
 			resp.Body = io.NopCloser(strings.NewReader("{}"))
 			return resp, nil
 		})}
-		client, err := New(Config{Host: "enclave.example", Repo: "org/repo"})
+		client, err := New(Config{Host: "enclave.example", Pin: verify.Pin{Repo: "org/repo"}})
 		require.NoError(t, err)
 		_, err = client.Verify()
 		require.ErrorIs(t, err, errs.ErrAttestation)

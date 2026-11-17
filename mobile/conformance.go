@@ -61,7 +61,7 @@ func NewDangerousTestOnlyVerifier(rootsJSON string) (_ *Verifier, err error) {
 
 // DangerousTestOnlyVerifyAt is Verify with the appraisal clock set to
 // unixSeconds, so that a frozen document replays at its capture time.
-func (v *Verifier) DangerousTestOnlyVerifyAt(doc, nonce []byte, repo string, unixSeconds int64) (string, error) {
+func (v *Verifier) DangerousTestOnlyVerifyAt(doc, nonce []byte, repo, project string, unixSeconds int64) (string, error) {
 	at := time.Unix(unixSeconds, 0)
-	return v.verifyAt(doc, nonce, repo, at, func() time.Time { return at })
+	return v.verifyAt(doc, nonce, verify.Pin{Repo: repo, Project: project}, at, func() time.Time { return at })
 }

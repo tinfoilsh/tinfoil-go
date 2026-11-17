@@ -71,7 +71,7 @@ func TestLiveClientFetchRouters(t *testing.T) {
 
 func TestLiveClientFallbackEnclave(t *testing.T) {
 	testutil.RequireLive(t)
-	defaultClient, err := enclave.New(enclave.Config{Host: "inference.tinfoil.sh", Repo: defaultRouterRepo})
+	defaultClient, err := enclave.New(enclave.Config{Host: "inference.tinfoil.sh", Pin: defaultRouterPin})
 	require.NoError(t, err)
 	_, err = defaultClient.Verify()
 	assert.NoError(t, err)

@@ -12,6 +12,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/tinfoilsh/tinfoil-go/internal/enclave"
 	"github.com/tinfoilsh/tinfoil-go/internal/testutil"
+	"github.com/tinfoilsh/tinfoil-go/verify"
 )
 
 const (
@@ -47,7 +48,7 @@ func TestLiveBasicChatCompletion(t *testing.T) {
 	host, repo, apiKey := os.Getenv(enclaveEnvVar), os.Getenv(repoEnvVar), os.Getenv(apiKeyEnvVar)
 
 	// Name the enclave to verify
-	e, err := enclave.New(enclave.Config{Host: host, Repo: repo})
+	e, err := enclave.New(enclave.Config{Host: host, Pin: verify.Pin{Repo: repo}})
 	require.NoError(t, err)
 
 	// Prepare chat completion request

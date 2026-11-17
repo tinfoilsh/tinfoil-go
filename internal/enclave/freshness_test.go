@@ -20,7 +20,7 @@ func verifyDocument(raw, nonce []byte, repo string, opts ...verify.Option) (*ver
 	if err != nil {
 		return nil, err
 	}
-	return verifier.VerifyV3(raw, nonce, repo)
+	return verifier.VerifyV3(raw, nonce, verify.Pin{Repo: repo})
 }
 
 func TestLiveVerifyRegisterPins(t *testing.T) {
@@ -45,7 +45,7 @@ func TestLiveVerifyRegisterPins(t *testing.T) {
 	require.ErrorAs(t, err, &rejected)
 	v, err := verify.NewVerifier(verify.WithPinnedRegisters(badPins), verify.WithFreshnessMaxAge(maxAge))
 	require.NoError(t, err)
-	s, err := New(Config{Host: host, Repo: repo, Verifier: v})
+	s, err := New(Config{Host: host, Pin: verify.Pin{Repo: repo}, Verifier: v})
 	require.NoError(t, err)
 	_, err = s.Verify()
 	require.ErrorIs(t, err, errs.ErrAttestation)

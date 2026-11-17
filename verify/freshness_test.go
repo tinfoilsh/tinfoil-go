@@ -56,16 +56,16 @@ func TestLiveArchivedVerification(t *testing.T) {
 	require.NoError(t, err)
 	defaults, err := NewVerifier()
 	require.NoError(t, err)
-	want, err := defaults.VerifyV3(raw, nonce, repo)
+	want, err := defaults.VerifyV3(raw, nonce, Pin{Repo: repo})
 	require.NoError(t, err)
 	require.False(t, want.FreshnessExpiresAt().IsZero())
 	verifiedAt := want.Metadata().VerifiedAt
-	got, err := defaults.VerifyV3At(raw, nonce, repo, verifiedAt)
+	got, err := defaults.VerifyV3At(raw, nonce, Pin{Repo: repo}, verifiedAt)
 	require.NoError(t, err)
 	require.Equal(t, want, got)
-	_, err = defaults.VerifyV3At(raw, nonce, repo, want.FreshnessExpiresAt().Add(-time.Nanosecond))
+	_, err = defaults.VerifyV3At(raw, nonce, Pin{Repo: repo}, want.FreshnessExpiresAt().Add(-time.Nanosecond))
 	require.NoError(t, err)
-	_, err = defaults.VerifyV3At(raw, nonce, repo, want.FreshnessExpiresAt().Add(time.Second))
+	_, err = defaults.VerifyV3At(raw, nonce, Pin{Repo: repo}, want.FreshnessExpiresAt().Add(time.Second))
 	var expired *VerificationError
 	require.ErrorAs(t, err, &expired)
 	require.Contains(t, []Layer{LayerProvenance, LayerQuote}, expired.Layer)
@@ -108,19 +108,19 @@ func TestLiveArchivedVerification(t *testing.T) {
 			}
 			bounded, err := NewVerifier(WithFreshnessMaxAge(tt.maxAge))
 			require.NoError(t, err)
-			_, err = bounded.VerifyV3At(modified, nonce, repo, verifiedAt)
+			_, err = bounded.VerifyV3At(modified, nonce, Pin{Repo: repo}, verifiedAt)
 			require.ErrorContains(t, err, tt.wantError)
 		})
 	}
 
 	wrongNonce := slices.Clone(nonce)
 	wrongNonce[0] ^= 1
-	_, err = defaults.VerifyV3At(raw, wrongNonce, repo, verifiedAt)
+	_, err = defaults.VerifyV3At(raw, wrongNonce, Pin{Repo: repo}, verifiedAt)
 	require.ErrorContains(t, err, "challenge nonce does not match")
 	modified := editDocument(t, raw, func(doc map[string]any) {
 		doc["cpu_evidence"].(map[string]any)["report_base64"] = base64.StdEncoding.EncodeToString([]byte("invalid quote"))
 	})
-	got, err = defaults.VerifyV3At(modified, nonce, repo, verifiedAt)
+	got, err = defaults.VerifyV3At(modified, nonce, Pin{Repo: repo}, verifiedAt)
 	require.Error(t, err)
 	require.Nil(t, got)
 }
@@ -151,7 +151,7 @@ func TestLiveFreshnessWitnessExpiration(t *testing.T) {
 	require.NoError(t, err)
 	verifier, err := NewVerifier()
 	require.NoError(t, err)
-	verified, err := verifier.VerifyV3(raw, nonce, repo)
+	verified, err := verifier.VerifyV3(raw, nonce, Pin{Repo: repo})
 	require.NoError(t, err)
 	doc, err := document.Parse(raw, nonce)
 	require.NoError(t, err)
@@ -194,7 +194,7 @@ func TestLiveFreshnessWitnessExpiration(t *testing.T) {
 	for _, age := range []time.Duration{shortAge, maxAge} {
 		custom, err := NewVerifier(WithFreshnessMaxAge(age))
 		require.NoError(t, err)
-		got, err := custom.VerifyV3At(raw, nonce, repo, appraisalTime)
+		got, err := custom.VerifyV3At(raw, nonce, Pin{Repo: repo}, appraisalTime)
 		require.NoError(t, err)
 		require.Equal(t, validity.Earliest(firstWitness.Add(age), cpu.ExpiresAt), got.FreshnessExpiresAt())
 	}
