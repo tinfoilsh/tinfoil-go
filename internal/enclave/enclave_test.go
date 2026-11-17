@@ -18,6 +18,8 @@ func TestNewChecksConfig(t *testing.T) {
 	_, err := New(Config{Host: "enclave.example", Pin: verify.Pin{Repo: "not a reference"}})
 	require.ErrorIs(t, err, errs.ErrConfiguration)
 	_, err = New(Config{Host: "enclave.example"})
+	require.ErrorIs(t, err, errs.ErrConfiguration, "a pin that names nothing must say so")
+	_, err = New(Config{Host: "enclave.example", Pin: verify.Pin{Unpinned: true}})
 	require.NoError(t, err)
 	authorizer, err := verify.NewVerifier(verify.WithConfigAuthorizer(func(collateral.ConfigEndorsement) error { return nil }))
 	require.NoError(t, err)
@@ -42,12 +44,12 @@ func TestConfigRegistryIDRequiresRegistryEvidence(t *testing.T) {
 	})
 	require.NoError(t, err)
 	for _, config := range []Config{
-		{Host: "enclave.example", Verifier: verifier},
-		{Host: "other.example", Relay: "relay.example", Verifier: verifier},
+		{Host: "enclave.example", Pin: verify.Pin{Unpinned: true}, Verifier: verifier},
+		{Host: "other.example", Relay: "relay.example", Pin: verify.Pin{Unpinned: true}, Verifier: verifier},
 	} {
 		enclave, err := New(config)
 		require.NoError(t, err)
-		_, err = enclave.Verifier().VerifyV3(raw, nonce, verify.Pin{})
+		_, err = enclave.Verifier().VerifyV3(raw, nonce, verify.Pin{Unpinned: true})
 		require.ErrorContains(t, err, "configured trust requires "+collateral.FormatV3)
 	}
 }

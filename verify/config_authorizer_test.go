@@ -26,15 +26,17 @@ func TestCheckPinVerifiability(t *testing.T) {
 		{"defaults with a project", nil, Pin{Project: "org/repo@v1"}, true},
 		{"defaults with a repository", nil, Pin{Repo: "Org/My_Repo"}, true},
 		{"defaults with both", nil, Pin{Repo: "Org/My_Repo", Project: "org/project"}, true},
-		{"defaults without a pin", nil, Pin{}, true},
+		{"defaults without a pin", nil, Pin{Unpinned: true}, true},
+		{"a pin that names nothing", nil, Pin{}, false},
+		{"unpinned with a repository", nil, Pin{Repo: "org/repo", Unpinned: true}, false},
 		{"defaults with a malformed project", nil, Pin{Project: "not a reference"}, false},
 		{"defaults with a malformed repository", nil, Pin{Repo: "not a reference"}, false},
-		{"embedded config without a pin", []Option{WithEmbeddedReferences(inputs)}, Pin{}, true},
+		{"embedded config without a pin", []Option{WithEmbeddedReferences(inputs)}, Pin{Unpinned: true}, true},
 		{"embedded config with its own project", []Option{WithEmbeddedReferences(inputs)}, Pin{Project: "org/project@v1"}, true},
 		{"embedded config with another project", []Option{WithEmbeddedReferences(inputs)}, Pin{Project: "org/repo"}, false},
 		{"embedded config with a repository alone", []Option{WithEmbeddedReferences(inputs)}, Pin{Repo: "org/project"}, false},
 		{"embedded config with its own project and a repository", []Option{WithEmbeddedReferences(inputs)}, Pin{Repo: "org/project", Project: "org/project@v1"}, true},
-		{"config authorizer without a pin", []Option{authorize}, Pin{}, true},
+		{"config authorizer without a pin", []Option{authorize}, Pin{Unpinned: true}, true},
 		{"config authorizer with a project", []Option{authorize}, Pin{Project: "org/repo"}, false},
 		{"config authorizer with a repository", []Option{authorize}, Pin{Repo: "org/repo"}, false},
 	} {
@@ -96,7 +98,7 @@ func TestConfigAuthorizerErrorNeverChoosesTheType(t *testing.T) {
 	refused := &UsageError{Err: errors.New("config is not authorized")}
 	v, err := NewVerifier(WithEmbeddedReferences(inputs), WithConfigAuthorizer(func(collateral.ConfigEndorsement) error { return refused }))
 	require.NoError(t, err)
-	_, err = v.VerifyV3(raw, nonce, Pin{})
+	_, err = v.VerifyV3(raw, nonce, Pin{Unpinned: true})
 	var classified Error
 	require.ErrorAs(t, err, &classified)
 	require.IsType(t, &VerificationError{}, classified, "the outermost verify error is the type")
@@ -130,7 +132,7 @@ func TestConfigAuthorizerPreservesReferencesAndHardwareChecks(t *testing.T) {
 	require.Equal(t, &ConfigVerification{Source: SourcePolicy, Digest: fmt.Sprintf("%x", digest)}, refs.config)
 	_, err = v.configReferences(doc, "org/project", time.Now())
 	require.ErrorContains(t, err, "cannot authenticate repository")
-	result, err := v.VerifyV3(raw, nonce, Pin{})
+	result, err := v.VerifyV3(raw, nonce, Pin{Unpinned: true})
 	require.Nil(t, result)
 	requireRejectedAt(t, err, LayerQuote)
 

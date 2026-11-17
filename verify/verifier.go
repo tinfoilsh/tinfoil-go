@@ -133,13 +133,29 @@ func (v *Verifier) FreshnessMaxAge() time.Duration { return v.freshnessMaxAge }
 
 // Pin names the workload a caller trusts. Repo and Project are separate
 // namespaces with unrelated owners, so neither is satisfied by the other's
-// collateral. Setting both accepts either; the zero Pin accepts any config the
-// verifier's trust authorizes.
+// collateral. Setting both accepts either. A Pin must set Repo, Project or
+// Unpinned: the zero Pin is a UsageError.
 type Pin struct {
 	// Repo is a GitHub repository, owner/name[@tag][@sha256:digest].
 	Repo string
 	// Project is a config registry project, org/project[@revision][@sha256:digest].
 	Project string
+	// Unpinned accepts any config the verifier's trust authorizes. It
+	// excludes Repo and Project.
+	Unpinned bool
+}
+
+// check reports a pin that names nothing without saying so, or that is
+// unpinned and names something.
+func (p Pin) check() error {
+	named := p.Repo != "" || p.Project != ""
+	switch {
+	case p.Unpinned && named:
+		return usageError(fmt.Errorf("an unpinned pin cannot also name a repository or project"))
+	case !p.Unpinned && !named:
+		return usageError(fmt.Errorf("pin names nothing: set Repo, Project, or Unpinned to accept any authorized config"))
+	}
+	return nil
 }
 
 // CheckPinVerifiability reports, without a document or network I/O, a pin
@@ -149,6 +165,9 @@ type Pin struct {
 // still be rejected once the document shows the project is not a valid config
 // identity.
 func (v *Verifier) CheckPinVerifiability(pin Pin) error {
+	if err := pin.check(); err != nil {
+		return err
+	}
 	if pin.Repo != "" {
 		if _, err := endorsement.ParseReference(pin.Repo); err != nil {
 			return usageError(err)
@@ -230,6 +249,9 @@ func (v *Verifier) verifyV3(docBytes, nonce []byte, pin Pin, now time.Time) (*Ve
 		return nil, "", &UsageError{Err: fmt.Errorf("verification time must not be zero")}
 	}
 	// A malformed pin is a usage error for any document.
+	if err := pin.check(); err != nil {
+		return nil, LayerProvenance, err
+	}
 	if pin.Repo != "" {
 		if _, err := endorsement.ParseReference(pin.Repo); err != nil {
 			return nil, LayerProvenance, usageError(err)

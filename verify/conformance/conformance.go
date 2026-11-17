@@ -189,7 +189,7 @@ func Run(stage string, in Input) (Output, int) {
 
 	switch stage {
 	case StageVerify:
-		return verifyFull(doc, nonce, verify.Pin{Repo: in.Repo, Project: in.Project}, verifier, appraisal)
+		return verifyFull(doc, nonce, verify.Pin{Repo: in.Repo, Project: in.Project, Unpinned: in.Repo == "" && in.Project == ""}, verifier, appraisal)
 	case StageCheckEnvelope:
 		if _, err := document.Parse(doc, nonce); err != nil {
 			return reject(stage, "ENVELOPE_REJECTED")

@@ -144,9 +144,9 @@ func TestEnclaveHTTPClientReportsItsEnclaveAndRepo(t *testing.T) {
 	require.Equal(t, "enclave.example:8443", c.Enclave(), "the enclave, not the proxy")
 	require.Equal(t, Pin{Repo: repo}, c.Pin(), "with its pins")
 
-	authorized, err := unverifiedEnclaveHTTPClient("enclave.example", Pin{}, &EnclaveOptions{Verifier: callerAuthorizedVerifier(t)})
+	authorized, err := unverifiedEnclaveHTTPClient("enclave.example", Pin{Unpinned: true}, &EnclaveOptions{Verifier: callerAuthorizedVerifier(t)})
 	require.NoError(t, err)
-	require.Empty(t, authorized.Pin())
+	require.Equal(t, Pin{Unpinned: true}, authorized.Pin())
 }
 
 func TestTransportModeDefaultsToTLS(t *testing.T) {

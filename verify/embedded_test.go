@@ -86,7 +86,7 @@ func TestEmbeddedConfigReferenceWithoutConfigBytes(t *testing.T) {
 	v, err := NewVerifier(WithEmbeddedReferences(inputs))
 	require.NoError(t, err)
 	require.True(t, v.CallerAuthorizesConfig())
-	require.NoError(t, v.CheckPinVerifiability(Pin{}))
+	require.NoError(t, v.CheckPinVerifiability(Pin{Unpinned: true}))
 	require.NoError(t, v.CheckPinVerifiability(Pin{Project: "org/project@v1@sha256:" + reference.Digest}))
 	require.ErrorAs(t, v.CheckPinVerifiability(Pin{Project: "org/project@v2"}), new(*UsageError))
 	require.ErrorAs(t, v.CheckPinVerifiability(Pin{Project: "org/project@sha256:" + strings.Repeat("ab", sha256.Size)}), new(*UsageError))
@@ -97,7 +97,7 @@ func TestEmbeddedConfigReferenceWithoutConfigBytes(t *testing.T) {
 	require.Equal(t, runtime.Digest, refs.artifact.Digest)
 	_, err = v.VerifyV3(raw, nonce, Pin{Project: "org/project@v1"})
 	requireRejectedAt(t, err, LayerQuote)
-	_, err = v.VerifyV3(raw, nonce, Pin{})
+	_, err = v.VerifyV3(raw, nonce, Pin{Unpinned: true})
 	requireRejectedAt(t, err, LayerQuote)
 	for _, mutate := range []func(*EmbeddedConfigReference){
 		func(r *EmbeddedConfigReference) { r.Digest = "" },
@@ -154,7 +154,7 @@ func TestEmbeddedReferencesPreserveBindingsAndOwnTheirBytes(t *testing.T) {
 	result, err := v.VerifyV3(raw, nonce, Pin{Project: "org/project@v1"})
 	require.Nil(t, result)
 	requireRejectedAt(t, err, LayerQuote, "embedding must never bypass hardware authentication")
-	_, err = v.VerifyV3(raw, nonce, Pin{})
+	_, err = v.VerifyV3(raw, nonce, Pin{Unpinned: true})
 	requireRejectedAt(t, err, LayerQuote, "exact local bytes can identify a workload without a registry pin")
 }
 
@@ -182,7 +182,7 @@ func TestEmbeddedReferencesCannotOverridePins(t *testing.T) {
 	var usage *UsageError
 	require.ErrorAs(t, err, &usage)
 	require.ErrorContains(t, err, "does not match the caller's pins")
-	_, err = v.VerifyV3(raw, nonce, Pin{})
+	_, err = v.VerifyV3(raw, nonce, Pin{Unpinned: true})
 	requireRejectedAt(t, err, LayerQuote)
 }
 

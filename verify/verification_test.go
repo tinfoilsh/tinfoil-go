@@ -79,11 +79,11 @@ func TestVerifyAppraisesCPUEvidenceAtTheVerificationInstant(t *testing.T) {
 
 	v, err := NewVerifier(WithEmbeddedReferences(embeddedInputs(t)))
 	require.NoError(t, err)
-	_, err = v.VerifyV3(raw, nonce, Pin{})
+	_, err = v.VerifyV3(raw, nonce, Pin{Unpinned: true})
 	requireRejectedAt(t, err, LayerQuote)
 	require.ErrorContains(t, err, "outside its validity window")
 
-	_, err = v.VerifyV3At(raw, nonce, Pin{}, appraisal)
+	_, err = v.VerifyV3At(raw, nonce, Pin{Unpinned: true}, appraisal)
 	requireRejectedAt(t, err, LayerQuote)
 	require.ErrorContains(t, err, "must be exactly", "the CRL window passed at the caller's instant")
 }
@@ -92,12 +92,12 @@ func TestVerifyV3AtRequiresAnInstant(t *testing.T) {
 	v, err := NewVerifier(WithEmbeddedReferences(embeddedInputs(t)))
 	require.NoError(t, err)
 	raw, nonce, _ := embeddedDocument(t, collateral.FormatV3)
-	_, err = v.VerifyV3At(raw, nonce, Pin{}, time.Time{})
+	_, err = v.VerifyV3At(raw, nonce, Pin{Unpinned: true}, time.Time{})
 	require.ErrorAs(t, err, new(*UsageError))
 	require.ErrorContains(t, err, "verification time must not be zero")
 
 	var unbuilt *Verifier
-	_, err = unbuilt.VerifyV3(raw, nonce, Pin{})
+	_, err = unbuilt.VerifyV3(raw, nonce, Pin{Unpinned: true})
 	require.ErrorAs(t, err, new(*UsageError))
 	require.ErrorContains(t, err, "verifier must be built with NewVerifier")
 }

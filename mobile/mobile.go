@@ -88,9 +88,10 @@ func newVerifier(optionsJSON string, authorizer ConfigAuthorizer) (_ *Verifier, 
 
 // CheckPinVerifiability reports, without a document or network I/O, the usage
 // error Verify would return for repo and project whatever the document, so a
-// caller can refuse a pin before fetching. Either may be empty.
+// caller can refuse a pin before fetching. Either may be empty; both empty
+// ask for no pin.
 func (v *Verifier) CheckPinVerifiability(repo, project string) error {
-	return toMobileError(v.inner.CheckPinVerifiability(verify.Pin{Repo: repo, Project: project}))
+	return toMobileError(v.inner.CheckPinVerifiability(pinOf(repo, project)))
 }
 
 // CallerAuthorizesConfig reports whether the caller supplies the config, with
@@ -104,11 +105,17 @@ func (v *Verifier) CallerAuthorizesConfig() bool {
 // Verify appraises doc, the attestation document fetched with nonce, against
 // repo, a GitHub owner/name[@tag][@sha256:digest], and project, a registry
 // org/project[@revision][@sha256:digest], and returns what it proved as the
-// JSON described in verification.go. Either may be empty; neither is satisfied
+// JSON described in verification.go. Either may be empty, and both empty ask for no pin; neither is satisfied
 // by the other's collateral. A result that can no longer authorize a request
 // is an error, as in the Go SDK.
 func (v *Verifier) Verify(doc, nonce []byte, repo, project string) (string, error) {
-	return v.verifyAt(doc, nonce, verify.Pin{Repo: repo, Project: project}, time.Now(), time.Now)
+	return v.verifyAt(doc, nonce, pinOf(repo, project), time.Now(), time.Now)
+}
+
+// pinOf is the pin of a binding call, where two empty strings ask for no pin:
+// the Swift SDK makes its callers say so explicitly.
+func pinOf(repo, project string) verify.Pin {
+	return verify.Pin{Repo: repo, Project: project, Unpinned: repo == "" && project == ""}
 }
 
 // verifyAt is Verify with the clocks given: the document is appraised at at,

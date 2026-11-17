@@ -220,7 +220,7 @@ func TestCollateralVersionSelectsVerification(t *testing.T) {
 		{"repository collateral, both", collateral.FormatV2, both, collateral.SigstoreCodeV1Format},
 		{"registry collateral, project", collateral.FormatV3, project, collateral.ConfigID},
 		{"registry collateral, repository", collateral.FormatV3, repo, repositoryOnly},
-		{"registry collateral, no pin", collateral.FormatV3, Pin{}, collateral.ConfigID},
+		{"registry collateral, no pin", collateral.FormatV3, Pin{Unpinned: true}, collateral.ConfigID},
 		{"registry collateral, both", collateral.FormatV3, both, collateral.ConfigID},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -242,7 +242,7 @@ func TestConfigReferencePins(t *testing.T) {
 	const repo = "org/project"
 	digest := strings.Repeat("ab", sha256.Size)
 	for _, ref := range []string{"", repo, repo + "@v1", repo + "@sha256:" + digest, repo + "@v1@sha256:" + digest} {
-		_, err := v.VerifyV3(raw, nonce, Pin{Project: ref})
+		_, err := v.VerifyV3(raw, nonce, Pin{Project: ref, Unpinned: ref == ""})
 		require.ErrorIs(t, err, collateral.ErrNotFound, "valid pins must reach endorsement verification")
 	}
 	for _, ref := range []string{"/org/project", "Org/project", "org/project_name", "org/project@v1/path", "org/project@sha256:bad", "org/project@v1@v2"} {
