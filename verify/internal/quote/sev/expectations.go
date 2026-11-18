@@ -231,9 +231,12 @@ func options(p *policy.SEVSNPPolicy, productLine string) (*sevvalidate.Options, 
 
 func tcbParts(field, productLine string, t policy.TCB) (kds.TCBVersion, error) {
 	// Every level but the microcode's is seven bits wide.
-	for name, level := range map[string]*uint8{"fmc_spl": t.FmcSpl, "bl_spl": t.BlSpl, "tee_spl": t.TeeSpl, "snp_spl": t.SnpSpl} {
-		if level != nil && *level > maxSPL {
-			return nil, fmt.Errorf("%s: %s is %d, want at most %d", field, name, *level, maxSPL)
+	for _, level := range []struct {
+		name  string
+		value *uint8
+	}{{"fmc_spl", t.FmcSpl}, {"bl_spl", t.BlSpl}, {"tee_spl", t.TeeSpl}, {"snp_spl", t.SnpSpl}} {
+		if level.value != nil && *level.value > maxSPL {
+			return nil, fmt.Errorf("%s: %s is %d, want at most %d", field, level.name, *level.value, maxSPL)
 		}
 	}
 	switch productLine {
