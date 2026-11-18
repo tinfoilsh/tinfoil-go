@@ -2,6 +2,7 @@ package sev
 
 import (
 	"encoding/hex"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -189,6 +190,54 @@ func TestValidateBox2TurinAttestation(t *testing.T) {
 	require.NoError(t, expectations.Validate(q))
 	reportData[0] ^= 0xff
 	require.NoError(t, expectations.Validate(q), "caller mutation must not change assembled expectations")
+}
+
+func TestFirmwareFloorOrdersTheAPIVersionBeforeTheBuild(t *testing.T) {
+	reportRaw, err := sevtestdata.Box2TurinReport()
+	require.NoError(t, err)
+	report, err := sevabi.ReportToProto(reportRaw)
+	require.NoError(t, err)
+	vcek, err := sevtestdata.Box2TurinVcek()
+	require.NoError(t, err)
+	product, err := productFromReport(report)
+	require.NoError(t, err)
+	identity, err := Identity(report.GetChipId())
+	require.NoError(t, err)
+	q := &Quote{identity: identity, attestation: &sevsnp.Attestation{
+		Report: report, CertificateChain: &sevsnp.CertificateChain{VcekCert: vcek}, Product: product,
+	}}
+	var reportData [64]byte
+	copy(reportData[:], report.GetReportData())
+	_, endorsed, err := loadFixture(t).PolicyFor(identity, policy.PlatformSEVSNP)
+	require.NoError(t, err)
+
+	major, minor, build := report.GetCurrentMajor(), report.GetCurrentMinor(), report.GetCurrentBuild()
+	require.NotZero(t, minor, "the cases below need an earlier API version")
+	require.Less(t, build, uint32(255), "the cases below need a later build")
+	for _, tc := range []struct {
+		name         string
+		minor, build uint32
+		accepted     bool
+	}{
+		{"the report's own version", minor, build, true},
+		{"an earlier API version with a later build", minor - 1, 255, true},
+		{"the same API version with a later build", minor, build + 1, false},
+		{"a later API version with build zero", minor + 1, 0, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			p := *endorsed.SEVSNP
+			p.MinimumAPIVersion = fmt.Sprintf("%d.%d", major, tc.minor)
+			p.MinimumBuild = ptr(uint8(tc.build))
+			expectations, err := Assemble(&p, q, measurement.Register(report.GetMeasurement()), reportData)
+			require.NoError(t, err)
+			err = expectations.Validate(q)
+			if tc.accepted {
+				require.NoError(t, err)
+				return
+			}
+			require.ErrorContains(t, err, "is below the endorsed minimum")
+		})
+	}
 }
 
 func TestIdentity(t *testing.T) {
