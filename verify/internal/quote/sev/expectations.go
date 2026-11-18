@@ -21,6 +21,9 @@ const (
 	ProductTurin = "Turin"
 )
 
+// maxSPL is the highest value of a TCB level other than the microcode's.
+const maxSPL = 127
+
 // Expectations is the fully translated SEV-SNP expected state, resolved at
 // assembly so that validation performs no translation and no lookups. The
 // want* fields are compared by strict equality — the library options only
@@ -226,22 +229,23 @@ func options(p *policy.SEVSNPPolicy, productLine string) (*sevvalidate.Options, 
 	}, nil
 }
 
-func tcbParts(field, productLine string, t policy.TCB) (kds.TCBParts, error) {
-	var fmcSpl uint8
-	if t.FmcSpl != nil {
-		fmcSpl = *t.FmcSpl
+func tcbParts(field, productLine string, t policy.TCB) (kds.TCBVersion, error) {
+	// Every level but the microcode's is seven bits wide.
+	for _, level := range []struct {
+		name  string
+		value *uint8
+	}{{"fmc_spl", t.FmcSpl}, {"bl_spl", t.BlSpl}, {"tee_spl", t.TeeSpl}, {"snp_spl", t.SnpSpl}} {
+		if level.value != nil && *level.value > maxSPL {
+			return nil, fmt.Errorf("%s: %s is %d, want at most %d", field, level.name, *level.value, maxSPL)
+		}
 	}
-	parts, err := kds.NewTCBParts(productLine, kds.TCBParts{
-		FmcSpl:   fmcSpl,
-		BlSpl:    *t.BlSpl,
-		TeeSpl:   *t.TeeSpl,
-		SnpSpl:   *t.SnpSpl,
-		UcodeSpl: *t.UcodeSpl,
-	})
-	if err != nil {
-		return kds.TCBParts{}, fmt.Errorf("%s: %w", field, err)
+	switch productLine {
+	case ProductGenoa:
+		return kds.TCBVersionV0{BlSpl: *t.BlSpl, TeeSpl: *t.TeeSpl, SnpSpl: *t.SnpSpl, UcodeSpl: *t.UcodeSpl}, nil
+	case ProductTurin:
+		return kds.TCBVersionV1{FmcSpl: *t.FmcSpl, BlSpl: *t.BlSpl, TeeSpl: *t.TeeSpl, SnpSpl: *t.SnpSpl, UcodeSpl: *t.UcodeSpl}, nil
 	}
-	return parts, nil
+	return nil, fmt.Errorf("%s: unsupported SEV product line %q", field, productLine)
 }
 
 func parseVersion(name, v string) (uint16, error) {

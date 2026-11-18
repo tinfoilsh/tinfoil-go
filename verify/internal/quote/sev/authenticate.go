@@ -132,12 +132,21 @@ func productFromReport(report *sevsnp.Report) (*sevsnp.SevProduct, error) {
 	}
 	product := abi.SevProductFromCpuid1Eax(fms)
 	switch product.GetName() {
-	case sevsnp.SevProduct_SEV_PRODUCT_GENOA, sevsnp.SevProduct_SEV_PRODUCT_TURIN:
+	case sevsnp.SevProduct_SEV_PRODUCT_GENOA:
 		return product, nil
-	default:
-		return nil, fmt.Errorf("unsupported SEV product in report CPUID 0x%x", fms)
+	case sevsnp.SevProduct_SEV_PRODUCT_TURIN:
+		// The library takes every family 1Ah model 00h-1Fh for Turin; only
+		// model 02h is endorsed here.
+		if model := (fms>>16&0xf)<<4 | fms>>4&0xf; model == turinModel {
+			return product, nil
+		}
 	}
+	return nil, fmt.Errorf("unsupported SEV product in report CPUID 0x%x", fms)
 }
+
+// turinModel is the CPUID model, extended model included, of the Turin
+// processors whose reports are accepted.
+const turinModel = 0x02
 
 // Quote is a signature-verified SEV-SNP report, not yet compared against
 // any expected value.

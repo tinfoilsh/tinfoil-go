@@ -31,7 +31,7 @@ func TestVerifiedCertificateExpiry(t *testing.T) {
 			require.NoError(t, err)
 			builder := &sevtesting.AmdSignerBuilder{
 				ProductName:     kds.ProductName(sevabi.SevProductFromCpuid1Eax(report.Cpuid1EaxFms)),
-				TCB:             kds.TCBVersion(report.ReportedTcb),
+				TCB:             kds.DecomposeTCBVersionV1(report.ReportedTcb),
 				ArkCreationTime: now, AskCreationTime: now, AsvkCreationTime: now, VcekCreationTime: now, VlekCreationTime: now,
 				ArkCustom: sevtesting.CertOverride{KeyUsage: x509.KeyUsageCertSign | x509.KeyUsageCRLSign},
 			}

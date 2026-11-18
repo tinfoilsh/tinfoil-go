@@ -2,6 +2,7 @@ package sev
 
 import (
 	"encoding/hex"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -10,6 +11,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	sevabi "github.com/tinfoilsh/go-sev-guest/abi"
+	"github.com/tinfoilsh/go-sev-guest/kds"
 	"github.com/tinfoilsh/go-sev-guest/proto/sevsnp"
 
 	"github.com/tinfoilsh/tinfoil-go/verify/internal/policy"
@@ -41,9 +43,7 @@ func TestOptionsGenoa(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, uint8(21), opts.MinimumBuild)
 	assert.Equal(t, uint16(1<<8|55), opts.MinimumVersion)
-	assert.Equal(t, uint8(7), opts.MinimumTCB.BlSpl)
-	assert.Equal(t, uint8(14), opts.MinimumTCB.SnpSpl)
-	assert.Equal(t, uint8(72), opts.MinimumTCB.UcodeSpl)
+	assert.Equal(t, kds.TCBVersionV0{BlSpl: 7, SnpSpl: 14, UcodeSpl: 72}, opts.MinimumTCB)
 	assert.True(t, opts.GuestPolicy.SMT)
 	assert.False(t, opts.GuestPolicy.Debug)
 	require.NotNil(t, opts.PlatformInfo)
@@ -59,16 +59,10 @@ func TestOptionsTurin(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, uint8(0), opts.MinimumBuild)
 	assert.Equal(t, uint16(1<<8|58), opts.MinimumVersion)
-	assert.Equal(t, uint8(1), opts.MinimumTCB.FmcSpl)
-	assert.Equal(t, uint8(1), opts.MinimumTCB.BlSpl)
-	assert.Equal(t, uint8(1), opts.MinimumTCB.TeeSpl)
-	assert.Equal(t, uint8(4), opts.MinimumTCB.SnpSpl)
-	assert.Equal(t, uint8(82), opts.MinimumTCB.UcodeSpl)
+	assert.Equal(t, kds.TCBVersionV1{FmcSpl: 1, BlSpl: 1, TeeSpl: 1, SnpSpl: 4, UcodeSpl: 82}, opts.MinimumTCB)
 	require.NotNil(t, opts.PlatformInfo)
 	assert.True(t, opts.PlatformInfo.IOMMUWriteSafe)
-	tcb, err := opts.MinimumTCB.ToTCBVersionStruct()
-	require.NoError(t, err)
-	assert.Equal(t, uint64(0x5200000004010101), tcb.TCB)
+	assert.Equal(t, uint64(0x5200000004010101), opts.MinimumTCB.Uint64())
 }
 
 func TestOptionsPinnedFields(t *testing.T) {
@@ -189,6 +183,54 @@ func TestValidateBox2TurinAttestation(t *testing.T) {
 	require.NoError(t, expectations.Validate(q))
 	reportData[0] ^= 0xff
 	require.NoError(t, expectations.Validate(q), "caller mutation must not change assembled expectations")
+}
+
+func TestFirmwareFloorOrdersTheAPIVersionBeforeTheBuild(t *testing.T) {
+	reportRaw, err := sevtestdata.Box2TurinReport()
+	require.NoError(t, err)
+	report, err := sevabi.ReportToProto(reportRaw)
+	require.NoError(t, err)
+	vcek, err := sevtestdata.Box2TurinVcek()
+	require.NoError(t, err)
+	product, err := productFromReport(report)
+	require.NoError(t, err)
+	identity, err := Identity(report.GetChipId())
+	require.NoError(t, err)
+	q := &Quote{identity: identity, attestation: &sevsnp.Attestation{
+		Report: report, CertificateChain: &sevsnp.CertificateChain{VcekCert: vcek}, Product: product,
+	}}
+	var reportData [64]byte
+	copy(reportData[:], report.GetReportData())
+	_, endorsed, err := loadFixture(t).PolicyFor(identity, policy.PlatformSEVSNP)
+	require.NoError(t, err)
+
+	major, minor, build := report.GetCurrentMajor(), report.GetCurrentMinor(), report.GetCurrentBuild()
+	require.NotZero(t, minor, "the cases below need an earlier API version")
+	require.Less(t, build, uint32(255), "the cases below need a later build")
+	for _, tc := range []struct {
+		name         string
+		minor, build uint32
+		accepted     bool
+	}{
+		{"the report's own version", minor, build, true},
+		{"an earlier API version with a later build", minor - 1, 255, true},
+		{"the same API version with a later build", minor, build + 1, false},
+		{"a later API version with build zero", minor + 1, 0, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			p := *endorsed.SEVSNP
+			p.MinimumAPIVersion = fmt.Sprintf("%d.%d", major, tc.minor)
+			p.MinimumBuild = ptr(uint8(tc.build))
+			expectations, err := Assemble(&p, q, measurement.Register(report.GetMeasurement()), reportData)
+			require.NoError(t, err)
+			err = expectations.Validate(q)
+			if tc.accepted {
+				require.NoError(t, err)
+				return
+			}
+			require.ErrorContains(t, err, "is below the required minimum")
+		})
+	}
 }
 
 func TestIdentity(t *testing.T) {
