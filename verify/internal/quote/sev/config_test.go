@@ -82,4 +82,9 @@ func TestConfigBoundEnforcesConfigAndPlatformConstraints(t *testing.T) {
 	require.Error(t, legacy.Validate(q), "legacy guests reject SVN below their endorsed floor")
 	resolved.GuestPolicy.Debug = true
 	require.NoError(t, e.Validate(q), "assembled expectations must not alias the platform policy")
+
+	permissive, err := Assemble(&resolved, q, launch, reportData)
+	require.NoError(t, err)
+	report.Policy |= sevabi.SnpPolicyToBytes(sevabi.SnpPolicy{Debug: true})
+	require.ErrorContains(t, permissive.Validate(q), "debugged", "no endorsed policy admits a debuggable guest")
 }

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
+	configendorsement "github.com/tinfoilsh/tinfoil-go/endorsement/config"
 	"github.com/tinfoilsh/tinfoil-go/verify/document/collateral"
 	"github.com/tinfoilsh/tinfoil-go/verify/internal/endorsement"
 	"github.com/tinfoilsh/tinfoil-go/verify/internal/quote"
@@ -26,7 +27,8 @@ func TestCheckPinVerifiability(t *testing.T) {
 		{"defaults with a project", nil, Pin{Project: "org/repo@v1"}, true},
 		{"defaults with a repository", nil, Pin{Repo: "Org/My_Repo"}, true},
 		{"defaults with both", nil, Pin{Repo: "Org/My_Repo", Project: "org/project"}, true},
-		{"defaults without a pin", nil, Pin{}, true},
+		{"defaults without a pin", nil, Pin{}, false},
+		{"named registry without a pin", []Option{WithConfigRegistryIDs(configendorsement.PublicRegistryID)}, Pin{}, true},
 		{"defaults with a malformed project", nil, Pin{Project: "not a reference"}, false},
 		{"defaults with a malformed repository", nil, Pin{Repo: "not a reference"}, false},
 		{"embedded config without a pin", []Option{WithEmbeddedReferences(inputs)}, Pin{}, true},

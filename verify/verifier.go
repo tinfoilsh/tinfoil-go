@@ -133,8 +133,8 @@ func (v *Verifier) FreshnessMaxAge() time.Duration { return v.freshnessMaxAge }
 
 // Pin names the workload a caller trusts. Repo and Project are separate
 // namespaces with unrelated owners, so neither is satisfied by the other's
-// collateral. Setting both accepts either; the zero Pin accepts any config the
-// verifier's trust authorizes.
+// collateral. Setting both accepts either. The zero Pin accepts any config the
+// verifier's trust authorizes, and is a UsageError under default config trust.
 type Pin struct {
 	// Repo is a GitHub repository, owner/name[@tag][@sha256:digest].
 	Repo string
@@ -143,12 +143,16 @@ type Pin struct {
 }
 
 // CheckPinVerifiability reports, without a document or network I/O, a pin
-// that VerifyV3 rejects whatever the document: a malformed reference, a Repo
+// that VerifyV3 rejects whatever the document: one that names nothing under
+// default config trust, a malformed reference, a Repo
 // set alone when v verifies registry collateral only, or a Project that v's
 // config authorizer or embedded config cannot match. A pin that passes can
 // still be rejected once the document shows the project is not a valid config
 // identity.
 func (v *Verifier) CheckPinVerifiability(pin Pin) error {
+	if err := v.requirePin(pin); err != nil {
+		return err
+	}
 	if pin.Repo != "" {
 		if _, err := endorsement.ParseReference(pin.Repo); err != nil {
 			return usageError(err)
@@ -159,6 +163,15 @@ func (v *Verifier) CheckPinVerifiability(pin Pin) error {
 	}
 	_, err := v.referencePins(pin.Project)
 	return err
+}
+
+// requirePin reports a pin that names nothing while v uses default config
+// trust, which would accept any config in the public registry.
+func (v *Verifier) requirePin(pin Pin) error {
+	if pin != (Pin{}) || v.embedded.ConfigReference != nil || v.configAuthorizer != nil || v.configKeys != nil || v.configRegistryIDs != nil {
+		return nil
+	}
+	return usageError(fmt.Errorf("pin names nothing: set Repo or Project, or configure the verifier's config trust"))
 }
 
 // CallerAuthorizesConfig reports whether the caller supplies the config, with
@@ -230,6 +243,9 @@ func (v *Verifier) verifyV3(docBytes, nonce []byte, pin Pin, now time.Time) (*Ve
 		return nil, "", &UsageError{Err: fmt.Errorf("verification time must not be zero")}
 	}
 	// A malformed pin is a usage error for any document.
+	if err := v.requirePin(pin); err != nil {
+		return nil, LayerProvenance, err
+	}
 	if pin.Repo != "" {
 		if _, err := endorsement.ParseReference(pin.Repo); err != nil {
 			return nil, LayerProvenance, usageError(err)

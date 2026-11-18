@@ -65,6 +65,10 @@ func (e *Expectations) Validate(q *Quote) (err error) {
 	if err != nil {
 		return fmt.Errorf("parsing report guest policy: %w", err)
 	}
+	// Refused whatever the endorsed policy says.
+	if gotPolicy.Debug {
+		return fmt.Errorf("SEV report allows the guest to be debugged")
+	}
 	wantPolicy := e.wantGuestPolicy
 	// ABI major/minor are a version floor (minimum_abi_version), enforced
 	// by the library's guest-policy comparison, not exact bits.

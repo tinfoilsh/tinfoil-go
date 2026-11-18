@@ -18,7 +18,7 @@ func TestNewChecksConfig(t *testing.T) {
 	_, err := New(Config{Host: "enclave.example", Pin: verify.Pin{Repo: "not a reference"}})
 	require.ErrorIs(t, err, errs.ErrConfiguration)
 	_, err = New(Config{Host: "enclave.example"})
-	require.NoError(t, err)
+	require.ErrorIs(t, err, errs.ErrConfiguration, "default trust needs a pin")
 	authorizer, err := verify.NewVerifier(verify.WithConfigAuthorizer(func(collateral.ConfigEndorsement) error { return nil }))
 	require.NoError(t, err)
 	_, err = New(Config{Host: "enclave.example", Pin: verify.Pin{Repo: "org/repo"}, Verifier: authorizer})

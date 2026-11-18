@@ -10,6 +10,9 @@ import (
 	"github.com/tinfoilsh/tinfoil-go/verify/measurement"
 )
 
+// tdAttributesDebug is the DEBUG bit of TDATTRIBUTES, in its first byte.
+const tdAttributesDebug = 1 << 0
+
 // Expectations is the fully translated TDX expected state, resolved at
 // assembly so that validation performs no translation and no lookups. The
 // collateral floor is separate because it is not a quote field.
@@ -39,6 +42,10 @@ func Assemble(p *policy.TDXPolicy, q *Quote, m measurement.TDX, reportData [64]b
 // library validation options plus the collateral floor. It is the only TDX
 // enforcement entry point, so no subset of the policy can be applied.
 func (e *Expectations) Validate(q *Quote) (err error) {
+	// Refused whatever the endorsed policy says.
+	if attributes := q.quote.GetTdQuoteBody().GetTdAttributes(); len(attributes) > 0 && attributes[0]&tdAttributesDebug != 0 {
+		return fmt.Errorf("TD quote reports a debuggable TD")
+	}
 	if err := tdxvalidate.TdxQuote(q.quote, e.opts); err != nil {
 		return err
 	}
