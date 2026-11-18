@@ -14,7 +14,7 @@ require (
 	github.com/sigstore/sigstore-go v1.2.2
 	github.com/stretchr/testify v1.11.1
 	github.com/tinfoilsh/encrypted-http-body-protocol v0.6.0
-	github.com/tinfoilsh/go-sev-guest v0.0.0-20260818055935-bec7bdb637fd
+	github.com/tinfoilsh/go-sev-guest v0.0.0-20261118195115-3791fa1c00a6
 	github.com/transparency-dev/formats v0.1.1
 	github.com/transparency-dev/merkle v0.0.2
 	golang.org/x/mod v0.42.0

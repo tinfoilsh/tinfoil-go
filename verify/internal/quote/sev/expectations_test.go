@@ -11,6 +11,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	sevabi "github.com/tinfoilsh/go-sev-guest/abi"
+	"github.com/tinfoilsh/go-sev-guest/kds"
 	"github.com/tinfoilsh/go-sev-guest/proto/sevsnp"
 
 	"github.com/tinfoilsh/tinfoil-go/verify/internal/policy"
@@ -42,9 +43,7 @@ func TestOptionsGenoa(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, uint8(21), opts.MinimumBuild)
 	assert.Equal(t, uint16(1<<8|55), opts.MinimumVersion)
-	assert.Equal(t, uint8(7), opts.MinimumTCB.BlSpl)
-	assert.Equal(t, uint8(14), opts.MinimumTCB.SnpSpl)
-	assert.Equal(t, uint8(72), opts.MinimumTCB.UcodeSpl)
+	assert.Equal(t, kds.TCBVersionV0{BlSpl: 7, SnpSpl: 14, UcodeSpl: 72}, opts.MinimumTCB)
 	assert.True(t, opts.GuestPolicy.SMT)
 	assert.False(t, opts.GuestPolicy.Debug)
 	require.NotNil(t, opts.PlatformInfo)
@@ -60,16 +59,10 @@ func TestOptionsTurin(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, uint8(0), opts.MinimumBuild)
 	assert.Equal(t, uint16(1<<8|58), opts.MinimumVersion)
-	assert.Equal(t, uint8(1), opts.MinimumTCB.FmcSpl)
-	assert.Equal(t, uint8(1), opts.MinimumTCB.BlSpl)
-	assert.Equal(t, uint8(1), opts.MinimumTCB.TeeSpl)
-	assert.Equal(t, uint8(4), opts.MinimumTCB.SnpSpl)
-	assert.Equal(t, uint8(82), opts.MinimumTCB.UcodeSpl)
+	assert.Equal(t, kds.TCBVersionV1{FmcSpl: 1, BlSpl: 1, TeeSpl: 1, SnpSpl: 4, UcodeSpl: 82}, opts.MinimumTCB)
 	require.NotNil(t, opts.PlatformInfo)
 	assert.True(t, opts.PlatformInfo.IOMMUWriteSafe)
-	tcb, err := opts.MinimumTCB.ToTCBVersionStruct()
-	require.NoError(t, err)
-	assert.Equal(t, uint64(0x5200000004010101), tcb.TCB)
+	assert.Equal(t, uint64(0x5200000004010101), opts.MinimumTCB.Uint64())
 }
 
 func TestOptionsPinnedFields(t *testing.T) {
@@ -235,7 +228,7 @@ func TestFirmwareFloorOrdersTheAPIVersionBeforeTheBuild(t *testing.T) {
 				require.NoError(t, err)
 				return
 			}
-			require.ErrorContains(t, err, "is below the endorsed minimum")
+			require.ErrorContains(t, err, "is below the required minimum")
 		})
 	}
 }

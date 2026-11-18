@@ -21,6 +21,9 @@ const (
 	ProductTurin = "Turin"
 )
 
+// maxSPL is the highest value of a TCB level other than the microcode's.
+const maxSPL = 127
+
 // Expectations is the fully translated SEV-SNP expected state, resolved at
 // assembly so that validation performs no translation and no lookups. The
 // want* fields are compared by strict equality — the library options only
@@ -56,21 +59,11 @@ func Assemble(p *policy.SEVSNPPolicy, q *Quote, launch measurement.Register, rep
 // the only SEV enforcement entry point, so no subset of the policy can be
 // applied.
 func (e *Expectations) Validate(q *Quote) (err error) {
-	// The library compares the firmware build without the API version, so
-	// the floor is checked below as one ordered version.
-	opts := *e.opts
-	opts.MinimumBuild, opts.MinimumVersion = 0, 0
-	if err := sevvalidate.SnpAttestation(q.attestation, &opts); err != nil {
+	if err := sevvalidate.SnpAttestation(q.attestation, e.opts); err != nil {
 		return err
 	}
 
 	report := q.attestation.GetReport()
-	minimum := firmwareVersion(uint32(e.opts.MinimumVersion>>8), uint32(e.opts.MinimumVersion&0xff), uint32(e.opts.MinimumBuild))
-	if firmwareVersion(report.GetCurrentMajor(), report.GetCurrentMinor(), report.GetCurrentBuild()) < minimum {
-		return fmt.Errorf("firmware version %d.%d build %d is below the endorsed minimum %d.%d build %d",
-			report.GetCurrentMajor(), report.GetCurrentMinor(), report.GetCurrentBuild(),
-			e.opts.MinimumVersion>>8, e.opts.MinimumVersion&0xff, e.opts.MinimumBuild)
-	}
 	gotPolicy, err := sevabi.ParseSnpPolicy(report.GetPolicy())
 	if err != nil {
 		return fmt.Errorf("parsing report guest policy: %w", err)
@@ -97,12 +90,6 @@ func (e *Expectations) Validate(q *Quote) (err error) {
 	}
 
 	return checkSigner(report)
-}
-
-// firmwareVersion orders SEV firmware as AMD numbers it: API major, then
-// minor, then the build within that API version. Each part is one byte.
-func firmwareVersion(major, minor, build uint32) uint32 {
-	return major<<16 | minor<<8 | build
 }
 
 // checkSigner requires the report to be launched without an author key or
@@ -242,22 +229,20 @@ func options(p *policy.SEVSNPPolicy, productLine string) (*sevvalidate.Options, 
 	}, nil
 }
 
-func tcbParts(field, productLine string, t policy.TCB) (kds.TCBParts, error) {
-	var fmcSpl uint8
-	if t.FmcSpl != nil {
-		fmcSpl = *t.FmcSpl
+func tcbParts(field, productLine string, t policy.TCB) (kds.TCBVersion, error) {
+	// Every level but the microcode's is seven bits wide.
+	for name, level := range map[string]*uint8{"fmc_spl": t.FmcSpl, "bl_spl": t.BlSpl, "tee_spl": t.TeeSpl, "snp_spl": t.SnpSpl} {
+		if level != nil && *level > maxSPL {
+			return nil, fmt.Errorf("%s: %s is %d, want at most %d", field, name, *level, maxSPL)
+		}
 	}
-	parts, err := kds.NewTCBParts(productLine, kds.TCBParts{
-		FmcSpl:   fmcSpl,
-		BlSpl:    *t.BlSpl,
-		TeeSpl:   *t.TeeSpl,
-		SnpSpl:   *t.SnpSpl,
-		UcodeSpl: *t.UcodeSpl,
-	})
-	if err != nil {
-		return kds.TCBParts{}, fmt.Errorf("%s: %w", field, err)
+	switch productLine {
+	case ProductGenoa:
+		return kds.TCBVersionV0{BlSpl: *t.BlSpl, TeeSpl: *t.TeeSpl, SnpSpl: *t.SnpSpl, UcodeSpl: *t.UcodeSpl}, nil
+	case ProductTurin:
+		return kds.TCBVersionV1{FmcSpl: *t.FmcSpl, BlSpl: *t.BlSpl, TeeSpl: *t.TeeSpl, SnpSpl: *t.SnpSpl, UcodeSpl: *t.UcodeSpl}, nil
 	}
-	return parts, nil
+	return nil, fmt.Errorf("%s: unsupported SEV product line %q", field, productLine)
 }
 
 func parseVersion(name, v string) (uint16, error) {
