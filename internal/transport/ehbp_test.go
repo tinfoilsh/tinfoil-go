@@ -10,6 +10,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 	ehbpidentity "github.com/tinfoilsh/encrypted-http-body-protocol/identity"
+	ehbpprotocol "github.com/tinfoilsh/encrypted-http-body-protocol/protocol"
 	"github.com/tinfoilsh/tinfoil-go/internal/enclave"
 	"github.com/tinfoilsh/tinfoil-go/internal/errs"
 	"github.com/tinfoilsh/tinfoil-go/internal/verifytest"
@@ -137,4 +138,31 @@ func TestEHBPSendsOverNext(t *testing.T) {
 	require.NoError(t, err)
 	resp.Body.Close()
 	require.Equal(t, []string{"/v1/models"}, sent)
+}
+
+func TestEHBPRefusesARedirectToASealedRequest(t *testing.T) {
+	key := strings.Repeat("01", 32)
+	for _, status := range []int{http.StatusMultipleChoices, http.StatusSeeOther, http.StatusTemporaryRedirect} {
+		var sent []string
+		next := roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			sent = append(sent, req.Method+" "+req.URL.Path)
+			resp := testResponse()
+			if req.URL.Path != "/followed" {
+				resp.StatusCode = status
+				resp.Header = http.Header{"Location": {"/followed"}}
+				resp.Body = io.NopCloser(strings.NewReader("forged answer"))
+			}
+			return resp, nil
+		})
+		sealing := newTestTransport(t, testState(time.Now().Add(time.Hour), key), nil, ehbpMode{next: next})
+
+		// The default client follows redirects.
+		req := newRequest(t, http.MethodPost, "https://enclave.example/v1/chat/completions", strings.NewReader(`{"q":"secret"}`))
+		resp, err := (&http.Client{Transport: sealing}).Do(req)
+		if resp != nil {
+			resp.Body.Close()
+		}
+		require.Equal(t, ehbpprotocol.UnexpectedRedirect, ehbpprotocol.CodeOf(err), "status %d", status)
+		require.Equal(t, []string{"POST /v1/chat/completions"}, sent, "status %d", status)
+	}
 }
