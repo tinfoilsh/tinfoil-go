@@ -1,6 +1,8 @@
 # SDK build artifacts
 TinfoilGo.xcframework
 TinfoilGo.xcframework.zip
+TinfoilGo.aar
+TinfoilGo-sources.jar
 coverage.out
 .env
 
