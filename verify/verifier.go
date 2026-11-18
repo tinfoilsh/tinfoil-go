@@ -143,7 +143,8 @@ type Pin struct {
 }
 
 // CheckPinVerifiability reports, without a document or network I/O, a pin
-// that VerifyV3 rejects whatever the document: a malformed reference, a Repo
+// that VerifyV3 rejects whatever the document: one that names nothing under
+// default config trust, a malformed reference, a Repo
 // set alone when v verifies registry collateral only, or a Project that v's
 // config authorizer or embedded config cannot match. A pin that passes can
 // still be rejected once the document shows the project is not a valid config

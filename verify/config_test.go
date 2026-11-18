@@ -244,7 +244,7 @@ func TestConfigReferencePins(t *testing.T) {
 		_, err := v.VerifyV3(raw, nonce, Pin{Project: ref})
 		require.ErrorIs(t, err, collateral.ErrNotFound, "valid pins must reach endorsement verification")
 	}
-	for _, ref := range []string{"/org/project", "Org/project", "org/project_name", "org/project@v1/path", "org/project@sha256:bad", "org/project@v1@v2"} {
+	for _, ref := range []string{"", "/org/project", "Org/project", "org/project_name", "org/project@v1/path", "org/project@sha256:bad", "org/project@v1@v2"} {
 		_, err := v.VerifyV3(raw, nonce, Pin{Project: ref})
 		var usage *UsageError
 		require.ErrorAs(t, err, &usage, ref)
