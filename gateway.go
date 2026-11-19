@@ -17,14 +17,13 @@ const defaultGatewayURL = "https://inference-gateway.tinfoil.sh/v1/"
 
 // GatewayOptions configures a GatewayHTTPClient.
 type GatewayOptions struct {
-	// ModelPins pins models to repositories. With PinnedModelsOnly, only pinned
-	// models are served, which requires at least one pin.
-	ModelPins        map[string]ModelPin
-	PinnedModelsOnly bool
-	// Verifier is the policy for unpinned models; nil selects the defaults.
+	// ModelPins pins models to repositories. Only pinned models are served,
+	// so at least one pin is required.
+	ModelPins map[string]ModelPin
+	// Verifier is the policy for pins that set none; nil selects the defaults.
 	Verifier *verify.Verifier
 	// VerificationCheck is called with each replica's verification, as
-	// EnclaveOptions.VerificationCheck is, for pinned and unpinned models.
+	// EnclaveOptions.VerificationCheck is.
 	// A replica it rejects is skipped for the next replica of the model.
 	VerificationCheck func(v *verify.Verification) error
 	// UserCacheSecret is the default prompt-cache scope for the client's
@@ -116,7 +115,6 @@ func unverifiedGatewayHTTPClient(opts *GatewayOptions) (*GatewayHTTPClient, erro
 		Relay:             base.Host,
 		Catalog:           opts.Catalog,
 		ModelPins:         pins,
-		PinnedModelsOnly:  opts.PinnedModelsOnly,
 		Verifier:          opts.Verifier,
 		VerificationCheck: opts.VerificationCheck,
 		UserCacheSecret:   opts.UserCacheSecret,

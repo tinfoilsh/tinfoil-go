@@ -160,7 +160,7 @@ func TestTransportRefreshesFetchedCatalog(t *testing.T) {
 			require.Equal(t, "https://gateway.example/catalog", req.URL.String())
 			return newResponse(http.StatusOK, served), nil
 		})
-		tr, err := NewTransport(Config{BaseURL: "https://gateway.example/v1/", Relay: "gateway.example"})
+		tr, err := NewTransport(Config{ModelPins: map[string]ModelPin{"old": {Repo: "tinfoilsh/old"}, "new": {Repo: "tinfoilsh/new"}}, BaseURL: "https://gateway.example/v1/", Relay: "gateway.example"})
 		require.NoError(t, err)
 		models := func() []string {
 			models, err := tr.Models(context.Background())
