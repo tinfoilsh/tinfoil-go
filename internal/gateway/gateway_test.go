@@ -34,11 +34,14 @@ const (
 	sealTestInitial = "initial.example"
 )
 
+var sealTestPolicy = gatewayPolicy{pins: map[string]ModelPin{sealTestModel: {Repo: "tinfoilsh/test"}}}
+
 // sealTestTransport serves each replica through the transport connect returns
 // for its host. Like a transport verifying, a replica calls connect until it
 // succeeds, then reuses the result.
 func sealTestTransport(connect func(host string) (http.RoundTripper, error)) *Transport {
 	return &Transport{
+		policy: sealTestPolicy,
 		build: func(r replica) (*verifiedReplicaTransport, error) {
 			var mu sync.Mutex
 			var verified http.RoundTripper
@@ -378,7 +381,7 @@ func TestGatewayEnsureVerifiedFallsOver(t *testing.T) {
 	buildFails, expired := order[0], order[1]
 	catalog := staticCatalog(Catalog{sealTestModel: {Repo: "tinfoilsh/test", Hosts: hosts}})
 	newGateway := func(attempts *[]string, build func(replica) (*verifiedReplicaTransport, error)) *Transport {
-		return &Transport{catalog: catalog, build: func(r replica) (*verifiedReplicaTransport, error) {
+		return &Transport{policy: sealTestPolicy, catalog: catalog, build: func(r replica) (*verifiedReplicaTransport, error) {
 			*attempts = append(*attempts, r.host)
 			return build(r)
 		}}
@@ -534,15 +537,15 @@ func TestPrepareForwardsOtherBodiesWithRepeats(t *testing.T) {
 func TestNewTransportCacheSecret(t *testing.T) {
 	t.Setenv("TINFOIL_USER_CACHE_SECRET", "from-env")
 	catalog := func() Catalog { return Catalog{} }
-	first, err := NewTransport(Config{Catalog: catalog})
+	first, err := NewTransport(Config{ModelPins: map[string]ModelPin{"pinned": {Repo: "tinfoilsh/pinned"}}, Catalog: catalog})
 	require.NoError(t, err)
-	second, err := NewTransport(Config{Catalog: catalog})
+	second, err := NewTransport(Config{ModelPins: map[string]ModelPin{"pinned": {Repo: "tinfoilsh/pinned"}}, Catalog: catalog})
 	require.NoError(t, err)
 	require.Len(t, first.secret, 64)
 	require.Equal(t, first.secret, second.secret, "clients in one process share the generated secret")
 	require.NotEqual(t, "from-env", first.secret, "the environment is not read")
 
-	explicit, err := NewTransport(Config{Catalog: catalog, UserCacheSecret: "from-option"})
+	explicit, err := NewTransport(Config{ModelPins: map[string]ModelPin{"pinned": {Repo: "tinfoilsh/pinned"}}, Catalog: catalog, UserCacheSecret: "from-option"})
 	require.NoError(t, err)
 	require.Equal(t, "from-option", explicit.secret)
 }

@@ -56,8 +56,9 @@ func TestOpenAIClientsSendThroughTheirHTTPClient(t *testing.T) {
 			name: "gateway",
 			newClient: func(t *testing.T, opts ...option.RequestOption) (*openai.Client, *http.Client, *http.Client) {
 				oc, err := NewGatewayOpenAIClient(t.Context(), &GatewayOptions{
-					URL:     "https://gateway.example/v1/",
-					Catalog: func() Catalog { return Catalog{} },
+					ModelPins: map[string]ModelPin{"pinned": {Repo: "tinfoilsh/pinned"}},
+					URL:       "https://gateway.example/v1/",
+					Catalog:   func() Catalog { return Catalog{} },
 				}, opts...)
 				require.NoError(t, err)
 				return oc.Client, oc.HTTPClient().secure, oc.HTTPClient().Client
@@ -91,7 +92,7 @@ func TestOpenAIClientsRejectInvalidOptions(t *testing.T) {
 	router, err := NewRouterOpenAIClient(t.Context(), &RouterOptions{TransportMode: "quic"})
 	require.Nil(t, router)
 	require.ErrorIs(t, err, ErrConfiguration)
-	gateway, err := NewGatewayOpenAIClient(t.Context(), &GatewayOptions{URL: "http://gateway.example/v1/", Catalog: func() Catalog { return Catalog{} }})
+	gateway, err := NewGatewayOpenAIClient(t.Context(), &GatewayOptions{ModelPins: map[string]ModelPin{"pinned": {Repo: "tinfoilsh/pinned"}}, URL: "http://gateway.example/v1/", Catalog: func() Catalog { return Catalog{} }})
 	require.Nil(t, gateway)
 	require.ErrorIs(t, err, ErrConfiguration)
 }
