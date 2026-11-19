@@ -1,7 +1,8 @@
 # mobile
 
 The gomobile surface: the one package bound into `TinfoilGo.xcframework`, which
-[tinfoil-swift](https://github.com/tinfoilsh/tinfoil-swift) uses. Everything
+[tinfoil-swift](https://github.com/tinfoilsh/tinfoil-swift) uses, and into
+`TinfoilGo.aar` for Android. Everything
 structured crosses as a JSON string whose shape is declared in
 `verification.go`. That struct is the contract, and `schema_version` says which
 version a payload is.
@@ -91,6 +92,24 @@ With Xcode, `scripts/build-mobile.sh` builds the framework and asserts the
 header set, and CI type-checks [`tests/mobile/Smoke.swift`](../tests/mobile/Smoke.swift)
 against it. Neither catches an export gomobile silently dropped; only the
 listing above does.
+
+## Android
+
+`scripts/build-mobile-android.sh` builds `TinfoilGo.aar` for `arm64-v8a`,
+`armeabi-v7a` and `x86_64` with the NDK named in
+`scripts/android-ndk-version.txt`. The package is bound as
+`sh.tinfoil.go.mobile`: the functions and constants are static members of
+`Mobile`, `Verifier` is a class, and `ConfigAuthorizer` is an interface that
+the caller implements. Errors reach Java as a `java.lang.Exception` carrying
+only a message, with the same prefixes as above.
+
+The script asserts that only this package is exported, that no library built
+without `tinfoil_conformance` carries a test-only entry point, and that the
+64-bit libraries load on devices with 16 KiB pages. An app can hold one
+gomobile library: a second one would bring its own `libgojni.so` and `go.Seq`
+class. To list the generated surface without building, pass `-lang=java
+-javapkg=sh.tinfoil.go` to `gobind`, and read
+`java/sh/tinfoil/go/mobile/*.java` under the output directory.
 
 ## Conformance build
 
