@@ -83,4 +83,5 @@ jobs:
       - name: Compile against the Java API
         run: |
           unzip -q TinfoilGo.aar classes.jar -d "$RUNNER_TEMP/aar"
+          mkdir -p "$RUNNER_TEMP/smoke"
           javac -Xlint:all -Werror -cp "$RUNNER_TEMP/aar/classes.jar" -d "$RUNNER_TEMP/smoke" tests/mobile/Smoke.java
