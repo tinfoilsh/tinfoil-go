@@ -153,6 +153,9 @@ func validateAPIPath(apiPath string) error {
 	if strings.ContainsAny(apiPath, "?#") {
 		return errs.Configuration(fmt.Errorf("invalid API path %q: it must not carry a query or a fragment", apiPath))
 	}
+	if _, err := url.Parse(apiPath); err != nil {
+		return errs.Configuration(fmt.Errorf("invalid API path %q: it does not parse", apiPath))
+	}
 	for _, segment := range strings.Split(apiPath, "/") {
 		decoded, err := url.PathUnescape(segment)
 		if err != nil {

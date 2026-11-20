@@ -162,7 +162,7 @@ func TestOpenAIClientJoinsTheAPIPath(t *testing.T) {
 func TestOpenAIClientRejectsAnInvalidAPIPath(t *testing.T) {
 	c, err := unverifiedEnclaveHTTPClient("enclave.example", RepoPin{Repo: "org/repo"}, nil)
 	require.NoError(t, err)
-	for _, apiPath := range []string{"v1", "v1/", "//evil.example/v1/", "https://evil.example/v1/", "/v1/?q=1", "/v1/#f", "/v1?", "/v1/../admin", "/..", "/./v1", "/%2e%2e/admin", "/v1/%2E/", "/a%2fb/", "/%zz/"} {
+	for _, apiPath := range []string{"v1", "v1/", "//evil.example/v1/", "https://evil.example/v1/", "/v1/?q=1", "/v1/#f", "/v1?", "/v1/../admin", "/..", "/./v1", "/%2e%2e/admin", "/v1/%2E/", "/a%2fb/", "/%zz/", "/v1\n/", "/v\t1/"} {
 		client, err := NewOpenAIClient(c, &OpenAIOptions{APIPath: apiPath})
 		require.Nil(t, client)
 		require.ErrorIs(t, err, ErrConfiguration, apiPath)
