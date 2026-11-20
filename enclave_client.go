@@ -129,8 +129,8 @@ func (c *attestedClient) embedded() *http.Client {
 // enclaveChain stacks what an enclave client sends through around keyed, from
 // the inside out: the proxy header, one replay after a key rejection, the
 // cache secret when there is one, and origin pinning. The cache secret sits
-// above keyed, so the field that it adds is sealed with the rest of the body (EHBP) or sent over the
-// pinned connection (TLS).
+// above keyed, so the field that it adds is sealed with the rest of the body
+// (EHBP) or sent over the pinned connection (TLS).
 func enclaveChain(keyed http.RoundTripper, host, proxyURL, secret string) (http.RoundTripper, error) {
 	rt := transport.WithEnclaveURL(keyed, host, proxyURL)
 	rt = transport.WithReplay(rt, transport.IsKeyRejection)
