@@ -116,7 +116,6 @@ func TestEmbeddedConfigReferenceWithoutConfigBytes(t *testing.T) {
 	inputs.Config = nil
 	v, err := newEmbeddedVerifier(inputs)
 	require.NoError(t, err)
-	require.True(t, v.CallerAuthorizesConfig())
 	require.NoError(t, v.CheckPinVerifiability(Pin{}))
 	require.NoError(t, v.CheckPinVerifiability(Pin{Project: "org/project@v1@sha256:" + reference.Digest}))
 	require.ErrorAs(t, v.CheckPinVerifiability(Pin{Project: "org/project@v2"}), new(*UsageError))

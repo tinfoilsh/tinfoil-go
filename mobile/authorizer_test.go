@@ -30,11 +30,11 @@ func (a *recordingAuthorizer) AuthorizeConfig(endorsementJSON string) error {
 func TestNewVerifierWithConfigAuthorizer(t *testing.T) {
 	verifier, err := NewVerifierWithConfigAuthorizer("", &recordingAuthorizer{})
 	require.NoError(t, err)
-	assert.True(t, verifier.inner.CallerAuthorizesConfig())
+	assert.True(t, verifier.CallerAuthorizesConfig())
 
 	plain, err := NewVerifier("")
 	require.NoError(t, err)
-	assert.False(t, plain.inner.CallerAuthorizesConfig())
+	assert.False(t, plain.CallerAuthorizesConfig())
 }
 
 func TestNewVerifierWithConfigAuthorizerRejects(t *testing.T) {

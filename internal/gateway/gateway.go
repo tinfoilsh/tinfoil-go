@@ -13,7 +13,6 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"math/rand/v2"
@@ -48,40 +47,42 @@ const (
 )
 
 type gatewayPolicy struct {
-	pins       map[string]ModelPin
+	pins       map[string]pinnedModel
 	pinnedOnly bool
 	verifier   *verify.Verifier // for unpinned models
 }
 
-// errCallerAuthorizedConfig rejects a policy whose config the caller supplies
-// or authorizes: gateway replicas are verified against repository pins.
-var errCallerAuthorizedConfig = errors.New("caller-authorized config requires a direct enclave client")
+// pinnedModel is a ModelPin with the verifier that its policy selects.
+type pinnedModel struct {
+	repo     string
+	verifier *verify.Verifier
+}
 
-func newGatewayPolicy(modelPins map[string]ModelPin, pinnedOnly bool, v *verify.Verifier) (gatewayPolicy, error) {
+// newGatewayPolicy builds the verifiers that policy and each pin's policy
+// select, which copies them.
+func newGatewayPolicy(modelPins map[string]ModelPin, pinnedOnly bool, policy verify.Policy) (gatewayPolicy, error) {
 	if pinnedOnly && len(modelPins) == 0 {
 		return gatewayPolicy{}, fmt.Errorf("pinned-only mode requires at least one model pin")
 	}
-	if v == nil {
-		var err error
-		if v, err = verify.NewVerifier(nil, verify.Policy{}); err != nil {
-			return gatewayPolicy{}, fmt.Errorf("gateway verification options: %w", err)
-		}
+	v, err := verify.NewVerifier(nil, policy)
+	if err != nil {
+		return gatewayPolicy{}, fmt.Errorf("gateway verification policy: %w", err)
 	}
-	if v.CallerAuthorizesConfig() {
-		return gatewayPolicy{}, errCallerAuthorizedConfig
-	}
-	p := gatewayPolicy{pins: make(map[string]ModelPin), pinnedOnly: pinnedOnly, verifier: v}
+	p := gatewayPolicy{pins: make(map[string]pinnedModel), pinnedOnly: pinnedOnly, verifier: v}
 	for model, pin := range modelPins {
-		if pin.Verifier != nil && pin.Verifier.CallerAuthorizesConfig() {
-			return gatewayPolicy{}, fmt.Errorf("model %q: %w", model, errCallerAuthorizedConfig)
-		}
 		if strings.TrimSpace(model) == "" || !strings.HasPrefix(pin.Repo, trustedRepoOwner) {
 			return gatewayPolicy{}, fmt.Errorf("model pin %q repository %q must belong to %s", model, pin.Repo, trustedRepoOwner)
 		}
 		if _, _, _, err := verify.ParseReference(pin.Repo); err != nil {
-			return gatewayPolicy{}, fmt.Errorf("model %q: %w", model, errs.Configuration(err))
+			return gatewayPolicy{}, fmt.Errorf("model %q: %w", model, err)
 		}
-		p.pins[model] = ModelPin{Repo: pin.Repo, Verifier: cmp.Or(pin.Verifier, v)}
+		pinned := pinnedModel{repo: pin.Repo, verifier: v}
+		if pin.Policy != nil {
+			if pinned.verifier, err = verify.NewVerifier(nil, *pin.Policy); err != nil {
+				return gatewayPolicy{}, fmt.Errorf("model %q verification policy: %w", model, err)
+			}
+		}
+		p.pins[model] = pinned
 	}
 	return p, nil
 }
@@ -96,10 +97,10 @@ func (p *gatewayPolicy) resolve(model string, catalog Catalog) ([]string, replic
 		return nil, replica{}, errs.Configuration(fmt.Errorf("model %q has no valid bare %s repository with replicas in the gateway catalog", model, trustedRepoOwner))
 	}
 	if pinned {
-		if repo, _, _ := strings.Cut(pin.Repo, "@"); entry.Repo != repo {
+		if repo, _, _ := strings.Cut(pin.repo, "@"); entry.Repo != repo {
 			return nil, replica{}, errs.Attestation(fmt.Errorf("model %q: expected repository %q, gateway offered %q", model, repo, entry.Repo))
 		}
-		return entry.Hosts, replica{ref: pin.Repo, model: model}, nil
+		return entry.Hosts, replica{ref: pin.repo, model: model}, nil
 	}
 	return entry.Hosts, replica{ref: entry.Repo}, nil
 }
@@ -107,7 +108,7 @@ func (p *gatewayPolicy) resolve(model string, catalog Catalog) ([]string, replic
 // verifierFor returns the policy a replica of r is verified under.
 func (p *gatewayPolicy) verifierFor(r replica) *verify.Verifier {
 	if pin, pinned := p.pins[r.model]; pinned {
-		return pin.Verifier
+		return pin.verifier
 	}
 	return p.verifier
 }
@@ -115,10 +116,10 @@ func (p *gatewayPolicy) verifierFor(r replica) *verify.Verifier {
 type replica struct{ host, ref, model string }
 
 // ModelPin pins a model to tinfoilsh/name[@tag][@sha256:digest]. A nil
-// Verifier inherits the gateway's; a non-nil one replaces it.
+// Policy inherits the gateway's; a non-nil one replaces it.
 type ModelPin struct {
-	Repo     string
-	Verifier *verify.Verifier
+	Repo   string
+	Policy *verify.Policy
 }
 
 // Config configures a Transport.
@@ -131,8 +132,8 @@ type Config struct {
 	Catalog          func() Catalog
 	ModelPins        map[string]ModelPin
 	PinnedModelsOnly bool
-	// Verifier is the policy for unpinned models; nil selects the defaults.
-	Verifier *verify.Verifier
+	// Policy is the verification policy for unpinned models.
+	Policy verify.Policy
 	// VerificationCheck, when set, can reject each replica's verification.
 	VerificationCheck func(v *verify.Verification) error
 	// UserCacheSecret is the explicit secret; empty selects the secret that
@@ -143,7 +144,7 @@ type Config struct {
 // NewTransport copies the policy in c and does no network I/O: the catalog is
 // fetched and replicas are verified on first use.
 func NewTransport(c Config) (*Transport, error) {
-	policy, err := newGatewayPolicy(c.ModelPins, c.PinnedModelsOnly, c.Verifier)
+	policy, err := newGatewayPolicy(c.ModelPins, c.PinnedModelsOnly, c.Policy)
 	if err != nil {
 		return nil, errs.Configuration(err)
 	}

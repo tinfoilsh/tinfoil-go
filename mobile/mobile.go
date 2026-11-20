@@ -51,6 +51,9 @@ func AttestationURL(host, relay string, nonce []byte) (string, error) {
 // safe to use from several threads at once.
 type Verifier struct {
 	inner *verify.Verifier
+	// callerAuthorizesConfig is set when the config trust is an embedded
+	// config or a config authorizer.
+	callerAuthorizesConfig bool
 }
 
 // NewVerifier builds a verifier from optionsJSON, a JSON object whose members
@@ -89,7 +92,12 @@ func newVerifier(optionsJSON string, authorizer ConfigAuthorizer) (_ *Verifier, 
 	if err != nil {
 		return nil, err
 	}
-	return &Verifier{inner: inner}, nil
+	var callerAuthorizes bool
+	switch config.(type) {
+	case verify.EmbeddedConfig, verify.EmbeddedConfigReference, verify.ConfigAuthorizer:
+		callerAuthorizes = true
+	}
+	return &Verifier{inner: inner, callerAuthorizesConfig: callerAuthorizes}, nil
 }
 
 // CheckPinVerifiability reports, without a document or network I/O, the usage
@@ -104,7 +112,7 @@ func (v *Verifier) CheckPinVerifiability(repo, project string) error {
 // pin authenticating it. Such a verifier needs an explicit enclave: it
 // cannot be used to discover a router.
 func (v *Verifier) CallerAuthorizesConfig() bool {
-	return v.inner.CallerAuthorizesConfig()
+	return v.callerAuthorizesConfig
 }
 
 // Verify appraises doc, the attestation document fetched with nonce, against

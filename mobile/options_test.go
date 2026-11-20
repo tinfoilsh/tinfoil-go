@@ -74,7 +74,7 @@ func TestNewVerifierAcceptsTrustOptions(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			verifier, err := NewVerifier(tc.options)
 			require.NoError(t, err)
-			assert.Equal(t, tc.authorizesConfig, verifier.inner.CallerAuthorizesConfig())
+			assert.Equal(t, tc.authorizesConfig, verifier.CallerAuthorizesConfig())
 		})
 	}
 }

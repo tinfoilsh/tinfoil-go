@@ -61,14 +61,17 @@ type EnclaveOptions struct {
 	// join under it, so a BaseURL with user information, a query or a
 	// fragment, even an empty one, is an ErrConfiguration error.
 	BaseURL string
-	// Verifier is the verification policy; nil selects the defaults.
-	Verifier *verify.Verifier
+	// Policy is the verification policy that applies on top of the trust
+	// argument; the zero Policy keeps every default. The client copies it, so
+	// later changes by the caller have no effect.
+	Policy verify.Policy
 	// VerificationCheck, when set, is called with each verification that
-	// passes Verifier, before the client uses the enclave's keys: when the
-	// client is created and whenever it verifies again. Return an error to
-	// reject the enclave. Verification then fails with an ErrAttestation error that
-	// wraps the error and isn't retried. Requests wait while it runs, so keep
-	// it fast; it may be called concurrently.
+	// passes the trust argument and Policy, before the client uses the
+	// enclave's keys: when the client is created and whenever it verifies
+	// again. Return an error to reject the enclave. Verification then fails
+	// with an ErrAttestation error that wraps the error and isn't retried.
+	// Requests wait while it runs, so keep it fast; it may be called
+	// concurrently.
 	VerificationCheck func(v *verify.Verification) error
 	// UserCacheSecret, when set, is the default prompt-cache scope for the
 	// client's requests. Only Tinfoil's router reads it, so set it when the
@@ -86,18 +89,15 @@ type EnclaveHTTPClient struct {
 	attestedClient
 }
 
-// Pin names the workload an enclave is verified against.
-type Pin = verify.Pin
-
 // NewEnclaveHTTPClient returns a client for the enclave at host, verified
-// against pin. An empty pin is an error unless opts.Verifier configures its
-// own config trust.
-// It checks opts before any network I/O, then
-// verifies the enclave under ctx before returning, so a misconfigured client
-// fails here rather than on its first request. The client verifies again by
-// itself when the verification expires or is rejected.
-func NewEnclaveHTTPClient(ctx context.Context, host string, pin Pin, opts *EnclaveOptions) (*EnclaveHTTPClient, error) {
-	c, err := unverifiedEnclaveHTTPClient(host, pin, opts)
+// under trust, which names who vouches for the enclave's config, and
+// opts.Policy. It checks trust and opts before any network I/O, including that
+// trust can be satisfied at all, then verifies the enclave under ctx before
+// returning, so a misconfigured client fails here rather than on its first
+// request. The client verifies again by itself when the verification expires
+// or is rejected.
+func NewEnclaveHTTPClient(ctx context.Context, host string, trust Trust, opts *EnclaveOptions) (*EnclaveHTTPClient, error) {
+	c, err := unverifiedEnclaveHTTPClient(host, trust, opts)
 	if err != nil {
 		return nil, err
 	}
@@ -109,9 +109,13 @@ func NewEnclaveHTTPClient(ctx context.Context, host string, pin Pin, opts *Encla
 
 // unverifiedEnclaveHTTPClient is NewEnclaveHTTPClient without the network I/O:
 // the client verifies on its first request.
-func unverifiedEnclaveHTTPClient(host string, pin Pin, opts *EnclaveOptions) (*EnclaveHTTPClient, error) {
+func unverifiedEnclaveHTTPClient(host string, trust Trust, opts *EnclaveOptions) (*EnclaveHTTPClient, error) {
 	if host == "" {
 		return nil, errs.Configuration(errors.New("enclave host is required"))
+	}
+	config, pin, err := verifierInputs(trust)
+	if err != nil {
+		return nil, err
 	}
 	if opts == nil {
 		opts = &EnclaveOptions{}
@@ -125,11 +129,15 @@ func unverifiedEnclaveHTTPClient(host string, pin Pin, opts *EnclaveOptions) (*E
 			return nil, err
 		}
 	}
-	e, err := enclave.New(enclave.Config{Host: host, Pin: pin, Verifier: opts.Verifier, VerificationCheck: opts.VerificationCheck})
+	verifier, err := enclave.NewVerifier(config, opts.Policy)
 	if err != nil {
 		return nil, err
 	}
-	a, err := newAttestedClient(keyedTransport(mode, e), mode, opts.BaseURL, opts.UserCacheSecret)
+	e, err := enclave.New(enclave.Config{Host: host, Pin: pin, Verifier: verifier, VerificationCheck: opts.VerificationCheck})
+	if err != nil {
+		return nil, err
+	}
+	a, err := newAttestedClient(keyedTransport(mode, e), cloneTrust(trust), mode, opts.BaseURL, opts.UserCacheSecret)
 	if err != nil {
 		return nil, err
 	}
@@ -140,13 +148,15 @@ func unverifiedEnclaveHTTPClient(host string, pin Pin, opts *EnclaveOptions) (*E
 // enclave and the chain their requests go through.
 type attestedClient struct {
 	keyed *transport.Transport
+	// trust is what the enclave is verified under, which no caller shares.
+	trust Trust
 	// secure is the client OpenAI clients use, which changes to the embedded
 	// client can't reach.
 	secure             *http.Client
 	baseURL, openAIURL string
 }
 
-func newAttestedClient(keyed *transport.Transport, mode TransportMode, baseURL, secret string) (attestedClient, error) {
+func newAttestedClient(keyed *transport.Transport, trust Trust, mode TransportMode, baseURL, secret string) (attestedClient, error) {
 	host := keyed.Enclave().Host()
 	if mode == TransportModeTLS {
 		if err := validateTLSBaseURL(baseURL, host); err != nil {
@@ -159,6 +169,7 @@ func newAttestedClient(keyed *transport.Transport, mode TransportMode, baseURL, 
 	}
 	return attestedClient{
 		keyed:     keyed,
+		trust:     trust,
 		secure:    &http.Client{Transport: rt},
 		baseURL:   cmp.Or(baseURL, "https://"+host+"/"),
 		openAIURL: cmp.Or(baseURL, "https://"+host+"/v1/"),
@@ -204,9 +215,11 @@ func (c *attestedClient) Enclave() string {
 	return c.keyed.Enclave().Host()
 }
 
-// Pin returns the pin the enclave is verified against.
-func (c *attestedClient) Pin() Pin {
-	return c.keyed.Enclave().Pin()
+// Trust returns a copy of the trust that the enclave is verified under: the
+// trust argument for an enclave client, or the router's repository for a
+// router client. Changing the copy has no effect on the client.
+func (c *attestedClient) Trust() Trust {
+	return cloneTrust(c.trust)
 }
 
 // EnsureVerified returns a verification that is valid now, verifying first

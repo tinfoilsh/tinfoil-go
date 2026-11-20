@@ -21,8 +21,10 @@ type GatewayOptions struct {
 	// models are served, which requires at least one pin.
 	ModelPins        map[string]ModelPin
 	PinnedModelsOnly bool
-	// Verifier is the policy for unpinned models; nil selects the defaults.
-	Verifier *verify.Verifier
+	// Policy is the verification policy for unpinned models, and for pinned
+	// models whose pin sets no Policy; the zero Policy keeps every default.
+	// The client copies it, so later changes by the caller have no effect.
+	Policy verify.Policy
 	// VerificationCheck is called with each replica's verification, as
 	// EnclaveOptions.VerificationCheck is, for pinned and unpinned models.
 	// A replica it rejects is skipped for the next replica of the model.
@@ -53,9 +55,10 @@ type GatewayOptions struct {
 // ModelPin pins a model to tinfoilsh/name[@tag][@sha256:digest].
 type ModelPin struct {
 	Repo string
-	// Verifier is the pin's policy: nil inherits GatewayOptions.Verifier;
-	// non-nil replaces it.
-	Verifier *verify.Verifier
+	// Policy is the pin's verification policy: nil inherits
+	// GatewayOptions.Policy, and non-nil replaces it entirely, so a field that
+	// it leaves unset takes the default rather than the gateway's value.
+	Policy *verify.Policy
 }
 
 // ReplicaVerification holds a gateway replica's last successful verification.
@@ -109,7 +112,7 @@ func unverifiedGatewayHTTPClient(opts *GatewayOptions) (*GatewayHTTPClient, erro
 	}
 	pins := make(map[string]gateway.ModelPin, len(opts.ModelPins))
 	for model, pin := range opts.ModelPins {
-		pins[model] = gateway.ModelPin{Repo: pin.Repo, Verifier: pin.Verifier}
+		pins[model] = gateway.ModelPin{Repo: pin.Repo, Policy: pin.Policy}
 	}
 	gatewayTransport, err := gateway.NewTransport(gateway.Config{
 		BaseURL:           baseURL,
@@ -117,7 +120,7 @@ func unverifiedGatewayHTTPClient(opts *GatewayOptions) (*GatewayHTTPClient, erro
 		Catalog:           opts.Catalog,
 		ModelPins:         pins,
 		PinnedModelsOnly:  opts.PinnedModelsOnly,
-		Verifier:          opts.Verifier,
+		Policy:            opts.Policy,
 		VerificationCheck: opts.VerificationCheck,
 		UserCacheSecret:   opts.UserCacheSecret,
 	})

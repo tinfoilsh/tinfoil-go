@@ -12,7 +12,7 @@ import (
 )
 
 func main() {
-	client, err := tinfoil.NewEnclaveHTTPClient(context.Background(), "inference.tinfoil.sh", tinfoil.Pin{Repo: "tinfoilsh/confidential-model-router", Project: "tinfoilsh/confidential-model-router"}, nil)
+	client, err := tinfoil.NewEnclaveHTTPClient(context.Background(), "inference.tinfoil.sh", tinfoil.EitherPin{Repo: "tinfoilsh/confidential-model-router", Project: "tinfoilsh/confidential-model-router"}, nil)
 	if err != nil {
 		log.Fatalf("failed to create client: %v", err)
 	}

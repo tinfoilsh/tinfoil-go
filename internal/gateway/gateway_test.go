@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 	"github.com/tinfoilsh/tinfoil-go/internal/cachesecret"
@@ -545,4 +546,22 @@ func TestNewTransportCacheSecret(t *testing.T) {
 	explicit, err := NewTransport(Config{Catalog: catalog, UserCacheSecret: "from-option"})
 	require.NoError(t, err)
 	require.Equal(t, "from-option", explicit.secret)
+}
+
+// A pin without a Policy inherits the gateway's; a pin with one replaces it
+// entirely, so an unset freshness bound takes the default.
+func TestModelPinPolicyInheritsOrReplaces(t *testing.T) {
+	defaults, err := verify.NewVerifier(nil, verify.Policy{})
+	require.NoError(t, err)
+	gatewayPolicy := verify.Policy{FreshnessMaxAge: time.Hour}
+	pinPolicy := verify.Policy{}
+	p, err := newGatewayPolicy(map[string]ModelPin{
+		"inherits": {Repo: "tinfoilsh/inherits"},
+		"replaces": {Repo: "tinfoilsh/replaces", Policy: &pinPolicy},
+	}, false, gatewayPolicy)
+	require.NoError(t, err)
+	pinPolicy.FreshnessMaxAge = time.Minute // copied at construction
+	require.Equal(t, time.Hour, p.verifierFor(replica{}).FreshnessMaxAge(), "unpinned")
+	require.Equal(t, time.Hour, p.verifierFor(replica{model: "inherits"}).FreshnessMaxAge())
+	require.Equal(t, defaults.FreshnessMaxAge(), p.verifierFor(replica{model: "replaces"}).FreshnessMaxAge())
 }

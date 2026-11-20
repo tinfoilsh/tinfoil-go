@@ -64,33 +64,6 @@ func TestV3CollateralRequiresConfigIdentityPins(t *testing.T) {
 	require.ErrorContains(t, err, "invalid config identity")
 }
 
-func TestCallerAuthorizesConfig(t *testing.T) {
-	inputs := embeddedInputs(t)
-	withoutConfig := inputs
-	withoutConfig.Config = nil
-	for _, tc := range []struct {
-		name   string
-		inputs embeddedTestInputs
-		config ConfigTrust
-		want   bool
-	}{
-		{"defaults", embeddedTestInputs{}, nil, false},
-		{"embedded runtime and platform", withoutConfig, nil, false},
-		{"embedded config", inputs, nil, true},
-		{"config authorizer", embeddedTestInputs{}, ConfigAuthorizer{Authorize: func(collateral.ConfigEndorsement) error { return nil }}, true},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			config := tc.config
-			if config == nil {
-				config = tc.inputs.config()
-			}
-			v, err := NewVerifier(config, tc.inputs.policy())
-			require.NoError(t, err)
-			require.Equal(t, tc.want, v.CallerAuthorizesConfig())
-		})
-	}
-}
-
 // A config authorizer's error is the cause of a VerificationError. It never
 // chooses verify's error type, even when it is one of verify's own types.
 func TestConfigAuthorizerErrorNeverChoosesTheType(t *testing.T) {

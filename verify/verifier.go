@@ -166,13 +166,6 @@ func (v *Verifier) requirePin(pin Pin) error {
 	return usageError(fmt.Errorf("pin names nothing: set Repo or Project, or configure the verifier's config trust"))
 }
 
-// CallerAuthorizesConfig reports whether the caller supplies the config, with
-// an embedded config, or authorizes it, with a config authorizer, instead of
-// a repository pin authenticating it.
-func (v *Verifier) CallerAuthorizesConfig() bool {
-	return v.embedded.config != nil || v.configAuthorizer != nil
-}
-
 // PinnedRegisters returns a copy of the configured register pins, or nil.
 func (v *Verifier) PinnedRegisters() measurement.Expected {
 	if v.pinnedRegisters == nil {

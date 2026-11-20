@@ -189,8 +189,10 @@ verifier, err := verify.NewVerifier(nil, verify.Policy{
 })
 ```
 
-The SDK's clients take this verifier as their policy, through
-`EnclaveOptions.Verifier`, `RouterOptions.Verifier` and `GatewayOptions.Verifier`.
+The SDK's clients build their verifiers themselves: pass the same
+`verify.Policy` as `EnclaveOptions.Policy`, `RouterOptions.Policy`,
+`GatewayOptions.Policy` or `ModelPin.Policy`, and name the enclave client's
+config trust with its `tinfoil.Trust` argument.
 
 ## JavaScript / TypeScript / WASM
 
