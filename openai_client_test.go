@@ -162,10 +162,89 @@ func TestOpenAIClientJoinsTheAPIPath(t *testing.T) {
 func TestOpenAIClientRejectsAnInvalidAPIPath(t *testing.T) {
 	c, err := unverifiedEnclaveHTTPClient("enclave.example", RepoPin{Repo: "org/repo"}, nil)
 	require.NoError(t, err)
-	for _, apiPath := range []string{"v1", "v1/", "//evil.example/v1/", "https://evil.example/v1/", "/v1/?q=1", "/v1/#f", "/v1?", "/v1/../admin", "/..", "/./v1", "/%2e%2e/admin", "/v1/%2E/", "/a%2fb/", "/%zz/", "/v1\n/", "/v\t1/"} {
+	for _, tc := range []struct {
+		apiPath string
+		reason  string
+	}{
+		{"v1", "absolute path"},
+		{"v1/", "absolute path"},
+		{"//evil.example/v1/", "absolute path"},
+		{"https://evil.example/v1/", "absolute path"},
+		{"/v1/?q=1", "query or a fragment"},
+		{"/v1/#f", "query or a fragment"},
+		{"/v1?", "query or a fragment"},
+		{"/v1/../admin", "segment"},
+		{"/..", "segment"},
+		{"/./v1", "segment"},
+		{"/%2e%2e/admin", "segment"},
+		{"/v1/%2E/", "segment"},
+		{"/a%2fb/", "encoded slash"},
+		{"/a%2Fb/", "encoded slash"},
+		{"/a%5cb/", "backslash"},
+		{"/a%5C..%5Cb/", "backslash"},
+		{"/%zz/", "invalid URL escape"},
+		{"/v1/%", "invalid URL escape"},
+		{"/v1/%2", "invalid URL escape"},
+		{"/v1\\..\\admin/", "RFC 3986"},
+		{"/v1 /", "RFC 3986"},
+		{"/v1\n/", "RFC 3986"},
+		{"/v\t1/", "RFC 3986"},
+		{"/v1\r/", "RFC 3986"},
+		{"/v1\x00/", "RFC 3986"},
+		{"/v1\x7f/", "RFC 3986"},
+		{"/v1/\u00a0/", "RFC 3986"},
+		{"/v1/\u2028/", "RFC 3986"},
+		{"/v1/\u00e9/", "RFC 3986"},
+		{`/v1/"/`, "RFC 3986"},
+		{"/v1/</", "RFC 3986"},
+		{"/v1/>/", "RFC 3986"},
+		{"/v1/[/", "RFC 3986"},
+		{"/v1/]/", "RFC 3986"},
+		{"/v1/^/", "RFC 3986"},
+		{"/v1/`/", "RFC 3986"},
+		{"/v1/{/", "RFC 3986"},
+		{"/v1/|/", "RFC 3986"},
+		{"/v1/}/", "RFC 3986"},
+	} {
+		client, err := NewOpenAIClient(c, &OpenAIOptions{APIPath: tc.apiPath})
+		require.Nil(t, client, "%q", tc.apiPath)
+		require.ErrorIs(t, err, ErrConfiguration, "%q", tc.apiPath)
+		require.ErrorContains(t, err, tc.reason, "%q", tc.apiPath)
+	}
+}
+
+func TestOpenAIClientAcceptsEveryRFC3986PathCharacter(t *testing.T) {
+	c, err := unverifiedEnclaveHTTPClient("enclave.example", RepoPin{Repo: "org/repo"}, nil)
+	require.NoError(t, err)
+	for _, apiPath := range []string{
+		"/abcdefghijklmnopqrstuvwxyz/ABCDEFGHIJKLMNOPQRSTUVWXYZ/0123456789/",
+		"/-._~/",
+		"/!$&'()*+,;=/",
+		"/:@/",
+		"/v%31/",
+		"/a%20b/",
+		"/%c3%a9/",
+		"/%ff/",
+		"/%2e%2e%2e/",
+		"/.well-known/",
+		"/.../",
+	} {
 		client, err := NewOpenAIClient(c, &OpenAIOptions{APIPath: apiPath})
-		require.Nil(t, client)
-		require.ErrorIs(t, err, ErrConfiguration, apiPath)
+		require.NoError(t, err, "%q", apiPath)
+		require.Equal(t, "https://enclave.example"+apiPath, client.BaseURL())
+	}
+}
+
+func TestOpenAIClientAcceptsOnlyRFC3986PathCharacters(t *testing.T) {
+	const pathChars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~!$&'()*+,;=:@/"
+	for b := 0; b < 256; b++ {
+		apiPath := "/a" + string([]byte{byte(b)}) + "b/"
+		err := validateAPIPath(apiPath)
+		if strings.IndexByte(pathChars, byte(b)) >= 0 {
+			require.NoError(t, err, "%q", apiPath)
+		} else {
+			require.ErrorIs(t, err, ErrConfiguration, "%q", apiPath)
+		}
 	}
 }
 
