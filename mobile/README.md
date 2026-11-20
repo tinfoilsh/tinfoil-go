@@ -22,30 +22,63 @@ This package performs no I/O. The caller:
 
 ## Options
 
-`NewVerifier` takes the policy as a JSON object; an empty string selects the
-default policy. Every member is optional, `null` counts as absent, and an
-unknown or malformed member is rejected. Byte strings are standard base64 with
-padding.
+`NewVerifier` takes a JSON object with two optional members: `config_trust`,
+which decides how a deployment's config is authenticated, and `policy`. An
+empty string, `{}`, and `null` members select the defaults: configs endorsed
+by Tinfoil's public registry, and the default policy. Byte strings are standard
+base64 with padding, and keys are PKIX public keys, each one PEM `PUBLIC KEY`
+block.
 
-| member | Go verifier input |
+```json
+{
+  "config_trust": {"type": "registries", "ids": ["<registry ID>"]},
+  "policy": {
+    "pinned_registers": {"type": "<measurement type>", "registers": ["<hex>", "..."]},
+    "freshness_max_age_ns": 3600000000000,
+    "artifacts": {"type": "endorsed", "freshness_keys_pem": ["<PEM>"]}
+  }
+}
+```
+
+`config_trust` and `policy.artifacts` are tagged objects: `type` selects the
+variant, and each variant takes only its own members.
+
+| `config_trust` | Go verifier input |
+|---|---|
+| `{"type": "registries", "ids": [...]}` (include `PublicRegistryID` to keep the public registry) | `verify.Registries` |
+| `{"type": "signing_keys", "keys_pem": [...]}` | `verify.ConfigSigningKeys` |
+| `{"type": "embedded_config", "name"?, "bytes"}` | `verify.EmbeddedConfig` |
+| `{"type": "embedded_config_reference", "name"?, "digest", "runtime": {"repo", "tag", "digest"}}` | `verify.EmbeddedConfigReference` |
+
+| `policy` member | Go verifier input |
 |---|---|
 | `pinned_registers` (`{type, registers}`) | `Policy.PinnedRegisters` |
 | `freshness_max_age_ns` (integer) | `Policy.FreshnessMaxAge` |
-| `config_registry_ids` (strings; include `PublicRegistryID` to keep the public registry) | `verify.Registries` |
-| `config_signing_keys_pem` (PEM `PUBLIC KEY` blocks) | `verify.ConfigSigningKeys` |
-| `embedded_config` (`{name?, bytes}` or `{name?, digest, runtime: {repo, tag, digest}}`) | `verify.EmbeddedConfig` or `verify.EmbeddedConfigReference` |
-| `embedded_runtime`, `embedded_platform` | `Policy.Artifacts` as `verify.EmbeddedArtifacts` |
-| `freshness_signing_keys_pem` (PEM `PUBLIC KEY` blocks) | `FreshnessKeys` of `verify.EmbeddedArtifacts`, or of `verify.EndorsedArtifacts` when nothing is embedded |
+| `artifacts`: `{"type": "endorsed", "freshness_keys_pem"?: [...]}` | `Policy.Artifacts` as `verify.EndorsedArtifacts` |
+| `artifacts`: `{"type": "embedded", "runtime"?, "platform"?, "freshness_keys_pem"?: [...]}` | `Policy.Artifacts` as `verify.EmbeddedArtifacts` |
 
-At most one of `config_registry_ids`, `config_signing_keys_pem` and
-`embedded_config` may be set, since each selects the verifier's config trust.
-The verifier's own checks apply on top, for example to an empty key list or to
-freshness keys when both the runtime and the platform are embedded.
+An absent `freshness_keys_pem` selects Tinfoil's public freshness keys. The
+parser rejects malformed JSON, a duplicate or unknown member, an unknown
+`type`, and a member that does not belong to the chosen `type`. The verifier's
+own checks apply on top, for example to an empty key list, or to freshness
+keys when both the runtime and the platform are embedded.
+
+For example, a verifier that takes an embedded config and runtime, and an
+endorsed platform:
+
+```json
+{
+  "config_trust": {"type": "embedded_config", "name": "/org/project/v1", "bytes": "<base64>"},
+  "policy": {"artifacts": {"type": "embedded", "runtime": "<base64>"}}
+}
+```
 
 ## Config authorizer
 
-`NewVerifierWithConfigAuthorizer` selects `verify.ConfigAuthorizer` as the config
-trust, so it conflicts with the three members above. gomobile cannot
+`NewVerifierWithConfigAuthorizer(policyJSON, authorizer)` takes the
+authorizer as the config trust (`verify.ConfigAuthorizer`), so its JSON is the
+policy object alone, in the shape of the `policy` member above, and a
+`config_trust` member there is rejected as unknown. gomobile cannot
 carry a Go function, so the callback is the `ConfigAuthorizer` interface, which
 Swift implements; Swift imports it as `MobileConfigAuthorizerProtocol`, because
 gomobile also emits a proxy class named `MobileConfigAuthorizer`. Go calls

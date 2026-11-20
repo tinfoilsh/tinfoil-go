@@ -61,11 +61,11 @@ func TestErrorsLeadWithCategory(t *testing.T) {
 		prefix string
 		call   func() error
 	}{
-		{"invalid options", UsageErrorPrefix, func() error { _, err := NewVerifier(`{"freshness_max_age_ns":-1}`); return err }},
+		{"invalid options", UsageErrorPrefix, func() error { _, err := NewVerifier(`{"policy":{"freshness_max_age_ns":-1}}`); return err }},
 		{"unknown option", UsageErrorPrefix, func() error { _, err := NewVerifier(`{"enclave":"x"}`); return err }},
-		{"misspelled option", UsageErrorPrefix, func() error { _, err := NewVerifier(`{"freshness_max_age":1}`); return err }},
+		{"misspelled option", UsageErrorPrefix, func() error { _, err := NewVerifier(`{"policy":{"freshness_max_age":1}}`); return err }},
 		{"options not an object", UsageErrorPrefix, func() error { _, err := NewVerifier(`null`); return err }},
-		{"malformed trust option", UsageErrorPrefix, func() error { _, err := NewVerifier(`{"embedded_config":{}}`); return err }},
+		{"malformed trust option", UsageErrorPrefix, func() error { _, err := NewVerifier(`{"config_trust":{"type":"embedded_config"}}`); return err }},
 		{"URL as host", UsageErrorPrefix, func() error { _, err := AttestationURL("https://enclave.example", "", nonce); return err }},
 		{"invalid repo", UsageErrorPrefix, func() error { _, err := verifier.Verify(doc, nonce, "owner", ""); return err }},
 		{"short nonce", UsageErrorPrefix, func() error { _, err := verifier.Verify([]byte("{}"), nonce[1:], routerRepo, ""); return err }},
@@ -87,8 +87,8 @@ func TestNewNonceIsFresh(t *testing.T) {
 
 func TestNewVerifierAppliesOptions(t *testing.T) {
 	register := strings.Repeat("ab", 48)
-	verifier, err := NewVerifier(`{"freshness_max_age_ns":3600000000000,` +
-		`"pinned_registers":{"type":"https://tinfoil.sh/predicate/tdx-guest/v2","registers":["","","","","` + register + `"]}}`)
+	verifier, err := NewVerifier(`{"policy":{"freshness_max_age_ns":3600000000000,` +
+		`"pinned_registers":{"type":"https://tinfoil.sh/predicate/tdx-guest/v2","registers":["","","","","` + register + `"]}}}`)
 	require.NoError(t, err)
 	assert.Equal(t, time.Hour, verifier.inner.FreshnessMaxAge())
 	rtmr3, err := measurement.ParseRegister(register)
@@ -110,7 +110,7 @@ func TestNewVerifierRejectsMalformedPins(t *testing.T) {
 		"wrong length": `{"type":"https://tinfoil.sh/predicate/sev-snp-guest/v2","registers":["abcd"]}`,
 	} {
 		t.Run(name, func(t *testing.T) {
-			_, err := NewVerifier(`{"pinned_registers":` + pins + `}`)
+			_, err := NewVerifier(`{"policy":{"pinned_registers":` + pins + `}}`)
 			require.Error(t, err)
 			assert.True(t, strings.HasPrefix(err.Error(), UsageErrorPrefix), err.Error())
 		})
