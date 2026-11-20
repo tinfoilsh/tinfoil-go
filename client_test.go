@@ -69,15 +69,15 @@ func TestLiveHTTPClient(t *testing.T) {
 	client, err := NewClient(context.Background())
 	require.NoError(t, err)
 
-	httpClient := client.HTTPClient()
-	require.NotNil(t, httpClient, "HTTPClient() should return a non-nil client")
+	httpClient, ok := client.HTTPClient().(*RouterHTTPClient)
+	require.True(t, ok, "NewClient sends through a router client")
 
 	_, err = httpClient.Get("https://unrelated.example")
 	require.ErrorIs(t, err, ErrConfiguration, "the HTTP client must refuse unrelated origins")
 
 	// Verify it returns the same instance (shared client)
 	httpClient2 := client.HTTPClient()
-	require.Same(t, httpClient, httpClient2, "HTTPClient() should return the same instance")
+	require.Same(t, AttestedHTTPClient(httpClient), httpClient2, "HTTPClient() should return the same instance")
 }
 
 // TestLiveClientIntegration_AudioTranscription mirrors the Python audio integration

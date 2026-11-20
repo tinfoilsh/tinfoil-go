@@ -2,20 +2,22 @@ package tinfoil
 
 import (
 	"context"
+	"errors"
 	"io"
 	"net/http"
 	"strings"
 	"testing"
+	"testing/synctest"
 
-	"github.com/openai/openai-go/v3"
 	"github.com/openai/openai-go/v3/option"
 	"github.com/stretchr/testify/require"
 )
 
-type recordingTransport struct{ urls []string }
+type recordingTransport struct{ urls, auths []string }
 
 func (r *recordingTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	r.urls = append(r.urls, req.URL.String())
+	r.auths = append(r.auths, req.Header.Get("Authorization"))
 	return &http.Response{
 		StatusCode: http.StatusOK,
 		Header:     http.Header{"Content-Type": {"application/json"}},
@@ -24,74 +26,209 @@ func (r *recordingTransport) RoundTrip(req *http.Request) (*http.Response, error
 	}, nil
 }
 
-func TestOpenAIClientsSendThroughTheirHTTPClient(t *testing.T) {
-	for _, tc := range []struct {
-		name string
-		// newClient returns the OpenAI client, the HTTP client it should send
-		// through, and the plain client's embedded client.
-		newClient func(t *testing.T, opts ...option.RequestOption) (client *openai.Client, secure, embedded *http.Client)
-		wantURL   string
-	}{
-		{
-			name: "enclave",
-			newClient: func(t *testing.T, opts ...option.RequestOption) (*openai.Client, *http.Client, *http.Client) {
-				c := &EnclaveHTTPClient{Client: &http.Client{}, attestedClient: attestedClient{secure: &http.Client{}, openAIURL: "https://enclave.example/v1/"}}
-				oc := newEnclaveOpenAIClient(c, opts)
-				require.Same(t, c, oc.HTTPClient())
-				return oc.Client, c.secure, c.Client
-			},
-			wantURL: "https://enclave.example/v1/models",
-		},
+// attestedCase is an attested HTTP client of one kind, made without network
+// I/O, and the base URL that an OpenAIClient over it defaults to.
+type attestedCase struct {
+	name        string
+	newClient   func(t *testing.T) (hc AttestedHTTPClient, secure, embedded *http.Client)
+	wantDefault string
+}
+
+func enclaveCase(name string, tr Transport, wantDefault string) attestedCase {
+	return attestedCase{name: name, wantDefault: wantDefault, newClient: func(t *testing.T) (AttestedHTTPClient, *http.Client, *http.Client) {
+		c, err := unverifiedEnclaveHTTPClient("enclave.example", RepoPin{Repo: "org/repo"}, &EnclaveOptions{Transport: tr})
+		require.NoError(t, err)
+		return c, c.secure, c.Client
+	}}
+}
+
+func attestedCases() []attestedCase {
+	return []attestedCase{
+		enclaveCase("enclave", nil, "https://enclave.example/v1/"),
+		enclaveCase("enclave through a proxy", EHBP{ProxyURL: "https://proxy.example/relay"}, "https://proxy.example/relay/v1/"),
+		enclaveCase("enclave through a proxy with a trailing slash", EHBP{ProxyURL: "https://proxy.example/relay/"}, "https://proxy.example/relay/v1/"),
 		{
 			name: "router",
-			newClient: func(t *testing.T, opts ...option.RequestOption) (*openai.Client, *http.Client, *http.Client) {
-				c := &RouterHTTPClient{Client: &http.Client{}, attestedClient: attestedClient{secure: &http.Client{}, openAIURL: "https://router.example/v1/"}}
-				oc := newRouterOpenAIClient(c, opts)
-				require.Same(t, c, oc.HTTPClient())
-				return oc.Client, c.secure, c.Client
+			newClient: func(t *testing.T) (AttestedHTTPClient, *http.Client, *http.Client) {
+				c := &RouterHTTPClient{Client: &http.Client{}, attestedClient: attestedClient{secure: &http.Client{}, baseURL: "https://router.example/"}}
+				return c, c.secure, c.Client
 			},
-			wantURL: "https://router.example/v1/models",
+			wantDefault: "https://router.example/v1/",
 		},
 		{
 			name: "gateway",
-			newClient: func(t *testing.T, opts ...option.RequestOption) (*openai.Client, *http.Client, *http.Client) {
-				oc, err := NewGatewayOpenAIClient(t.Context(), &GatewayOptions{
-					URL:     "https://gateway.example/v1/",
-					Catalog: func() Catalog { return Catalog{} },
-				}, opts...)
+			newClient: func(t *testing.T) (AttestedHTTPClient, *http.Client, *http.Client) {
+				c, err := unverifiedGatewayHTTPClient(&GatewayOptions{URL: "https://gateway.example/api/v1/", Catalog: func() Catalog { return Catalog{} }})
 				require.NoError(t, err)
-				return oc.Client, oc.HTTPClient().secure, oc.HTTPClient().Client
+				return c, c.secure, c.Client
 			},
-			wantURL: "https://gateway.example/v1/models",
+			wantDefault: "https://gateway.example/api/v1/",
 		},
-	} {
+	}
+}
+
+// listModels sends a request through client and returns the URLs that reached
+// secure.
+func listModels(t *testing.T, client *OpenAIClient, secure *http.Client, opts ...option.RequestOption) []string {
+	t.Helper()
+	rec := &recordingTransport{}
+	secure.Transport = rec
+	_, err := client.Models.List(context.Background(), opts...)
+	require.NoError(t, err)
+	return rec.urls
+}
+
+func TestOpenAIClientSendsThroughItsHTTPClient(t *testing.T) {
+	for _, tc := range attestedCases() {
 		t.Run(tc.name, func(t *testing.T) {
-			secure, caller, replaced := &recordingTransport{}, &recordingTransport{}, &recordingTransport{}
-			client, secureClient, embedded := tc.newClient(t,
-				option.WithBaseURL("https://evil.example/"),
+			hc, secure, embedded := tc.newClient(t)
+			caller, replaced := &recordingTransport{}, &recordingTransport{}
+			client, err := NewOpenAIClient(hc, nil,
 				option.WithHTTPClient(&http.Client{Transport: caller}),
 				option.WithMaxRetries(0),
 			)
-			secureClient.Transport = secure
+			require.NoError(t, err)
+			require.Same(t, hc, client.HTTPClient())
+			require.Equal(t, tc.wantDefault, client.BaseURL())
 			embedded.Transport = replaced
 
-			_, err := client.Models.List(context.Background())
-			require.NoError(t, err)
-			require.Equal(t, []string{tc.wantURL}, secure.urls)
+			require.Equal(t, []string{tc.wantDefault + "models"}, listModels(t, client, secure))
 			require.Empty(t, caller.urls, "the caller's HTTP client is replaced")
 			require.Empty(t, replaced.urls, "changing the embedded client doesn't reach the OpenAI client")
 		})
 	}
 }
 
-func TestOpenAIClientsRejectInvalidOptions(t *testing.T) {
-	enclave, err := NewEnclaveOpenAIClient(t.Context(), "", RepoPin{Repo: "org/repo"}, nil)
-	require.Nil(t, enclave)
-	require.ErrorIs(t, err, ErrConfiguration)
-	router, err := NewRouterOpenAIClient(t.Context(), &RouterOptions{Transport: &TLS{}})
-	require.Nil(t, router)
-	require.ErrorIs(t, err, ErrConfiguration)
-	gateway, err := NewGatewayOpenAIClient(t.Context(), &GatewayOptions{URL: "http://gateway.example/v1/", Catalog: func() Catalog { return Catalog{} }})
-	require.Nil(t, gateway)
+func TestOpenAIClientIgnoresTheCallersBaseURL(t *testing.T) {
+	t.Setenv("OPENAI_BASE_URL", "https://api.openai.com/v1/")
+	for _, tc := range attestedCases() {
+		t.Run(tc.name, func(t *testing.T) {
+			hc, secure, _ := tc.newClient(t)
+			for _, opt := range []option.RequestOption{
+				option.WithBaseURL("https://evil.example/v1/"),
+				option.WithBaseURL(strings.Replace(tc.wantDefault, "v1/", "other/", 1)),
+				option.WithDataResidency(option.DataResidencyUS),
+			} {
+				client, err := NewOpenAIClient(hc, nil, opt)
+				require.NoError(t, err)
+				require.Equal(t, []string{tc.wantDefault + "models"}, listModels(t, client, secure))
+			}
+		})
+	}
+}
+
+func TestOpenAIClientKeepsTheCallersOtherOptions(t *testing.T) {
+	t.Setenv("OPENAI_API_KEY", "from-the-environment")
+	c, err := unverifiedEnclaveHTTPClient("enclave.example", RepoPin{Repo: "org/repo"}, nil)
+	require.NoError(t, err)
+	rec := &recordingTransport{}
+	c.secure.Transport = rec
+
+	client, err := NewOpenAIClient(c, nil)
+	require.NoError(t, err)
+	_, err = client.Models.List(context.Background())
+	require.NoError(t, err)
+	client, err = NewOpenAIClient(c, nil, option.WithAPIKey("from-the-caller"), option.WithQuery("q", "1"))
+	require.NoError(t, err)
+	_, err = client.Models.List(context.Background())
+	require.NoError(t, err)
+	require.Equal(t, []string{"Bearer from-the-environment", "Bearer from-the-caller"}, rec.auths)
+	require.Equal(t, "https://enclave.example/v1/models?q=1", rec.urls[1])
+}
+
+func TestOpenAIClientJoinsTheAPIPath(t *testing.T) {
+	for _, tc := range []struct {
+		tr      Transport
+		apiPath string
+		want    string
+	}{
+		{nil, "/", "https://enclave.example/"},
+		{nil, "/v2", "https://enclave.example/v2/"},
+		{nil, "/openai/v1/", "https://enclave.example/openai/v1/"},
+		{EHBP{ProxyURL: "https://proxy.example"}, "/v2", "https://proxy.example/v2/"},
+		{EHBP{ProxyURL: "https://proxy.example/relay"}, "/openai/v1", "https://proxy.example/relay/openai/v1/"},
+		{EHBP{ProxyURL: "https://proxy.example/relay/"}, "/openai/v1/", "https://proxy.example/relay/openai/v1/"},
+		{EHBP{ProxyURL: "http://localhost:8080"}, "", "http://localhost:8080/v1/"},
+	} {
+		c, err := unverifiedEnclaveHTTPClient("enclave.example", RepoPin{Repo: "org/repo"}, &EnclaveOptions{Transport: tc.tr})
+		require.NoError(t, err)
+		client, err := NewOpenAIClient(c, &OpenAIOptions{APIPath: tc.apiPath})
+		require.NoError(t, err, tc.apiPath)
+		require.Equal(t, tc.want, client.BaseURL(), "%v %q", tc.tr, tc.apiPath)
+		require.Equal(t, []string{tc.want + "models"}, listModels(t, client, c.secure))
+	}
+}
+
+func TestOpenAIClientRejectsAnInvalidAPIPath(t *testing.T) {
+	c, err := unverifiedEnclaveHTTPClient("enclave.example", RepoPin{Repo: "org/repo"}, nil)
+	require.NoError(t, err)
+	for _, apiPath := range []string{"v1", "v1/", "//evil.example/v1/", "https://evil.example/v1/", "/v1/?q=1", "/v1/#f", "/v1?", "/v1/../admin", "/..", "/./v1", "/%2e%2e/admin", "/v1/%2E/", "/a%2fb/", "/%zz/", "/v1\n/", "/v\t1/"} {
+		client, err := NewOpenAIClient(c, &OpenAIOptions{APIPath: apiPath})
+		require.Nil(t, client)
+		require.ErrorIs(t, err, ErrConfiguration, apiPath)
+	}
+}
+
+func TestOpenAIClientEndsTheGatewayURLWithASlash(t *testing.T) {
+	gw, err := unverifiedGatewayHTTPClient(&GatewayOptions{URL: "https://gateway.example/api/v1", Catalog: func() Catalog { return Catalog{} }})
+	require.NoError(t, err)
+	client, err := NewOpenAIClient(gw, nil)
+	require.NoError(t, err)
+	require.Equal(t, "https://gateway.example/api/v1/", client.BaseURL())
+	require.Equal(t, []string{"https://gateway.example/api/v1/models"}, listModels(t, client, gw.secure))
+}
+
+func TestOpenAIClientRejectsAnAPIPathForTheGateway(t *testing.T) {
+	gw, err := unverifiedGatewayHTTPClient(&GatewayOptions{Catalog: func() Catalog { return Catalog{} }})
+	require.NoError(t, err)
+	client, err := NewOpenAIClient(gw, &OpenAIOptions{APIPath: "/v1/"})
+	require.Nil(t, client)
 	require.ErrorIs(t, err, ErrConfiguration)
 }
+
+// embeddingClient embeds an attested client, so it implements
+// AttestedHTTPClient without being one.
+type embeddingClient struct{ *EnclaveHTTPClient }
+
+func TestOpenAIClientRejectsOtherHTTPClients(t *testing.T) {
+	c, err := unverifiedEnclaveHTTPClient("enclave.example", RepoPin{Repo: "org/repo"}, nil)
+	require.NoError(t, err)
+	for name, hc := range map[string]AttestedHTTPClient{
+		"nil":                   nil,
+		"nil enclave client":    (*EnclaveHTTPClient)(nil),
+		"nil router client":     (*RouterHTTPClient)(nil),
+		"nil gateway client":    (*GatewayHTTPClient)(nil),
+		"zero enclave client":   &EnclaveHTTPClient{},
+		"zero router client":    &RouterHTTPClient{},
+		"zero gateway client":   &GatewayHTTPClient{},
+		"type embedding one":    embeddingClient{c},
+		"pointer embedding one": &embeddingClient{c},
+	} {
+		client, err := NewOpenAIClient(hc, nil)
+		require.Nil(t, client, name)
+		require.ErrorIs(t, err, ErrConfiguration, name)
+	}
+}
+
+func TestOpenAIClientSurfacesSDKErrors(t *testing.T) {
+	original := http.DefaultTransport
+	t.Cleanup(func() { http.DefaultTransport = original })
+	synctest.Test(t, func(t *testing.T) {
+		http.DefaultTransport = roundTripFunc(func(*http.Request) (*http.Response, error) {
+			return nil, errors.New("no network in this test")
+		})
+		c, err := unverifiedEnclaveHTTPClient("enclave.example", RepoPin{Repo: "org/repo"}, nil)
+		require.NoError(t, err)
+		client, err := NewOpenAIClient(c, nil, option.WithMaxRetries(0))
+		require.NoError(t, err)
+
+		_, err = client.Models.List(context.Background(), option.WithBaseURL("https://evil.example/v1/"))
+		require.ErrorIs(t, err, ErrConfiguration, "a per-request base URL on another origin is refused")
+
+		_, err = client.Models.List(context.Background())
+		require.ErrorIs(t, err, ErrNetwork, "a failed verification keeps its category through the OpenAI client")
+	})
+}
+
+// NewClient returns the same OpenAIClient type as NewOpenAIClient.
+var _ func(context.Context, ...option.RequestOption) (*OpenAIClient, error) = NewClient
