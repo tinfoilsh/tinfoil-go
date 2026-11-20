@@ -33,9 +33,11 @@ func (*GatewayHTTPClient) attestedHTTPClient() {}
 type OpenAIOptions struct {
 	// APIPath is the path of the OpenAI API, joined under the EHBP ProxyURL
 	// or, when there is none, under the enclave's origin. Empty selects
-	// "/v1/". It must be an absolute path, without a query, a fragment, an
-	// encoded slash, or a "." or ".." segment, percent-encoded or not. A gateway client's URL already carries the API
-	// path, so a non-empty APIPath with one is an ErrConfiguration error.
+	// "/v1/". It must be an absolute path that consists only of RFC 3986 path
+	// characters, without a query, a fragment, an encoded slash or backslash,
+	// or a "." or ".." segment, percent-encoded or not. A gateway client's URL
+	// already carries the API path, so a non-empty APIPath with one is an
+	// ErrConfiguration error.
 	APIPath string
 }
 
@@ -143,9 +145,22 @@ func withTrailingSlash(u string) string {
 	return u + "/"
 }
 
-// validateAPIPath requires an absolute path without a query, a fragment, or a
-// "." or ".." segment, percent-encoded or not, so that it can only name a path
-// under its root.
+// isPathChar reports whether c is a character that a path may hold as it is
+// written in a URL: RFC 3986 pchar, which includes the "%" of an escape, or
+// "/". A URL parser could rewrite anything else, such as a backslash, a space
+// or a control character, and turn it into a separator or a dot segment.
+func isPathChar(c byte) bool {
+	switch {
+	case 'a' <= c && c <= 'z', 'A' <= c && c <= 'Z', '0' <= c && c <= '9':
+		return true
+	}
+	return strings.IndexByte("-._~!$&'()*+,;=:@%/", c) >= 0
+}
+
+// validateAPIPath requires an absolute path of RFC 3986 path characters
+// without a query, a fragment, an encoded slash or backslash, or a "." or ".."
+// segment, percent-encoded or not, so that it can only name a path under its
+// root, and so that every URL parser reads it as it is written.
 func validateAPIPath(apiPath string) error {
 	if !strings.HasPrefix(apiPath, "/") || strings.HasPrefix(apiPath, "//") {
 		return errs.Configuration(fmt.Errorf("invalid API path %q: it must be an absolute path, such as /v1/", apiPath))
@@ -153,16 +168,18 @@ func validateAPIPath(apiPath string) error {
 	if strings.ContainsAny(apiPath, "?#") {
 		return errs.Configuration(fmt.Errorf("invalid API path %q: it must not carry a query or a fragment", apiPath))
 	}
-	if _, err := url.Parse(apiPath); err != nil {
-		return errs.Configuration(fmt.Errorf("invalid API path %q: it does not parse", apiPath))
+	for i := 0; i < len(apiPath); i++ {
+		if !isPathChar(apiPath[i]) {
+			return errs.Configuration(fmt.Errorf("invalid API path %q: it must consist only of RFC 3986 path characters", apiPath))
+		}
 	}
 	for _, segment := range strings.Split(apiPath, "/") {
 		decoded, err := url.PathUnescape(segment)
 		if err != nil {
 			return errs.Configuration(fmt.Errorf("invalid API path %q: %w", apiPath, err))
 		}
-		if decoded == "." || decoded == ".." || strings.Contains(decoded, "/") {
-			return errs.Configuration(fmt.Errorf("invalid API path %q: it must not contain a \".\" or \"..\" segment or an encoded slash", apiPath))
+		if decoded == "." || decoded == ".." || strings.ContainsAny(decoded, "/\\") {
+			return errs.Configuration(fmt.Errorf("invalid API path %q: it must not contain a \".\" or \"..\" segment or an encoded slash or backslash", apiPath))
 		}
 	}
 	return nil
