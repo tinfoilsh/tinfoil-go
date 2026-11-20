@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"slices"
 	"strings"
 	"testing"
 	"testing/synctest"
@@ -106,6 +107,7 @@ func TestFetchRoutersRefusesInsecureRedirects(t *testing.T) {
 }
 
 func TestDiscoverBoundsTotalProbeTime(t *testing.T) {
+	keepOrder(t)
 	synctest.Test(t, func(t *testing.T) {
 		original := http.DefaultClient
 		defer func() { http.DefaultClient = original }()
@@ -171,6 +173,7 @@ func TestDiscoverUsesTheCallersListAndFetcher(t *testing.T) {
 		"list error": {func(context.Context) ([]string, error) { return []string{"a.example"}, errors.New("unavailable") }, []string{"inference.tinfoil.sh"}},
 	} {
 		t.Run(name, func(t *testing.T) {
+			keepOrder(t)
 			synctest.Test(t, func(t *testing.T) {
 				var hosts []string
 				fetchDocument := func(_ context.Context, host string, _ []byte) ([]byte, error) {
@@ -210,4 +213,41 @@ func TestFetchListAppliesTheListRules(t *testing.T) {
 			require.Error(t, err, "%.40s", body)
 		}
 	}
+}
+
+// keepOrder makes Discover try routers in the order that the list gives them,
+// for the duration of t.
+func keepOrder(t *testing.T) {
+	original := shuffle
+	t.Cleanup(func() { shuffle = original })
+	shuffle = func([]string) {}
+}
+
+func TestDiscoverShufflesACopyOfTheList(t *testing.T) {
+	list := []string{"a.example", "b.example", "c.example"}
+	original := shuffle
+	t.Cleanup(func() { shuffle = original })
+	shuffle = slices.Reverse[[]string]
+	synctest.Test(t, func(t *testing.T) {
+		var hosts []string
+		fetchDocument := func(_ context.Context, host string, _ []byte) ([]byte, error) {
+			hosts = append(hosts, host)
+			return nil, errors.New("unreachable")
+		}
+		_, err := Discover(context.Background(), Options{NewTransport: newTLS, List: func(context.Context) ([]string, error) { return list, nil }, FetchAttestation: fetchDocument})
+		require.NoError(t, err)
+		require.Equal(t, []string{"c.example", "b.example", "a.example"}, hosts[:3], "routers are tried in the shuffled order")
+		require.Equal(t, []string{"a.example", "b.example", "c.example"}, list, "the caller's slice is left alone")
+	})
+}
+
+func TestShuffleVariesTheFirstRouter(t *testing.T) {
+	first := map[string]bool{}
+	for range 100 {
+		routers := []string{"a.example", "b.example", "c.example", "d.example"}
+		shuffle(routers)
+		require.ElementsMatch(t, []string{"a.example", "b.example", "c.example", "d.example"}, routers)
+		first[routers[0]] = true
+	}
+	require.Greater(t, len(first), 1, "a uniform shuffle doesn't always put the same router first")
 }

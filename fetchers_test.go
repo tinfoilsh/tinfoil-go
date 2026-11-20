@@ -231,7 +231,10 @@ func TestAttestationFetcherServesEveryVerification(t *testing.T) {
 			FetchRouterList:  RouterListFetcherFunc(func(context.Context) ([]string, error) { return []string{"a.example", "b.example"}, nil }),
 		})
 		require.ErrorIs(t, err, ErrAttestation)
-		require.Equal(t, []string{"a.example", "b.example", "inference.tinfoil.sh", "inference.tinfoil.sh"}, fetcher.hosts(), "discovery's routers and the fallback")
+		hosts := fetcher.hosts()
+		require.Len(t, hosts, 4)
+		require.ElementsMatch(t, []string{"a.example", "b.example"}, hosts[:2], "discovery's routers, in shuffled order")
+		require.Equal(t, []string{"inference.tinfoil.sh", "inference.tinfoil.sh"}, hosts[2:], "then the fallback")
 	})
 }
 
