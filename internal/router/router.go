@@ -7,7 +7,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math/rand/v2"
 	"net/http"
+	"slices"
 	"time"
 
 	"github.com/tinfoilsh/tinfoil-go/internal/enclave"
@@ -23,6 +25,12 @@ var (
 	// Tinfoil owns the router's name in both namespaces.
 	defaultRouterPin = verify.Pin{Repo: Name, Project: Name}
 	defaultRouterURL = "https://atc.tinfoil.sh/routers"
+	// shuffle puts the candidates in a uniformly random order, so that
+	// clients spread across routers rather than all trying the first one.
+	// Tests replace it to fix the order.
+	shuffle = func(routers []string) {
+		rand.Shuffle(len(routers), func(i, j int) { routers[i], routers[j] = routers[j], routers[i] })
+	}
 )
 
 const (
@@ -130,7 +138,9 @@ func Discover(ctx context.Context, o Options) (*transport.Transport, error) {
 	probing, cancel := context.WithTimeout(ctx, discoveryTimeout)
 	defer cancel()
 	deadline, _ := probing.Deadline()
-	routers := listRouters(probing, list)
+	// A copy, since a caller's fetcher may keep the slice that it returned.
+	routers := slices.Clone(listRouters(probing, list))
+	shuffle(routers)
 	for _, router := range routers {
 		// The deadline can pass before probing's timer cancels it, as when a
 		// probe's own timeout ends at the same instant.
