@@ -66,7 +66,7 @@ type ReplicaVerification = gateway.ReplicaVerification
 
 // GatewayHTTPClient is an *http.Client for Tinfoil inference through the gateway.
 // Each request is sealed to a verified replica of the model it names, as with
-// TransportModeEHBP: the gateway sees the method, URL and headers, and
+// the EHBP transport: the gateway sees the method, URL and headers, and
 // WebSocket upgrades are refused. A JSON object body that repeats its model,
 // user_cache_secret or cache_salt member is refused with ErrConfiguration
 // before it is sent, since a server could read a different repeat from the one
@@ -141,7 +141,7 @@ func validateGatewayURL(baseURL string) (*url.URL, error) {
 	if _, err := transport.OriginOf(baseURL); err != nil {
 		return nil, errs.Configuration(fmt.Errorf("invalid base URL: %w", err))
 	}
-	if err := refuseQueryOrFragment(baseURL); err != nil {
+	if err := refuseQueryOrFragment("base URL", baseURL); err != nil {
 		return nil, err
 	}
 	base, _ := url.Parse(baseURL) // OriginOf parsed it

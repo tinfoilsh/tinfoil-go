@@ -39,16 +39,17 @@ func TestNewEnclaveHTTPClientRejectsInvalidOptions(t *testing.T) {
 		trust Trust
 		opts  *EnclaveOptions
 	}{
-		"no host":                      {"", RepoPin{Repo: "org/repo"}, nil},
-		"unknown transport mode":       {"enclave.example", RepoPin{Repo: "org/repo"}, &EnclaveOptions{TransportMode: "quic"}},
-		"plaintext remote proxy":       {"enclave.example", RepoPin{Repo: "org/repo"}, &EnclaveOptions{TransportMode: TransportModeEHBP, BaseURL: "http://proxy.example/v1/"}},
-		"TLS through a loopback proxy": {"enclave.example", RepoPin{Repo: "org/repo"}, &EnclaveOptions{BaseURL: "http://localhost:8080/v1/"}},
-		"relative base URL":            {"enclave.example", RepoPin{Repo: "org/repo"}, &EnclaveOptions{BaseURL: "/v1/"}},
-		"TLS through a proxy":          {"enclave.example", RepoPin{Repo: "org/repo"}, &EnclaveOptions{BaseURL: "https://proxy.example/v1/"}},
-		"invalid repository":           {"enclave.example", RepoPin{Repo: "not a reference"}, nil},
-		"invalid project":              {"enclave.example", ProjectPin{Project: "not a reference"}, nil},
-		"invalid policy":               {"enclave.example", RepoPin{Repo: "org/repo"}, &EnclaveOptions{Policy: verify.Policy{FreshnessMaxAge: -1}}},
-		"invalid trust":                {"enclave.example", AuthorizedBy{}, nil},
+		"no host":                         {"", RepoPin{Repo: "org/repo"}, nil},
+		"pointer to a transport":          {"enclave.example", RepoPin{Repo: "org/repo"}, &EnclaveOptions{Transport: &EHBP{}}},
+		"type that embeds a transport":    {"enclave.example", RepoPin{Repo: "org/repo"}, &EnclaveOptions{Transport: embeddedTLS{}}},
+		"plaintext remote proxy":          {"enclave.example", RepoPin{Repo: "org/repo"}, &EnclaveOptions{Transport: EHBP{ProxyURL: "http://proxy.example/v1/"}}},
+		"relative proxy URL":              {"enclave.example", RepoPin{Repo: "org/repo"}, &EnclaveOptions{Transport: EHBP{ProxyURL: "/v1/"}}},
+		"proxy on the enclave's origin":   {"enclave.example", RepoPin{Repo: "org/repo"}, &EnclaveOptions{Transport: EHBP{ProxyURL: "https://enclave.example/v1/"}}},
+		"proxy on the enclave's port 443": {"enclave.example", RepoPin{Repo: "org/repo"}, &EnclaveOptions{Transport: EHBP{ProxyURL: "https://ENCLAVE.example:443/custom/v1/"}}},
+		"invalid repository":              {"enclave.example", RepoPin{Repo: "not a reference"}, nil},
+		"invalid project":                 {"enclave.example", ProjectPin{Project: "not a reference"}, nil},
+		"invalid policy":                  {"enclave.example", RepoPin{Repo: "org/repo"}, &EnclaveOptions{Policy: verify.Policy{FreshnessMaxAge: -1}}},
+		"invalid trust":                   {"enclave.example", AuthorizedBy{}, nil},
 	} {
 		t.Run(name, func(t *testing.T) {
 			c, err := NewEnclaveHTTPClient(t.Context(), tc.host, tc.trust, tc.opts)
@@ -132,7 +133,7 @@ func TestNewEnclaveHTTPClientResolvesNoCacheSecret(t *testing.T) {
 
 func TestEnclaveHTTPClientReportsItsEnclaveAndTrust(t *testing.T) {
 	repo := "org/repo@v1@sha256:" + strings.Repeat("a", 64)
-	c, err := unverifiedEnclaveHTTPClient("enclave.example:8443", RepoPin{Repo: repo}, &EnclaveOptions{TransportMode: TransportModeEHBP, BaseURL: "https://proxy.example/v1/"})
+	c, err := unverifiedEnclaveHTTPClient("enclave.example:8443", RepoPin{Repo: repo}, &EnclaveOptions{Transport: EHBP{ProxyURL: "https://proxy.example/v1/"}})
 	require.NoError(t, err)
 	require.Equal(t, "enclave.example:8443", c.Enclave(), "the enclave, not the proxy")
 	require.Equal(t, RepoPin{Repo: repo}, c.Trust(), "with its trust")
@@ -151,24 +152,33 @@ func TestEnclaveHTTPClientReportsItsEnclaveAndTrust(t *testing.T) {
 	require.IsType(t, AuthorizedBy{}, authorized.Trust())
 }
 
-func TestTransportModeDefaultsToTLS(t *testing.T) {
+// embeddedTLS embeds a variant, so it has the variant's methods without being
+// one.
+type embeddedTLS struct{ TLS }
+
+func TestTransportDefaultsToTLS(t *testing.T) {
 	for _, tc := range []struct {
-		mode TransportMode
-		want TransportMode
+		transport Transport
+		want      Transport
 	}{
-		{"", TransportModeTLS},
-		{TransportModeTLS, TransportModeTLS},
-		{TransportModeEHBP, TransportModeEHBP},
+		{nil, TLS{}},
+		{TLS{}, TLS{}},
+		{EHBP{}, EHBP{}},
+		{EHBP{ProxyURL: "https://proxy.example/v1/"}, EHBP{ProxyURL: "https://proxy.example/v1/"}},
 	} {
-		got, err := tc.mode.resolve()
+		got, err := resolveTransport(tc.transport)
 		require.NoError(t, err)
 		require.Equal(t, tc.want, got)
 	}
+	for _, invalid := range []Transport{&TLS{}, &EHBP{}, embeddedTLS{}} {
+		_, err := resolveTransport(invalid)
+		require.ErrorIs(t, err, ErrConfiguration, "%T", invalid)
+	}
 }
 
-func TestKeyedTransportFollowsTheMode(t *testing.T) {
+func TestKeyedTransportFollowsTheTransport(t *testing.T) {
 	e := enclave.NewForTest("enclave.example", func() (*verify.Verification, error) {
-		t.Error("each transport mode refuses its request before verifying")
+		t.Error("each transport refuses its request before verifying")
 		return nil, errors.New("unreachable")
 	})
 	upgrade, err := http.NewRequest(http.MethodGet, "https://enclave.example/v1/realtime", nil)
@@ -176,13 +186,13 @@ func TestKeyedTransportFollowsTheMode(t *testing.T) {
 	upgrade.Header.Set("Upgrade", "websocket")
 	plaintext, err := http.NewRequest(http.MethodGet, "http://enclave.example/v1/models", nil)
 	require.NoError(t, err)
-	_, err = keyedTransport(TransportModeEHBP, e).RoundTrip(upgrade)
+	_, err = keyedTransport(EHBP{}, e).RoundTrip(upgrade)
 	require.ErrorContains(t, err, "EHBP seals only request and response bodies")
-	_, err = keyedTransport(TransportModeTLS, e).RoundTrip(plaintext)
+	_, err = keyedTransport(TLS{}, e).RoundTrip(plaintext)
 	require.ErrorContains(t, err, "requires an HTTPS request")
 }
 
-func TestEnclaveHTTPClientUsesItsTransportMode(t *testing.T) {
+func TestEnclaveHTTPClientUsesItsTransport(t *testing.T) {
 	original := http.DefaultTransport
 	t.Cleanup(func() { http.DefaultTransport = original })
 	synctest.Test(t, func(t *testing.T) {
@@ -197,7 +207,7 @@ func TestEnclaveHTTPClientUsesItsTransportMode(t *testing.T) {
 			req.Header.Set("Upgrade", "websocket")
 			return req
 		}
-		sealed, err := unverifiedEnclaveHTTPClient("enclave.example", RepoPin{Repo: "org/repo"}, &EnclaveOptions{TransportMode: TransportModeEHBP})
+		sealed, err := unverifiedEnclaveHTTPClient("enclave.example", RepoPin{Repo: "org/repo"}, &EnclaveOptions{Transport: EHBP{}})
 		require.NoError(t, err)
 		_, err = sealed.Do(upgrade())
 		require.ErrorContains(t, err, "EHBP seals only request and response bodies")
@@ -256,9 +266,9 @@ func TestNewGatewayHTTPClientRejectsInvalidOptions(t *testing.T) {
 func TestLiveRouterClient(t *testing.T) {
 	testutil.RequireLive(t, "TINFOIL_API_KEY")
 	apiKey := os.Getenv("TINFOIL_API_KEY")
-	for _, mode := range []TransportMode{TransportModeEHBP, TransportModeTLS} {
-		t.Run(string(mode), func(t *testing.T) {
-			oc, err := NewRouterOpenAIClient(context.Background(), &RouterOptions{TransportMode: mode, UserCacheSecret: "go-live-integration-cache-secret"}, option.WithAPIKey(apiKey))
+	for name, tr := range map[string]Transport{"ehbp": EHBP{}, "tls": TLS{}} {
+		t.Run(name, func(t *testing.T) {
+			oc, err := NewRouterOpenAIClient(context.Background(), &RouterOptions{Transport: tr, UserCacheSecret: "go-live-integration-cache-secret"}, option.WithAPIKey(apiKey))
 			require.NoError(t, err)
 			c := oc.HTTPClient()
 			verified, err := c.EnsureVerified(context.Background())
@@ -393,8 +403,8 @@ func TestLiveVerificationCheck(t *testing.T) {
 	})
 }
 
-func TestValidateBaseURL(t *testing.T) {
-	for _, baseURL := range []string{
+func TestValidateProxyURL(t *testing.T) {
+	for _, proxyURL := range []string{
 		"https://proxy.example/v1/",
 		"http://localhost:8080/v1/",
 		"http://LOCALHOST/v1/",
@@ -402,9 +412,9 @@ func TestValidateBaseURL(t *testing.T) {
 		"http://127.1.2.3/v1/",
 		"http://[::1]:8080/v1/",
 	} {
-		require.NoError(t, validateBaseURL(baseURL), baseURL)
+		require.NoError(t, validateProxyURL(proxyURL), proxyURL)
 	}
-	for _, baseURL := range []string{
+	for _, proxyURL := range []string{
 		"http://proxy.example/v1/",
 		"http://app.localhost/v1/",
 		"http://localhost.example/v1/",
@@ -413,13 +423,13 @@ func TestValidateBaseURL(t *testing.T) {
 		"/v1/",
 		"ftp://localhost/v1/",
 	} {
-		require.ErrorIs(t, validateBaseURL(baseURL), ErrConfiguration, baseURL)
+		require.ErrorIs(t, validateProxyURL(proxyURL), ErrConfiguration, proxyURL)
 	}
 }
 
-// refusedBaseURLParts are base URLs with user information, a query or a
-// fragment, each of which every option that takes a base URL refuses.
-var refusedBaseURLParts = map[string]string{
+// refusedURLParts are URLs with user information, a query or a fragment, each
+// of which every option that takes a proxy or base URL refuses.
+var refusedURLParts = map[string]string{
 	"user information":          "https://user:secret@proxy.example/v1/",
 	"user with empty password":  "https://user:@proxy.example/v1/",
 	"user without password":     "https://user@proxy.example/v1/",
@@ -432,53 +442,58 @@ var refusedBaseURLParts = map[string]string{
 	"loopback HTTP with query":  "http://localhost:8080/v1/?a=1",
 }
 
-func TestBaseURLRefusesUserInfoQueryAndFragment(t *testing.T) {
+func TestURLOptionsRefuseUserInfoQueryAndFragment(t *testing.T) {
 	original := http.DefaultTransport
 	t.Cleanup(func() { http.DefaultTransport = original })
 	http.DefaultTransport = roundTripFunc(func(req *http.Request) (*http.Response, error) {
 		t.Errorf("a refused base URL sent %s %s", req.Method, req.URL)
 		return nil, errors.New("no network in this test")
 	})
-	requireRefused := func(t *testing.T, err error) {
+	requireRefused := func(t *testing.T, err error, prefix string) {
 		t.Helper()
 		require.ErrorIs(t, err, ErrConfiguration)
-		require.ErrorContains(t, err, "invalid base URL:")
+		require.ErrorContains(t, err, prefix)
 		require.NotContains(t, err.Error(), "secret", "the error doesn't echo the credentials")
 	}
-	for name, baseURL := range refusedBaseURLParts {
+	for name, rawURL := range refusedURLParts {
 		t.Run(name, func(t *testing.T) {
-			requireRefused(t, validateBaseURL(baseURL))
-			for _, mode := range []TransportMode{TransportModeEHBP, TransportModeTLS} {
-				c, err := NewEnclaveHTTPClient(t.Context(), "proxy.example", RepoPin{Repo: "org/repo"}, &EnclaveOptions{TransportMode: mode, BaseURL: baseURL})
-				require.Nil(t, c)
-				requireRefused(t, err)
-				r, err := NewRouterHTTPClient(t.Context(), &RouterOptions{TransportMode: mode, BaseURL: baseURL})
-				require.Nil(t, r)
-				requireRefused(t, err)
-			}
-			gw, err := NewGatewayHTTPClient(t.Context(), &GatewayOptions{URL: baseURL, Catalog: func() Catalog { return Catalog{} }})
+			requireRefused(t, validateProxyURL(rawURL), "invalid proxy URL:")
+			c, err := NewEnclaveHTTPClient(t.Context(), "enclave.example", RepoPin{Repo: "org/repo"}, &EnclaveOptions{Transport: EHBP{ProxyURL: rawURL}})
+			require.Nil(t, c)
+			requireRefused(t, err, "invalid proxy URL:")
+			r, err := NewRouterHTTPClient(t.Context(), &RouterOptions{Transport: EHBP{ProxyURL: rawURL}})
+			require.Nil(t, r)
+			requireRefused(t, err, "invalid proxy URL:")
+			gw, err := NewGatewayHTTPClient(t.Context(), &GatewayOptions{URL: rawURL, Catalog: func() Catalog { return Catalog{} }})
 			require.Nil(t, gw)
-			requireRefused(t, err)
+			requireRefused(t, err, "invalid base URL:")
 		})
 	}
 }
 
-func TestBaseURLWithAPathIsAccepted(t *testing.T) {
-	for _, baseURL := range []string{"https://proxy.example/custom/v1/", "http://localhost:8080/custom/v1/"} {
-		c, err := unverifiedEnclaveHTTPClient("enclave.example", RepoPin{Repo: "org/repo"}, &EnclaveOptions{TransportMode: TransportModeEHBP, BaseURL: baseURL})
-		require.NoError(t, err, baseURL)
-		require.Equal(t, baseURL, c.BaseURL())
+func TestURLOptionsWithAPathAreAccepted(t *testing.T) {
+	for _, proxyURL := range []string{"https://proxy.example/custom/v1/", "http://localhost:8080/custom/v1/"} {
+		c, err := unverifiedEnclaveHTTPClient("enclave.example", RepoPin{Repo: "org/repo"}, &EnclaveOptions{Transport: EHBP{ProxyURL: proxyURL}})
+		require.NoError(t, err, proxyURL)
+		require.Equal(t, proxyURL, c.BaseURL())
+		require.Equal(t, proxyURL, c.openAIURL, "OpenAI clients use the proxy URL as their base URL")
 	}
-	c, err := unverifiedEnclaveHTTPClient("enclave.example", RepoPin{Repo: "org/repo"}, &EnclaveOptions{BaseURL: "https://enclave.example/custom/v1/"})
-	require.NoError(t, err, "a TLS base URL on the enclave's origin may carry a path")
-	require.Equal(t, "https://enclave.example/custom/v1/", c.BaseURL())
 	gw, err := unverifiedGatewayHTTPClient(&GatewayOptions{URL: "https://gateway.example/custom/v1/", Catalog: func() Catalog { return Catalog{} }})
 	require.NoError(t, err)
 	require.Equal(t, "https://gateway.example/custom/v1/", gw.BaseURL())
 }
 
+func TestDirectTransportsSendToTheEnclaveOrigin(t *testing.T) {
+	for _, tr := range []Transport{nil, TLS{}, EHBP{}} {
+		c, err := unverifiedEnclaveHTTPClient("enclave.example", RepoPin{Repo: "org/repo"}, &EnclaveOptions{Transport: tr})
+		require.NoError(t, err)
+		require.Equal(t, "https://enclave.example/", c.BaseURL(), "%T", tr)
+		require.Equal(t, "https://enclave.example/v1/", c.openAIURL, "%T", tr)
+	}
+}
+
 func TestLoopbackProxyAuthorizesOnlyItsOrigin(t *testing.T) {
-	c, err := unverifiedEnclaveHTTPClient("enclave.example", RepoPin{Repo: "org/repo"}, &EnclaveOptions{TransportMode: TransportModeEHBP, BaseURL: "http://localhost:8080/v1/"})
+	c, err := unverifiedEnclaveHTTPClient("enclave.example", RepoPin{Repo: "org/repo"}, &EnclaveOptions{Transport: EHBP{ProxyURL: "http://localhost:8080/v1/"}})
 	require.NoError(t, err)
 	require.Equal(t, "http://localhost:8080/v1/", c.BaseURL())
 	for _, target := range []string{
@@ -491,21 +506,6 @@ func TestLoopbackProxyAuthorizesOnlyItsOrigin(t *testing.T) {
 		require.ErrorIs(t, err, ErrConfiguration, "%s is refused before verifying, so no network I/O", target)
 		require.ErrorContains(t, err, "refusing to send request")
 	}
-}
-
-func TestValidateTLSBaseURL(t *testing.T) {
-	require.NoError(t, validateTLSBaseURL("", "enclave.example.com"))
-	require.NoError(t, validateTLSBaseURL("https://enclave.example.com/custom/v1", "enclave.example.com"))
-	require.NoError(t, validateTLSBaseURL("https://enclave.example.com:443/custom/v1", "enclave.example.com"))
-
-	err := validateTLSBaseURL("https://proxy.example.com/v1", "enclave.example.com")
-	require.Error(t, err)
-	require.Contains(t, err.Error(), "verified enclave origin")
-	require.Contains(t, err.Error(), "requires TransportModeEHBP", "the error names the mode a proxy needs")
-
-	err = validateTLSBaseURL("http://enclave.example.com/v1", "enclave.example.com")
-	require.Error(t, err)
-	require.Contains(t, err.Error(), "verified enclave origin")
 }
 
 // testKeyRejection is a key rejection as transport.IsKeyRejection reports one.
@@ -551,8 +551,8 @@ func TestEnclaveChainStacksEveryLayer(t *testing.T) {
 }
 
 func TestEnclaveHTTPClientRefusesOtherOrigins(t *testing.T) {
-	for _, mode := range []TransportMode{TransportModeTLS, TransportModeEHBP} {
-		c, err := unverifiedEnclaveHTTPClient("enclave.example", RepoPin{Repo: "org/repo"}, &EnclaveOptions{TransportMode: mode})
+	for _, tr := range []Transport{TLS{}, EHBP{}, EHBP{ProxyURL: "https://proxy.example/v1/"}} {
+		c, err := unverifiedEnclaveHTTPClient("enclave.example", RepoPin{Repo: "org/repo"}, &EnclaveOptions{Transport: tr})
 		require.NoError(t, err)
 		_, err = c.Get("https://elsewhere.example/v1/models")
 		require.ErrorIs(t, err, ErrConfiguration, "refused before verifying, so no network I/O")

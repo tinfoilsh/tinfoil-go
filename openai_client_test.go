@@ -88,7 +88,7 @@ func TestOpenAIClientsRejectInvalidOptions(t *testing.T) {
 	enclave, err := NewEnclaveOpenAIClient(t.Context(), "", RepoPin{Repo: "org/repo"}, nil)
 	require.Nil(t, enclave)
 	require.ErrorIs(t, err, ErrConfiguration)
-	router, err := NewRouterOpenAIClient(t.Context(), &RouterOptions{TransportMode: "quic"})
+	router, err := NewRouterOpenAIClient(t.Context(), &RouterOptions{Transport: &TLS{}})
 	require.Nil(t, router)
 	require.ErrorIs(t, err, ErrConfiguration)
 	gateway, err := NewGatewayOpenAIClient(t.Context(), &GatewayOptions{URL: "http://gateway.example/v1/", Catalog: func() Catalog { return Catalog{} }})

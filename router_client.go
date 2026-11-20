@@ -2,12 +2,10 @@ package tinfoil
 
 import (
 	"context"
-	"errors"
 	"net/http"
 
 	"github.com/tinfoilsh/tinfoil-go/internal/cachesecret"
 	"github.com/tinfoilsh/tinfoil-go/internal/enclave"
-	"github.com/tinfoilsh/tinfoil-go/internal/errs"
 	"github.com/tinfoilsh/tinfoil-go/internal/router"
 	"github.com/tinfoilsh/tinfoil-go/internal/transport"
 	"github.com/tinfoilsh/tinfoil-go/verify"
@@ -15,18 +13,9 @@ import (
 
 // RouterOptions configures a RouterHTTPClient.
 type RouterOptions struct {
-	// TransportMode defaults to TransportModeTLS.
-	TransportMode TransportMode
-	// BaseURL is a proxy that forwards requests to the router discovery
-	// chooses, and requires TransportModeEHBP: the router isn't known before
-	// discovery, so a BaseURL can't name its origin. Requests carry
-	// X-Tinfoil-Enclave-Url so the proxy can forward them. The proxy must use
-	// HTTPS, since EHBP doesn't seal headers such as the API key; http:// is
-	// accepted only when its host is localhost or a loopback IP address, for a
-	// local development proxy or a sidecar. Request paths join under it, so a
-	// BaseURL with user information, a query or a fragment, even an empty
-	// one, is an ErrConfiguration error.
-	BaseURL string
+	// Transport is TLS or EHBP, and nil selects TLS{}. An EHBP ProxyURL
+	// forwards requests to the router that discovery chooses.
+	Transport Transport
 	// Policy is the verification policy that applies on top of the router's
 	// fixed trust; the zero Policy keeps every default. The client copies it,
 	// so later changes by the caller have no effect.
@@ -72,30 +61,22 @@ func NewRouterHTTPClient(ctx context.Context, opts *RouterOptions) (*RouterHTTPC
 	if opts == nil {
 		opts = &RouterOptions{}
 	}
-	mode, err := opts.TransportMode.resolve()
+	tr, err := resolveTransport(opts.Transport)
 	if err != nil {
 		return nil, err
-	}
-	if opts.BaseURL != "" {
-		if err := validateBaseURL(opts.BaseURL); err != nil {
-			return nil, err
-		}
-		if mode == TransportModeTLS {
-			return nil, errs.Configuration(errors.New("a base URL is a proxy when discovering the router, which requires TransportModeEHBP"))
-		}
 	}
 	verifier, err := enclave.NewVerifier(nil, opts.Policy)
 	if err != nil {
 		return nil, err
 	}
 	keyed, err := router.Discover(ctx, verifier, opts.VerificationCheck, func(e *enclave.Enclave) *transport.Transport {
-		return keyedTransport(mode, e)
+		return keyedTransport(tr, e)
 	})
 	if err != nil {
 		return nil, err
 	}
 	secret := cachesecret.Resolve(opts.UserCacheSecret)
-	a, err := newAttestedClient(keyed, routerTrust, mode, opts.BaseURL, secret)
+	a, err := newAttestedClient(keyed, routerTrust, proxyURLOf(tr), secret)
 	if err != nil {
 		return nil, err
 	}

@@ -37,20 +37,20 @@ func TestNewRouterHTTPClientRejectsInvalidOptionsBeforeDiscovery(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	for _, opts := range []*RouterOptions{
-		{TransportMode: "quic"},
-		{TransportMode: TransportModeEHBP, BaseURL: "http://proxy.example/v1/"},
-		{BaseURL: "https://proxy.example/v1/"},
-		{TransportMode: TransportModeTLS, BaseURL: "https://proxy.example/v1/"},
+		{Transport: &TLS{}},
+		{Transport: embeddedTLS{}},
+		{Transport: EHBP{ProxyURL: "http://proxy.example/v1/"}},
+		{Transport: EHBP{ProxyURL: "/v1/"}},
 		{Policy: verify.Policy{FreshnessMaxAge: -1}},
 	} {
 		c, err := NewRouterHTTPClient(ctx, opts)
 		require.Nil(t, c)
 		require.ErrorIs(t, err, ErrConfiguration)
 	}
-	_, err := NewRouterHTTPClient(ctx, &RouterOptions{BaseURL: "https://proxy.example/v1/"})
-	require.ErrorContains(t, err, "requires TransportModeEHBP", "a proxy never downgrades the default mode silently")
-	_, err = NewRouterHTTPClient(ctx, &RouterOptions{TransportMode: TransportModeEHBP, BaseURL: "http://localhost:8080/v1/"})
-	require.ErrorIs(t, err, context.Canceled, "a loopback proxy passes the checks and reaches discovery")
+	for _, proxyURL := range []string{"https://proxy.example/v1/", "http://localhost:8080/v1/"} {
+		_, err := NewRouterHTTPClient(ctx, &RouterOptions{Transport: EHBP{ProxyURL: proxyURL}})
+		require.ErrorIs(t, err, context.Canceled, "%s passes the checks and reaches discovery", proxyURL)
+	}
 }
 
 func TestNewRouterHTTPClientVerifiesTheFallbackUnderItsContext(t *testing.T) {
