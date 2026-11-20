@@ -58,6 +58,13 @@ type RouterHTTPClient struct {
 // discovers again each time it is called. The client verifies its router
 // again by itself when the verification expires or is rejected.
 func NewRouterHTTPClient(ctx context.Context, opts *RouterOptions) (*RouterHTTPClient, error) {
+	return newRouterHTTPClient(ctx, opts, nil)
+}
+
+// newRouterHTTPClient is NewRouterHTTPClient with a check, when check isn't
+// nil, that runs with the proxy URL ("" for none) after opts are checked and
+// before any network I/O.
+func newRouterHTTPClient(ctx context.Context, opts *RouterOptions, check func(proxyURL string) error) (*RouterHTTPClient, error) {
 	if opts == nil {
 		opts = &RouterOptions{}
 	}
@@ -68,6 +75,11 @@ func NewRouterHTTPClient(ctx context.Context, opts *RouterOptions) (*RouterHTTPC
 	verifier, err := enclave.NewVerifier(nil, opts.Policy)
 	if err != nil {
 		return nil, err
+	}
+	if check != nil {
+		if err := check(proxyURLOf(tr)); err != nil {
+			return nil, err
+		}
 	}
 	keyed, err := router.Discover(ctx, verifier, opts.VerificationCheck, func(e *enclave.Enclave) *transport.Transport {
 		return keyedTransport(tr, e)

@@ -23,8 +23,7 @@ func NewClient(ctx context.Context, openaiOpts ...option.RequestOption) (*Client
 	if err != nil {
 		return nil, fmt.Errorf("failed to create client: %w", err)
 	}
-	router := client.HTTPClient()
-	return &Client{Client: client.Client, httpClient: router.secure, baseURL: router.openAIURL}, nil
+	return &Client{Client: client.Client, httpClient: client.HTTPClient().secure, baseURL: client.baseURL}, nil
 }
 
 // HTTPClient returns the HTTP client the OpenAI client sends through. It
@@ -37,8 +36,10 @@ func (c *Client) HTTPClient() *http.Client {
 	return c.httpClient
 }
 
-// BaseURL returns the URL the client sends requests to on the route it chose.
-// Build raw request URLs for HTTPClient from it so they follow the route.
+// BaseURL returns the OpenAI base URL that the client sends requests to on the
+// route it chose: by default v1/ under the router's origin, or an
+// option.WithBaseURL on that origin. Build raw request URLs for HTTPClient
+// from it so that they follow the route.
 func (c *Client) BaseURL() string {
 	return c.baseURL
 }

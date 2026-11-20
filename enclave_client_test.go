@@ -472,11 +472,11 @@ func TestURLOptionsRefuseUserInfoQueryAndFragment(t *testing.T) {
 }
 
 func TestURLOptionsWithAPathAreAccepted(t *testing.T) {
-	for _, proxyURL := range []string{"https://proxy.example/custom/v1/", "http://localhost:8080/custom/v1/"} {
+	for _, proxyURL := range []string{"https://proxy.example/custom/", "http://localhost:8080/custom/"} {
 		c, err := unverifiedEnclaveHTTPClient("enclave.example", RepoPin{Repo: "org/repo"}, &EnclaveOptions{Transport: EHBP{ProxyURL: proxyURL}})
 		require.NoError(t, err, proxyURL)
 		require.Equal(t, proxyURL, c.BaseURL())
-		require.Equal(t, proxyURL, c.openAIURL, "OpenAI clients use the proxy URL as their base URL")
+		require.Equal(t, proxyURL+"v1/", c.openAIURL, "OpenAI clients send to v1/ under the proxy URL")
 	}
 	gw, err := unverifiedGatewayHTTPClient(&GatewayOptions{URL: "https://gateway.example/custom/v1/", Catalog: func() Catalog { return Catalog{} }})
 	require.NoError(t, err)
