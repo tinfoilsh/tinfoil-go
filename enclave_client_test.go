@@ -355,7 +355,9 @@ func TestLiveVerificationCheck(t *testing.T) {
 
 	// replicatedCatalog fetches Tinfoil's gateway catalog once and returns it
 	// with its model that has the most replicas. Clients built on that catalog
-	// choose the model and verify it against the same snapshot.
+	// choose the model and verify it against the same snapshot. It skips the
+	// test when no model has two replicas, which depends on production capacity
+	// rather than on the SDK.
 	replicatedCatalog := func(t *testing.T) (Catalog, string) {
 		base, err := url.Parse(defaultGatewayURL)
 		require.NoError(t, err)
@@ -367,7 +369,9 @@ func TestLiveVerificationCheck(t *testing.T) {
 				model = m
 			}
 		}
-		require.GreaterOrEqual(t, len(catalog[model].Hosts), 2, "the gateway's catalog needs a model with two replicas")
+		if len(catalog[model].Hosts) < 2 {
+			t.Skipf("the gateway's catalog has no model with two replicas (the most is %d, for %q)", len(catalog[model].Hosts), model)
+		}
 		return catalog, model
 	}
 
