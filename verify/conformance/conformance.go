@@ -179,10 +179,9 @@ func Run(stage string, in Input) (Output, int) {
 	}
 	quoteOpts := &quote.Options{}
 	quoteOpts.DangerousTestOnlySetRoots(rts.amd, rts.intel)
-	verifier, err := verify.NewVerifier(
-		verify.DangerousTestOnlyWithSigstoreRoot(rts.sigstore),
-		verify.DangerousTestOnlyWithVendorRoots(rts.amd, rts.intel),
-	)
+	verifier, err := verify.DangerousTestOnlyNewVerifier(nil, verify.Policy{}, verify.DangerousTestOnlyRoots{
+		SigstoreRootJSON: rts.sigstore, AMDRootPEM: rts.amd, IntelRootPEM: rts.intel,
+	})
 	if err != nil {
 		return malformed(stage)
 	}
@@ -335,8 +334,7 @@ type roots struct {
 }
 
 // TrustAnchors returns the anchors that the input supplies, in the form that
-// verify.DangerousTestOnlyWithSigstoreRoot and DangerousTestOnlyWithVendorRoots
-// take: the Sigstore trusted-root JSON, the AMD ASK+ARK chain and the Intel
+// verify.DangerousTestOnlyRoots takes: the Sigstore trusted-root JSON, the AMD ASK+ARK chain and the Intel
 // root, each nil when the input keeps the embedded one. The mobile binding's
 // conformance build reads anchors through it, so both parse them alike.
 func (in Input) TrustAnchors() (sigstore, amd, intel []byte, err error) {

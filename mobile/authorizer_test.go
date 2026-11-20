@@ -44,9 +44,9 @@ func TestNewVerifierWithConfigAuthorizerRejects(t *testing.T) {
 		authorizer              ConfigAuthorizer
 	}{
 		{"nil authorizer", "", "must not be nil", nil},
-		{"with config signing keys", `{"config_signing_keys_pem":[` + quoted(key) + `]}`, "config authorizer conflicts", &recordingAuthorizer{}},
-		{"with an embedded config", `{"embedded_config":{"bytes":"` + b64(testConfig) + `"}}`, "config authorizer conflicts", &recordingAuthorizer{}},
-		{"with registry IDs", `{"config_registry_ids":[` + quoted(PublicRegistryID) + `]}`, "require endorsement verification", &recordingAuthorizer{}},
+		{"with config signing keys", `{"config_signing_keys_pem":[` + quoted(key) + `]}`, "conflicting config trust", &recordingAuthorizer{}},
+		{"with an embedded config", `{"embedded_config":{"bytes":"` + b64(testConfig) + `"}}`, "conflicting config trust", &recordingAuthorizer{}},
+		{"with registry IDs", `{"config_registry_ids":[` + quoted(PublicRegistryID) + `]}`, "conflicting config trust", &recordingAuthorizer{}},
 		{"with malformed options", `{"unknown":1}`, "parsing verification options", &recordingAuthorizer{}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

@@ -40,7 +40,7 @@ func TestConfigPinsOneRuntimeManifest(t *testing.T) {
 		inputs.Runtime, err = json.Marshal(manifest)
 		require.NoError(t, err)
 		inputs.Config.Bytes = []byte(fmt.Sprintf("cvm-version: 0.15.0%s@sha256:%x\n", suffix, sha256.Sum256(inputs.Runtime)))
-		v, err := NewVerifier(WithEmbeddedReferences(inputs))
+		v, err := newEmbeddedVerifier(inputs)
 		require.NoError(t, err)
 		refs, err := v.configReferences(doc, "", time.Now())
 		require.NoError(t, err)
@@ -50,13 +50,46 @@ func TestConfigPinsOneRuntimeManifest(t *testing.T) {
 		require.Equal(t, "v0.15.0", refs.artifact.Tag)
 		inputs.Runtime = embeddedInputs(t).Runtime
 		if suffix != "" {
-			_, err = NewVerifier(WithEmbeddedReferences(inputs))
+			_, err = newEmbeddedVerifier(inputs)
 			require.ErrorContains(t, err, "digest pin")
 		}
 	}
 }
 
-func embeddedInputs(t *testing.T) EmbeddedReferences {
+// embeddedTestInputs are caller-trusted references: a config, given as bytes
+// or as a reference, and the runtime and platform artifacts. A nil member
+// keeps the endorsement of that component.
+type embeddedTestInputs struct {
+	Config          *EmbeddedConfig
+	ConfigReference *EmbeddedConfigReference
+	Runtime         []byte
+	Platform        []byte
+}
+
+// config returns the config trust that in selects.
+func (in embeddedTestInputs) config() ConfigTrust {
+	switch {
+	case in.Config != nil:
+		return *in.Config
+	case in.ConfigReference != nil:
+		return *in.ConfigReference
+	}
+	return nil
+}
+
+// policy returns a policy that embeds in's artifacts.
+func (in embeddedTestInputs) policy() Policy {
+	if in.Runtime == nil && in.Platform == nil {
+		return Policy{}
+	}
+	return Policy{Artifacts: EmbeddedArtifacts{Runtime: in.Runtime, Platform: in.Platform}}
+}
+
+func newEmbeddedVerifier(in embeddedTestInputs) (*Verifier, error) {
+	return NewVerifier(in.config(), in.policy())
+}
+
+func embeddedInputs(t *testing.T) embeddedTestInputs {
 	t.Helper()
 	zero := strings.Repeat("00", runtime.MeasurementSize)
 	manifest, err := json.Marshal(runtime.Manifest{Version: "v0.15.0", Measurements: &runtime.Measurements{
@@ -67,7 +100,7 @@ func embeddedInputs(t *testing.T) EmbeddedReferences {
 	require.NoError(t, err)
 	platform, err := json.Marshal(policy.Artifact{Format: policy.ArtifactFormatV2})
 	require.NoError(t, err)
-	return EmbeddedReferences{
+	return embeddedTestInputs{
 		Config:  &EmbeddedConfig{Name: embeddedConfigName, Bytes: []byte(fmt.Sprintf("cvm-version: 0.15.0@sha256:%x\n", sha256.Sum256(manifest)))},
 		Runtime: manifest, Platform: platform,
 	}
@@ -80,10 +113,8 @@ func TestEmbeddedConfigReferenceWithoutConfigBytes(t *testing.T) {
 	require.NoError(t, err)
 	reference := EmbeddedConfigReference{Name: embeddedConfigName, Digest: hex.EncodeToString(digest[:]), Runtime: runtime}
 	inputs.ConfigReference = &reference
-	_, err = NewVerifier(WithEmbeddedReferences(inputs))
-	require.ErrorContains(t, err, "mutually exclusive")
 	inputs.Config = nil
-	v, err := NewVerifier(WithEmbeddedReferences(inputs))
+	v, err := newEmbeddedVerifier(inputs)
 	require.NoError(t, err)
 	require.True(t, v.CallerAuthorizesConfig())
 	require.NoError(t, v.CheckPinVerifiability(Pin{}))
@@ -107,7 +138,7 @@ func TestEmbeddedConfigReferenceWithoutConfigBytes(t *testing.T) {
 		bad := reference
 		mutate(&bad)
 		inputs.ConfigReference = &bad
-		_, err = NewVerifier(WithEmbeddedReferences(inputs))
+		_, err = newEmbeddedVerifier(inputs)
 		require.Error(t, err)
 	}
 	reference.Digest = strings.Repeat("ab", sha256.Size)
@@ -128,10 +159,10 @@ func embeddedDocument(t *testing.T, format string, entries ...collateral.Entry) 
 	return raw, nonce, doc
 }
 
-func TestEmbeddedReferencesPreserveBindingsAndOwnTheirBytes(t *testing.T) {
+func TestEmbeddedTrustPreservesBindingsAndOwnsItsBytes(t *testing.T) {
 	inputs := embeddedInputs(t)
 	configHash := sha256.Sum256(inputs.Config.Bytes)
-	v, err := NewVerifier(WithEmbeddedReferences(inputs))
+	v, err := newEmbeddedVerifier(inputs)
 	require.NoError(t, err)
 	inputs.Config.Name = "/other/project/v2"
 	for _, data := range [][]byte{inputs.Config.Bytes, inputs.Runtime, inputs.Platform} {
@@ -158,9 +189,9 @@ func TestEmbeddedReferencesPreserveBindingsAndOwnTheirBytes(t *testing.T) {
 	requireRejectedAt(t, err, LayerQuote, "exact local bytes can identify a workload without a registry pin")
 }
 
-func TestEmbeddedReferencesCannotOverridePins(t *testing.T) {
+func TestEmbeddedConfigCannotOverridePins(t *testing.T) {
 	inputs := embeddedInputs(t)
-	v, err := NewVerifier(WithEmbeddedReferences(inputs))
+	v, err := newEmbeddedVerifier(inputs)
 	require.NoError(t, err)
 	raw, nonce, _ := embeddedDocument(t, collateral.FormatV3)
 	for _, ref := range []string{"other/project", "org/project@v2", "org/project@sha256:" + strings.Repeat("00", sha256.Size)} {
@@ -170,13 +201,13 @@ func TestEmbeddedReferencesCannotOverridePins(t *testing.T) {
 		require.ErrorContains(t, err, "does not match the caller's pins")
 	}
 	inputs.Runtime = append(inputs.Runtime, '\n')
-	_, err = NewVerifier(WithEmbeddedReferences(inputs))
+	_, err = newEmbeddedVerifier(inputs)
 	require.ErrorAs(t, err, new(*UsageError), "a manifest the embedded config does not pin is the caller's mistake")
 	require.ErrorContains(t, err, "config's digest pin")
 
 	inputs = embeddedInputs(t)
 	inputs.Config.Name = ""
-	v, err = NewVerifier(WithEmbeddedReferences(inputs))
+	v, err = newEmbeddedVerifier(inputs)
 	require.NoError(t, err)
 	_, err = v.VerifyV3(raw, nonce, Pin{Project: "org/project"})
 	var usage *UsageError
@@ -186,7 +217,7 @@ func TestEmbeddedReferencesCannotOverridePins(t *testing.T) {
 	requireRejectedAt(t, err, LayerQuote)
 }
 
-func TestEmbeddedReferencesStillRequireOtherEndorsements(t *testing.T) {
+func TestEmbeddedTrustStillRequiresOtherEndorsements(t *testing.T) {
 	_, _, doc := embeddedDocument(t, collateral.FormatV3)
 	for _, component := range []string{collateral.ConfigID, collateral.RuntimeID, collateral.PlatformID} {
 		t.Run(component, func(t *testing.T) {
@@ -199,7 +230,7 @@ func TestEmbeddedReferencesStillRequireOtherEndorsements(t *testing.T) {
 			case collateral.PlatformID:
 				inputs.Platform = nil
 			}
-			v, err := NewVerifier(WithEmbeddedReferences(inputs))
+			v, err := newEmbeddedVerifier(inputs)
 			require.NoError(t, err)
 			_, err = v.configReferences(doc, "org/project", time.Now())
 			require.ErrorIs(t, err, collateral.ErrNotFound)
@@ -212,9 +243,30 @@ func TestEmbeddedTrustRejectsInvalidOrUnusedInputs(t *testing.T) {
 	inputs := embeddedInputs(t)
 	keys, err := endorsement.PublicSigningKeys()
 	require.NoError(t, err)
-	for _, refs := range []EmbeddedReferences{{}, {Config: &EmbeddedConfig{}}, {Runtime: []byte{}}, {Runtime: []byte(`{}`)}, {Platform: []byte{}}, {Platform: []byte(`{"format":"unknown"}`)}} {
-		_, err := NewVerifier(WithEmbeddedReferences(refs))
-		require.Error(t, err)
+	for _, config := range []ConfigTrust{EmbeddedConfig{}, EmbeddedConfig{Bytes: make([]byte, configendorsement.MaxConfigSize+1)}, EmbeddedConfigReference{}} {
+		_, err := NewVerifier(config, Policy{})
+		require.ErrorAs(t, err, new(*UsageError))
+	}
+	for _, artifacts := range []EmbeddedArtifacts{
+		{},
+		{FreshnessKeys: keys},
+		{Runtime: []byte{}},
+		{Runtime: []byte(`{}`)},
+		{Platform: []byte{}},
+		{Platform: []byte(`{"format":"unknown"}`)},
+		{Runtime: inputs.Runtime, FreshnessKeys: []crypto.PublicKey{}},
+		// Keys with nothing left to verify.
+		{Runtime: inputs.Runtime, Platform: inputs.Platform, FreshnessKeys: keys},
+	} {
+		_, err := NewVerifier(nil, Policy{Artifacts: artifacts})
+		require.ErrorAs(t, err, new(*UsageError))
+	}
+	for _, artifacts := range []EmbeddedArtifacts{
+		{Runtime: inputs.Runtime, FreshnessKeys: keys},
+		{Platform: inputs.Platform, FreshnessKeys: keys},
+	} {
+		_, err := NewVerifier(*inputs.Config, Policy{Artifacts: artifacts})
+		require.NoError(t, err)
 	}
 	for _, version := range []string{"", "0.15.0", "v0.15"} {
 		var manifest runtime.Manifest
@@ -222,21 +274,18 @@ func TestEmbeddedTrustRejectsInvalidOrUnusedInputs(t *testing.T) {
 		manifest.Version = version
 		data, err := json.Marshal(manifest)
 		require.NoError(t, err)
-		_, err = NewVerifier(WithEmbeddedReferences(EmbeddedReferences{Runtime: data}))
+		_, err = NewVerifier(nil, Policy{Artifacts: EmbeddedArtifacts{Runtime: data}})
 		require.ErrorAs(t, err, new(*UsageError), "a manifest no config can pin, version %q", version)
 	}
-	for _, options := range [][]Option{
-		{WithEmbeddedReferences(inputs), WithConfigSigningKeys(keys)},
-		{WithConfigSigningKeys(keys), WithEmbeddedReferences(inputs)},
-		{WithEmbeddedReferences(inputs), WithFreshnessSigningKeys(keys)},
-		{WithFreshnessSigningKeys(keys), WithEmbeddedReferences(inputs)},
-	} {
-		_, err := NewVerifier(options...)
-		require.Error(t, err)
-	}
 	raw, nonce, _ := embeddedDocument(t, collateral.FormatV2)
-	for _, option := range []Option{WithEmbeddedReferences(inputs), WithConfigSigningKeys(keys), WithFreshnessSigningKeys(keys)} {
-		v, err := NewVerifier(option)
+	for _, build := range []func() (*Verifier, error){
+		func() (*Verifier, error) { return newEmbeddedVerifier(inputs) },
+		func() (*Verifier, error) { return NewVerifier(ConfigSigningKeys{Keys: keys}, Policy{}) },
+		func() (*Verifier, error) {
+			return NewVerifier(nil, Policy{Artifacts: EndorsedArtifacts{FreshnessKeys: keys}})
+		},
+	} {
+		v, err := build()
 		require.NoError(t, err)
 		_, err = v.VerifyV3(raw, nonce, Pin{Project: "org/project"})
 		require.ErrorContains(t, err, "configured trust requires")
@@ -254,7 +303,7 @@ func TestEndorsedConfigWithEmbeddedArtifactsRetainsFreshnessAndAuthority(t *test
 	payload, err := s.Complete(f.Timestamp(t, timestampInput, at))
 	require.NoError(t, err)
 	bundle := sigstoretest.MarshalBundle(t, f.Bundle(t, payload))
-	v, err := NewVerifier(WithEmbeddedReferences(EmbeddedReferences{Runtime: inputs.Runtime, Platform: inputs.Platform}), WithConfigSigningKeys([]crypto.PublicKey{f.Key.Public()}))
+	v, err := NewVerifier(ConfigSigningKeys{Keys: []crypto.PublicKey{f.Key.Public()}}, Policy{Artifacts: EmbeddedArtifacts{Runtime: inputs.Runtime, Platform: inputs.Platform}})
 	require.NoError(t, err)
 	v.configVerifier, err = endorsement.NewConfigVerifier(&f.Trust, []crypto.PublicKey{f.Key.Public()})
 	require.NoError(t, err)
@@ -271,7 +320,7 @@ func TestEndorsedConfigWithEmbeddedArtifactsRetainsFreshnessAndAuthority(t *test
 	require.Equal(t, at, refs.config.ApprovalTime)
 	require.Equal(t, at.Add(v.freshnessMaxAge), refs.freshnessExpiresAt)
 	rejected := fmt.Errorf("config is not authorized")
-	require.NoError(t, WithConfigAuthorizer(func(collateral.ConfigEndorsement) error { return rejected })(v))
+	v.configAuthorizer = func(collateral.ConfigEndorsement) error { return rejected }
 	_, err = v.configReferences(doc, "", f.Now)
 	require.ErrorIs(t, err, rejected, "a valid endorsement must not bypass caller policy")
 	v.configAuthorizer = nil

@@ -54,7 +54,7 @@ func TestLiveArchivedVerification(t *testing.T) {
 	require.NoError(t, err)
 	raw, err := fetch.Document(t.Context(), os.Getenv(enclaveEnvVar), "", nonce)
 	require.NoError(t, err)
-	defaults, err := NewVerifier()
+	defaults, err := NewVerifier(nil, Policy{})
 	require.NoError(t, err)
 	want, err := defaults.VerifyV3(raw, nonce, Pin{Repo: repo})
 	require.NoError(t, err)
@@ -106,7 +106,7 @@ func TestLiveArchivedVerification(t *testing.T) {
 			if tt.mutate != nil {
 				modified = editDocument(t, raw, tt.mutate)
 			}
-			bounded, err := NewVerifier(WithFreshnessMaxAge(tt.maxAge))
+			bounded, err := NewVerifier(nil, Policy{FreshnessMaxAge: tt.maxAge})
 			require.NoError(t, err)
 			_, err = bounded.VerifyV3At(modified, nonce, Pin{Repo: repo}, verifiedAt)
 			require.ErrorContains(t, err, tt.wantError)
@@ -149,7 +149,7 @@ func TestLiveFreshnessWitnessExpiration(t *testing.T) {
 	require.NoError(t, err)
 	raw, err := fetch.Document(t.Context(), os.Getenv(enclaveEnvVar), "", nonce)
 	require.NoError(t, err)
-	verifier, err := NewVerifier()
+	verifier, err := NewVerifier(nil, Policy{})
 	require.NoError(t, err)
 	verified, err := verifier.VerifyV3(raw, nonce, Pin{Repo: repo})
 	require.NoError(t, err)
@@ -192,7 +192,7 @@ func TestLiveFreshnessWitnessExpiration(t *testing.T) {
 	require.Equal(t, validity.Earliest(firstWitness.Add(endorsement.MaxFreshnessAge), cpu.ExpiresAt), verified.FreshnessExpiresAt())
 	shortAge := max(appraisalTime.Sub(firstWitness), time.Nanosecond)
 	for _, age := range []time.Duration{shortAge, maxAge} {
-		custom, err := NewVerifier(WithFreshnessMaxAge(age))
+		custom, err := NewVerifier(nil, Policy{FreshnessMaxAge: age})
 		require.NoError(t, err)
 		got, err := custom.VerifyV3At(raw, nonce, Pin{Repo: repo}, appraisalTime)
 		require.NoError(t, err)

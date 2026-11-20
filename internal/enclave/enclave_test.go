@@ -19,12 +19,12 @@ func TestNewChecksConfig(t *testing.T) {
 	require.ErrorIs(t, err, errs.ErrConfiguration)
 	_, err = New(Config{Host: "enclave.example"})
 	require.ErrorIs(t, err, errs.ErrConfiguration, "default trust needs a pin")
-	authorizer, err := verify.NewVerifier(verify.WithConfigAuthorizer(func(collateral.ConfigEndorsement) error { return nil }))
+	authorizer, err := verify.NewVerifier(verify.ConfigAuthorizer{Authorize: func(collateral.ConfigEndorsement) error { return nil }}, verify.Policy{})
 	require.NoError(t, err)
 	_, err = New(Config{Host: "enclave.example", Pin: verify.Pin{Repo: "org/repo"}, Verifier: authorizer})
 	require.ErrorIs(t, err, errs.ErrConfiguration, "a config authorizer can't verify a repository pin")
 
-	v, err := verify.NewVerifier(verify.WithFreshnessMaxAge(time.Hour))
+	v, err := verify.NewVerifier(nil, verify.Policy{FreshnessMaxAge: time.Hour})
 	require.NoError(t, err)
 	s, err := New(Config{Host: "enclave.example", Relay: "relay.example", Pin: verify.Pin{Repo: "org/repo"}, Verifier: v})
 	require.NoError(t, err)
@@ -34,7 +34,7 @@ func TestNewChecksConfig(t *testing.T) {
 
 func TestConfigRegistryIDRequiresRegistryEvidence(t *testing.T) {
 	const registryID = "https://registry.tinfoil.sh/scopes/9c4a7f21e0b836d56a13c8fe42d907ab"
-	verifier, err := verify.NewVerifier(verify.WithConfigRegistryIDs(registryID))
+	verifier, err := verify.NewVerifier(verify.Registries{IDs: []string{registryID}}, verify.Policy{})
 	require.NoError(t, err)
 	nonce := make([]byte, document.NonceSize)
 	raw, err := document.Build(document.BuildInput{Nonce: nonce, CollateralFormat: collateral.FormatV2}, func([64]byte) (string, []byte, error) {

@@ -34,7 +34,7 @@ func TestLiveVerificationRecordsRepoAndMetadata(t *testing.T) {
 	require.NoError(t, err)
 	raw, err := fetch.Document(t.Context(), os.Getenv(enclaveEnvVar), "", nonce)
 	require.NoError(t, err)
-	verifier, err := NewVerifier()
+	verifier, err := NewVerifier(nil, Policy{})
 	require.NoError(t, err)
 
 	before := time.Now()
@@ -77,7 +77,7 @@ func TestVerifyAppraisesCPUEvidenceAtTheVerificationInstant(t *testing.T) {
 		collateral.Entry{ID: "crl", Role: collateral.RoleEndorsement, Format: collateral.AMDCRLV1Format, Subjects: []string{collateral.SubjectCPU}, Data: crlData},
 	)
 
-	v, err := NewVerifier(WithEmbeddedReferences(embeddedInputs(t)))
+	v, err := newEmbeddedVerifier(embeddedInputs(t))
 	require.NoError(t, err)
 	_, err = v.VerifyV3(raw, nonce, Pin{})
 	requireRejectedAt(t, err, LayerQuote)
@@ -89,7 +89,7 @@ func TestVerifyAppraisesCPUEvidenceAtTheVerificationInstant(t *testing.T) {
 }
 
 func TestVerifyV3AtRequiresAnInstant(t *testing.T) {
-	v, err := NewVerifier(WithEmbeddedReferences(embeddedInputs(t)))
+	v, err := newEmbeddedVerifier(embeddedInputs(t))
 	require.NoError(t, err)
 	raw, nonce, _ := embeddedDocument(t, collateral.FormatV3)
 	_, err = v.VerifyV3At(raw, nonce, Pin{}, time.Time{})

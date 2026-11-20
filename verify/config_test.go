@@ -30,11 +30,13 @@ func TestConfigTrustRequiresEndorsements(t *testing.T) {
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	require.NoError(t, err)
 	keys := []crypto.PublicKey{key.Public()}
-	_, err = NewVerifier(WithFreshnessSigningKeys(nil))
+	_, err = NewVerifier(nil, Policy{Artifacts: EndorsedArtifacts{FreshnessKeys: []crypto.PublicKey{}}})
 	require.ErrorContains(t, err, "must not be empty")
-	_, err = NewVerifier(WithConfigSigningKeys(nil))
-	require.ErrorContains(t, err, "must not be empty")
-	v, err := NewVerifier(WithConfigSigningKeys(keys), WithFreshnessSigningKeys(keys))
+	for _, empty := range [][]crypto.PublicKey{nil, {}} {
+		_, err = NewVerifier(ConfigSigningKeys{Keys: empty}, Policy{})
+		require.ErrorContains(t, err, "must not be empty")
+	}
+	v, err := NewVerifier(ConfigSigningKeys{Keys: keys}, Policy{Artifacts: EndorsedArtifacts{FreshnessKeys: keys}})
 	require.NoError(t, err)
 	nonce := make([]byte, document.NonceSize)
 	raw, err := document.Build(document.BuildInput{Nonce: nonce, CollateralFormat: collateral.FormatV3}, func([64]byte) (string, []byte, error) { return document.SEVSNPReportV1Format, []byte("quote"), nil })
@@ -64,7 +66,7 @@ func TestDigestEndorsementBindsQuoteAndRuntimeWithoutConfig(t *testing.T) {
 		ID: collateral.ConfigID, Role: collateral.RoleReferenceValues, Format: collateral.ConfigEndorsementV2Format, Data: data,
 	})
 	inputs.Config = nil
-	v, err := NewVerifier(WithEmbeddedReferences(inputs), WithConfigSigningKeys([]crypto.PublicKey{f.Key.Public()}))
+	v, err := NewVerifier(ConfigSigningKeys{Keys: []crypto.PublicKey{f.Key.Public()}}, inputs.policy())
 	require.NoError(t, err)
 	v.configVerifier, err = endorsement.NewConfigVerifier(&f.Trust, []crypto.PublicKey{f.Key.Public()})
 	require.NoError(t, err)
@@ -100,7 +102,7 @@ func TestDigestEndorsementBindsQuoteAndRuntimeWithoutConfig(t *testing.T) {
 		}
 	}
 	inputs.Runtime = append(inputs.Runtime, '\n')
-	v, err = NewVerifier(WithEmbeddedReferences(inputs), WithConfigSigningKeys([]crypto.PublicKey{f.Key.Public()}))
+	v, err = NewVerifier(ConfigSigningKeys{Keys: []crypto.PublicKey{f.Key.Public()}}, inputs.policy())
 	require.NoError(t, err)
 	v.configVerifier, err = endorsement.NewConfigVerifier(&f.Trust, []crypto.PublicKey{f.Key.Public()})
 	require.NoError(t, err)
@@ -133,16 +135,16 @@ func TestScopedConfigRetainsFreshnessAfterCertificateExpiry(t *testing.T) {
 	inputs.Config = nil
 	for _, test := range []struct {
 		name     string
-		options  []Option
+		config   ConfigTrust
 		accepted bool
 	}{
 		{"default", nil, false},
-		{"exclusive", []Option{WithConfigRegistryIDs(privateRegistryID)}, true},
-		{"additive", []Option{WithAdditionalConfigRegistryIDs(privateRegistryID)}, true},
-		{"other registry", []Option{WithConfigRegistryIDs(configendorsement.PublicRegistryID)}, false},
+		{"exclusive", Registries{IDs: []string{privateRegistryID}}, true},
+		{"with the public registry", Registries{IDs: []string{PublicRegistryID, privateRegistryID}}, true},
+		{"other registry", Registries{IDs: []string{PublicRegistryID}}, false},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			v, err := NewVerifier(append(test.options, WithEmbeddedReferences(inputs))...)
+			v, err := NewVerifier(test.config, inputs.policy())
 			require.NoError(t, err)
 			v.configVerifier, err = endorsement.NewRegistryVerifier(&f.Trust, []crypto.PublicKey{rootKey.Public()})
 			require.NoError(t, err)
@@ -166,29 +168,24 @@ func TestScopedConfigRetainsFreshnessAfterCertificateExpiry(t *testing.T) {
 	}
 }
 
-func TestConfigRegistryIDOptionsRejectAmbiguousTrust(t *testing.T) {
-	f := sigstoretest.New(t)
+func TestRegistriesRejectInvalidIDsAndOwnThem(t *testing.T) {
 	for _, test := range []struct {
-		options []Option
-		want    string
+		ids  []string
+		want string
 	}{
-		{[]Option{WithConfigRegistryIDs()}, "must not be empty"},
-		{[]Option{WithAdditionalConfigRegistryIDs()}, "must not be empty"},
-		{[]Option{WithConfigRegistryIDs("")}, "canonical registry URI"},
-		{[]Option{WithConfigRegistryIDs(privateRegistryID, privateRegistryID)}, "duplicate config registry ID"},
-		{[]Option{WithConfigRegistryIDs(privateRegistryID), WithAdditionalConfigRegistryIDs(privateRegistryID)}, "must be supplied once"},
-		{[]Option{WithAdditionalConfigRegistryIDs(privateRegistryID), WithConfigRegistryIDs(privateRegistryID)}, "must be supplied once"},
-		{[]Option{WithConfigRegistryIDs(privateRegistryID), WithConfigSigningKeys([]crypto.PublicKey{f.Key.Public()})}, "requires Tinfoil registry root"},
-		{[]Option{WithConfigRegistryIDs(privateRegistryID), WithEmbeddedReferences(embeddedInputs(t))}, "require endorsement verification"},
+		{nil, "must not be empty"},
+		{[]string{}, "must not be empty"},
+		{[]string{""}, "canonical registry URI"},
+		{[]string{privateRegistryID, privateRegistryID}, "duplicate config registry ID"},
 	} {
-		_, err := NewVerifier(test.options...)
+		_, err := NewVerifier(Registries{IDs: test.ids}, Policy{})
+		require.ErrorAs(t, err, new(*UsageError))
 		require.ErrorContains(t, err, test.want)
 	}
 	registryIDs := []string{privateRegistryID}
-	option := WithConfigRegistryIDs(registryIDs...)
-	registryIDs[0] = configendorsement.PublicRegistryID
-	v, err := NewVerifier(option)
+	v, err := NewVerifier(Registries{IDs: registryIDs}, Policy{})
 	require.NoError(t, err)
+	registryIDs[0] = PublicRegistryID
 	pins, err := v.referencePins("")
 	require.NoError(t, err)
 	require.Equal(t, []string{privateRegistryID}, pins.RegistryIDs)
@@ -202,7 +199,7 @@ func TestConfigRegistryIDOptionsRejectAmbiguousTrust(t *testing.T) {
 // The document's collateral selects which half of the pin applies, and a pin
 // in one namespace never admits collateral from the other.
 func TestCollateralVersionSelectsVerification(t *testing.T) {
-	v, err := NewVerifier()
+	v, err := NewVerifier(nil, Policy{})
 	require.NoError(t, err)
 	nonce := make([]byte, document.NonceSize)
 	const repositoryOnly, projectOnly = "only a GitHub repository is pinned", "only a registry project is pinned"
@@ -233,7 +230,7 @@ func TestCollateralVersionSelectsVerification(t *testing.T) {
 }
 
 func TestConfigReferencePins(t *testing.T) {
-	v, err := NewVerifier()
+	v, err := NewVerifier(nil, Policy{})
 	require.NoError(t, err)
 	nonce := make([]byte, document.NonceSize)
 	raw, err := document.Build(document.BuildInput{Nonce: nonce, CollateralFormat: collateral.FormatV3}, func([64]byte) (string, []byte, error) { return document.SEVSNPReportV1Format, []byte("quote"), nil })
@@ -300,10 +297,7 @@ func TestConfiguredKeysPreserveProofVerification(t *testing.T) {
 	doc, err := document.Parse(raw, nonce)
 	require.NoError(t, err)
 	for _, expired := range []bool{false, true} {
-		v, err := NewVerifier(WithConfigSigningKeys([]crypto.PublicKey{configKey}), WithFreshnessSigningKeys([]crypto.PublicKey{f.Key.Public()}), func(v *Verifier) error {
-			v.endorsements = client
-			return nil
-		})
+		v, err := newVerifier(ConfigSigningKeys{Keys: []crypto.PublicKey{configKey}}, Policy{Artifacts: EndorsedArtifacts{FreshnessKeys: []crypto.PublicKey{f.Key.Public()}}}, client, overrides{})
 		require.NoError(t, err)
 		now := f.Now
 		if expired {

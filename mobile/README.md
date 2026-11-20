@@ -27,20 +27,25 @@ default policy. Every member is optional, `null` counts as absent, and an
 unknown or malformed member is rejected. Byte strings are standard base64 with
 padding.
 
-| member | verifier option |
+| member | Go verifier input |
 |---|---|
-| `pinned_registers` (`{type, registers}`) | `WithPinnedRegisters` |
-| `freshness_max_age_ns` (integer) | `WithFreshnessMaxAge` |
-| `config_registry_ids` (strings; include `PublicRegistryID` to keep the public registry) | `WithConfigRegistryIDs` |
-| `config_signing_keys_pem`, `freshness_signing_keys_pem` (PEM `PUBLIC KEY` blocks) | `WithConfigSigningKeys`, `WithFreshnessSigningKeys` |
-| `embedded_config` (`{name?, bytes}` or `{name?, digest, runtime: {repo, tag, digest}}`), `embedded_runtime`, `embedded_platform` | `WithEmbeddedReferences` |
+| `pinned_registers` (`{type, registers}`) | `Policy.PinnedRegisters` |
+| `freshness_max_age_ns` (integer) | `Policy.FreshnessMaxAge` |
+| `config_registry_ids` (strings; include `PublicRegistryID` to keep the public registry) | `verify.Registries` |
+| `config_signing_keys_pem` (PEM `PUBLIC KEY` blocks) | `verify.ConfigSigningKeys` |
+| `embedded_config` (`{name?, bytes}` or `{name?, digest, runtime: {repo, tag, digest}}`) | `verify.EmbeddedConfig` or `verify.EmbeddedConfigReference` |
+| `embedded_runtime`, `embedded_platform` | `Policy.Artifacts` as `verify.EmbeddedArtifacts` |
+| `freshness_signing_keys_pem` (PEM `PUBLIC KEY` blocks) | `FreshnessKeys` of `verify.EmbeddedArtifacts`, or of `verify.EndorsedArtifacts` when nothing is embedded |
 
-The verifier's own checks apply on top, including the conflicts between trust
-sources (for example, registry IDs with config signing keys).
+At most one of `config_registry_ids`, `config_signing_keys_pem` and
+`embedded_config` may be set, since each selects the verifier's config trust.
+The verifier's own checks apply on top, for example to an empty key list or to
+freshness keys when both the runtime and the platform are embedded.
 
 ## Config authorizer
 
-`NewVerifierWithConfigAuthorizer` adds `WithConfigAuthorizer`. gomobile cannot
+`NewVerifierWithConfigAuthorizer` selects `verify.ConfigAuthorizer` as the config
+trust, so it conflicts with the three members above. gomobile cannot
 carry a Go function, so the callback is the `ConfigAuthorizer` interface, which
 Swift implements; Swift imports it as `MobileConfigAuthorizerProtocol`, because
 gomobile also emits a proxy class named `MobileConfigAuthorizer`. Go calls

@@ -49,10 +49,9 @@ func NewDangerousTestOnlyVerifier(rootsJSON string) (_ *Verifier, err error) {
 	if err != nil {
 		return nil, &verify.UsageError{Err: fmt.Errorf("conformance roots: %w", err)}
 	}
-	inner, err := verify.NewVerifier(
-		verify.DangerousTestOnlyWithSigstoreRoot(sigstore),
-		verify.DangerousTestOnlyWithVendorRoots(amd, intel),
-	)
+	inner, err := verify.DangerousTestOnlyNewVerifier(nil, verify.Policy{}, verify.DangerousTestOnlyRoots{
+		SigstoreRootJSON: sigstore, AMDRootPEM: amd, IntelRootPEM: intel,
+	})
 	if err != nil {
 		return nil, err
 	}

@@ -3,12 +3,14 @@
 package verify
 
 import (
+	"bytes"
+
 	"github.com/tinfoilsh/tinfoil-go/verify/internal/endorsement"
 	"github.com/tinfoilsh/tinfoil-go/verify/internal/quote"
 )
 
 // overrides carries the synthetic vendor roots set by
-// DangerousTestOnlyWithVendorRoots; nil entries keep the embedded anchors.
+// DangerousTestOnlyNewVerifier; nil entries keep the embedded anchors.
 type overrides struct {
 	amdRootPEM   []byte
 	intelRootPEM []byte
@@ -21,34 +23,32 @@ func (v *Verifier) quoteOptions() *quote.Options {
 	return opts
 }
 
-// DangerousTestOnlyWithSigstoreRoot replaces the embedded Sigstore trusted
-// root, so the conformance harness can authenticate reference values signed by
-// a synthetic CA. A supplied root destroys the guarantee that those values came
-// from Tinfoil's release workflows, which is why this exists only in the
-// conformance build. A nil rootJSON keeps the embedded root.
-func DangerousTestOnlyWithSigstoreRoot(rootJSON []byte) Option {
-	return func(v *Verifier) error {
-		if rootJSON == nil {
-			return nil
-		}
-		client, err := endorsement.NewClientFromJSON(rootJSON)
-		if err != nil {
-			return err
-		}
-		v.endorsements = client
-		return nil
-	}
+// DangerousTestOnlyRoots replaces trust anchors embedded in this module, so
+// that the conformance harness can authenticate synthetic collateral. A
+// supplied anchor destroys the guarantee that it protects, which is why this
+// exists only in the conformance build. A nil member keeps the embedded anchor.
+type DangerousTestOnlyRoots struct {
+	// SigstoreRootJSON replaces the Sigstore trusted root, which otherwise
+	// guarantees that reference values came from Tinfoil's release workflows.
+	SigstoreRootJSON []byte
+	// AMDRootPEM and IntelRootPEM replace the vendor anchors, which otherwise
+	// guarantee that CPU evidence chains to AMD or Intel.
+	AMDRootPEM   []byte
+	IntelRootPEM []byte
 }
 
-// DangerousTestOnlyWithVendorRoots replaces the embedded AMD and Intel trust
-// anchors, so the conformance harness can authenticate synthetic CPU evidence.
-// A supplied anchor destroys the guarantee that evidence chains to AMD or
-// Intel, which is why this exists only in the conformance build. A nil entry
-// keeps the embedded anchor for that platform.
-func DangerousTestOnlyWithVendorRoots(amdRootPEM, intelRootPEM []byte) Option {
-	return func(v *Verifier) error {
-		v.overrides.amdRootPEM = amdRootPEM
-		v.overrides.intelRootPEM = intelRootPEM
-		return nil
+// DangerousTestOnlyNewVerifier is NewVerifier with the trust anchors that
+// roots supplies in place of the embedded ones.
+func DangerousTestOnlyNewVerifier(config ConfigTrust, policy Policy, roots DangerousTestOnlyRoots) (*Verifier, error) {
+	endorsements, err := endorsement.NewDefaultClient()
+	if roots.SigstoreRootJSON != nil {
+		endorsements, err = endorsement.NewClientFromJSON(roots.SigstoreRootJSON)
 	}
+	if err != nil {
+		return nil, usageError(err)
+	}
+	return newVerifier(config, policy, endorsements, overrides{
+		amdRootPEM:   bytes.Clone(roots.AMDRootPEM),
+		intelRootPEM: bytes.Clone(roots.IntelRootPEM),
+	})
 }

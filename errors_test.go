@@ -59,7 +59,7 @@ func TestPublicInputErrors(t *testing.T) {
 	_, err := tinfoil.NewEnclaveHTTPClient(t.Context(), "enclave.example", tinfoil.Pin{Repo: "org/repo"}, &tinfoil.EnclaveOptions{TransportMode: "invalid"})
 	require.ErrorIs(t, err, tinfoil.ErrConfiguration)
 	var usage *verify.UsageError
-	verifier, err := verify.NewVerifier()
+	verifier, err := verify.NewVerifier(nil, verify.Policy{})
 	require.NoError(t, err)
 	_, err = verifier.VerifyV3(nil, nil, verify.Pin{})
 	require.ErrorAs(t, err, &usage)
@@ -95,7 +95,7 @@ func TestMalformedPinsAreRejectedBeforeAnyClient(t *testing.T) {
 		(*measurement.ExpectedTDX)(nil),
 		&measurement.ExpectedTDX{RTMR3: &register},
 	} {
-		_, err := verify.NewVerifier(verify.WithPinnedRegisters(pins))
+		_, err := verify.NewVerifier(nil, verify.Policy{PinnedRegisters: pins})
 		var usage *verify.UsageError
 		require.ErrorAs(t, err, &usage)
 	}
@@ -103,7 +103,7 @@ func TestMalformedPinsAreRejectedBeforeAnyClient(t *testing.T) {
 		measurement.ExpectedSEVSNP{Launch: &register},
 		measurement.ExpectedTDX{RTMR3: &register},
 	} {
-		_, err := verify.NewVerifier(verify.WithPinnedRegisters(pins))
+		_, err := verify.NewVerifier(nil, verify.Policy{PinnedRegisters: pins})
 		require.NoError(t, err, "sparse pins remain supported")
 	}
 }

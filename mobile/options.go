@@ -12,12 +12,13 @@ import (
 	configendorsement "github.com/tinfoilsh/tinfoil-go/endorsement/config"
 	"github.com/tinfoilsh/tinfoil-go/internal/canonical"
 	"github.com/tinfoilsh/tinfoil-go/verify"
+	"github.com/tinfoilsh/tinfoil-go/verify/document/collateral"
 )
 
 // PublicRegistryID is Tinfoil's public config registry. List it in
 // config_registry_ids to keep accepting public configs alongside a private
 // registry.
-const PublicRegistryID = configendorsement.PublicRegistryID
+const PublicRegistryID = verify.PublicRegistryID
 
 // options is the policy NewVerifier accepts as JSON. Every member is optional;
 // an absent or null member keeps the default, and a present one must be valid.
@@ -57,9 +58,9 @@ type runtimeReferenceJSON struct {
 	Digest string `json:"digest"`
 }
 
-// parseOptions decodes optionsJSON, where "" selects the defaults, into
-// verifier options. Any malformed or unknown member is a usage error.
-func parseOptions(optionsJSON string) ([]verify.Option, error) {
+// parseOptions decodes optionsJSON, where "" selects the defaults. Any
+// malformed or unknown member is a usage error.
+func parseOptions(optionsJSON string) (*options, error) {
 	opts := &options{}
 	if optionsJSON != "" {
 		opts = nil
@@ -70,78 +71,100 @@ func parseOptions(optionsJSON string) ([]verify.Option, error) {
 			return nil, fmt.Errorf("verification options must be a JSON object")
 		}
 	}
-	pins, err := opts.PinnedRegisters.expected()
-	if err != nil {
-		return nil, err
-	}
-	out := []verify.Option{
-		verify.WithPinnedRegisters(pins),
-		verify.WithFreshnessMaxAge(time.Duration(opts.FreshnessMaxAgeNs)),
-	}
-	// A present but empty list reaches the option, which rejects it.
-	if opts.ConfigRegistryIDs != nil {
-		out = append(out, verify.WithConfigRegistryIDs(opts.ConfigRegistryIDs...))
-	}
-	if opts.ConfigSigningKeysPEM != nil {
-		keys, err := parsePublicKeys("config signing key", opts.ConfigSigningKeysPEM)
-		if err != nil {
-			return nil, err
-		}
-		out = append(out, verify.WithConfigSigningKeys(keys))
-	}
-	if opts.FreshnessSigningKeysPEM != nil {
-		keys, err := parsePublicKeys("freshness signing key", opts.FreshnessSigningKeysPEM)
-		if err != nil {
-			return nil, err
-		}
-		out = append(out, verify.WithFreshnessSigningKeys(keys))
-	}
-	refs, err := opts.embeddedReferences()
-	if err != nil {
-		return nil, err
-	}
-	if refs != nil {
-		out = append(out, verify.WithEmbeddedReferences(*refs))
-	}
-	return out, nil
+	return opts, nil
 }
 
-// embeddedReferences returns nil when no component is embedded.
-func (o *options) embeddedReferences() (*verify.EmbeddedReferences, error) {
-	if o.EmbeddedConfig == nil && o.EmbeddedRuntime == nil && o.EmbeddedPlatform == nil {
-		return nil, nil
+// verifierInputs translates o, and authorize when it is not nil, into the
+// verifier's config trust and policy. At most one member may select config
+// trust; the verifier checks each value.
+func (o *options) verifierInputs(authorize func(collateral.ConfigEndorsement) error) (verify.ConfigTrust, verify.Policy, error) {
+	var config verify.ConfigTrust
+	var source string
+	selectConfig := func(name string, trust verify.ConfigTrust) error {
+		if config != nil {
+			return fmt.Errorf("%s and %s select conflicting config trust", source, name)
+		}
+		config, source = trust, name
+		return nil
 	}
-	var refs verify.EmbeddedReferences
-	var err error
-	if o.EmbeddedRuntime != nil {
-		if refs.Runtime, err = decodeBase64("embedded_runtime", *o.EmbeddedRuntime); err != nil {
+	// A present but empty list reaches the verifier, which rejects it.
+	if o.ConfigRegistryIDs != nil {
+		if err := selectConfig("config_registry_ids", verify.Registries{IDs: o.ConfigRegistryIDs}); err != nil {
+			return nil, verify.Policy{}, err
+		}
+	}
+	if o.ConfigSigningKeysPEM != nil {
+		keys, err := parsePublicKeys("config signing key", o.ConfigSigningKeysPEM)
+		if err != nil {
+			return nil, verify.Policy{}, err
+		}
+		if err := selectConfig("config_signing_keys_pem", verify.ConfigSigningKeys{Keys: keys}); err != nil {
+			return nil, verify.Policy{}, err
+		}
+	}
+	if o.EmbeddedConfig != nil {
+		embedded, err := o.EmbeddedConfig.configTrust()
+		if err != nil {
+			return nil, verify.Policy{}, err
+		}
+		if err := selectConfig("embedded_config", embedded); err != nil {
+			return nil, verify.Policy{}, err
+		}
+	}
+	if authorize != nil {
+		if err := selectConfig("config authorizer", verify.ConfigAuthorizer{Authorize: authorize}); err != nil {
+			return nil, verify.Policy{}, err
+		}
+	}
+
+	pins, err := o.PinnedRegisters.expected()
+	if err != nil {
+		return nil, verify.Policy{}, err
+	}
+	policy := verify.Policy{PinnedRegisters: pins, FreshnessMaxAge: time.Duration(o.FreshnessMaxAgeNs)}
+	var freshnessKeys []crypto.PublicKey
+	if o.FreshnessSigningKeysPEM != nil {
+		if freshnessKeys, err = parsePublicKeys("freshness signing key", o.FreshnessSigningKeysPEM); err != nil {
+			return nil, verify.Policy{}, err
+		}
+	}
+	if o.EmbeddedRuntime != nil || o.EmbeddedPlatform != nil {
+		embedded := verify.EmbeddedArtifacts{FreshnessKeys: freshnessKeys}
+		if o.EmbeddedRuntime != nil {
+			if embedded.Runtime, err = decodeBase64("embedded_runtime", *o.EmbeddedRuntime); err != nil {
+				return nil, verify.Policy{}, err
+			}
+		}
+		if o.EmbeddedPlatform != nil {
+			if embedded.Platform, err = decodeBase64("embedded_platform", *o.EmbeddedPlatform); err != nil {
+				return nil, verify.Policy{}, err
+			}
+		}
+		policy.Artifacts = embedded
+	} else if freshnessKeys != nil {
+		policy.Artifacts = verify.EndorsedArtifacts{FreshnessKeys: freshnessKeys}
+	}
+	return config, policy, nil
+}
+
+// configTrust returns the embedded config that c describes.
+func (c *embeddedConfigJSON) configTrust() (verify.ConfigTrust, error) {
+	switch {
+	case c.Bytes != nil && c.Digest == "" && c.Runtime == nil:
+		config, err := decodeBase64("embedded_config.bytes", *c.Bytes)
+		if err != nil {
 			return nil, err
 		}
+		return verify.EmbeddedConfig{Name: c.Name, Bytes: config}, nil
+	case c.Bytes == nil && c.Digest != "" && c.Runtime != nil:
+		return verify.EmbeddedConfigReference{
+			Name:    c.Name,
+			Digest:  c.Digest,
+			Runtime: configendorsement.RuntimeReference{Repo: c.Runtime.Repo, Tag: c.Runtime.Tag, Digest: c.Runtime.Digest},
+		}, nil
+	default:
+		return nil, fmt.Errorf("embedded_config requires either bytes, or digest and runtime")
 	}
-	if o.EmbeddedPlatform != nil {
-		if refs.Platform, err = decodeBase64("embedded_platform", *o.EmbeddedPlatform); err != nil {
-			return nil, err
-		}
-	}
-	if c := o.EmbeddedConfig; c != nil {
-		switch {
-		case c.Bytes != nil && c.Digest == "" && c.Runtime == nil:
-			config, err := decodeBase64("embedded_config.bytes", *c.Bytes)
-			if err != nil {
-				return nil, err
-			}
-			refs.Config = &verify.EmbeddedConfig{Name: c.Name, Bytes: config}
-		case c.Bytes == nil && c.Digest != "" && c.Runtime != nil:
-			refs.ConfigReference = &verify.EmbeddedConfigReference{
-				Name:    c.Name,
-				Digest:  c.Digest,
-				Runtime: configendorsement.RuntimeReference{Repo: c.Runtime.Repo, Tag: c.Runtime.Tag, Digest: c.Runtime.Digest},
-			}
-		default:
-			return nil, fmt.Errorf("embedded_config requires either bytes, or digest and runtime")
-		}
-	}
-	return &refs, nil
 }
 
 // decodeBase64 accepts only the canonical standard encoding. Embedded

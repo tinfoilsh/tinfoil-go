@@ -11,37 +11,36 @@ import (
 	"github.com/stretchr/testify/require"
 	configendorsement "github.com/tinfoilsh/tinfoil-go/endorsement/config"
 	"github.com/tinfoilsh/tinfoil-go/verify/document/collateral"
-	"github.com/tinfoilsh/tinfoil-go/verify/internal/endorsement"
 	"github.com/tinfoilsh/tinfoil-go/verify/internal/quote"
 )
 
 func TestCheckPinVerifiability(t *testing.T) {
 	inputs := embeddedInputs(t)
-	authorize := WithConfigAuthorizer(func(collateral.ConfigEndorsement) error { return nil })
+	authorize := ConfigAuthorizer{Authorize: func(collateral.ConfigEndorsement) error { return nil }}
 	for _, tc := range []struct {
-		name  string
-		opts  []Option
-		pin   Pin
-		valid bool
+		name   string
+		config ConfigTrust
+		pin    Pin
+		valid  bool
 	}{
 		{"defaults with a project", nil, Pin{Project: "org/repo@v1"}, true},
 		{"defaults with a repository", nil, Pin{Repo: "Org/My_Repo"}, true},
 		{"defaults with both", nil, Pin{Repo: "Org/My_Repo", Project: "org/project"}, true},
 		{"defaults without a pin", nil, Pin{}, false},
-		{"named registry without a pin", []Option{WithConfigRegistryIDs(configendorsement.PublicRegistryID)}, Pin{}, true},
+		{"named registry without a pin", Registries{IDs: []string{configendorsement.PublicRegistryID}}, Pin{}, true},
 		{"defaults with a malformed project", nil, Pin{Project: "not a reference"}, false},
 		{"defaults with a malformed repository", nil, Pin{Repo: "not a reference"}, false},
-		{"embedded config without a pin", []Option{WithEmbeddedReferences(inputs)}, Pin{}, true},
-		{"embedded config with its own project", []Option{WithEmbeddedReferences(inputs)}, Pin{Project: "org/project@v1"}, true},
-		{"embedded config with another project", []Option{WithEmbeddedReferences(inputs)}, Pin{Project: "org/repo"}, false},
-		{"embedded config with a repository alone", []Option{WithEmbeddedReferences(inputs)}, Pin{Repo: "org/project"}, false},
-		{"embedded config with its own project and a repository", []Option{WithEmbeddedReferences(inputs)}, Pin{Repo: "org/project", Project: "org/project@v1"}, true},
-		{"config authorizer without a pin", []Option{authorize}, Pin{}, true},
-		{"config authorizer with a project", []Option{authorize}, Pin{Project: "org/repo"}, false},
-		{"config authorizer with a repository", []Option{authorize}, Pin{Repo: "org/repo"}, false},
+		{"embedded config without a pin", *inputs.Config, Pin{}, true},
+		{"embedded config with its own project", *inputs.Config, Pin{Project: "org/project@v1"}, true},
+		{"embedded config with another project", *inputs.Config, Pin{Project: "org/repo"}, false},
+		{"embedded config with a repository alone", *inputs.Config, Pin{Repo: "org/project"}, false},
+		{"embedded config with its own project and a repository", *inputs.Config, Pin{Repo: "org/project", Project: "org/project@v1"}, true},
+		{"config authorizer without a pin", authorize, Pin{}, true},
+		{"config authorizer with a project", authorize, Pin{Project: "org/repo"}, false},
+		{"config authorizer with a repository", authorize, Pin{Repo: "org/repo"}, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			v, err := NewVerifier(tc.opts...)
+			v, err := NewVerifier(tc.config, Policy{})
 			require.NoError(t, err)
 			err = v.CheckPinVerifiability(tc.pin)
 			if tc.valid {
@@ -55,7 +54,7 @@ func TestCheckPinVerifiability(t *testing.T) {
 }
 
 func TestV3CollateralRequiresConfigIdentityPins(t *testing.T) {
-	v, err := NewVerifier()
+	v, err := NewVerifier(nil, Policy{})
 	require.NoError(t, err)
 	require.NoError(t, v.CheckPinVerifiability(Pin{Project: "Org/My_Repo"}))
 	raw, nonce, _ := embeddedDocument(t, collateral.FormatV3)
@@ -70,17 +69,22 @@ func TestCallerAuthorizesConfig(t *testing.T) {
 	withoutConfig := inputs
 	withoutConfig.Config = nil
 	for _, tc := range []struct {
-		name string
-		opts []Option
-		want bool
+		name   string
+		inputs embeddedTestInputs
+		config ConfigTrust
+		want   bool
 	}{
-		{"defaults", nil, false},
-		{"embedded runtime and platform", []Option{WithEmbeddedReferences(withoutConfig)}, false},
-		{"embedded config", []Option{WithEmbeddedReferences(inputs)}, true},
-		{"config authorizer", []Option{WithConfigAuthorizer(func(collateral.ConfigEndorsement) error { return nil })}, true},
+		{"defaults", embeddedTestInputs{}, nil, false},
+		{"embedded runtime and platform", withoutConfig, nil, false},
+		{"embedded config", inputs, nil, true},
+		{"config authorizer", embeddedTestInputs{}, ConfigAuthorizer{Authorize: func(collateral.ConfigEndorsement) error { return nil }}, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			v, err := NewVerifier(tc.opts...)
+			config := tc.config
+			if config == nil {
+				config = tc.inputs.config()
+			}
+			v, err := NewVerifier(config, tc.inputs.policy())
 			require.NoError(t, err)
 			require.Equal(t, tc.want, v.CallerAuthorizesConfig())
 		})
@@ -96,7 +100,7 @@ func TestConfigAuthorizerErrorNeverChoosesTheType(t *testing.T) {
 	raw, nonce, _ := embeddedDocument(t, collateral.FormatV3, collateral.Entry{ID: collateral.ConfigID, Role: collateral.RoleReferenceValues, Format: collateral.ConfigV1Format, Data: data})
 	inputs.Config = nil
 	refused := &UsageError{Err: errors.New("config is not authorized")}
-	v, err := NewVerifier(WithEmbeddedReferences(inputs), WithConfigAuthorizer(func(collateral.ConfigEndorsement) error { return refused }))
+	v, err := NewVerifier(ConfigAuthorizer{Authorize: func(collateral.ConfigEndorsement) error { return refused }}, inputs.policy())
 	require.NoError(t, err)
 	_, err = v.VerifyV3(raw, nonce, Pin{})
 	var classified Error
@@ -113,7 +117,7 @@ func TestConfigAuthorizerPreservesReferencesAndHardwareChecks(t *testing.T) {
 	require.NoError(t, err)
 	raw, nonce, doc := embeddedDocument(t, collateral.FormatV3, collateral.Entry{ID: collateral.ConfigID, Role: collateral.RoleReferenceValues, Format: collateral.ConfigV1Format, Data: data})
 	inputs.Config = nil
-	v, err := NewVerifier(WithEmbeddedReferences(inputs))
+	v, err := newEmbeddedVerifier(inputs)
 	require.NoError(t, err)
 	_, err = v.configReferences(doc, "org/project", time.Now())
 	require.ErrorContains(t, err, "unsigned config")
@@ -125,7 +129,7 @@ func TestConfigAuthorizerPreservesReferencesAndHardwareChecks(t *testing.T) {
 		candidate.Config[0] ^= 1
 		return nil
 	}
-	require.NoError(t, WithConfigAuthorizer(authorize)(v))
+	v.configAuthorizer = authorize
 	refs, err := v.configReferences(doc, "", time.Now())
 	require.NoError(t, err)
 	require.Equal(t, digest, refs.quote.(quote.ConfigReferenceValues).Hash)
@@ -136,15 +140,15 @@ func TestConfigAuthorizerPreservesReferencesAndHardwareChecks(t *testing.T) {
 	require.Nil(t, result)
 	requireRejectedAt(t, err, LayerQuote)
 
-	v.embedded.Runtime = append(v.embedded.Runtime, '\n')
+	v.embedded.runtime = append(v.embedded.runtime, '\n')
 	_, err = v.configReferences(doc, "", time.Now())
 	require.ErrorContains(t, err, "config's digest pin")
-	v.embedded.Runtime = nil
+	v.embedded.runtime = nil
 	_, err = v.configReferences(doc, "", time.Now())
 	require.ErrorIs(t, err, collateral.ErrNotFound)
 	require.ErrorContains(t, err, collateral.RuntimeID)
-	v.embedded.Runtime = inputs.Runtime
-	v.embedded.Platform = nil
+	v.embedded.runtime = inputs.Runtime
+	v.embedded.platform = nil
 	_, err = v.configReferences(doc, "", time.Now())
 	require.ErrorIs(t, err, collateral.ErrNotFound)
 	require.ErrorContains(t, err, collateral.PlatformID)
@@ -157,18 +161,8 @@ func TestConfigAuthorizerPreservesReferencesAndHardwareChecks(t *testing.T) {
 	require.ErrorContains(t, err, "configured trust requires")
 }
 
-func TestConfigAuthorizerRejectsConflictingTrust(t *testing.T) {
-	authorize := WithConfigAuthorizer(func(collateral.ConfigEndorsement) error { return nil })
-	keys, err := endorsement.PublicSigningKeys()
-	require.NoError(t, err)
-	for _, options := range [][]Option{
-		{WithConfigAuthorizer(nil)},
-		{authorize, WithEmbeddedReferences(embeddedInputs(t))},
-		{WithEmbeddedReferences(embeddedInputs(t)), authorize},
-		{authorize, WithConfigSigningKeys(keys)},
-		{WithConfigSigningKeys(keys), authorize},
-	} {
-		_, err := NewVerifier(options...)
-		require.Error(t, err)
-	}
+func TestConfigAuthorizerMustNotBeNil(t *testing.T) {
+	_, err := NewVerifier(ConfigAuthorizer{}, Policy{})
+	require.ErrorAs(t, err, new(*UsageError))
+	require.ErrorContains(t, err, "must not be nil")
 }
