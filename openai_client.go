@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
 	"slices"
 	"strings"
 
@@ -32,8 +33,8 @@ func (*GatewayHTTPClient) attestedHTTPClient() {}
 type OpenAIOptions struct {
 	// APIPath is the path of the OpenAI API, joined under the EHBP ProxyURL
 	// or, when there is none, under the enclave's origin. Empty selects
-	// "/v1/". It must be an absolute path, without a query, a fragment, or a
-	// "." or ".." segment. A gateway client's URL already carries the API
+	// "/v1/". It must be an absolute path, without a query, a fragment, an
+	// encoded slash, or a "." or ".." segment, percent-encoded or not. A gateway client's URL already carries the API
 	// path, so a non-empty APIPath with one is an ErrConfiguration error.
 	APIPath string
 }
@@ -81,7 +82,9 @@ func NewOpenAIClient(hc AttestedHTTPClient, opts *OpenAIOptions, openaiOpts ...o
 		}
 	case *GatewayHTTPClient:
 		if c != nil && c.secure != nil {
-			secure, baseURL = c.secure, c.baseURL
+			// The gateway URL carries no query or fragment, so a slash can end
+			// it, as option.WithBaseURL would end its path.
+			secure, baseURL = c.secure, withTrailingSlash(c.baseURL)
 			if opts.APIPath != "" {
 				err = errs.Configuration(errors.New("invalid API path: a gateway client's URL already carries the API path; set GatewayOptions.URL instead"))
 			}
@@ -128,15 +131,21 @@ func joinAPIPath(root, apiPath string) (string, error) {
 	if err := validateAPIPath(apiPath); err != nil {
 		return "", err
 	}
-	joined := strings.TrimSuffix(root, "/") + apiPath
-	if !strings.HasSuffix(joined, "/") {
-		joined += "/"
+	return withTrailingSlash(strings.TrimSuffix(root, "/") + apiPath), nil
+}
+
+// withTrailingSlash returns u ending with a slash, so that request paths join
+// under it.
+func withTrailingSlash(u string) string {
+	if strings.HasSuffix(u, "/") {
+		return u
 	}
-	return joined, nil
+	return u + "/"
 }
 
 // validateAPIPath requires an absolute path without a query, a fragment, or a
-// "." or ".." segment, so that it can only name a path under its root.
+// "." or ".." segment, percent-encoded or not, so that it can only name a path
+// under its root.
 func validateAPIPath(apiPath string) error {
 	if !strings.HasPrefix(apiPath, "/") || strings.HasPrefix(apiPath, "//") {
 		return errs.Configuration(fmt.Errorf("invalid API path %q: it must be an absolute path, such as /v1/", apiPath))
@@ -145,8 +154,12 @@ func validateAPIPath(apiPath string) error {
 		return errs.Configuration(fmt.Errorf("invalid API path %q: it must not carry a query or a fragment", apiPath))
 	}
 	for _, segment := range strings.Split(apiPath, "/") {
-		if segment == "." || segment == ".." {
-			return errs.Configuration(fmt.Errorf("invalid API path %q: it must not contain a %q segment", apiPath, segment))
+		decoded, err := url.PathUnescape(segment)
+		if err != nil {
+			return errs.Configuration(fmt.Errorf("invalid API path %q: %w", apiPath, err))
+		}
+		if decoded == "." || decoded == ".." || strings.Contains(decoded, "/") {
+			return errs.Configuration(fmt.Errorf("invalid API path %q: it must not contain a \".\" or \"..\" segment or an encoded slash", apiPath))
 		}
 	}
 	return nil

@@ -162,11 +162,20 @@ func TestOpenAIClientJoinsTheAPIPath(t *testing.T) {
 func TestOpenAIClientRejectsAnInvalidAPIPath(t *testing.T) {
 	c, err := unverifiedEnclaveHTTPClient("enclave.example", RepoPin{Repo: "org/repo"}, nil)
 	require.NoError(t, err)
-	for _, apiPath := range []string{"v1", "v1/", "//evil.example/v1/", "https://evil.example/v1/", "/v1/?q=1", "/v1/#f", "/v1?", "/v1/../admin", "/..", "/./v1"} {
+	for _, apiPath := range []string{"v1", "v1/", "//evil.example/v1/", "https://evil.example/v1/", "/v1/?q=1", "/v1/#f", "/v1?", "/v1/../admin", "/..", "/./v1", "/%2e%2e/admin", "/v1/%2E/", "/a%2fb/", "/%zz/"} {
 		client, err := NewOpenAIClient(c, &OpenAIOptions{APIPath: apiPath})
 		require.Nil(t, client)
 		require.ErrorIs(t, err, ErrConfiguration, apiPath)
 	}
+}
+
+func TestOpenAIClientEndsTheGatewayURLWithASlash(t *testing.T) {
+	gw, err := unverifiedGatewayHTTPClient(&GatewayOptions{URL: "https://gateway.example/api/v1", Catalog: func() Catalog { return Catalog{} }})
+	require.NoError(t, err)
+	client, err := NewOpenAIClient(gw, nil)
+	require.NoError(t, err)
+	require.Equal(t, "https://gateway.example/api/v1/", client.BaseURL())
+	require.Equal(t, []string{"https://gateway.example/api/v1/models"}, listModels(t, client, gw.secure))
 }
 
 func TestOpenAIClientRejectsAnAPIPathForTheGateway(t *testing.T) {
