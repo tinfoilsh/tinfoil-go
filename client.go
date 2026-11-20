@@ -3,43 +3,18 @@ package tinfoil
 import (
 	"context"
 	"fmt"
-	"net/http"
 
-	"github.com/openai/openai-go/v3"
 	"github.com/openai/openai-go/v3/option"
 )
 
-// Client is an OpenAI client for Tinfoil's recommended route.
-type Client struct {
-	*openai.Client
-	httpClient *http.Client
-	baseURL    string
-}
-
-// NewClient returns an OpenAI client for Tinfoil's recommended route,
-// verified under ctx before it returns.
-func NewClient(ctx context.Context, openaiOpts ...option.RequestOption) (*Client, error) {
-	client, err := NewRouterOpenAIClient(ctx, nil, openaiOpts...)
+// NewClient returns an OpenAI client for Tinfoil's recommended route: a
+// RouterHTTPClient that NewRouterHTTPClient creates with the default options,
+// verified under ctx before it returns, and an OpenAIClient over it that
+// NewOpenAIClient creates with openaiOpts.
+func NewClient(ctx context.Context, openaiOpts ...option.RequestOption) (*OpenAIClient, error) {
+	router, err := NewRouterHTTPClient(ctx, nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create client: %w", err)
 	}
-	return &Client{Client: client.Client, httpClient: client.HTTPClient().secure, baseURL: client.baseURL}, nil
-}
-
-// HTTPClient returns the HTTP client the OpenAI client sends through. It
-// verifies the service behind the route again before new requests when the
-// verification expires or its key changes. It is bound to that service:
-// requests to any other origin are refused to avoid disclosing sensitive
-// headers. A request's body and the response to it are protected end to end;
-// don't rely on headers, or a request without a body, being private.
-func (c *Client) HTTPClient() *http.Client {
-	return c.httpClient
-}
-
-// BaseURL returns the OpenAI base URL that the client sends requests to on the
-// route it chose: by default v1/ under the router's origin, or an
-// option.WithBaseURL on that origin. Build raw request URLs for HTTPClient
-// from it so that they follow the route.
-func (c *Client) BaseURL() string {
-	return c.baseURL
+	return NewOpenAIClient(router, nil, openaiOpts...)
 }

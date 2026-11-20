@@ -268,9 +268,10 @@ func TestLiveRouterClient(t *testing.T) {
 	apiKey := os.Getenv("TINFOIL_API_KEY")
 	for name, tr := range map[string]Transport{"ehbp": EHBP{}, "tls": TLS{}} {
 		t.Run(name, func(t *testing.T) {
-			oc, err := NewRouterOpenAIClient(context.Background(), &RouterOptions{Transport: tr, UserCacheSecret: "go-live-integration-cache-secret"}, option.WithAPIKey(apiKey))
+			c, err := NewRouterHTTPClient(context.Background(), &RouterOptions{Transport: tr, UserCacheSecret: "go-live-integration-cache-secret"})
 			require.NoError(t, err)
-			c := oc.HTTPClient()
+			oc, err := NewOpenAIClient(c, nil, option.WithAPIKey(apiKey))
+			require.NoError(t, err)
 			verified, err := c.EnsureVerified(context.Background())
 			require.NoError(t, err)
 			require.Equal(t, verified.FreshnessExpiresAt(), c.Current().FreshnessExpiresAt(), "a valid verification is reused")
@@ -476,7 +477,9 @@ func TestURLOptionsWithAPathAreAccepted(t *testing.T) {
 		c, err := unverifiedEnclaveHTTPClient("enclave.example", RepoPin{Repo: "org/repo"}, &EnclaveOptions{Transport: EHBP{ProxyURL: proxyURL}})
 		require.NoError(t, err, proxyURL)
 		require.Equal(t, proxyURL, c.BaseURL())
-		require.Equal(t, proxyURL+"v1/", c.openAIURL, "OpenAI clients send to v1/ under the proxy URL")
+		oc, err := NewOpenAIClient(c, nil)
+		require.NoError(t, err)
+		require.Equal(t, proxyURL+"v1/", oc.BaseURL(), "OpenAI clients send to v1/ under the proxy URL")
 	}
 	gw, err := unverifiedGatewayHTTPClient(&GatewayOptions{URL: "https://gateway.example/custom/v1/", Catalog: func() Catalog { return Catalog{} }})
 	require.NoError(t, err)
@@ -488,7 +491,9 @@ func TestDirectTransportsSendToTheEnclaveOrigin(t *testing.T) {
 		c, err := unverifiedEnclaveHTTPClient("enclave.example", RepoPin{Repo: "org/repo"}, &EnclaveOptions{Transport: tr})
 		require.NoError(t, err)
 		require.Equal(t, "https://enclave.example/", c.BaseURL(), "%T", tr)
-		require.Equal(t, "https://enclave.example/v1/", c.openAIURL, "%T", tr)
+		oc, err := NewOpenAIClient(c, nil)
+		require.NoError(t, err)
+		require.Equal(t, "https://enclave.example/v1/", oc.BaseURL(), "%T", tr)
 	}
 }
 

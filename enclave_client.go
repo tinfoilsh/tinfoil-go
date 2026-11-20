@@ -105,10 +105,8 @@ type attestedClient struct {
 	trust Trust
 	// secure is the client OpenAI clients use, which changes to the embedded
 	// client can't reach.
-	secure *http.Client
-	// baseURL is where requests are sent, and openAIURL is the default base
-	// URL of an OpenAI client over the chain.
-	baseURL, openAIURL string
+	secure  *http.Client
+	baseURL string
 }
 
 // newAttestedClient sends requests to proxyURL, or directly to the enclave
@@ -120,11 +118,10 @@ func newAttestedClient(keyed *transport.Transport, trust Trust, proxyURL, secret
 		return attestedClient{}, err
 	}
 	return attestedClient{
-		keyed:     keyed,
-		trust:     trust,
-		secure:    &http.Client{Transport: rt},
-		baseURL:   cmp.Or(proxyURL, "https://"+host+"/"),
-		openAIURL: openAIURL(cmp.Or(proxyURL, "https://"+host+"/")),
+		keyed:   keyed,
+		trust:   trust,
+		secure:  &http.Client{Transport: rt},
+		baseURL: cmp.Or(proxyURL, "https://"+host+"/"),
 	}, nil
 }
 

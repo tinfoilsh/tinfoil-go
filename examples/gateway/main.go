@@ -13,12 +13,16 @@ import (
 
 func main() {
 	const model = "gpt-oss-120b"
-	client, err := tinfoil.NewGatewayOpenAIClient(context.Background(), &tinfoil.GatewayOptions{
+	gateway, err := tinfoil.NewGatewayHTTPClient(context.Background(), &tinfoil.GatewayOptions{
 		ModelPins: map[string]tinfoil.ModelPin{
 			model: {Repo: os.Getenv("TINFOIL_MODEL_REF")},
 		},
 		PinnedModelsOnly: true,
-	}, option.WithAPIKey(os.Getenv("TINFOIL_API_KEY")))
+	})
+	if err != nil {
+		log.Fatal(err)
+	}
+	client, err := tinfoil.NewOpenAIClient(gateway, nil, option.WithAPIKey(os.Getenv("TINFOIL_API_KEY")))
 	if err != nil {
 		log.Fatal(err)
 	}
