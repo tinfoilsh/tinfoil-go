@@ -77,7 +77,7 @@ that instant like everything else.
 ```go
 import "github.com/tinfoilsh/tinfoil-go/verify"
 
-verifier, err := verify.NewVerifier()
+verifier, err := verify.NewVerifier(nil, verify.Policy{})
 if err != nil {
     return err
 }
@@ -163,7 +163,12 @@ taking the registers in order and `""` for one left unpinned. To require
 exactly what an earlier verification measured, pin
 `verified.EnclaveMeasurement().Expected()`.
 
-`verify.NewVerifier` takes functional options:
+`verify.NewVerifier` takes the config trust and a `verify.Policy`. A nil
+config trust selects Tinfoil's public registry; `verify.Registries`,
+`verify.ConfigSigningKeys`, `verify.ConfigAuthorizer`, `verify.EmbeddedConfig`
+and `verify.EmbeddedConfigReference` select another source. `Policy.Artifacts`
+selects how the runtime and platform artifacts are trusted, and a nil value
+keeps the endorsements that Tinfoil's public keys approve:
 
 ```go
 import (
@@ -178,10 +183,10 @@ pins, err := measurement.ParseExpectedTDX("", "", "", "", rtmr3Hex)
 if err != nil {
     return err
 }
-verifier, err := verify.NewVerifier(
-    verify.WithPinnedRegisters(pins),
-    verify.WithFreshnessMaxAge(24*time.Hour),
-)
+verifier, err := verify.NewVerifier(nil, verify.Policy{
+    PinnedRegisters: pins,
+    FreshnessMaxAge: 24 * time.Hour,
+})
 ```
 
 The SDK's clients take this verifier as their policy, through

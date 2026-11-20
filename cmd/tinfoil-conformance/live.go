@@ -29,7 +29,7 @@ type liveRequest struct {
 }
 
 // runLive verifies a live enclave through the SDK's production verifier —
-// verify.NewVerifier with no options, so the embedded roots, the current time
+// verify.NewVerifier with the default trust and policy, so the embedded roots, the current time
 // and the default freshness bound, never the adapter's injected seams — then
 // asserts the live connection's SPKI fingerprint equals the endorsed one
 // before reporting the facts with channel_binding "tls-spki".
@@ -43,7 +43,7 @@ func runLive() int {
 		return conformance.ExitMalformed
 	}
 
-	v, err := verify.NewVerifier()
+	v, err := verify.NewVerifier(nil, verify.Policy{})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "building verifier: %v\n", err)
 		return conformance.ExitInternal

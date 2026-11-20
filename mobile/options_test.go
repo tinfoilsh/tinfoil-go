@@ -79,9 +79,9 @@ func TestNewVerifierAcceptsTrustOptions(t *testing.T) {
 	}
 }
 
-// Each option reaches the verifier: the verifier's own checks, including the
-// conflicts between trust sources, reject what the options parser lets
-// through.
+// Each option reaches the verifier, whose own checks reject what the options
+// parser lets through. The parser rejects two members that select config
+// trust.
 func TestNewVerifierRejectsTrustOptions(t *testing.T) {
 	key := testKeyPEM(t)
 	for _, tc := range []struct {
@@ -89,8 +89,9 @@ func TestNewVerifierRejectsTrustOptions(t *testing.T) {
 	}{
 		{"empty registry IDs", `{"config_registry_ids":[]}`, "must not be empty"},
 		{"malformed registry ID", `{"config_registry_ids":["not a registry"]}`, "canonical registry URI"},
-		{"registry IDs with signing keys", `{"config_registry_ids":[` + quoted(PublicRegistryID) + `],"config_signing_keys_pem":[` + quoted(key) + `]}`, "registry ID policy"},
-		{"embedded config with signing keys", `{"embedded_config":{"bytes":"` + b64(testConfig) + `"},"config_signing_keys_pem":[` + quoted(key) + `]}`, "conflicting trust sources"},
+		{"registry IDs with signing keys", `{"config_registry_ids":[` + quoted(PublicRegistryID) + `],"config_signing_keys_pem":[` + quoted(key) + `]}`, "conflicting config trust"},
+		{"embedded config with signing keys", `{"embedded_config":{"bytes":"` + b64(testConfig) + `"},"config_signing_keys_pem":[` + quoted(key) + `]}`, "conflicting config trust"},
+		{"registry IDs with an embedded config", `{"config_registry_ids":[` + quoted(PublicRegistryID) + `],"embedded_config":{"bytes":"` + b64(testConfig) + `"}}`, "conflicting config trust"},
 		{"freshness keys with nothing endorsed", `{"embedded_config":{"bytes":"` + b64(testConfig) + `"},"embedded_runtime":"` + b64(testRuntime) + `","embedded_platform":"` + b64(testPlatform) + `","freshness_signing_keys_pem":[` + quoted(key) + `]}`, "no endorsed artifact"},
 		{"empty signing keys", `{"config_signing_keys_pem":[]}`, "must not be empty"},
 		{"text before the key", `{"config_signing_keys_pem":[` + quoted("junk\n"+key) + `]}`, "PEM PUBLIC KEY block"},

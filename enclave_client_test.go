@@ -27,7 +27,7 @@ import (
 // against a repository pin.
 func callerAuthorizedVerifier(t *testing.T) *verify.Verifier {
 	t.Helper()
-	v, err := verify.NewVerifier(verify.WithConfigAuthorizer(func(collateral.ConfigEndorsement) error { return nil }))
+	v, err := verify.NewVerifier(verify.ConfigAuthorizer{Authorize: func(collateral.ConfigEndorsement) error { return nil }}, verify.Policy{})
 	require.NoError(t, err)
 	return v
 }

@@ -24,6 +24,7 @@ import (
 	"github.com/tinfoilsh/tinfoil-go/internal/fetch"
 	"github.com/tinfoilsh/tinfoil-go/verify"
 	"github.com/tinfoilsh/tinfoil-go/verify/document"
+	"github.com/tinfoilsh/tinfoil-go/verify/document/collateral"
 )
 
 // NewNonce returns a fresh random challenge for one attestation fetch. Pass
@@ -76,10 +77,15 @@ func newVerifier(optionsJSON string, authorizer ConfigAuthorizer) (_ *Verifier, 
 	if err != nil {
 		return nil, &verify.UsageError{Err: err}
 	}
+	var authorize func(collateral.ConfigEndorsement) error
 	if authorizer != nil {
-		opts = append(opts, verify.WithConfigAuthorizer(authorizeWith(authorizer)))
+		authorize = authorizeWith(authorizer)
 	}
-	inner, err := verify.NewVerifier(opts...)
+	config, policy, err := opts.verifierInputs(authorize)
+	if err != nil {
+		return nil, &verify.UsageError{Err: err}
+	}
+	inner, err := verify.NewVerifier(config, policy)
 	if err != nil {
 		return nil, err
 	}

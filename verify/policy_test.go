@@ -2,6 +2,7 @@ package verify
 
 import (
 	"os"
+	"slices"
 	"testing"
 	"time"
 
@@ -17,25 +18,25 @@ import (
 )
 
 func TestNewDefaults(t *testing.T) {
-	v, err := NewVerifier()
+	v, err := NewVerifier(nil, Policy{})
 	require.NoError(t, err)
 	assert.Equal(t, endorsement.MaxFreshnessAge, v.FreshnessMaxAge())
 	assert.Nil(t, v.PinnedRegisters())
 }
 
-func TestWithFreshnessMaxAge(t *testing.T) {
+func TestPolicyFreshnessMaxAge(t *testing.T) {
 	// Zero keeps the default, so a caller passing an unset policy field does
 	// not silently disable the bound.
-	v, err := NewVerifier(WithFreshnessMaxAge(0))
+	v, err := NewVerifier(nil, Policy{FreshnessMaxAge: 0})
 	require.NoError(t, err)
 	assert.Equal(t, endorsement.MaxFreshnessAge, v.FreshnessMaxAge())
 
-	v, err = NewVerifier(WithFreshnessMaxAge(24 * time.Hour))
+	v, err = NewVerifier(nil, Policy{FreshnessMaxAge: 24 * time.Hour})
 	require.NoError(t, err)
 	assert.Equal(t, 24*time.Hour, v.FreshnessMaxAge())
 
 	for _, maxAge := range []time.Duration{-time.Nanosecond, -time.Hour} {
-		v, err := NewVerifier(WithFreshnessMaxAge(maxAge))
+		v, err := NewVerifier(nil, Policy{FreshnessMaxAge: maxAge})
 		require.Nil(t, v)
 		require.ErrorContains(t, err, "freshness maximum age must not be negative")
 		var usage *UsageError
@@ -43,10 +44,10 @@ func TestWithFreshnessMaxAge(t *testing.T) {
 	}
 }
 
-func TestWithPinnedRegistersCopies(t *testing.T) {
+func TestPolicyPinnedRegistersCopies(t *testing.T) {
 	register := measurement.Register{0xab}
 	pinned := register
-	v, err := NewVerifier(WithPinnedRegisters(measurement.ExpectedTDX{RTMR3: &pinned}))
+	v, err := NewVerifier(nil, Policy{PinnedRegisters: measurement.ExpectedTDX{RTMR3: &pinned}})
 	require.NoError(t, err)
 
 	// Changing the caller's register after construction must not reach the
@@ -60,7 +61,7 @@ func TestWithPinnedRegistersCopies(t *testing.T) {
 
 // Pins are values. A pointer, nil or not, satisfies measurement.Expected but
 // is a usage error.
-func TestWithPinnedRegistersRejectsPointers(t *testing.T) {
+func TestPolicyPinnedRegistersRejectsPointers(t *testing.T) {
 	register := measurement.Register{0xab}
 	for name, pins := range map[string]measurement.Expected{
 		"SEV-SNP":     &measurement.ExpectedSEVSNP{Launch: &register},
@@ -69,7 +70,7 @@ func TestWithPinnedRegistersRejectsPointers(t *testing.T) {
 		"nil TDX":     (*measurement.ExpectedTDX)(nil),
 	} {
 		t.Run(name, func(t *testing.T) {
-			v, err := NewVerifier(WithPinnedRegisters(pins))
+			v, err := NewVerifier(nil, Policy{PinnedRegisters: pins})
 			require.Nil(t, v)
 			require.ErrorAs(t, err, new(*UsageError))
 			require.ErrorContains(t, err, "value, not *measurement.Expected")
@@ -88,7 +89,7 @@ func TestLivePinsForTheOtherPlatformReject(t *testing.T) {
 	require.NoError(t, err)
 	raw, err := fetch.Document(t.Context(), os.Getenv(enclaveEnvVar), "", nonce)
 	require.NoError(t, err)
-	verifier, err := NewVerifier()
+	verifier, err := NewVerifier(nil, Policy{})
 	require.NoError(t, err)
 	verified, err := verifier.VerifyV3(raw, nonce, Pin{Repo: repo})
 	require.NoError(t, err)
@@ -102,12 +103,12 @@ func TestLivePinsForTheOtherPlatformReject(t *testing.T) {
 	default:
 		t.Fatalf("unexpected enclave measurement %T", m)
 	}
-	pinned, err := NewVerifier(WithPinnedRegisters(own))
+	pinned, err := NewVerifier(nil, Policy{PinnedRegisters: own})
 	require.NoError(t, err)
 	_, err = pinned.VerifyV3(raw, nonce, Pin{Repo: repo})
 	require.NoError(t, err)
 
-	pinned, err = NewVerifier(WithPinnedRegisters(other))
+	pinned, err = NewVerifier(nil, Policy{PinnedRegisters: other})
 	require.NoError(t, err)
 	_, err = pinned.VerifyV3(raw, nonce, Pin{Repo: repo})
 	var rejected *VerificationError
@@ -117,7 +118,7 @@ func TestLivePinsForTheOtherPlatformReject(t *testing.T) {
 }
 
 func TestVerifyV3RejectsBadRepo(t *testing.T) {
-	v, err := NewVerifier()
+	v, err := NewVerifier(nil, Policy{})
 	require.NoError(t, err)
 	nonce := make([]byte, document.NonceSize)
 	raw, err := document.Build(document.BuildInput{Nonce: nonce, Collateral: []collateral.Entry{{
@@ -131,10 +132,33 @@ func TestVerifyV3RejectsBadRepo(t *testing.T) {
 	require.ErrorAs(t, err, &usage)
 }
 
-func TestNewIgnoresNilOption(t *testing.T) {
-	v, err := NewVerifier(nil, WithFreshnessMaxAge(time.Hour), nil)
-	require.NoError(t, err)
-	assert.Equal(t, time.Hour, v.FreshnessMaxAge())
+// Variants are values. A pointer to one, nil or not, or a type that embeds
+// one, satisfies the interface but is a usage error.
+func TestNewVerifierRejectsUnsupportedVariants(t *testing.T) {
+	type wrapped struct{ Registries }
+	for name, config := range map[string]ConfigTrust{
+		"pointer":     &Registries{IDs: []string{PublicRegistryID}},
+		"nil pointer": (*ConfigSigningKeys)(nil),
+		"embedding":   wrapped{Registries{IDs: []string{PublicRegistryID}}},
+	} {
+		t.Run("config "+name, func(t *testing.T) {
+			v, err := NewVerifier(config, Policy{})
+			require.Nil(t, v)
+			require.ErrorAs(t, err, new(*UsageError))
+			require.ErrorContains(t, err, "config trust must be")
+		})
+	}
+	for name, artifacts := range map[string]ArtifactTrust{
+		"pointer":     &EndorsedArtifacts{},
+		"nil pointer": (*EmbeddedArtifacts)(nil),
+	} {
+		t.Run("artifacts "+name, func(t *testing.T) {
+			v, err := NewVerifier(nil, Policy{Artifacts: artifacts})
+			require.Nil(t, v)
+			require.ErrorAs(t, err, new(*UsageError))
+			require.ErrorContains(t, err, "artifact trust must be")
+		})
+	}
 }
 
 // A caller that ignores NewVerifier's error holds a nil *Verifier, and a zero
@@ -151,4 +175,17 @@ func TestVerifyV3RejectsUnbuiltVerifier(t *testing.T) {
 			require.ErrorContains(t, err, "verifier must be built with NewVerifier")
 		})
 	}
+}
+
+// NewVerifier copies every slice that it keeps, so later changes by the caller
+// have no effect.
+func TestNewVerifierCopiesTrust(t *testing.T) {
+	keys, err := endorsement.PublicSigningKeys()
+	require.NoError(t, err)
+	configKeys, freshnessKeys := slices.Clone(keys), slices.Clone(keys)
+	v, err := NewVerifier(ConfigSigningKeys{Keys: configKeys}, Policy{Artifacts: EndorsedArtifacts{FreshnessKeys: freshnessKeys}})
+	require.NoError(t, err)
+	configKeys[0], freshnessKeys[0] = nil, nil
+	require.Equal(t, keys, v.configKeys)
+	require.Equal(t, keys, v.freshnessKeys)
 }

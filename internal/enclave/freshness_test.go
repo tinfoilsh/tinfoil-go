@@ -14,9 +14,9 @@ import (
 	"github.com/tinfoilsh/tinfoil-go/verify/measurement"
 )
 
-// verifyDocument verifies raw with a verifier built from opts.
-func verifyDocument(raw, nonce []byte, repo string, opts ...verify.Option) (*verify.Verification, error) {
-	verifier, err := verify.NewVerifier(opts...)
+// verifyDocument verifies raw with a verifier that applies policy.
+func verifyDocument(raw, nonce []byte, repo string, policy verify.Policy) (*verify.Verification, error) {
+	verifier, err := verify.NewVerifier(nil, policy)
 	if err != nil {
 		return nil, err
 	}
@@ -30,20 +30,20 @@ func TestLiveVerifyRegisterPins(t *testing.T) {
 	require.NoError(t, err)
 	raw, err := fetch.Document(t.Context(), host, "", nonce)
 	require.NoError(t, err)
-	verified, err := verifyDocument(raw, nonce, repo)
+	verified, err := verifyDocument(raw, nonce, repo, verify.Policy{})
 	require.NoError(t, err)
 	const maxAge = 30 * 24 * time.Hour
 	for _, age := range []time.Duration{0, maxAge} {
-		_, err := verifyDocument(raw, nonce, repo, verify.WithFreshnessMaxAge(age), verify.WithPinnedRegisters(exactPins(verified.EnclaveMeasurement(), nil)))
+		_, err := verifyDocument(raw, nonce, repo, verify.Policy{FreshnessMaxAge: age, PinnedRegisters: exactPins(verified.EnclaveMeasurement(), nil)})
 		require.NoError(t, err)
 	}
 	bad := measurement.Register{0xab}
 	badPins := exactPins(verified.EnclaveMeasurement(), &bad)
 	require.NotEqual(t, exactPins(verified.EnclaveMeasurement(), nil), badPins)
-	_, err = verifyDocument(raw, nonce, repo, verify.WithPinnedRegisters(badPins))
+	_, err = verifyDocument(raw, nonce, repo, verify.Policy{PinnedRegisters: badPins})
 	var rejected *verify.VerificationError
 	require.ErrorAs(t, err, &rejected)
-	v, err := verify.NewVerifier(verify.WithPinnedRegisters(badPins), verify.WithFreshnessMaxAge(maxAge))
+	v, err := verify.NewVerifier(nil, verify.Policy{PinnedRegisters: badPins, FreshnessMaxAge: maxAge})
 	require.NoError(t, err)
 	s, err := New(Config{Host: host, Pin: verify.Pin{Repo: repo}, Verifier: v})
 	require.NoError(t, err)

@@ -43,7 +43,7 @@ import (
 // instant from the caller instead. So the same document is accepted today and
 // rejected once its witnesses go stale.
 type Verifier struct {
-	embedded        EmbeddedReferences
+	embedded        embeddedReferences
 	pinnedRegisters measurement.Expected
 	freshnessMaxAge time.Duration
 
@@ -64,40 +64,32 @@ type Verifier struct {
 	overrides overrides
 }
 
-// NewVerifier builds a Verifier from opts. Defaults use embedded production trust,
-// Tinfoil's public config and artifact signing keys, and a seven-day freshness bound.
-func NewVerifier(opts ...Option) (*Verifier, error) {
-	// Build default endorsement.Client with embedded roots
-	endorsementClient, err := endorsement.NewDefaultClient()
+// NewVerifier builds a Verifier that trusts configs as config selects and
+// applies policy. A nil config selects the public registry, and the zero
+// Policy keeps every default: Tinfoil's public artifact signing keys and a
+// seven-day freshness bound. NewVerifier copies both, so later changes by the
+// caller have no effect, and reports an invalid field as a UsageError.
+func NewVerifier(config ConfigTrust, policy Policy) (*Verifier, error) {
+	endorsements, err := endorsement.NewDefaultClient()
 	if err != nil {
 		return nil, usageError(err)
 	}
+	return newVerifier(config, policy, endorsements, overrides{})
+}
+
+// newVerifier is NewVerifier with the Sigstore trusted root and any other
+// trust anchors given, which only the conformance build replaces.
+func newVerifier(config ConfigTrust, policy Policy, endorsements *endorsement.Client, o overrides) (*Verifier, error) {
 	v := &Verifier{
 		freshnessMaxAge: endorsement.MaxFreshnessAge,
-		endorsements:    endorsementClient,
+		endorsements:    endorsements,
+		overrides:       o,
 	}
-	for _, opt := range opts {
-		if opt == nil {
-			continue
-		}
-		if err := opt(v); err != nil {
-			return nil, usageError(err)
-		}
+	if err := v.apply(policy); err != nil {
+		return nil, usageError(err)
 	}
-	if v.embedded.ConfigReference != nil && v.configKeys != nil {
-		return nil, usageError(fmt.Errorf("embedded config and config signing keys select conflicting trust sources"))
-	}
-	if v.configAuthorizer != nil && (v.embedded.ConfigReference != nil || v.configKeys != nil) {
-		return nil, usageError(fmt.Errorf("config authorizer conflicts with embedded config or config signing keys"))
-	}
-	if v.configRegistryIDs != nil && (v.embedded.ConfigReference != nil || v.configAuthorizer != nil) {
-		return nil, usageError(fmt.Errorf("config authority pins require endorsement verification"))
-	}
-	if v.configRegistryIDs != nil && v.configKeys != nil {
-		return nil, usageError(fmt.Errorf("config registry ID policy requires Tinfoil registry root verification"))
-	}
-	if v.embedded.Runtime != nil && v.embedded.Platform != nil && v.freshnessKeys != nil {
-		return nil, usageError(fmt.Errorf("freshness signing keys have no endorsed artifact to verify"))
+	if err := v.applyConfigTrust(config); err != nil {
+		return nil, usageError(err)
 	}
 	publicKeys, err := endorsement.PublicSigningKeys()
 	if err != nil {
@@ -168,7 +160,7 @@ func (v *Verifier) CheckPinVerifiability(pin Pin) error {
 // requirePin reports a pin that names nothing while v uses default config
 // trust, which would accept any config in the public registry.
 func (v *Verifier) requirePin(pin Pin) error {
-	if pin != (Pin{}) || v.embedded.ConfigReference != nil || v.configAuthorizer != nil || v.configKeys != nil || v.configRegistryIDs != nil {
+	if pin != (Pin{}) || v.embedded.config != nil || v.configAuthorizer != nil || v.configKeys != nil || v.configRegistryIDs != nil {
 		return nil
 	}
 	return usageError(fmt.Errorf("pin names nothing: set Repo or Project, or configure the verifier's config trust"))
@@ -178,7 +170,7 @@ func (v *Verifier) requirePin(pin Pin) error {
 // an embedded config, or authorizes it, with a config authorizer, instead of
 // a repository pin authenticating it.
 func (v *Verifier) CallerAuthorizesConfig() bool {
-	return v.embedded.ConfigReference != nil || v.configAuthorizer != nil
+	return v.embedded.config != nil || v.configAuthorizer != nil
 }
 
 // PinnedRegisters returns a copy of the configured register pins, or nil.

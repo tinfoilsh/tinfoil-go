@@ -63,7 +63,7 @@ func New(c Config) (*Enclave, error) {
 	v := c.Verifier
 	if v == nil {
 		var err error
-		if v, err = verify.NewVerifier(); err != nil {
+		if v, err = verify.NewVerifier(nil, verify.Policy{}); err != nil {
 			return nil, fromVerify(err)
 		}
 	}
