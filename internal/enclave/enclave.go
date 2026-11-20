@@ -33,9 +33,10 @@ const (
 type Config struct {
 	// Host is the enclave, a host with an optional port.
 	Host string
-	// Relay, when set, is a host that fetches attestation from the enclave on
-	// the client's behalf.
-	Relay string
+	// FetchAttestation, when set, obtains the enclave's attestation document
+	// instead of a direct fetch from the enclave. What it returns is verified
+	// like a fetched document.
+	FetchAttestation fetch.Func
 	// Pin is what the enclave is verified against.
 	Pin verify.Pin
 	// Verifier is the policy, which several enclaves can share; nil selects the
@@ -48,8 +49,10 @@ type Config struct {
 
 // Enclave is one enclave and the policy its attestation is verified against.
 type Enclave struct {
-	host, relay string
-	pin         verify.Pin
+	host string
+	pin  verify.Pin
+	// fetchDocument obtains the attestation document.
+	fetchDocument fetch.Func
 	// verifier is the immutable verification policy, shareable across enclaves.
 	verifier *verify.Verifier
 	// check is the caller's VerificationCheck, or nil.
@@ -81,7 +84,11 @@ func New(c Config) (*Enclave, error) {
 	if err := v.CheckPinVerifiability(c.Pin); err != nil {
 		return nil, fromVerify(err)
 	}
-	return &Enclave{host: c.Host, pin: c.Pin, relay: c.Relay, verifier: v, check: c.VerificationCheck}, nil
+	fetchDocument := c.FetchAttestation
+	if fetchDocument == nil {
+		fetchDocument = fetch.Document
+	}
+	return &Enclave{host: c.Host, pin: c.Pin, fetchDocument: fetchDocument, verifier: v, check: c.VerificationCheck}, nil
 }
 
 // NewForTest returns an Enclave for host that verifies by calling fetch
@@ -159,11 +166,18 @@ func (e *Enclave) fetchVerification() (*verify.Verification, error) {
 	if err != nil {
 		return nil, err
 	}
+	if err := fetch.CheckTarget(e.host, nonce); err != nil {
+		return nil, errs.Configuration(err)
+	}
 	// A verification can serve many waiting requests, so no single caller's
-	// context applies; fetch.Document still caps the request's duration.
-	docBytes, err := fetch.Document(context.Background(), e.host, e.relay, nonce)
+	// context applies; the fetch is still capped in duration. Each waiting
+	// caller's cancellation ends its own wait instead.
+	ctx, cancel := context.WithTimeout(context.Background(), fetch.Timeout)
+	defer cancel()
+	docBytes, err := e.fetchDocument(ctx, e.host, nonce)
 	if err != nil {
-		return nil, err
+		// A caller's fetcher may already report an SDK category.
+		return nil, errs.WrapNetwork(err)
 	}
 
 	verified, err := e.verifier.VerifyV3(docBytes, nonce, e.pin)

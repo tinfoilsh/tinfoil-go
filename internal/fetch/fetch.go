@@ -10,6 +10,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strings"
 	"time"
 
 	"github.com/tinfoilsh/tinfoil-go/internal/errs"
@@ -17,17 +18,39 @@ import (
 	"github.com/tinfoilsh/tinfoil-go/verify/document"
 )
 
-// Document retrieves a v3 attestation document from an enclave host using a
-// fresh challenge nonce, returning the raw response bytes for verification. If
-// relay is an empty string, the document is fetched from the host URL.
-// Otherwise, the request is made to the relay URL. The fetch stops when ctx is
-// done or after 30 seconds, whichever comes first.
-func Document(ctx context.Context, host, relay string, nonce []byte) (result []byte, err error) {
-	defer func() { err = errs.WrapNetwork(err) }()
-	target, err := URL(host, relay, nonce)
+// Func obtains the raw attestation document of host for nonce. The verifier
+// treats whatever it returns as untrusted.
+type Func func(ctx context.Context, host string, nonce []byte) ([]byte, error)
+
+// Document retrieves a v3 attestation document directly from an enclave host
+// using a fresh challenge nonce, returning the raw response bytes for
+// verification. The fetch stops when ctx is done or after 30 seconds,
+// whichever comes first.
+func Document(ctx context.Context, host string, nonce []byte) ([]byte, error) {
+	target, err := URL(host, "", nonce)
 	if err != nil {
 		return nil, errs.Configuration(err)
 	}
+	return Get(ctx, target, maxAttestationBytes, "attestation document")
+}
+
+// Relayed retrieves the attestation document of host through the relay at
+// relayURL, as RelayURL describes, under the same bounds as Document.
+func Relayed(ctx context.Context, relayURL, host string, nonce []byte) ([]byte, error) {
+	target, err := RelayURL(relayURL, host, nonce)
+	if err != nil {
+		return nil, errs.Configuration(err)
+	}
+	return Get(ctx, target, maxAttestationBytes, "attestation document")
+}
+
+// Get fetches target with the SDK's identity headers and returns at most
+// limit bytes of a successful response; what describes the response in
+// errors. It refuses a redirect to a non-HTTPS URL, stops when ctx is done or
+// after 30 seconds, whichever comes first, and reports failures as network
+// errors.
+func Get(ctx context.Context, target string, limit int, what string) (result []byte, err error) {
+	defer func() { err = errs.WrapNetwork(err) }()
 	ctx, cancel := context.WithTimeout(ctx, attestationFetchTimeout)
 	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, target, nil)
@@ -64,13 +87,13 @@ func Document(ctx context.Context, host, relay string, nonce []byte) (result []b
 		return nil, fmt.Errorf("HTTP GET %s: %d %s", target, resp.StatusCode, resp.Status)
 	}
 	// LimitReader truncates silently. Reading one byte past the limit tells an
-	// oversized document apart from one of exactly the maximum size.
-	body, err := io.ReadAll(io.LimitReader(resp.Body, maxAttestationBytes+1))
+	// oversized response apart from one of exactly the maximum size.
+	body, err := io.ReadAll(io.LimitReader(resp.Body, int64(limit)+1))
 	if err != nil {
 		return nil, err
 	}
-	if len(body) > maxAttestationBytes {
-		return nil, fmt.Errorf("attestation document exceeds %d bytes", maxAttestationBytes)
+	if len(body) > limit {
+		return nil, fmt.Errorf("%s exceeds %d bytes", what, limit)
 	}
 	return body, nil
 }
@@ -92,28 +115,82 @@ func RefuseInsecureRedirects(req *http.Request, via []*http.Request) error {
 // from host itself, or from relay, which forwards the request to host, when
 // relay is not empty. Both are a host with an optional port, not a URL.
 func URL(host, relay string, nonce []byte) (string, error) {
+	if err := checkTarget(host, nonce); err != nil {
+		return "", err
+	}
+	if relay == "" {
+		u := url.URL{Scheme: "https", Host: host, Path: attestationEndpoint, RawQuery: "nonce=" + hex.EncodeToString(nonce)}
+		return u.String(), nil
+	}
+	if !isAuthority(relay) {
+		return "", fmt.Errorf("invalid host %q: want a host with an optional port", relay)
+	}
+	return RelayURL("https://"+relay, host, nonce)
+}
+
+// RelayURL returns where the attestation document of host is fetched with
+// nonce through the relay at relayURL: the attestation path joined under
+// relayURL's path, whether or not that ends with "/", with the nonce in
+// lowercase hex and the enclave host as query parameters. relayURL must be an
+// absolute http or https URL without user information, a query or a fragment;
+// which schemes a caller may use is its own policy.
+func RelayURL(relayURL, host string, nonce []byte) (string, error) {
+	if err := checkTarget(host, nonce); err != nil {
+		return "", err
+	}
+	u, err := ParseBaseURL(relayURL)
+	if err != nil {
+		return "", err
+	}
+	u = u.JoinPath(attestationEndpoint)
+	u.RawQuery = "nonce=" + hex.EncodeToString(nonce) + "&enclave=" + url.QueryEscape(host)
+	return u.String(), nil
+}
+
+// ParseBaseURL parses rawURL as a URL that request paths join under: an
+// absolute http or https URL with a host and without user information, a
+// query or a fragment, even an empty one.
+func ParseBaseURL(rawURL string) (*url.URL, error) {
+	// Errors don't echo the URL, which may carry credentials.
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return nil, errors.New("URL does not parse")
+	}
+	if u.Scheme != "https" && u.Scheme != "http" {
+		return nil, errors.New("URL must use http or https")
+	}
+	if u.Host == "" || u.Opaque != "" {
+		return nil, errors.New("URL must be absolute, with a scheme and a host")
+	}
+	if u.User != nil {
+		return nil, errors.New("URL must not contain user information")
+	}
+	// url.URL doesn't record an empty fragment; once the URL has parsed, a
+	// '?' or '#' in it can only start a query or a fragment.
+	if strings.ContainsAny(rawURL, "?#") {
+		return nil, errors.New("URL must not carry a query or a fragment")
+	}
+	return u, nil
+}
+
+// CheckTarget checks the enclave host and the nonce of an attestation fetch,
+// whoever performs it.
+func CheckTarget(host string, nonce []byte) error {
+	return checkTarget(host, nonce)
+}
+
+// checkTarget checks the enclave host and the nonce of an attestation fetch.
+func checkTarget(host string, nonce []byte) error {
 	if host == "" {
-		return "", fmt.Errorf("enclave host is required")
+		return fmt.Errorf("enclave host is required")
 	}
 	if len(nonce) != document.NonceSize {
-		return "", fmt.Errorf("nonce must be %d bytes, got %d", document.NonceSize, len(nonce))
+		return fmt.Errorf("nonce must be %d bytes, got %d", document.NonceSize, len(nonce))
 	}
-	for _, authority := range []string{host, relay} {
-		if authority != "" && !isAuthority(authority) {
-			return "", fmt.Errorf("invalid host %q: want a host with an optional port", authority)
-		}
+	if !isAuthority(host) {
+		return fmt.Errorf("invalid host %q: want a host with an optional port", host)
 	}
-	u := url.URL{
-		Scheme:   "https",
-		Host:     host,
-		Path:     attestationEndpoint,
-		RawQuery: "nonce=" + hex.EncodeToString(nonce),
-	}
-	if relay != "" {
-		u.Host = relay
-		u.RawQuery += "&enclave=" + url.QueryEscape(host)
-	}
-	return u.String(), nil
+	return nil
 }
 
 // isAuthority reports whether s parses back as exactly the host of an HTTPS
@@ -122,6 +199,9 @@ func isAuthority(s string) bool {
 	parsed, err := url.Parse((&url.URL{Scheme: "https", Host: s}).String())
 	return err == nil && parsed.Host == s && parsed.Path == "" && parsed.User == nil
 }
+
+// Timeout bounds one attestation fetch, whoever performs it.
+const Timeout = attestationFetchTimeout
 
 const (
 	attestationEndpoint     = "/.well-known/tinfoil-attestation"

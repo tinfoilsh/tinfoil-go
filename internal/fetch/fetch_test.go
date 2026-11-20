@@ -35,9 +35,9 @@ func TestFetchReportsSDKIdentity(t *testing.T) {
 		var body []byte
 		var err error
 		if relay {
-			body, err = Document(t.Context(), "enclave.example", host, testNonce())
+			body, err = Relayed(t.Context(), "https://"+host, "enclave.example", testNonce())
 		} else {
-			body, err = Document(t.Context(), host, "", testNonce())
+			body, err = Document(t.Context(), host, testNonce())
 		}
 		require.NoError(t, err)
 		require.Equal(t, responseBody, string(body))
@@ -77,8 +77,46 @@ func TestURL(t *testing.T) {
 	require.Error(t, err)
 
 	// Document reports a URL it cannot build as the caller's configuration.
-	_, err = Document(t.Context(), "https://enclave.example", "", testNonce())
+	_, err = Document(t.Context(), "https://enclave.example", testNonce())
 	require.ErrorIs(t, err, errs.ErrConfiguration)
+}
+
+// RelayURL joins the attestation path under the relay's mount path, so a
+// trailing slash makes no difference.
+func TestRelayURL(t *testing.T) {
+	query := "?nonce=" + hex.EncodeToString(testNonce()) + "&enclave="
+	for relay, want := range map[string]string{
+		"https://relay.example":           "https://relay.example/.well-known/tinfoil-attestation",
+		"https://relay.example/":          "https://relay.example/.well-known/tinfoil-attestation",
+		"https://relay.example/tinfoil":   "https://relay.example/tinfoil/.well-known/tinfoil-attestation",
+		"https://relay.example/tinfoil/":  "https://relay.example/tinfoil/.well-known/tinfoil-attestation",
+		"https://relay.example:8443/a/b":  "https://relay.example:8443/a/b/.well-known/tinfoil-attestation",
+		"http://localhost:8080/attest/":   "http://localhost:8080/attest/.well-known/tinfoil-attestation",
+		"https://relay.example/a%2Fb/":    "https://relay.example/a%2Fb/.well-known/tinfoil-attestation",
+		"https://relay.example/tin foil/": "https://relay.example/tin%20foil/.well-known/tinfoil-attestation",
+	} {
+		got, err := RelayURL(relay, "enclave.example", testNonce())
+		require.NoError(t, err, relay)
+		require.Equal(t, want+query+"enclave.example", got, relay)
+	}
+	got, err := RelayURL("https://relay.example", "enclave.example:8443", testNonce())
+	require.NoError(t, err)
+	require.Equal(t, "https://relay.example/.well-known/tinfoil-attestation"+query+"enclave.example%3A8443", got, "the enclave is query-escaped")
+
+	for _, bad := range []string{"", "relay.example", "/relay", "ftp://relay.example", "https://user@relay.example", "https://relay.example?", "https://relay.example/?a=1", "https://relay.example#", "https:relay.example"} {
+		_, err := RelayURL(bad, "enclave.example", testNonce())
+		require.Error(t, err, bad)
+	}
+	for _, bad := range []string{"", "https://enclave.example", "enclave.example/path"} {
+		_, err := RelayURL("https://relay.example", bad, testNonce())
+		require.Error(t, err, "enclave %q", bad)
+	}
+	_, err = RelayURL("https://relay.example", "enclave.example", testNonce()[1:])
+	require.Error(t, err)
+	_, err = Relayed(t.Context(), "https://relay.example?", "enclave.example", testNonce())
+	require.ErrorIs(t, err, errs.ErrConfiguration)
+	_, err = RelayURL("https://user:secret@relay.example", "enclave.example", testNonce())
+	require.NotContains(t, err.Error(), "secret", "errors don't echo the URL")
 }
 
 type fetchTransport func(*http.Request) (*http.Response, error)
@@ -100,7 +138,7 @@ func TestFetchSizeLimitAndRedirects(t *testing.T) {
 				return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(strings.Repeat("x", size)))}, nil
 			}),
 		}
-		body, err := Document(t.Context(), "enclave.example", "", testNonce())
+		body, err := Document(t.Context(), "enclave.example", testNonce())
 		require.Equal(t, 1, redirects)
 		if size > limit {
 			require.ErrorContains(t, err, "exceeds 33554432 bytes")
@@ -126,7 +164,7 @@ func TestFetchTimeout(t *testing.T) {
 				return &http.Response{StatusCode: http.StatusOK, Body: body}, nil
 			})}
 			start := time.Now()
-			_, err := Document(t.Context(), "enclave.example", "", testNonce())
+			_, err := Document(t.Context(), "enclave.example", testNonce())
 			require.ErrorIs(t, err, context.DeadlineExceeded)
 			if timeout == 0 {
 				timeout = 30 * time.Second
@@ -151,7 +189,7 @@ func TestFetchHonorsCallerDeadline(t *testing.T) {
 		ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 		defer cancel()
 		start := time.Now()
-		_, err := Document(ctx, "enclave.example", "", testNonce())
+		_, err := Document(ctx, "enclave.example", testNonce())
 		require.ErrorIs(t, err, context.DeadlineExceeded)
 		require.Equal(t, 5*time.Second, time.Since(start), "a caller deadline shorter than the cap applies")
 	})
@@ -171,7 +209,7 @@ func TestFetchRejectsNonHTTPSRedirect(t *testing.T) {
 			return &http.Response{StatusCode: http.StatusFound, Header: http.Header{"Location": {"http://enclave.example/redirect"}}, Body: http.NoBody}, nil
 		}),
 	}
-	_, err := Document(t.Context(), "enclave.example", "", testNonce())
+	_, err := Document(t.Context(), "enclave.example", testNonce())
 	require.ErrorContains(t, err, "refusing redirect to non-HTTPS URL")
 	require.Equal(t, []string{"https"}, schemes)
 }
@@ -184,7 +222,7 @@ func TestFetchKeepsDefaultRedirectLimit(t *testing.T) {
 		requests++
 		return &http.Response{StatusCode: http.StatusFound, Header: http.Header{"Location": {"/loop"}}, Body: http.NoBody}, nil
 	})}
-	_, err := Document(t.Context(), "enclave.example", "", testNonce())
+	_, err := Document(t.Context(), "enclave.example", testNonce())
 	require.ErrorContains(t, err, "stopped after 10 redirects")
 	require.Equal(t, 10, requests)
 }
@@ -242,8 +280,14 @@ func TestFetchUsesFreshConnectionAfterCutover(t *testing.T) {
 			require.Equal(t, "old "+protocol, sharedFetch())
 			address.Store(newServer.Listener.Addr().String())
 			host := strings.TrimPrefix(oldServer.URL, "https://")
-			for _, relay := range []string{"", host} {
-				body, err := Document(t.Context(), host, relay, testNonce())
+			for _, relayed := range []bool{false, true} {
+				var body []byte
+				var err error
+				if relayed {
+					body, err = Relayed(t.Context(), oldServer.URL, host, testNonce())
+				} else {
+					body, err = Document(t.Context(), host, testNonce())
+				}
 				require.NoError(t, err)
 				require.Equal(t, "new "+protocol, string(body))
 			}
