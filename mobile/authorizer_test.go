@@ -6,6 +6,7 @@ import (
 	"errors"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -32,6 +33,10 @@ func TestNewVerifierWithConfigAuthorizer(t *testing.T) {
 	require.NoError(t, err)
 	assert.True(t, verifier.CallerAuthorizesConfig())
 
+	withPolicy, err := NewVerifierWithConfigAuthorizer(`{"freshness_max_age_ns":3600000000000,"artifacts":{"type":"endorsed"}}`, &recordingAuthorizer{})
+	require.NoError(t, err)
+	assert.Equal(t, time.Hour, withPolicy.inner.FreshnessMaxAge())
+
 	plain, err := NewVerifier("")
 	require.NoError(t, err)
 	assert.False(t, plain.CallerAuthorizesConfig())
@@ -44,10 +49,12 @@ func TestNewVerifierWithConfigAuthorizerRejects(t *testing.T) {
 		authorizer              ConfigAuthorizer
 	}{
 		{"nil authorizer", "", "must not be nil", nil},
-		{"with config signing keys", `{"config_signing_keys_pem":[` + quoted(key) + `]}`, "conflicting config trust", &recordingAuthorizer{}},
-		{"with an embedded config", `{"embedded_config":{"bytes":"` + b64(testConfig) + `"}}`, "conflicting config trust", &recordingAuthorizer{}},
-		{"with registry IDs", `{"config_registry_ids":[` + quoted(PublicRegistryID) + `]}`, "conflicting config trust", &recordingAuthorizer{}},
-		{"with malformed options", `{"unknown":1}`, "parsing verification options", &recordingAuthorizer{}},
+		{"with config trust", `{"config_trust":{"type":"signing_keys","keys_pem":[` + quoted(key) + `]}}`, "parsing verification policy", &recordingAuthorizer{}},
+		{"with the whole options object", `{"policy":{}}`, "parsing verification policy", &recordingAuthorizer{}},
+		{"with an invalid policy", `{"freshness_max_age_ns":-1}`, "", &recordingAuthorizer{}},
+		{"with an unknown artifacts type", `{"artifacts":{"type":"nope"}}`, "unknown type", &recordingAuthorizer{}},
+		{"policy not an object", `[]`, "parsing verification policy", &recordingAuthorizer{}},
+		{"null policy", `null`, "must be a JSON object", &recordingAuthorizer{}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			_, err := NewVerifierWithConfigAuthorizer(tc.options, tc.authorizer)
@@ -103,7 +110,7 @@ func TestPinChecksBeforeIO(t *testing.T) {
 	assert.NoError(t, authorized.CheckPinVerifiability("", ""))
 	requireUsageError(t, authorized.CheckPinVerifiability("", "org/repo"), "config authorizer cannot authenticate")
 
-	embedded, err := NewVerifier(`{"embedded_config":{"name":"/org/project/v1","bytes":"` + b64(testConfig) + `"}}`)
+	embedded, err := NewVerifier(`{"config_trust":{"type":"embedded_config","name":"/org/project/v1","bytes":"` + b64(testConfig) + `"}}`)
 	require.NoError(t, err)
 	assert.True(t, embedded.CallerAuthorizesConfig())
 	assert.NoError(t, embedded.CheckPinVerifiability("", "org/project@v1"))

@@ -24,7 +24,6 @@ import (
 	"github.com/tinfoilsh/tinfoil-go/internal/fetch"
 	"github.com/tinfoilsh/tinfoil-go/verify"
 	"github.com/tinfoilsh/tinfoil-go/verify/document"
-	"github.com/tinfoilsh/tinfoil-go/verify/document/collateral"
 )
 
 // NewNonce returns a fresh random challenge for one attestation fetch. Pass
@@ -56,38 +55,37 @@ type Verifier struct {
 	callerAuthorizesConfig bool
 }
 
-// NewVerifier builds a verifier from optionsJSON, a JSON object whose members
-// are described on the options type in options.go; an empty string selects the
-// defaults. Any unknown or malformed member is rejected.
-func NewVerifier(optionsJSON string) (*Verifier, error) {
-	return newVerifier(optionsJSON, nil)
-}
-
-// NewVerifierWithConfigAuthorizer builds a verifier as NewVerifier does, with
-// authorizer deciding which configs are authorized in place of their
-// endorsements. It conflicts with config_signing_keys_pem, config_registry_ids
-// and embedded_config, and a repo passed alone to Verify is then refused.
-func NewVerifierWithConfigAuthorizer(optionsJSON string, authorizer ConfigAuthorizer) (*Verifier, error) {
-	if authorizer == nil {
-		return nil, toMobileError(&verify.UsageError{Err: fmt.Errorf("config authorizer must not be nil")})
-	}
-	return newVerifier(optionsJSON, authorizer)
-}
-
-func newVerifier(optionsJSON string, authorizer ConfigAuthorizer) (_ *Verifier, err error) {
+// NewVerifier builds a verifier from optionsJSON, a JSON object with an
+// optional config_trust and an optional policy, as described on the options
+// type in options.go; an empty string selects the defaults. Any unknown or
+// malformed member is rejected.
+func NewVerifier(optionsJSON string) (_ *Verifier, err error) {
 	defer func() { err = toMobileError(err) }()
-	opts, err := parseOptions(optionsJSON)
+	config, policy, err := parseOptions(optionsJSON)
 	if err != nil {
 		return nil, &verify.UsageError{Err: err}
 	}
-	var authorize func(collateral.ConfigEndorsement) error
-	if authorizer != nil {
-		authorize = authorizeWith(authorizer)
+	return newVerifier(config, policy)
+}
+
+// NewVerifierWithConfigAuthorizer builds a verifier whose config trust is
+// authorizer, which decides which configs are authorized in place of their
+// endorsements. policyJSON is the policy object alone, in the shape of the
+// policy member that NewVerifier takes; an empty string selects the default
+// policy. A repo passed alone to Verify is then refused.
+func NewVerifierWithConfigAuthorizer(policyJSON string, authorizer ConfigAuthorizer) (_ *Verifier, err error) {
+	defer func() { err = toMobileError(err) }()
+	if authorizer == nil {
+		return nil, &verify.UsageError{Err: fmt.Errorf("config authorizer must not be nil")}
 	}
-	config, policy, err := opts.verifierInputs(authorize)
+	policy, err := parsePolicy(policyJSON)
 	if err != nil {
 		return nil, &verify.UsageError{Err: err}
 	}
+	return newVerifier(verify.ConfigAuthorizer{Authorize: authorizeWith(authorizer)}, policy)
+}
+
+func newVerifier(config verify.ConfigTrust, policy verify.Policy) (*Verifier, error) {
 	inner, err := verify.NewVerifier(config, policy)
 	if err != nil {
 		return nil, err

@@ -52,24 +52,33 @@ func requireUsageError(t *testing.T, err error, contains string) {
 	assert.Contains(t, err.Error(), contains)
 }
 
+// Shorthands for the tagged objects, so that the cases below read as options.
+func withConfigTrust(members string) string { return `{"config_trust":{` + members + `}}` }
+func withArtifacts(members string) string   { return `{"policy":{"artifacts":{` + members + `}}}` }
+
 func TestNewVerifierAcceptsTrustOptions(t *testing.T) {
 	key := quoted(testKeyPEM(t))
 	digest := sha256.Sum256([]byte(testConfig))
-	configReference := `{"name":"/org/project/v1","digest":"` + hex.EncodeToString(digest[:]) +
-		`","runtime":{"repo":"tinfoilsh/cvmimage","tag":"v0.15.0","digest":"` + fmt.Sprintf("%x", sha256.Sum256([]byte(testRuntime))) + `"}}`
+	configReference := `"type":"embedded_config_reference","name":"/org/project/v1","digest":"` + hex.EncodeToString(digest[:]) +
+		`","runtime":{"repo":"tinfoilsh/cvmimage","tag":"v0.15.0","digest":"` + fmt.Sprintf("%x", sha256.Sum256([]byte(testRuntime))) + `"}`
+	embeddedArtifacts := `"type":"embedded","runtime":"` + b64(testRuntime) + `","platform":"` + b64(testPlatform) + `"`
 	for _, tc := range []struct {
 		name             string
 		options          string
 		authorizesConfig bool
 	}{
-		{"null members keep the defaults", `{"config_registry_ids":null,"embedded_config":null,"embedded_runtime":null}`, false},
-		{"registry IDs", `{"config_registry_ids":[` + quoted(PublicRegistryID) + `]}`, false},
-		{"config signing keys", `{"config_signing_keys_pem":[` + key + `]}`, false},
-		{"freshness signing keys", `{"freshness_signing_keys_pem":[` + key + `]}`, false},
-		{"embedded config bytes", `{"embedded_config":{"name":"/org/project/v1","bytes":"` + b64(testConfig) + `"}}`, true},
-		{"embedded config reference", `{"embedded_config":` + configReference + `}`, true},
-		{"embedded runtime and platform", `{"embedded_runtime":"` + b64(testRuntime) + `","embedded_platform":"` + b64(testPlatform) + `"}`, false},
-		{"every embedded component", `{"embedded_config":{"bytes":"` + b64(testConfig) + `"},"embedded_runtime":"` + b64(testRuntime) + `","embedded_platform":"` + b64(testPlatform) + `"}`, true},
+		{"empty object", `{}`, false},
+		{"null members keep the defaults", `{"config_trust":null,"policy":null}`, false},
+		{"null policy members keep the defaults", `{"policy":{"pinned_registers":null,"artifacts":null}}`, false},
+		{"registry IDs", withConfigTrust(`"type":"registries","ids":[` + quoted(PublicRegistryID) + `]`), false},
+		{"config signing keys", withConfigTrust(`"type":"signing_keys","keys_pem":[` + key + `]`), false},
+		{"endorsed artifacts", withArtifacts(`"type":"endorsed"`), false},
+		{"freshness signing keys", withArtifacts(`"type":"endorsed","freshness_keys_pem":[` + key + `]`), false},
+		{"embedded config bytes", withConfigTrust(`"type":"embedded_config","name":"/org/project/v1","bytes":"` + b64(testConfig) + `"`), true},
+		{"embedded config reference", withConfigTrust(configReference), true},
+		{"embedded runtime and platform", withArtifacts(embeddedArtifacts), false},
+		{"embedded runtime with freshness keys", withArtifacts(`"type":"embedded","runtime":"` + b64(testRuntime) + `","freshness_keys_pem":[` + key + `]`), false},
+		{"every embedded component", `{"config_trust":{"type":"embedded_config","bytes":"` + b64(testConfig) + `"},"policy":{"artifacts":{` + embeddedArtifacts + `}}}`, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			verifier, err := NewVerifier(tc.options)
@@ -80,32 +89,69 @@ func TestNewVerifierAcceptsTrustOptions(t *testing.T) {
 }
 
 // Each option reaches the verifier, whose own checks reject what the options
-// parser lets through. The parser rejects two members that select config
-// trust.
+// parser lets through.
 func TestNewVerifierRejectsTrustOptions(t *testing.T) {
 	key := testKeyPEM(t)
 	for _, tc := range []struct {
 		name, options, contains string
 	}{
-		{"empty registry IDs", `{"config_registry_ids":[]}`, "must not be empty"},
-		{"malformed registry ID", `{"config_registry_ids":["not a registry"]}`, "canonical registry URI"},
-		{"registry IDs with signing keys", `{"config_registry_ids":[` + quoted(PublicRegistryID) + `],"config_signing_keys_pem":[` + quoted(key) + `]}`, "conflicting config trust"},
-		{"embedded config with signing keys", `{"embedded_config":{"bytes":"` + b64(testConfig) + `"},"config_signing_keys_pem":[` + quoted(key) + `]}`, "conflicting config trust"},
-		{"registry IDs with an embedded config", `{"config_registry_ids":[` + quoted(PublicRegistryID) + `],"embedded_config":{"bytes":"` + b64(testConfig) + `"}}`, "conflicting config trust"},
-		{"freshness keys with nothing endorsed", `{"embedded_config":{"bytes":"` + b64(testConfig) + `"},"embedded_runtime":"` + b64(testRuntime) + `","embedded_platform":"` + b64(testPlatform) + `","freshness_signing_keys_pem":[` + quoted(key) + `]}`, "no endorsed artifact"},
-		{"empty signing keys", `{"config_signing_keys_pem":[]}`, "must not be empty"},
-		{"text before the key", `{"config_signing_keys_pem":[` + quoted("junk\n"+key) + `]}`, "PEM PUBLIC KEY block"},
-		{"two keys in one entry", `{"config_signing_keys_pem":[` + quoted(key+key) + `]}`, "single PEM block"},
-		{"wrong block type", `{"config_signing_keys_pem":[` + quoted(strings.ReplaceAll(key, "PUBLIC KEY", "CERTIFICATE")) + `]}`, "PEM PUBLIC KEY block"},
-		{"not a key", `{"config_signing_keys_pem":[` + quoted(string(pem.EncodeToMemory(&pem.Block{Type: "PUBLIC KEY", Bytes: []byte("nope")}))) + `]}`, "config signing key 0"},
-		{"embedded config with bytes and digest", `{"embedded_config":{"bytes":"` + b64(testConfig) + `","digest":"` + strings.Repeat("ab", 32) + `"}}`, "either bytes, or digest and runtime"},
-		{"embedded config with digest only", `{"embedded_config":{"digest":"` + strings.Repeat("ab", 32) + `"}}`, "either bytes, or digest and runtime"},
-		{"empty embedded config", `{"embedded_config":{}}`, "either bytes, or digest and runtime"},
-		{"empty embedded config bytes", `{"embedded_config":{"bytes":""}}`, "must not be empty"},
-		{"unpadded base64", `{"embedded_runtime":"` + strings.TrimRight(b64(testRuntime+"x"), "=") + `"}`, "embedded_runtime"},
-		{"malformed config", `{"embedded_config":{"bytes":"` + b64("not: a config") + `"}}`, "cvm-version"},
-		{"runtime the config does not pin", `{"embedded_config":{"bytes":"` + b64(testConfig) + `"},"embedded_runtime":"` + b64(strings.Replace(testRuntime, "v0.15.0", "v0.15.1", 1)) + `"}`, "does not match"},
-		{"unknown embedded member", `{"embedded_config":{"bytes":"` + b64(testConfig) + `","extra":1}}`, "parsing verification options"},
+		{"missing registry IDs", withConfigTrust(`"type":"registries"`), "must not be empty"},
+		{"empty registry IDs", withConfigTrust(`"type":"registries","ids":[]`), "must not be empty"},
+		{"malformed registry ID", withConfigTrust(`"type":"registries","ids":["not a registry"]`), "canonical registry URI"},
+		{"freshness keys with nothing endorsed", `{"config_trust":{"type":"embedded_config","bytes":"` + b64(testConfig) + `"},"policy":{"artifacts":{"type":"embedded","runtime":"` + b64(testRuntime) + `","platform":"` + b64(testPlatform) + `","freshness_keys_pem":[` + quoted(key) + `]}}}`, "no endorsed artifact"},
+		{"embedded artifacts with nothing embedded", withArtifacts(`"type":"embedded"`), ""},
+		{"empty freshness keys", withArtifacts(`"type":"endorsed","freshness_keys_pem":[]`), "must not be empty"},
+		{"missing signing keys", withConfigTrust(`"type":"signing_keys"`), "must not be empty"},
+		{"empty signing keys", withConfigTrust(`"type":"signing_keys","keys_pem":[]`), "must not be empty"},
+		{"text before the key", withConfigTrust(`"type":"signing_keys","keys_pem":[` + quoted("junk\n"+key) + `]`), "PEM PUBLIC KEY block"},
+		{"two keys in one entry", withConfigTrust(`"type":"signing_keys","keys_pem":[` + quoted(key+key) + `]`), "single PEM block"},
+		{"wrong block type", withConfigTrust(`"type":"signing_keys","keys_pem":[` + quoted(strings.ReplaceAll(key, "PUBLIC KEY", "CERTIFICATE")) + `]`), "PEM PUBLIC KEY block"},
+		{"not a key", withConfigTrust(`"type":"signing_keys","keys_pem":[` + quoted(string(pem.EncodeToMemory(&pem.Block{Type: "PUBLIC KEY", Bytes: []byte("nope")}))) + `]`), "config signing key 0"},
+		{"not a freshness key", withArtifacts(`"type":"endorsed","freshness_keys_pem":["nope"]`), "freshness signing key 0"},
+		{"embedded config without bytes", withConfigTrust(`"type":"embedded_config"`), "must not be empty"},
+		{"empty embedded config bytes", withConfigTrust(`"type":"embedded_config","bytes":""`), "must not be empty"},
+		{"config reference with digest only", withConfigTrust(`"type":"embedded_config_reference","digest":"` + strings.Repeat("ab", 32) + `"`), "runtime"},
+		{"config reference without digest", withConfigTrust(`"type":"embedded_config_reference","runtime":{"repo":"tinfoilsh/cvmimage","tag":"v0.15.0","digest":"` + strings.Repeat("ab", 32) + `"}`), "config digest"},
+		{"empty embedded runtime", withArtifacts(`"type":"embedded","runtime":""`), "must not be empty"},
+		{"unpadded base64", withArtifacts(`"type":"embedded","runtime":"` + strings.TrimRight(b64(testRuntime+"x"), "=") + `"`), "artifacts.runtime"},
+		{"malformed config", withConfigTrust(`"type":"embedded_config","bytes":"` + b64("not: a config") + `"`), "cvm-version"},
+		{"runtime the config does not pin", `{"config_trust":{"type":"embedded_config","bytes":"` + b64(testConfig) + `"},"policy":{"artifacts":{"type":"embedded","runtime":"` + b64(strings.Replace(testRuntime, "v0.15.0", "v0.15.1", 1)) + `"}}}`, "does not match"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := NewVerifier(tc.options)
+			requireUsageError(t, err, tc.contains)
+		})
+	}
+}
+
+// The parser rejects anything that is not exactly one of the documented
+// shapes, before the verifier sees it.
+func TestNewVerifierRejectsMalformedOptions(t *testing.T) {
+	for _, tc := range []struct {
+		name, options, contains string
+	}{
+		{"malformed JSON", `{"config_trust":`, "parsing verification options"},
+		{"not an object", `[]`, "parsing verification options"},
+		{"null", `null`, "must be a JSON object"},
+		{"unknown member", `{"enclave":"x"}`, "parsing verification options"},
+		{"former flat member", `{"config_registry_ids":["x"]}`, "parsing verification options"},
+		{"duplicate member", `{"policy":{},"policy":{}}`, "duplicate object member"},
+		{"unknown policy member", `{"policy":{"embedded_runtime":"eA=="}}`, "parsing verification options"},
+		{"policy not an object", `{"policy":"x"}`, "parsing verification options"},
+		{"config trust not an object", `{"config_trust":["registries"]}`, "parsing config_trust"},
+		{"config trust without a type", withConfigTrust(`"ids":["x"]`), "config_trust requires a type"},
+		{"config trust type not a string", withConfigTrust(`"type":1`), "parsing config_trust"},
+		{"unknown config trust type", withConfigTrust(`"type":"authorizer"`), `unknown type "authorizer"`},
+		{"duplicate type", withConfigTrust(`"type":"registries","type":"signing_keys"`), "duplicate object member"},
+		{"duplicate member in a tagged object", withConfigTrust(`"type":"registries","ids":[],"ids":[]`), "duplicate object member"},
+		{"member of another config trust type", withConfigTrust(`"type":"registries","ids":[` + quoted(PublicRegistryID) + `],"keys_pem":[]`), `config_trust of type "registries"`},
+		{"bytes on a config reference", withConfigTrust(`"type":"embedded_config_reference","bytes":"eA=="`), `config_trust of type "embedded_config_reference"`},
+		{"unknown runtime reference member", withConfigTrust(`"type":"embedded_config_reference","runtime":{"extra":1}`), `config_trust of type "embedded_config_reference"`},
+		{"artifacts not an object", `{"policy":{"artifacts":"embedded"}}`, "parsing artifacts"},
+		{"artifacts without a type", withArtifacts(`"freshness_keys_pem":[]`), "artifacts requires a type"},
+		{"unknown artifacts type", withArtifacts(`"type":"pinned"`), `unknown type "pinned"`},
+		{"member of another artifacts type", withArtifacts(`"type":"endorsed","runtime":"eA=="`), `artifacts of type "endorsed"`},
+		{"config trust in the policy", `{"policy":{"config_trust":{"type":"registries"}}}`, "parsing verification options"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			_, err := NewVerifier(tc.options)
