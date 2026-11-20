@@ -27,6 +27,7 @@ import (
 	"github.com/tinfoilsh/tinfoil-go/internal/cachesecret"
 	"github.com/tinfoilsh/tinfoil-go/internal/enclave"
 	"github.com/tinfoilsh/tinfoil-go/internal/errs"
+	"github.com/tinfoilsh/tinfoil-go/internal/fetch"
 	"github.com/tinfoilsh/tinfoil-go/internal/transport"
 	"github.com/tinfoilsh/tinfoil-go/verify"
 )
@@ -148,6 +149,10 @@ func NewTransport(c Config) (*Transport, error) {
 	if err != nil {
 		return nil, errs.Configuration(err)
 	}
+	// The gateway relays attestation from its own origin.
+	relay := func(ctx context.Context, host string, nonce []byte) ([]byte, error) {
+		return fetch.Relayed(ctx, "https://"+c.Relay, host, nonce)
+	}
 	catalog := func(context.Context) (Catalog, error) { return c.Catalog(), nil }
 	if c.Catalog == nil {
 		catalog = (&catalogCache{fetch: func(ctx context.Context) (Catalog, error) { return FetchCatalog(ctx, c.Relay) }}).get
@@ -158,7 +163,7 @@ func NewTransport(c Config) (*Transport, error) {
 		secret:  cachesecret.Resolve(c.UserCacheSecret),
 		build: func(r replica) (*verifiedReplicaTransport, error) {
 			// Tinfoil owns model names in both namespaces.
-			e, err := enclave.New(enclave.Config{Host: r.host, Relay: c.Relay, Pin: verify.Pin{Repo: r.ref, Project: r.ref}, Verifier: policy.verifierFor(r), VerificationCheck: c.VerificationCheck})
+			e, err := enclave.New(enclave.Config{Host: r.host, FetchAttestation: relay, Pin: verify.Pin{Repo: r.ref, Project: r.ref}, Verifier: policy.verifierFor(r), VerificationCheck: c.VerificationCheck})
 			if err != nil {
 				return nil, err
 			}

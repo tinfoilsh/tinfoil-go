@@ -1,7 +1,6 @@
 package tinfoil
 
 import (
-	"errors"
 	"fmt"
 	"net/netip"
 	"net/url"
@@ -92,24 +91,30 @@ func keyedTransport(t Transport, e *enclave.Enclave) *transport.Transport {
 }
 
 // validateProxyURL requires an absolute URL that keeps request headers private
-// on the way to the proxy: HTTPS, or HTTP to a loopback host, whose traffic
-// never leaves the machine. It refuses user information (through
-// transport.OriginOf) and a query or a fragment (through
-// refuseQueryOrFragment).
+// on the way to the proxy, as validateServiceURL describes.
 func validateProxyURL(proxyURL string) error {
-	origin, err := transport.OriginOf(proxyURL)
+	return validateServiceURL("proxy URL", proxyURL)
+}
+
+// validateServiceURL requires an absolute URL, which name describes, that
+// keeps request headers private on the way to the service: HTTPS, or HTTP to a
+// loopback host, whose traffic never leaves the machine. It refuses user
+// information (through transport.OriginOf) and a query or a fragment (through
+// refuseQueryOrFragment).
+func validateServiceURL(name, rawURL string) error {
+	origin, err := transport.OriginOf(rawURL)
 	if err != nil {
-		return errs.Configuration(fmt.Errorf("invalid proxy URL: %w", err))
+		return errs.Configuration(fmt.Errorf("invalid %s: %w", name, err))
 	}
-	if err := refuseQueryOrFragment("proxy URL", proxyURL); err != nil {
+	if err := refuseQueryOrFragment(name, rawURL); err != nil {
 		return err
 	}
 	if strings.HasPrefix(origin, "https://") {
 		return nil
 	}
-	u, _ := url.Parse(proxyURL) // OriginOf parsed it
+	u, _ := url.Parse(rawURL) // OriginOf parsed it
 	if !isLoopback(u.Hostname()) {
-		return errs.Configuration(errors.New("invalid proxy URL: HTTP is allowed only for localhost or a loopback IP address; use HTTPS to protect request headers"))
+		return errs.Configuration(fmt.Errorf("invalid %s: HTTP is allowed only for localhost or a loopback IP address; use HTTPS to protect request headers", name))
 	}
 	return nil
 }

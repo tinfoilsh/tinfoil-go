@@ -28,7 +28,7 @@ func TestLiveVerifyRegisterPins(t *testing.T) {
 	host, repo := os.Getenv(enclaveEnvVar), os.Getenv(repoEnvVar)
 	nonce, err := document.RandomNonce()
 	require.NoError(t, err)
-	raw, err := fetch.Document(t.Context(), host, "", nonce)
+	raw, err := fetch.Document(t.Context(), host, nonce)
 	require.NoError(t, err)
 	verified, err := verifyDocument(raw, nonce, repo, verify.Policy{})
 	require.NoError(t, err)

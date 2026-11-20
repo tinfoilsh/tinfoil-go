@@ -67,6 +67,27 @@ func main() {
   A `ProjectPin` with nil `RegistryIDs` trusts Tinfoil's public registry; a non-empty list trusts exactly the registries that it names, and an empty but non-nil list is an `ErrConfiguration` error.
 - All OpenAI methods and types are unchanged; see the [OpenAI Go client documentation](https://pkg.go.dev/github.com/openai/openai-go/v3).
 
+## Reaching Only Your Own Origin
+
+By default, a client fetches attestation documents directly from enclaves, and the router client fetches its candidate routers from `https://atc.tinfoil.sh/routers`. To have a client reach only your own origin, for example under a strict content security policy in a browser, or so that enclaves never see your users' IP addresses, serve three endpoints under one URL and point the client at them:
+
+```go
+const origin = "https://app.example/tinfoil"
+client, err := tinfoil.NewRouterHTTPClient(ctx, &tinfoil.RouterOptions{
+    Transport:        tinfoil.EHBP{ProxyURL: origin},
+    FetchAttestation: tinfoil.AttestationRelay{URL: origin},
+    FetchRouterList:  tinfoil.RouterListRelay{URL: origin},
+})
+```
+
+| The client sends | Your server forwards it to |
+|---|---|
+| `GET {URL}/.well-known/tinfoil-attestation?nonce={hex}&enclave={host}` | `GET https://{host}/.well-known/tinfoil-attestation?nonce={hex}`, returning the body unchanged |
+| `GET {URL}/routers` | `GET https://atc.tinfoil.sh/routers`, returning the body unchanged |
+| Any other request under `{URL}`, such as `{URL}/v1/chat/completions` | The enclave that its `X-Tinfoil-Enclave-Url` header names, at the path that follows `{URL}` |
+
+Each option also works alone, and `EnclaveOptions` takes `FetchAttestation` too. For anything else, such as your own transport, pass an `AttestationFetcherFunc` or a `RouterListFetcherFunc`. The client verifies every document as it verifies one that it fetched itself, so the relays can make verification fail but can't make an enclave pass. Two things remain trusted: the router list, because an attestation document doesn't name the host that serves it, so with EHBP a host that the list names receives the request headers, including the API key, although not the bodies; and your server, which sees those headers anyway. Forward attestation requests only to enclave hosts that you expect, so that the relay isn't an open proxy.
+
 ## Development
 
 Run `go test -race ./...` for local tests. Live tests require explicit opt-in: set `TINFOIL_API_KEY`, `TINFOIL_ENCLAVE`, and `TINFOIL_REPO`, then run:

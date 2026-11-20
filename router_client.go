@@ -38,6 +38,19 @@ type RouterOptions struct {
 	// processes or machines pass it here.
 	// Use an opaque random value, not a raw user ID or API key.
 	UserCacheSecret string
+	// FetchAttestation, when set, obtains the attestation documents of the
+	// routers that discovery tries, of the fallback and of the chosen router
+	// whenever it is verified again, for example through an AttestationRelay
+	// on the application's own origin; nil fetches them directly from each
+	// router. Every document is verified as a fetched one is.
+	FetchAttestation AttestationFetcher
+	// FetchRouterList, when set, obtains the list of candidate routers, for
+	// example through a RouterListRelay on the application's own origin; nil
+	// fetches Tinfoil's list. Discovery runs on the list as on Tinfoil's: it
+	// verifies each router that it tries and falls back to
+	// inference.tinfoil.sh. See RouterListFetcher for what the list source is
+	// trusted with.
+	FetchRouterList RouterListFetcher
 }
 
 // RouterHTTPClient is an *http.Client whose requests reach only the attested
@@ -47,11 +60,12 @@ type RouterHTTPClient struct {
 	attestedClient
 }
 
-// NewRouterHTTPClient returns a client for the first router from Tinfoil's
-// router list that passes verification, and otherwise for
-// inference.tinfoil.sh, verified before it returns. It checks opts before any
-// network I/O, tries routers for at most 30 seconds before falling back, and
-// discovers again each time it is called. The client verifies its router
+// NewRouterHTTPClient returns a client for the first router that passes
+// verification from Tinfoil's router list, or from the list that
+// opts.FetchRouterList obtains, and otherwise for inference.tinfoil.sh,
+// verified before it returns. It checks opts before any network I/O, tries
+// routers for at most 30 seconds before falling back, and discovers again
+// each time it is called. The client verifies its router
 // again by itself when the verification expires or is rejected.
 func NewRouterHTTPClient(ctx context.Context, opts *RouterOptions) (*RouterHTTPClient, error) {
 	if opts == nil {
@@ -61,12 +75,26 @@ func NewRouterHTTPClient(ctx context.Context, opts *RouterOptions) (*RouterHTTPC
 	if err != nil {
 		return nil, err
 	}
+	fetchAttestation, err := attestationFetchFunc(opts.FetchAttestation)
+	if err != nil {
+		return nil, err
+	}
+	listRouters, err := routerListFunc(opts.FetchRouterList)
+	if err != nil {
+		return nil, err
+	}
 	verifier, err := enclave.NewVerifier(nil, opts.Policy)
 	if err != nil {
 		return nil, err
 	}
-	keyed, err := router.Discover(ctx, verifier, opts.VerificationCheck, func(e *enclave.Enclave) *transport.Transport {
-		return keyedTransport(tr, e)
+	keyed, err := router.Discover(ctx, router.Options{
+		Verifier: verifier,
+		Check:    opts.VerificationCheck,
+		NewTransport: func(e *enclave.Enclave) *transport.Transport {
+			return keyedTransport(tr, e)
+		},
+		List:             listRouters,
+		FetchAttestation: fetchAttestation,
 	})
 	if err != nil {
 		return nil, err

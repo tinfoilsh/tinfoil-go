@@ -87,7 +87,7 @@ func TestLivePinsForTheOtherPlatformReject(t *testing.T) {
 	repo := os.Getenv(repoEnvVar)
 	nonce, err := document.RandomNonce()
 	require.NoError(t, err)
-	raw, err := fetch.Document(t.Context(), os.Getenv(enclaveEnvVar), "", nonce)
+	raw, err := fetch.Document(t.Context(), os.Getenv(enclaveEnvVar), nonce)
 	require.NoError(t, err)
 	verifier, err := NewVerifier(nil, Policy{})
 	require.NoError(t, err)

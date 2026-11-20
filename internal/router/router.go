@@ -32,15 +32,20 @@ const (
 	// falls back.
 	discoveryTimeout = 30 * time.Second
 	maxRouterBytes   = 32 << 20
+	relayListPath    = "routers"
 )
 
-// fetchRouters is bounded the same way attestation fetching is: discovery runs
-// before anything is verified, so an unresponsive or oversized reply must not
-// stall client construction or exhaust memory.
-func fetchRouters(ctx context.Context) ([]string, error) {
+// ListFunc obtains the untrusted list of candidate routers.
+type ListFunc func(ctx context.Context) ([]string, error)
+
+// FetchList fetches the router list from listURL, as from Tinfoil's list.
+// It is bounded the same way attestation fetching is: discovery runs before
+// anything is verified, so an unresponsive or oversized reply must not stall
+// client construction or exhaust memory.
+func FetchList(ctx context.Context, listURL string) ([]string, error) {
 	ctx, cancel := context.WithTimeout(ctx, routerFetchTimeout)
 	defer cancel()
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, defaultRouterURL, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, listURL, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -54,14 +59,14 @@ func fetchRouters(ctx context.Context) ([]string, error) {
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode > 299 {
-		return nil, fmt.Errorf("fetching routers from %s: %d %s", defaultRouterURL, resp.StatusCode, resp.Status)
+		return nil, fmt.Errorf("fetching routers from %s: %d %s", listURL, resp.StatusCode, resp.Status)
 	}
 	body, err := io.ReadAll(io.LimitReader(resp.Body, maxRouterBytes+1))
 	if err != nil {
 		return nil, err
 	}
 	if len(body) > maxRouterBytes {
-		return nil, fmt.Errorf("router list from %s exceeds %d bytes", defaultRouterURL, maxRouterBytes)
+		return nil, fmt.Errorf("router list from %s exceeds %d bytes", listURL, maxRouterBytes)
 	}
 
 	var routers []string
@@ -72,14 +77,51 @@ func fetchRouters(ctx context.Context) ([]string, error) {
 	return routers, nil
 }
 
-// Discover returns the transport newTransport makes for the first router from
-// Tinfoil's router list that verifies under v and passes check, and otherwise
-// for inference.tinfoil.sh, which it leaves to be verified on first use. v
-// must use default config trust, which the router's pin requires; nil v
-// selects the default policy, and nil check accepts every router. It stops
-// trying routers after discoveryTimeout, or sooner when ctx ends.
-func Discover(ctx context.Context, v *verify.Verifier, check func(v *verify.Verification) error, newTransport func(*enclave.Enclave) *transport.Transport) (*transport.Transport, error) {
-	fallback, err := enclave.New(enclave.Config{Host: "inference.tinfoil.sh", Pin: defaultRouterPin, Verifier: v, VerificationCheck: check})
+// RelayListURL returns where the router list is fetched through the relay at
+// relayURL: "routers" joined under its path, whether or not that ends with
+// "/", with the query parameters that Tinfoil's list takes, of which this
+// client sends none.
+func RelayListURL(relayURL string) (string, error) {
+	u, err := fetch.ParseBaseURL(relayURL)
+	if err != nil {
+		return "", err
+	}
+	return u.JoinPath(relayListPath).String(), nil
+}
+
+// fetchRouters fetches Tinfoil's router list.
+func fetchRouters(ctx context.Context) ([]string, error) {
+	return FetchList(ctx, defaultRouterURL)
+}
+
+// Options are the inputs of Discover.
+type Options struct {
+	// Verifier is the policy, which must use default config trust, as the
+	// router's pin requires; nil selects the default policy.
+	Verifier *verify.Verifier
+	// Check, when set, can reject each router's verification.
+	Check func(v *verify.Verification) error
+	// NewTransport makes the transport that verifies a router.
+	NewTransport func(*enclave.Enclave) *transport.Transport
+	// List, when set, replaces fetching Tinfoil's router list.
+	List ListFunc
+	// FetchAttestation, when set, replaces fetching each router's attestation
+	// document from the router, for candidates and the fallback alike.
+	FetchAttestation fetch.Func
+}
+
+// Discover returns the transport o.NewTransport makes for the first router
+// from the router list that verifies under o.Verifier and passes o.Check, and
+// otherwise for inference.tinfoil.sh, which it leaves to be verified on first
+// use. A list that can't be obtained counts as empty. It stops trying routers
+// after discoveryTimeout, or sooner when ctx ends.
+func Discover(ctx context.Context, o Options) (*transport.Transport, error) {
+	list := o.List
+	if list == nil {
+		list = fetchRouters
+	}
+	newTransport := o.NewTransport
+	fallback, err := enclave.New(enclave.Config{Host: "inference.tinfoil.sh", Pin: defaultRouterPin, Verifier: o.Verifier, VerificationCheck: o.Check, FetchAttestation: o.FetchAttestation})
 	if err != nil {
 		return nil, err
 	}
@@ -88,14 +130,14 @@ func Discover(ctx context.Context, v *verify.Verifier, check func(v *verify.Veri
 	probing, cancel := context.WithTimeout(ctx, discoveryTimeout)
 	defer cancel()
 	deadline, _ := probing.Deadline()
-	routers, _ := fetchRouters(probing)
+	routers := listRouters(probing, list)
 	for _, router := range routers {
 		// The deadline can pass before probing's timer cancels it, as when a
 		// probe's own timeout ends at the same instant.
 		if !time.Now().Before(deadline) {
 			break
 		}
-		e, err := enclave.New(enclave.Config{Host: router, Pin: fallback.Pin(), Verifier: fallback.Verifier(), VerificationCheck: check})
+		e, err := enclave.New(enclave.Config{Host: router, Pin: fallback.Pin(), Verifier: fallback.Verifier(), VerificationCheck: o.Check, FetchAttestation: o.FetchAttestation})
 		if err != nil {
 			return nil, err
 		}
@@ -110,4 +152,17 @@ func Discover(ctx context.Context, v *verify.Verifier, check func(v *verify.Veri
 		return nil, err
 	}
 	return newTransport(fallback), nil
+}
+
+// listRouters calls list with a context that ends after routerFetchTimeout,
+// as a fetch of Tinfoil's list does. A list that comes with an error counts
+// as empty.
+func listRouters(ctx context.Context, list ListFunc) []string {
+	ctx, cancel := context.WithTimeout(ctx, routerFetchTimeout)
+	defer cancel()
+	routers, err := list(ctx)
+	if err != nil {
+		return nil
+	}
+	return routers
 }

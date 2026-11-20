@@ -28,6 +28,11 @@ type EnclaveOptions struct {
 	// Requests wait while it runs, so keep it fast; it may be called
 	// concurrently.
 	VerificationCheck func(v *verify.Verification) error
+	// FetchAttestation, when set, obtains the enclave's attestation documents,
+	// for example through an AttestationRelay on the application's own
+	// origin; nil fetches them directly from the enclave. Every document is
+	// verified as a fetched one is.
+	FetchAttestation AttestationFetcher
 }
 
 // EnclaveHTTPClient is an *http.Client whose requests reach only one attested
@@ -79,11 +84,15 @@ func unverifiedEnclaveHTTPClient(host string, trust Trust, opts *EnclaveOptions)
 	if err := refuseEnclaveOriginProxy(proxyURLOf(tr), host); err != nil {
 		return nil, err
 	}
+	fetchAttestation, err := attestationFetchFunc(opts.FetchAttestation)
+	if err != nil {
+		return nil, err
+	}
 	verifier, err := enclave.NewVerifier(config, opts.Policy)
 	if err != nil {
 		return nil, err
 	}
-	e, err := enclave.New(enclave.Config{Host: host, Pin: pin, Verifier: verifier, VerificationCheck: opts.VerificationCheck})
+	e, err := enclave.New(enclave.Config{Host: host, Pin: pin, Verifier: verifier, VerificationCheck: opts.VerificationCheck, FetchAttestation: fetchAttestation})
 	if err != nil {
 		return nil, err
 	}

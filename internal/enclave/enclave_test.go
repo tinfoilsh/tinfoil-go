@@ -1,6 +1,7 @@
 package enclave
 
 import (
+	"context"
 	"os"
 	"testing"
 	"time"
@@ -26,10 +27,9 @@ func TestNewChecksConfig(t *testing.T) {
 
 	v, err := verify.NewVerifier(nil, verify.Policy{FreshnessMaxAge: time.Hour})
 	require.NoError(t, err)
-	s, err := New(Config{Host: "enclave.example", Relay: "relay.example", Pin: verify.Pin{Repo: "org/repo"}, Verifier: v})
+	s, err := New(Config{Host: "enclave.example", Pin: verify.Pin{Repo: "org/repo"}, Verifier: v})
 	require.NoError(t, err)
 	require.Same(t, v, s.verifier, "enclaves share the caller's verifier")
-	require.Equal(t, "relay.example", s.relay)
 }
 
 func TestConfigRegistryIDRequiresRegistryEvidence(t *testing.T) {
@@ -43,7 +43,7 @@ func TestConfigRegistryIDRequiresRegistryEvidence(t *testing.T) {
 	require.NoError(t, err)
 	for _, config := range []Config{
 		{Host: "enclave.example", Verifier: verifier},
-		{Host: "other.example", Relay: "relay.example", Verifier: verifier},
+		{Host: "other.example", FetchAttestation: func(context.Context, string, []byte) ([]byte, error) { return raw, nil }, Verifier: verifier},
 	} {
 		enclave, err := New(config)
 		require.NoError(t, err)

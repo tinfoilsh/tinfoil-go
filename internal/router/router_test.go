@@ -40,7 +40,7 @@ func TestDefaultClientProbesOncePerDiscovery(t *testing.T) {
 			}
 			return nil, cause
 		})}
-		s, err := Discover(context.Background(), nil, nil, newTLS)
+		s, err := Discover(context.Background(), Options{NewTransport: newTLS})
 		if err == nil {
 			// Complete initialization if the constructor returned a lazy fallback.
 			_, err = s.Reverify(context.Background())
@@ -54,7 +54,7 @@ func TestDefaultClientProbesOncePerDiscovery(t *testing.T) {
 
 func TestLiveDiscoverRouter(t *testing.T) {
 	testutil.RequireLive(t)
-	client, err := Discover(t.Context(), nil, nil, newTLS)
+	client, err := Discover(t.Context(), Options{NewTransport: newTLS})
 	require.NoError(t, err)
 	assert.NotEmpty(t, client.Enclave().Host())
 	_, err = client.Reverify(t.Context())
@@ -125,11 +125,89 @@ func TestDiscoverBoundsTotalProbeTime(t *testing.T) {
 			return nil, req.Context().Err()
 		})}
 		start := time.Now()
-		h, err := Discover(context.Background(), nil, nil, newTLS)
+		h, err := Discover(context.Background(), Options{NewTransport: newTLS})
 		require.NoError(t, err)
 		require.Equal(t, "inference.tinfoil.sh", h.Enclave().Host(), "discovery falls back")
 		require.Equal(t, discoveryTimeout, time.Since(start), "one budget for every probe, not one per router")
 		synctest.Wait()
 		require.Equal(t, map[string]int{"router0.example": 1}, probes, "no router is probed after the budget runs out")
 	})
+}
+
+func TestRelayListURL(t *testing.T) {
+	for relay, want := range map[string]string{
+		"https://app.example":           "https://app.example/routers",
+		"https://app.example/":          "https://app.example/routers",
+		"https://app.example/tinfoil":   "https://app.example/tinfoil/routers",
+		"https://app.example/tinfoil/":  "https://app.example/tinfoil/routers",
+		"http://127.0.0.1:8080/tinfoil": "http://127.0.0.1:8080/tinfoil/routers",
+	} {
+		got, err := RelayListURL(relay)
+		require.NoError(t, err, relay)
+		require.Equal(t, want, got, relay)
+	}
+	for _, bad := range []string{"", "/tinfoil", "https://app.example/?", "https://app.example#x", "https://u:p@app.example"} {
+		_, err := RelayListURL(bad)
+		require.Error(t, err, bad)
+	}
+}
+
+// A caller's list goes through discovery as Tinfoil's does: each router is
+// tried once, under the same attestation fetcher as the fallback, and a list
+// that can't be obtained counts as empty.
+func TestDiscoverUsesTheCallersListAndFetcher(t *testing.T) {
+	original := http.DefaultClient
+	t.Cleanup(func() { http.DefaultClient = original })
+	http.DefaultClient = &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		t.Errorf("nothing is fetched directly, but %s was", req.URL)
+		return nil, errors.New("no network in this test")
+	})}
+	for name, tc := range map[string]struct {
+		list ListFunc
+		want []string
+	}{
+		"list":       {func(context.Context) ([]string, error) { return []string{"a.example", "b.example"}, nil }, []string{"a.example", "b.example", "inference.tinfoil.sh"}},
+		"empty list": {func(context.Context) ([]string, error) { return nil, nil }, []string{"inference.tinfoil.sh"}},
+		"list error": {func(context.Context) ([]string, error) { return []string{"a.example"}, errors.New("unavailable") }, []string{"inference.tinfoil.sh"}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				var hosts []string
+				fetchDocument := func(_ context.Context, host string, _ []byte) ([]byte, error) {
+					hosts = append(hosts, host)
+					return nil, errors.New("unreachable")
+				}
+				s, err := Discover(context.Background(), Options{NewTransport: newTLS, List: tc.list, FetchAttestation: fetchDocument})
+				require.NoError(t, err)
+				require.Equal(t, "inference.tinfoil.sh", s.Enclave().Host())
+				_, err = s.Reverify(context.Background())
+				require.Error(t, err)
+				require.Equal(t, tc.want, hosts[:len(hosts)-1], "every router is tried once, then the fallback")
+				require.Equal(t, "inference.tinfoil.sh", hosts[len(hosts)-1], "the fallback is verified with a retry")
+			})
+		})
+	}
+}
+
+func TestFetchListAppliesTheListRules(t *testing.T) {
+	original := http.DefaultClient
+	t.Cleanup(func() { http.DefaultClient = original })
+	for body, ok := range map[string]bool{
+		`["a.example","b.example"]`: true,
+		`{"routers":["a.example"]}`: false,
+		`[1]`:                       false,
+		"[\"" + strings.Repeat("a", maxRouterBytes) + "\"]": false,
+	} {
+		http.DefaultClient = &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			require.Equal(t, "https://app.example/tinfoil/routers", req.URL.String())
+			return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(body))}, nil
+		})}
+		routers, err := FetchList(t.Context(), "https://app.example/tinfoil/routers")
+		if ok {
+			require.NoError(t, err)
+			require.Equal(t, []string{"a.example", "b.example"}, routers)
+		} else {
+			require.Error(t, err, "%.40s", body)
+		}
+	}
 }
