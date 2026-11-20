@@ -39,7 +39,7 @@ type Config struct {
 	// Pin is what the enclave is verified against.
 	Pin verify.Pin
 	// Verifier is the policy, which several enclaves can share; nil selects the
-	// defaults, which accept public registry configs when Pin is empty.
+	// defaults, under which Pin must name a repository or project.
 	Verifier *verify.Verifier
 	// VerificationCheck, when set, is called with each verification that
 	// passes Verifier. An error rejects the verification without a retry.
@@ -58,13 +58,24 @@ type Enclave struct {
 	fetch func() (*verify.Verification, error)
 }
 
+// NewVerifier builds the verifier that config and policy describe, and reports
+// an invalid value as an errs.ErrConfiguration error that wraps verify's
+// UsageError.
+func NewVerifier(config verify.ConfigTrust, policy verify.Policy) (*verify.Verifier, error) {
+	v, err := verify.NewVerifier(config, policy)
+	if err != nil {
+		return nil, fromVerify(err)
+	}
+	return v, nil
+}
+
 // New checks c.Pin against the verifier's rules and does no network I/O.
 func New(c Config) (*Enclave, error) {
 	v := c.Verifier
 	if v == nil {
 		var err error
-		if v, err = verify.NewVerifier(nil, verify.Policy{}); err != nil {
-			return nil, fromVerify(err)
+		if v, err = NewVerifier(nil, verify.Policy{}); err != nil {
+			return nil, err
 		}
 	}
 	if err := v.CheckPinVerifiability(c.Pin); err != nil {

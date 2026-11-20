@@ -27,12 +27,12 @@ type RouterOptions struct {
 	// BaseURL with user information, a query or a fragment, even an empty
 	// one, is an ErrConfiguration error.
 	BaseURL string
-	// Verifier is the verification policy; nil selects the defaults. A
-	// verifier that authorizes the config itself is an ErrConfiguration error,
-	// since it needs an explicit enclave.
-	Verifier *verify.Verifier
+	// Policy is the verification policy that applies on top of the router's
+	// fixed trust; the zero Policy keeps every default. The client copies it,
+	// so later changes by the caller have no effect.
+	Policy verify.Policy
 	// VerificationCheck, when set, is called with each verification that
-	// passes Verifier, before the client uses the router's keys: for each
+	// passes Policy, before the client uses the router's keys: for each
 	// router tried during discovery, and whenever the client verifies again.
 	// Return an error to reject the router. Discovery then moves on to the
 	// next router; otherwise verification fails with an ErrAttestation error that
@@ -50,6 +50,10 @@ type RouterOptions struct {
 	// Use an opaque random value, not a raw user ID or API key.
 	UserCacheSecret string
 }
+
+// routerTrust is the trust that a router is verified under. Tinfoil owns the
+// router's name in both namespaces.
+var routerTrust = EitherPin{Repo: router.Name, Project: router.Name}
 
 // RouterHTTPClient is an *http.Client whose requests reach only the attested
 // router it discovered.
@@ -80,17 +84,18 @@ func NewRouterHTTPClient(ctx context.Context, opts *RouterOptions) (*RouterHTTPC
 			return nil, errs.Configuration(errors.New("a base URL is a proxy when discovering the router, which requires TransportModeEHBP"))
 		}
 	}
-	if opts.Verifier != nil && opts.Verifier.CallerAuthorizesConfig() {
-		return nil, errs.Configuration(errors.New("caller-authorized config requires an explicit enclave"))
+	verifier, err := enclave.NewVerifier(nil, opts.Policy)
+	if err != nil {
+		return nil, err
 	}
-	keyed, err := router.Discover(ctx, opts.Verifier, opts.VerificationCheck, func(e *enclave.Enclave) *transport.Transport {
+	keyed, err := router.Discover(ctx, verifier, opts.VerificationCheck, func(e *enclave.Enclave) *transport.Transport {
 		return keyedTransport(mode, e)
 	})
 	if err != nil {
 		return nil, err
 	}
 	secret := cachesecret.Resolve(opts.UserCacheSecret)
-	a, err := newAttestedClient(keyed, mode, opts.BaseURL, secret)
+	a, err := newAttestedClient(keyed, routerTrust, mode, opts.BaseURL, secret)
 	if err != nil {
 		return nil, err
 	}

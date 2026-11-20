@@ -56,7 +56,7 @@ func TestErrorContract(t *testing.T) {
 }
 
 func TestPublicInputErrors(t *testing.T) {
-	_, err := tinfoil.NewEnclaveHTTPClient(t.Context(), "enclave.example", tinfoil.Pin{Repo: "org/repo"}, &tinfoil.EnclaveOptions{TransportMode: "invalid"})
+	_, err := tinfoil.NewEnclaveHTTPClient(t.Context(), "enclave.example", tinfoil.RepoPin{Repo: "org/repo"}, &tinfoil.EnclaveOptions{TransportMode: "invalid"})
 	require.ErrorIs(t, err, tinfoil.ErrConfiguration)
 	var usage *verify.UsageError
 	verifier, err := verify.NewVerifier(nil, verify.Policy{})
@@ -65,15 +65,15 @@ func TestPublicInputErrors(t *testing.T) {
 	require.ErrorAs(t, err, &usage)
 	_, err = verifier.VerifyV3(nil, nil, verify.Pin{Repo: "org/repo"})
 	require.ErrorAs(t, err, &usage)
-	_, err = tinfoil.NewEnclaveHTTPClient(t.Context(), "", tinfoil.Pin{}, nil)
+	_, err = tinfoil.NewEnclaveHTTPClient(t.Context(), "", tinfoil.RepoPin{Repo: "org/repo"}, nil)
 	require.ErrorIs(t, err, tinfoil.ErrConfiguration, "reject a missing enclave before fetching")
 	for _, repo := range []string{"owner", "owner/repo/extra", "owner/repo@sha256:bad"} {
-		_, err = tinfoil.NewEnclaveHTTPClient(t.Context(), "enclave.example", tinfoil.Pin{Repo: repo}, nil)
+		_, err = tinfoil.NewEnclaveHTTPClient(t.Context(), "enclave.example", tinfoil.RepoPin{Repo: repo}, nil)
 		require.ErrorIs(t, err, tinfoil.ErrConfiguration)
 		_, err = verifier.VerifyV3(nil, nil, verify.Pin{Repo: repo})
 		require.ErrorAs(t, err, &usage)
 	}
-	_, err = enclave.New(enclave.Config{Host: "enclave.example", Pin: tinfoil.Pin{Repo: "org/repo@v1@sha256:" + strings.Repeat("a", 64)}})
+	_, err = enclave.New(enclave.Config{Host: "enclave.example", Pin: verify.Pin{Repo: "org/repo@v1@sha256:" + strings.Repeat("a", 64)}})
 	require.NoError(t, err)
 	_, err = fetch.Document(t.Context(), "", "", make([]byte, document.NonceSize))
 	require.ErrorIs(t, err, tinfoil.ErrConfiguration)

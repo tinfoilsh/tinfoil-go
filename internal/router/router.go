@@ -16,11 +16,13 @@ import (
 	"github.com/tinfoilsh/tinfoil-go/verify"
 )
 
+// Name is the router's GitHub repository and config registry project.
+const Name = "tinfoilsh/confidential-model-router"
+
 var (
 	// Tinfoil owns the router's name in both namespaces.
-	defaultRouterName = "tinfoilsh/confidential-model-router"
-	defaultRouterPin  = verify.Pin{Repo: defaultRouterName, Project: defaultRouterName}
-	defaultRouterURL  = "https://atc.tinfoil.sh/routers"
+	defaultRouterPin = verify.Pin{Repo: Name, Project: Name}
+	defaultRouterURL = "https://atc.tinfoil.sh/routers"
 )
 
 const (
@@ -72,7 +74,8 @@ func fetchRouters(ctx context.Context) ([]string, error) {
 
 // Discover returns the transport newTransport makes for the first router from
 // Tinfoil's router list that verifies under v and passes check, and otherwise
-// for inference.tinfoil.sh, which it leaves to be verified on first use. nil v
+// for inference.tinfoil.sh, which it leaves to be verified on first use. v
+// must use default config trust, which the router's pin requires; nil v
 // selects the default policy, and nil check accepts every router. It stops
 // trying routers after discoveryTimeout, or sooner when ctx ends.
 func Discover(ctx context.Context, v *verify.Verifier, check func(v *verify.Verification) error, newTransport func(*enclave.Enclave) *transport.Transport) (*transport.Transport, error) {

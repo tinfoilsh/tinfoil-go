@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
+	"github.com/tinfoilsh/tinfoil-go/verify"
 )
 
 func TestNewRouterHTTPClientWritesNoCacheSecretFile(t *testing.T) {
@@ -40,7 +41,7 @@ func TestNewRouterHTTPClientRejectsInvalidOptionsBeforeDiscovery(t *testing.T) {
 		{TransportMode: TransportModeEHBP, BaseURL: "http://proxy.example/v1/"},
 		{BaseURL: "https://proxy.example/v1/"},
 		{TransportMode: TransportModeTLS, BaseURL: "https://proxy.example/v1/"},
-		{Verifier: callerAuthorizedVerifier(t)},
+		{Policy: verify.Policy{FreshnessMaxAge: -1}},
 	} {
 		c, err := NewRouterHTTPClient(ctx, opts)
 		require.Nil(t, c)
