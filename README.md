@@ -83,7 +83,7 @@ client, err := tinfoil.NewRouterHTTPClient(ctx, &tinfoil.RouterOptions{
 | The client sends | Your server forwards it to |
 |---|---|
 | `GET {URL}/.well-known/tinfoil-attestation?nonce={hex}&enclave={host}` | `GET https://{host}/.well-known/tinfoil-attestation?nonce={hex}`, returning the body unchanged |
-| `GET {URL}/routers` | `GET https://atc.tinfoil.sh/routers` with the same query, returning the body unchanged |
+| `GET {URL}/routers` | `GET https://atc.tinfoil.sh/routers`, returning the body unchanged |
 | Any other request under `{URL}`, such as `{URL}/v1/chat/completions` | The enclave that its `X-Tinfoil-Enclave-Url` header names, at the path that follows `{URL}` |
 
 Each option also works alone, and `EnclaveOptions` takes `FetchAttestation` too. For anything else, such as your own transport, pass an `AttestationFetcherFunc` or a `RouterListFetcherFunc`. The client verifies every document as it verifies one that it fetched itself, so the relays can make verification fail but can't make an enclave pass. Two things remain trusted: the router list, because an attestation document doesn't name the host that serves it, so with EHBP a host that the list names receives the request headers, including the API key, although not the bodies; and your server, which sees those headers anyway. Forward attestation requests only to enclave hosts that you expect, so that the relay isn't an open proxy.
