@@ -9,7 +9,7 @@ import (
 )
 
 // EnclaveOpenAIClient is an OpenAI client whose requests go through an
-// EnclaveHTTPClient, to EnclaveOptions.BaseURL or, when that is unset, the
+// EnclaveHTTPClient, to the EHBP ProxyURL or, when there is none, the
 // enclave's /v1/ API. A per-request option.WithHTTPClient bypasses the
 // enclave client and its protections.
 type EnclaveOpenAIClient struct {
@@ -38,7 +38,7 @@ func (c *EnclaveOpenAIClient) HTTPClient() *EnclaveHTTPClient {
 }
 
 // RouterOpenAIClient is an OpenAI client whose requests go through a
-// RouterHTTPClient, to RouterOptions.BaseURL or, when that is unset, the
+// RouterHTTPClient, to the EHBP ProxyURL or, when there is none, the
 // router's /v1/ API. A per-request option.WithHTTPClient bypasses the router
 // client and its protections.
 type RouterOpenAIClient struct {

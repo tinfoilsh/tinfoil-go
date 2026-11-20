@@ -4,11 +4,7 @@ import (
 	"cmp"
 	"context"
 	"errors"
-	"fmt"
 	"net/http"
-	"net/netip"
-	"net/url"
-	"strings"
 
 	"github.com/tinfoilsh/tinfoil-go/internal/enclave"
 	"github.com/tinfoilsh/tinfoil-go/internal/errs"
@@ -16,51 +12,10 @@ import (
 	"github.com/tinfoilsh/tinfoil-go/verify"
 )
 
-// TransportMode selects how a client protects its traffic to an enclave. The
-// zero value selects TransportModeTLS, the stronger mode; a proxy BaseURL
-// requires choosing TransportModeEHBP.
-type TransportMode string
-
-const (
-	// TransportModeTLS pins each connection to the attested TLS key. It
-	// protects the whole request and response, and needs a direct connection.
-	// Its connections take only the proxy, dialer and connection-pool
-	// settings of http.DefaultTransport and the roots and verification
-	// callbacks of its TLS config; a custom TLS dialer or TLS key log there
-	// is an ErrConfiguration error.
-	TransportModeTLS TransportMode = "tls"
-	// TransportModeEHBP seals request and response bodies to the attested
-	// HPKE key, so they stay private through a proxy. The method, URL and
-	// headers aren't sealed, and neither is a request without a body or its
-	// response. It refuses protocol upgrades, such as WebSockets, and CONNECT
-	// tunnels, because nothing after the handshake would be sealed.
-	TransportModeEHBP TransportMode = "ehbp"
-)
-
-// resolve returns m, or TransportModeTLS for the zero value.
-func (m TransportMode) resolve() (TransportMode, error) {
-	switch m {
-	case "":
-		return TransportModeTLS, nil
-	case TransportModeTLS, TransportModeEHBP:
-		return m, nil
-	}
-	return "", errs.Configuration(fmt.Errorf("unknown transport mode %q", m))
-}
-
 // EnclaveOptions configures an EnclaveHTTPClient.
 type EnclaveOptions struct {
-	// TransportMode defaults to TransportModeTLS.
-	TransportMode TransportMode
-	// BaseURL is a path on the enclave's own HTTPS origin, or a proxy on
-	// another origin, which requires TransportModeEHBP. Requests to a proxy
-	// carry X-Tinfoil-Enclave-Url so it can forward them to the enclave. A
-	// proxy must use HTTPS, since EHBP doesn't seal headers such as the API
-	// key; http:// is accepted only when its host is localhost or a loopback
-	// IP address, for a local development proxy or a sidecar. Request paths
-	// join under it, so a BaseURL with user information, a query or a
-	// fragment, even an empty one, is an ErrConfiguration error.
-	BaseURL string
+	// Transport is TLS or EHBP, and nil selects TLS{}.
+	Transport Transport
 	// Policy is the verification policy that applies on top of the trust
 	// argument; the zero Policy keeps every default. The client copies it, so
 	// later changes by the caller have no effect.
@@ -120,14 +75,12 @@ func unverifiedEnclaveHTTPClient(host string, trust Trust, opts *EnclaveOptions)
 	if opts == nil {
 		opts = &EnclaveOptions{}
 	}
-	mode, err := opts.TransportMode.resolve()
+	tr, err := resolveTransport(opts.Transport)
 	if err != nil {
 		return nil, err
 	}
-	if opts.BaseURL != "" {
-		if err := validateBaseURL(opts.BaseURL); err != nil {
-			return nil, err
-		}
+	if err := refuseEnclaveOriginProxy(proxyURLOf(tr), host); err != nil {
+		return nil, err
 	}
 	verifier, err := enclave.NewVerifier(config, opts.Policy)
 	if err != nil {
@@ -137,7 +90,7 @@ func unverifiedEnclaveHTTPClient(host string, trust Trust, opts *EnclaveOptions)
 	if err != nil {
 		return nil, err
 	}
-	a, err := newAttestedClient(keyedTransport(mode, e), cloneTrust(trust), mode, opts.BaseURL, opts.UserCacheSecret)
+	a, err := newAttestedClient(keyedTransport(tr, e), cloneTrust(trust), proxyURLOf(tr), opts.UserCacheSecret)
 	if err != nil {
 		return nil, err
 	}
@@ -156,14 +109,11 @@ type attestedClient struct {
 	baseURL, openAIURL string
 }
 
-func newAttestedClient(keyed *transport.Transport, trust Trust, mode TransportMode, baseURL, secret string) (attestedClient, error) {
+// newAttestedClient sends requests to proxyURL, or directly to the enclave
+// when it is empty.
+func newAttestedClient(keyed *transport.Transport, trust Trust, proxyURL, secret string) (attestedClient, error) {
 	host := keyed.Enclave().Host()
-	if mode == TransportModeTLS {
-		if err := validateTLSBaseURL(baseURL, host); err != nil {
-			return attestedClient{}, errs.Configuration(err)
-		}
-	}
-	rt, err := enclaveChain(keyed, host, baseURL, secret)
+	rt, err := enclaveChain(keyed, host, proxyURL, secret)
 	if err != nil {
 		return attestedClient{}, err
 	}
@@ -171,8 +121,8 @@ func newAttestedClient(keyed *transport.Transport, trust Trust, mode TransportMo
 		keyed:     keyed,
 		trust:     trust,
 		secure:    &http.Client{Transport: rt},
-		baseURL:   cmp.Or(baseURL, "https://"+host+"/"),
-		openAIURL: cmp.Or(baseURL, "https://"+host+"/v1/"),
+		baseURL:   cmp.Or(proxyURL, "https://"+host+"/"),
+		openAIURL: cmp.Or(proxyURL, "https://"+host+"/v1/"),
 	}, nil
 }
 
@@ -182,35 +132,26 @@ func (c *attestedClient) embedded() *http.Client {
 	return &http.Client{Transport: c.secure.Transport}
 }
 
-// keyedTransport returns the transport that verifies e and protects mode's
-// traffic with the keys it verifies.
-func keyedTransport(mode TransportMode, e *enclave.Enclave) *transport.Transport {
-	if mode == TransportModeTLS {
-		return transport.TLS(e)
-	}
-	return transport.WithEHBP(nil, e)
-}
-
 // enclaveChain stacks what an enclave client sends through around keyed, from
 // the inside out: the proxy header, one replay after a key rejection, the
 // cache secret, and origin pinning. The cache secret sits above keyed, so the
 // field it adds is sealed with the rest of the body (EHBP) or sent over the
 // pinned connection (TLS).
-func enclaveChain(keyed http.RoundTripper, host, baseURL, secret string) (http.RoundTripper, error) {
-	rt := transport.WithEnclaveURL(keyed, host, baseURL)
+func enclaveChain(keyed http.RoundTripper, host, proxyURL, secret string) (http.RoundTripper, error) {
+	rt := transport.WithEnclaveURL(keyed, host, proxyURL)
 	rt = transport.WithReplay(rt, transport.IsKeyRejection)
 	rt = transport.WithCacheSecret(rt, secret)
-	return transport.WithOriginRestriction(rt, host, baseURL)
+	return transport.WithOriginRestriction(rt, host, proxyURL)
 }
 
-// BaseURL returns the URL requests are sent to: the BaseURL option, or the
-// enclave's own origin.
+// BaseURL returns the URL that requests are sent to: the EHBP ProxyURL, or
+// the enclave's own origin when the client connects directly.
 func (c *attestedClient) BaseURL() string {
 	return c.baseURL
 }
 
-// Enclave returns the host of the enclave the client verifies. It stays the
-// enclave's host when BaseURL is a proxy.
+// Enclave returns the host of the enclave that the client verifies. It stays
+// the enclave's host when requests go through an EHBP ProxyURL.
 func (c *attestedClient) Enclave() string {
 	return c.keyed.Enclave().Host()
 }
@@ -239,71 +180,4 @@ func (c *attestedClient) Reverify(ctx context.Context) (*verify.Verification, er
 // valid.
 func (c *attestedClient) Current() *verify.Verification {
 	return c.keyed.Current()
-}
-
-// validateBaseURL requires an absolute URL that keeps request headers private
-// on the way to the enclave or proxy: HTTPS, or HTTP to a loopback host, whose
-// traffic never leaves the machine. It refuses user information (through
-// transport.OriginOf) and a query or a fragment (through
-// refuseQueryOrFragment).
-func validateBaseURL(baseURL string) error {
-	origin, err := transport.OriginOf(baseURL)
-	if err != nil {
-		return errs.Configuration(fmt.Errorf("invalid base URL: %w", err))
-	}
-	if err := refuseQueryOrFragment(baseURL); err != nil {
-		return err
-	}
-	if strings.HasPrefix(origin, "https://") {
-		return nil
-	}
-	u, _ := url.Parse(baseURL) // OriginOf parsed it
-	if !isLoopback(u.Hostname()) {
-		return errs.Configuration(errors.New("invalid base URL: HTTP is allowed only for localhost or a loopback IP address; use HTTPS to protect request headers"))
-	}
-	return nil
-}
-
-// refuseQueryOrFragment refuses a base URL that carries a query or a
-// fragment, even an empty one: request paths join under a base URL, so either
-// would make request URLs that the caller didn't intend. It checks the text,
-// since url.URL doesn't record an empty fragment; once the URL has parsed, a
-// '?' or '#' in it can only start a query or a fragment.
-func refuseQueryOrFragment(baseURL string) error {
-	if strings.ContainsAny(baseURL, "?#") {
-		return errs.Configuration(errors.New("invalid base URL: a base URL must not carry a query or a fragment"))
-	}
-	return nil
-}
-
-// isLoopback reports whether host, as written, is localhost or a loopback IP
-// address. It doesn't resolve other names, so DNS can't make a remote host
-// pass.
-func isLoopback(host string) bool {
-	if strings.EqualFold(host, "localhost") {
-		return true
-	}
-	addr, err := netip.ParseAddr(host)
-	return err == nil && addr.IsLoopback()
-}
-
-// validateTLSBaseURL requires a TLS base URL to use the enclave's own origin,
-// since a pinned connection can't pass through a proxy.
-func validateTLSBaseURL(baseURL, enclave string) error {
-	if baseURL == "" {
-		return nil
-	}
-
-	baseOrigin, err := transport.OriginOf(baseURL)
-	if err != nil {
-		return fmt.Errorf("invalid base URL: %w", err)
-	}
-	enclaveOrigin, err := transport.OriginOf("https://" + enclave)
-	if err != nil {
-		return err
-	}
-	if baseOrigin != enclaveOrigin {
-		return fmt.Errorf("a base URL off the verified enclave origin %q is a proxy, which requires TransportModeEHBP", enclaveOrigin)
-	}
-	return nil
 }

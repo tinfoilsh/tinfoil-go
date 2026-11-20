@@ -56,7 +56,7 @@ func TestErrorContract(t *testing.T) {
 }
 
 func TestPublicInputErrors(t *testing.T) {
-	_, err := tinfoil.NewEnclaveHTTPClient(t.Context(), "enclave.example", tinfoil.RepoPin{Repo: "org/repo"}, &tinfoil.EnclaveOptions{TransportMode: "invalid"})
+	_, err := tinfoil.NewEnclaveHTTPClient(t.Context(), "enclave.example", tinfoil.RepoPin{Repo: "org/repo"}, &tinfoil.EnclaveOptions{Transport: &tinfoil.TLS{}})
 	require.ErrorIs(t, err, tinfoil.ErrConfiguration)
 	var usage *verify.UsageError
 	verifier, err := verify.NewVerifier(nil, verify.Policy{})
