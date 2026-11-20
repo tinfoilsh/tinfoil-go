@@ -40,10 +40,6 @@ type RouterOptions struct {
 	UserCacheSecret string
 }
 
-// routerTrust is the trust that a router is verified under. Tinfoil owns the
-// router's name in both namespaces.
-var routerTrust = EitherPin{Repo: router.Name, Project: router.Name}
-
 // RouterHTTPClient is an *http.Client whose requests reach only the attested
 // router it discovered.
 type RouterHTTPClient struct {
@@ -76,7 +72,7 @@ func NewRouterHTTPClient(ctx context.Context, opts *RouterOptions) (*RouterHTTPC
 		return nil, err
 	}
 	secret := cachesecret.Resolve(opts.UserCacheSecret)
-	a, err := newAttestedClient(keyed, routerTrust, proxyURLOf(tr), secret)
+	a, err := newAttestedClient(keyed, proxyURLOf(tr), secret)
 	if err != nil {
 		return nil, err
 	}

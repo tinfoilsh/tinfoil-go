@@ -131,6 +131,28 @@ func TestNewEnclaveHTTPClientResolvesNoCacheSecret(t *testing.T) {
 	requireEmptyDir(t, home)
 }
 
+// The enclave client's chain has no cache secret, so it sends a body as it is,
+// including a user_cache_secret that the caller set.
+func TestEnclaveChainWithoutSecretLeavesBodiesAlone(t *testing.T) {
+	var got []string
+	conn := roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		body, err := io.ReadAll(req.Body)
+		require.NoError(t, err)
+		got = append(got, string(body))
+		return &http.Response{StatusCode: http.StatusOK, Body: http.NoBody, Header: make(http.Header)}, nil
+	})
+	rt, err := enclaveChain(conn, "enclave.example", "", "")
+	require.NoError(t, err)
+	for _, body := range []string{`{"model":"m"}`, `{"model":"m","user_cache_secret":"end-user"}`} {
+		req, err := http.NewRequest(http.MethodPost, "https://enclave.example/v1/chat/completions", strings.NewReader(body))
+		require.NoError(t, err)
+		resp, err := rt.RoundTrip(req)
+		require.NoError(t, err)
+		resp.Body.Close()
+	}
+	require.Equal(t, []string{`{"model":"m"}`, `{"model":"m","user_cache_secret":"end-user"}`}, got)
+}
+
 func TestEnclaveHTTPClientReportsItsEnclaveAndTrust(t *testing.T) {
 	repo := "org/repo@v1@sha256:" + strings.Repeat("a", 64)
 	c, err := unverifiedEnclaveHTTPClient("enclave.example:8443", RepoPin{Repo: repo}, &EnclaveOptions{Transport: EHBP{ProxyURL: "https://proxy.example/v1/"}})
@@ -276,7 +298,7 @@ func TestLiveRouterClient(t *testing.T) {
 			require.NoError(t, err)
 			require.Equal(t, verified.FreshnessExpiresAt(), c.Current().FreshnessExpiresAt(), "a valid verification is reused")
 			require.Equal(t, "https://"+c.Enclave()+"/", c.BaseURL(), "Enclave is the router discovery chose")
-			require.Equal(t, EitherPin{Repo: "tinfoilsh/confidential-model-router", Project: "tinfoilsh/confidential-model-router"}, c.Trust())
+			require.Equal(t, "tinfoilsh/confidential-model-router", verified.ConfigRepo(), "the router is verified under Tinfoil's router repository")
 
 			completion, err := oc.Chat.Completions.New(context.Background(), openai.ChatCompletionNewParams{
 				Model:    "llama3-3-70b",
@@ -298,7 +320,7 @@ func TestLiveRouterClient(t *testing.T) {
 
 func TestLiveNewEnclaveHTTPClient(t *testing.T) {
 	testutil.RequireLive(t, "TINFOIL_ENCLAVE", "TINFOIL_REPO")
-	c, err := NewEnclaveHTTPClient(context.Background(), os.Getenv("TINFOIL_ENCLAVE"), RepoPin{Repo: os.Getenv("TINFOIL_REPO")}, &EnclaveOptions{UserCacheSecret: "go-live-integration-cache-secret"})
+	c, err := NewEnclaveHTTPClient(context.Background(), os.Getenv("TINFOIL_ENCLAVE"), RepoPin{Repo: os.Getenv("TINFOIL_REPO")}, nil)
 	require.NoError(t, err)
 	require.NotNil(t, c.Current(), "the client is verified when it's returned")
 	before, err := c.EnsureVerified(context.Background())

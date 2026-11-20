@@ -28,20 +28,17 @@ type EnclaveOptions struct {
 	// Requests wait while it runs, so keep it fast; it may be called
 	// concurrently.
 	VerificationCheck func(v *verify.Verification) error
-	// UserCacheSecret, when set, is the default prompt-cache scope for the
-	// client's requests. Only Tinfoil's router reads it, so set it when the
-	// enclave is a router. A non-empty user_cache_secret string in a
-	// request's JSON body overrides it, so a server can scope the cache to
-	// each end user, for example with option.WithJSONSet("user_cache_secret",
-	// s). Use an opaque random value, not a raw user ID or API key.
-	UserCacheSecret string
 }
 
 // EnclaveHTTPClient is an *http.Client whose requests reach only one attested
-// enclave.
+// enclave. It sends request bodies as they are: it never adds or changes a
+// user_cache_secret member, so a caller that points it at Tinfoil's router and
+// wants a scoped prompt cache sets that member in each request body.
 type EnclaveHTTPClient struct {
 	*http.Client
 	attestedClient
+	// trust is what the enclave is verified under, which no caller shares.
+	trust Trust
 }
 
 // NewEnclaveHTTPClient returns a client for the enclave at host, verified
@@ -90,19 +87,17 @@ func unverifiedEnclaveHTTPClient(host string, trust Trust, opts *EnclaveOptions)
 	if err != nil {
 		return nil, err
 	}
-	a, err := newAttestedClient(keyedTransport(tr, e), cloneTrust(trust), proxyURLOf(tr), opts.UserCacheSecret)
+	a, err := newAttestedClient(keyedTransport(tr, e), proxyURLOf(tr), "")
 	if err != nil {
 		return nil, err
 	}
-	return &EnclaveHTTPClient{Client: a.embedded(), attestedClient: a}, nil
+	return &EnclaveHTTPClient{Client: a.embedded(), attestedClient: a, trust: cloneTrust(trust)}, nil
 }
 
 // attestedClient is what the enclave and router clients share: the verified
 // enclave and the chain their requests go through.
 type attestedClient struct {
 	keyed *transport.Transport
-	// trust is what the enclave is verified under, which no caller shares.
-	trust Trust
 	// secure is the client OpenAI clients use, which changes to the embedded
 	// client can't reach.
 	secure  *http.Client
@@ -110,8 +105,9 @@ type attestedClient struct {
 }
 
 // newAttestedClient sends requests to proxyURL, or directly to the enclave
-// when it is empty.
-func newAttestedClient(keyed *transport.Transport, trust Trust, proxyURL, secret string) (attestedClient, error) {
+// when it is empty. A non-empty secret is the cache secret that requests
+// carry; an empty one adds none.
+func newAttestedClient(keyed *transport.Transport, proxyURL, secret string) (attestedClient, error) {
 	host := keyed.Enclave().Host()
 	rt, err := enclaveChain(keyed, host, proxyURL, secret)
 	if err != nil {
@@ -119,7 +115,6 @@ func newAttestedClient(keyed *transport.Transport, trust Trust, proxyURL, secret
 	}
 	return attestedClient{
 		keyed:   keyed,
-		trust:   trust,
 		secure:  &http.Client{Transport: rt},
 		baseURL: cmp.Or(proxyURL, "https://"+host+"/"),
 	}, nil
@@ -133,8 +128,8 @@ func (c *attestedClient) embedded() *http.Client {
 
 // enclaveChain stacks what an enclave client sends through around keyed, from
 // the inside out: the proxy header, one replay after a key rejection, the
-// cache secret, and origin pinning. The cache secret sits above keyed, so the
-// field it adds is sealed with the rest of the body (EHBP) or sent over the
+// cache secret when there is one, and origin pinning. The cache secret sits
+// above keyed, so the field that it adds is sealed with the rest of the body (EHBP) or sent over the
 // pinned connection (TLS).
 func enclaveChain(keyed http.RoundTripper, host, proxyURL, secret string) (http.RoundTripper, error) {
 	rt := transport.WithEnclaveURL(keyed, host, proxyURL)
@@ -155,10 +150,9 @@ func (c *attestedClient) Enclave() string {
 	return c.keyed.Enclave().Host()
 }
 
-// Trust returns a copy of the trust that the enclave is verified under: the
-// trust argument for an enclave client, or the router's repository for a
-// router client. Changing the copy has no effect on the client.
-func (c *attestedClient) Trust() Trust {
+// Trust returns a copy of the trust argument that the enclave is verified
+// under. Changing the copy has no effect on the client.
+func (c *EnclaveHTTPClient) Trust() Trust {
 	return cloneTrust(c.trust)
 }
 
