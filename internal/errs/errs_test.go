@@ -79,6 +79,13 @@ type customIs struct{ msg string }
 func (e *customIs) Error() string        { return e.msg }
 func (e *customIs) Is(target error) bool { return target == fs.ErrNotExist }
 
+// claimsCategory delegates Is and As to an SDK error that it doesn't wrap.
+type claimsCategory struct{ inner error }
+
+func (e *claimsCategory) Error() string        { return "claims " + e.inner.Error() }
+func (e *claimsCategory) Is(target error) bool { return errors.Is(e.inner, target) }
+func (e *claimsCategory) As(target any) bool   { return errors.As(e.inner, target) }
+
 func TestUncategorized(t *testing.T) {
 	require.NoError(t, Uncategorized(nil))
 	plain := fmt.Errorf("callback: %w", context.Canceled)
@@ -107,6 +114,15 @@ func TestUncategorized(t *testing.T) {
 			requireCategory(t, Attestation(got), ErrAttestation)
 		})
 	}
+
+	// An error whose own Is and As methods claim an SDK error or a category
+	// doesn't bring it back.
+	claiming := Uncategorized(fmt.Errorf("callback: %w", &claimsCategory{inner: Network(cause)}))
+	requireCategory(t, claiming, nil)
+	var sdkError *Error
+	require.False(t, errors.As(claiming, &sdkError))
+	var claimer *claimsCategory
+	require.ErrorAs(t, claiming, &claimer, "the callback's error is still found")
 
 	sentinel := Uncategorized(ErrNetwork)
 	require.Equal(t, ErrNetwork.Error(), sentinel.Error())

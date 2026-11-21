@@ -151,9 +151,10 @@ func (u *uncategorized) Unwrap() []error {
 }
 
 // Is reports whether u.err is target, or its Is method says so. It reports
-// neither an SDK error, which the view replaces by its cause, nor a category.
+// neither an SDK error, which the view replaces by its cause, nor a category,
+// even when u.err's Is method claims one.
 func (u *uncategorized) Is(target error) bool {
-	if u.hidden() {
+	if u.hidden() || isCategory(target) {
 		return false
 	}
 	if reflect.TypeOf(target) != nil && reflect.TypeOf(target).Comparable() && u.err == target {
@@ -165,7 +166,8 @@ func (u *uncategorized) Is(target error) bool {
 
 // As sets target to u.err when u.err is assignable to it, as errors.As does
 // for each error in a chain, or defers to u.err's As method. It reports
-// neither an SDK error nor a category.
+// neither an SDK error nor a category, even when u.err's As method offers
+// one.
 func (u *uncategorized) As(target any) bool {
 	if u.hidden() {
 		return false
@@ -177,14 +179,25 @@ func (u *uncategorized) As(target any) bool {
 		return true
 	}
 	as, ok := u.err.(interface{ As(any) bool })
-	return ok && as.As(target)
+	if !ok || !as.As(target) {
+		return false
+	}
+	if found, isErr := dst.Interface().(error); isErr && (isSDKError(found) || isCategory(found)) {
+		dst.SetZero()
+		return false
+	}
+	return true
+}
+
+func isSDKError(err error) bool {
+	_, ok := err.(*Error)
+	return ok
 }
 
 // hidden reports whether u.err is an SDK error or a category, which the view
 // doesn't report.
 func (u *uncategorized) hidden() bool {
-	_, ok := u.err.(*Error)
-	return ok || isCategory(u.err)
+	return isSDKError(u.err) || isCategory(u.err)
 }
 
 // categorized reports whether err carries a category: whether it contains an
