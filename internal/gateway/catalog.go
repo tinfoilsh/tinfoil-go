@@ -38,7 +38,11 @@ type CatalogEntry struct {
 type Catalog map[string]CatalogEntry
 
 // FetchCatalog reads the catalog of the gateway at host, keeping only models
-// with replicas of a bare tinfoilsh/ repository, without a tag or digest.
+// with replicas of a bare tinfoilsh/ repository, without a tag or digest. It
+// reports a failure to fetch or read the catalog as a network error, except
+// that a request or read that stops because ctx ended returns its error with
+// no category, matching ctx.Err() with errors.Is. A failure that came first,
+// or its own 10-second limit, is a network error.
 func FetchCatalog(ctx context.Context, host string) (Catalog, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "https://"+host+catalogPath, nil)
 	if err != nil {
@@ -46,23 +50,24 @@ func FetchCatalog(ctx context.Context, host string) (Catalog, error) {
 	}
 	resp, err := (&http.Client{Timeout: catalogFetchTimeout, CheckRedirect: fetch.RefuseInsecureRedirects}).Do(req)
 	if err != nil {
-		return nil, errs.Network(err)
+		return nil, errs.Interrupted(ctx, err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		return nil, errs.Network(fmt.Errorf("fetching gateway catalog: %s", resp.Status))
 	}
-	return readCatalog(resp.Body)
+	return readCatalog(ctx, resp.Body)
 }
 
 // readCatalog decodes at most maxCatalogBytes of an untrusted gateway's
-// catalog, so an oversized one can't exhaust memory.
-func readCatalog(r io.Reader) (Catalog, error) {
+// catalog, so an oversized one can't exhaust memory. A failed read is
+// classified under ctx, the caller's context.
+func readCatalog(ctx context.Context, r io.Reader) (Catalog, error) {
 	// LimitReader truncates silently. Reading one byte past the limit tells an
 	// oversized catalog apart from one of exactly the maximum size.
 	body, err := io.ReadAll(io.LimitReader(r, maxCatalogBytes+1))
 	if err != nil {
-		return nil, errs.Network(fmt.Errorf("reading gateway catalog: %w", err))
+		return nil, errs.Interrupted(ctx, fmt.Errorf("reading gateway catalog: %w", err))
 	}
 	if len(body) > maxCatalogBytes {
 		return nil, errs.Network(fmt.Errorf("gateway catalog exceeds %d bytes", maxCatalogBytes))

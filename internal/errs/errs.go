@@ -9,6 +9,7 @@
 package errs
 
 import (
+	"context"
 	"errors"
 	"fmt"
 )
@@ -63,6 +64,21 @@ func WrapAttestation(err error) error {
 		return err
 	}
 	return Attestation(err)
+}
+
+// Interrupted classifies err, which a blocking call made under ctx, the
+// caller's own context, returned. When the call stopped because ctx ended,
+// that is, when ctx is done and err matches ctx.Err() with errors.Is, it
+// returns err as it is, with no category, so that the caller's cancellation
+// passes through. Otherwise the call failed first, and it returns err as a
+// network error, unless it already is an SDK error: a failure that came
+// before the caller cancelled, or a timeout that the SDK imposes on its own
+// work, keeps its category even if the caller cancels afterwards.
+func Interrupted(ctx context.Context, err error) error {
+	if ctxErr := ctx.Err(); ctxErr != nil && errors.Is(err, ctxErr) {
+		return err
+	}
+	return WrapNetwork(err)
 }
 
 func classified(err error) bool {

@@ -25,7 +25,7 @@ type Func func(ctx context.Context, host string, nonce []byte) ([]byte, error)
 // Document retrieves a v3 attestation document directly from an enclave host
 // using a fresh challenge nonce, returning the raw response bytes for
 // verification. The fetch stops when ctx is done or after 30 seconds,
-// whichever comes first.
+// whichever comes first; see Get for how it reports each.
 func Document(ctx context.Context, host string, nonce []byte) ([]byte, error) {
 	target, err := URL(host, "", nonce)
 	if err != nil {
@@ -48,12 +48,13 @@ func Relayed(ctx context.Context, relayURL, host string, nonce []byte) ([]byte, 
 // limit bytes of a successful response; what describes the response in
 // errors. It refuses a redirect to a non-HTTPS URL, stops when ctx is done or
 // after 30 seconds, whichever comes first, and reports failures as network
-// errors.
-func Get(ctx context.Context, target string, limit int, what string) (result []byte, err error) {
-	defer func() { err = errs.WrapNetwork(err) }()
-	ctx, cancel := context.WithTimeout(ctx, attestationFetchTimeout)
+// errors, except that a request or read that stops because ctx ended returns
+// its error with no category, matching ctx.Err() with errors.Is. A failure
+// that came first, or its own 30-second limit, is a network error.
+func Get(ctx context.Context, target string, limit int, what string) ([]byte, error) {
+	fetchCtx, cancel := context.WithTimeout(ctx, attestationFetchTimeout)
 	defer cancel()
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, target, nil)
+	req, err := http.NewRequestWithContext(fetchCtx, http.MethodGet, target, nil)
 	if err != nil {
 		return nil, errs.Configuration(err)
 	}
@@ -80,20 +81,20 @@ func Get(ctx context.Context, target string, limit int, what string) (result []b
 	client.CheckRedirect = RefuseInsecureRedirects
 	resp, err := client.Do(req)
 	if err != nil {
-		return nil, err
+		return nil, errs.Interrupted(ctx, err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode > 299 {
-		return nil, fmt.Errorf("HTTP GET %s: %d %s", target, resp.StatusCode, resp.Status)
+		return nil, errs.Network(fmt.Errorf("HTTP GET %s: %d %s", target, resp.StatusCode, resp.Status))
 	}
 	// LimitReader truncates silently. Reading one byte past the limit tells an
 	// oversized response apart from one of exactly the maximum size.
 	body, err := io.ReadAll(io.LimitReader(resp.Body, int64(limit)+1))
 	if err != nil {
-		return nil, err
+		return nil, errs.Interrupted(ctx, err)
 	}
 	if len(body) > limit {
-		return nil, fmt.Errorf("%s exceeds %d bytes", what, limit)
+		return nil, errs.Network(fmt.Errorf("%s exceeds %d bytes", what, limit))
 	}
 	return body, nil
 }
