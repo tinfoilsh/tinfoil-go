@@ -53,7 +53,8 @@ type ListFunc func(ctx context.Context) ([]string, error)
 // client construction or exhaust memory. It reports failures as network
 // errors, except that a request or read that stops because ctx ended returns
 // its error with no category, matching ctx.Err() with errors.Is. A failure
-// that came first, or its own 30-second limit, is a network error.
+// that came first, or its own 30-second limit, is a network error. A listURL
+// that doesn't form a request is a configuration error.
 func FetchList(ctx context.Context, listURL string) ([]string, error) {
 	fetchCtx, cancel := context.WithTimeout(ctx, routerFetchTimeout)
 	defer cancel()

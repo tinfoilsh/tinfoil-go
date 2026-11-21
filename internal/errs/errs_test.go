@@ -17,7 +17,7 @@ func TestInterrupted(t *testing.T) {
 
 	require.NoError(t, Interrupted(done, nil))
 	interrupted := fmt.Errorf("Get: %w", context.Canceled)
-	require.Equal(t, interrupted, Interrupted(done, interrupted), "the call's own error, as it is")
+	require.Same(t, interrupted, Interrupted(done, interrupted), "the call's own error, as it is")
 	failedFirst := Interrupted(done, cause)
 	require.ErrorIs(t, failedFirst, ErrNetwork, "a failure that came before the cancellation keeps its category")
 	require.ErrorIs(t, failedFirst, cause)
