@@ -117,7 +117,7 @@ func verifierInputs(trust Trust) (verify.ConfigTrust, verify.Pin, error) {
 	case SignedBy:
 		return verify.ConfigSigningKeys{Keys: t.Keys}, verify.Pin{Project: t.Project}, nil
 	case AuthorizedBy:
-		return verify.ConfigAuthorizer{Authorize: t.Authorize}, verify.Pin{}, nil
+		return verify.ConfigAuthorizer{Authorize: uncategorizedAuthorizer(t.Authorize)}, verify.Pin{}, nil
 	case EmbeddedConfig:
 		return verify.EmbeddedConfig{Name: t.Name, Bytes: t.Bytes}, verify.Pin{}, nil
 	case EitherPin:
@@ -127,6 +127,19 @@ func verifierInputs(trust Trust) (verify.ConfigTrust, verify.Pin, error) {
 		return nil, verify.Pin{Repo: t.Repo, Project: t.Project}, nil
 	default:
 		return nil, verify.Pin{}, errs.Configuration(fmt.Errorf("trust must be a RepoPin, ProjectPin, SignedBy, AuthorizedBy, EmbeddedConfig or EitherPin value, not %T", trust))
+	}
+}
+
+// uncategorizedAuthorizer returns authorize with the categories stripped from
+// its errors, or nil for nil, which the verifier refuses. The verifier
+// reports a refusal as a provenance failure, an attestation error, which a
+// category in the authorizer's error would contradict.
+func uncategorizedAuthorizer(authorize func(collateral.ConfigEndorsement) error) func(collateral.ConfigEndorsement) error {
+	if authorize == nil {
+		return nil
+	}
+	return func(e collateral.ConfigEndorsement) error {
+		return errs.Uncategorized(authorize(e))
 	}
 }
 

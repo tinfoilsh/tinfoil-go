@@ -9,6 +9,7 @@ import (
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"errors"
+	"fmt"
 	"io"
 	"log"
 	"math/big"
@@ -24,6 +25,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"github.com/tinfoilsh/tinfoil-go/internal/errs"
+	"github.com/tinfoilsh/tinfoil-go/internal/testutil"
 	"github.com/tinfoilsh/tinfoil-go/internal/verifytest"
 	"github.com/tinfoilsh/tinfoil-go/verify"
 	"github.com/tinfoilsh/tinfoil-go/verify/document"
@@ -378,18 +380,24 @@ func TestPinnedTransportRunsTheCallersChecks(t *testing.T) {
 	rejection := errors.New("rejected by the caller")
 	original := http.DefaultTransport
 	t.Cleanup(func() { http.DefaultTransport = original })
-	for name, config := range map[string]*tls.Config{
-		"VerifyConnection":      {RootCAs: roots, VerifyConnection: func(tls.ConnectionState) error { return rejection }},
-		"VerifyPeerCertificate": {RootCAs: roots, VerifyPeerCertificate: func([][]byte, [][]*x509.Certificate) error { return rejection }},
-	} {
-		t.Run(name, func(t *testing.T) {
-			http.DefaultTransport = &http.Transport{TLSClientConfig: config}
-			bound, err := newTLSBoundRoundTripper(key)
-			require.NoError(t, err)
-			defer bound.CloseIdleConnections()
-			_, err = (&http.Client{Transport: bound}).Get(server.URL)
-			require.ErrorIs(t, err, rejection, "the pin matches, so only the caller's check rejects")
-		})
+	// A check that returns an SDK error of another category still rejects
+	// the peer, and the result has one category.
+	for _, returned := range []error{rejection, errs.Network(rejection), fmt.Errorf("%w: %w", errs.ErrConfiguration, rejection)} {
+		for name, config := range map[string]*tls.Config{
+			"VerifyConnection":      {RootCAs: roots, VerifyConnection: func(tls.ConnectionState) error { return returned }},
+			"VerifyPeerCertificate": {RootCAs: roots, VerifyPeerCertificate: func([][]byte, [][]*x509.Certificate) error { return returned }},
+		} {
+			t.Run(name+"/"+returned.Error(), func(t *testing.T) {
+				http.DefaultTransport = &http.Transport{TLSClientConfig: config}
+				bound, err := newTLSBoundRoundTripper(key)
+				require.NoError(t, err)
+				defer bound.CloseIdleConnections()
+				_, err = (&http.Client{Transport: bound}).Get(server.URL)
+				require.ErrorContains(t, err, returned.Error(), "the pin matches, so only the caller's check rejects")
+				testutil.RequireCategory(t, err, errs.ErrAttestation)
+				require.ErrorIs(t, err, rejection)
+			})
+		}
 	}
 }
 

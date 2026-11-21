@@ -1,7 +1,6 @@
 package transport
 
 import (
-	"errors"
 	"fmt"
 	"net/http"
 
@@ -98,15 +97,11 @@ func (e *unreplayableError) Error() string {
 	return fmt.Sprintf("%s (key rejection: %v)", msg, e.rejection)
 }
 
-// Unwrap returns the error that GetBody returned, unless it is nil or already
-// carries an SDK category, which would give the result a second one. It never
-// returns the rejection.
+// Unwrap returns the error that GetBody returned, or nil, without the
+// category that it may carry, which would give the result a second one. It
+// never returns the rejection.
 func (e *unreplayableError) Unwrap() error {
-	var sdkError *errs.Error
-	if errors.As(e.bodyErr, &sdkError) {
-		return nil
-	}
-	return e.bodyErr
+	return errs.Uncategorized(e.bodyErr)
 }
 
 func (e *unreplayableError) KeyRejected() bool { return true }
