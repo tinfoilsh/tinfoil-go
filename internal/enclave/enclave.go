@@ -154,12 +154,27 @@ func (e *Enclave) verify(retries int) (*verify.Verification, error) {
 	}
 	if err != nil {
 		if firstErr != nil {
-			err = errors.Join(err, firstErr)
+			err = &retriedError{err: err, first: firstErr}
 		}
 		return nil, err
 	}
 	return verified, nil
 }
+
+// retriedError is the error of a verification that failed again when it was
+// retried. It reports the final attempt's error, whose category and types
+// errors.Is and errors.As find; the first attempt's error appears only in the
+// message, so that the result has one category, as net/http.Transport reports
+// only the error of its last attempt.
+type retriedError struct {
+	err, first error
+}
+
+func (e *retriedError) Error() string {
+	return fmt.Sprintf("%v (first attempt: %v)", e.err, e.first)
+}
+
+func (e *retriedError) Unwrap() error { return e.err }
 
 func (e *Enclave) fetchVerification() (*verify.Verification, error) {
 	nonce, err := document.RandomNonce()
@@ -239,11 +254,6 @@ func retryableVerification(err error) bool {
 	var rejected *rejectedError
 	if errors.Is(err, errs.ErrConfiguration) || errors.As(err, &rejected) {
 		return false
-	}
-	// Joined failures put the terminal cause first; earlier probes are diagnostics.
-	if joined, ok := err.(interface{ Unwrap() []error }); ok {
-		causes := joined.Unwrap()
-		return len(causes) > 0 && retryableVerification(causes[0])
 	}
 	return errors.Is(err, errs.ErrNetwork) || errors.Is(err, errs.ErrAttestation)
 }
