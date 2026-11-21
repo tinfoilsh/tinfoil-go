@@ -198,13 +198,21 @@ var ehbpKeyConfigError = ehbpidentity.NewKeyConfigError(errors.New("rotated"))
 
 func TestUnreplayableKeyRejectionIsANetworkError(t *testing.T) {
 	bodyErr := errors.New("body is gone")
+	classifiedBodyErr := errs.Attestation(errors.New("classified body failure"))
 	for _, mode := range rejectingModes {
 		for _, body := range []struct {
 			name    string
 			getBody func() (io.ReadCloser, error)
+			// reached is whether errors.Is reaches the error that GetBody
+			// returned.
+			reached bool
+			bodyErr error
 		}{
-			{"no GetBody", nil},
-			{"GetBody fails", func() (io.ReadCloser, error) { return nil, bodyErr }},
+			{"no GetBody", nil, false, nil},
+			{"GetBody fails", func() (io.ReadCloser, error) { return nil, bodyErr }, true, bodyErr},
+			// A GetBody error that has a category of its own is reported in
+			// the message only, so that the result keeps one category.
+			{"GetBody fails with a category", func() (io.ReadCloser, error) { return nil, classifiedBodyErr }, false, classifiedBodyErr},
 		} {
 			t.Run(mode.name+"/"+body.name, func(t *testing.T) {
 				var refreshes int
@@ -222,8 +230,13 @@ func TestUnreplayableKeyRejectionIsANetworkError(t *testing.T) {
 				require.ErrorContains(t, err, mode.rejection.Error())
 				require.ErrorContains(t, err, "the request body can't be replayed")
 				require.True(t, IsKeyRejection(err))
-				if body.getBody != nil {
-					require.ErrorIs(t, err, bodyErr)
+				if body.bodyErr != nil {
+					require.ErrorContains(t, err, body.bodyErr.Error())
+					if body.reached {
+						require.ErrorIs(t, err, body.bodyErr)
+					} else {
+						require.NotErrorIs(t, err, body.bodyErr)
+					}
 				}
 				require.False(t, currentValid(tr), "the rejection still invalidates the verification")
 				require.Zero(t, refreshes)

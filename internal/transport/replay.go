@@ -1,6 +1,7 @@
 package transport
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
 
@@ -83,7 +84,7 @@ func resetRequestBody(req *http.Request) (*http.Request, error) {
 // has invalidated the verification all the same.
 type unreplayableError struct {
 	// bodyErr is the error that GetBody returned, or nil if the request
-	// has no GetBody.
+	// has no GetBody. Its message is always reported.
 	bodyErr error
 	// rejection is the key rejection that the request failed with.
 	rejection error
@@ -97,7 +98,15 @@ func (e *unreplayableError) Error() string {
 	return fmt.Sprintf("%s (key rejection: %v)", msg, e.rejection)
 }
 
-// Unwrap returns the error that GetBody returned, if any, but not the
-// rejection.
-func (e *unreplayableError) Unwrap() error     { return e.bodyErr }
+// Unwrap returns the error that GetBody returned, unless it is nil or already
+// carries an SDK category, which would give the result a second one. It never
+// returns the rejection.
+func (e *unreplayableError) Unwrap() error {
+	var sdkError *errs.Error
+	if errors.As(e.bodyErr, &sdkError) {
+		return nil
+	}
+	return e.bodyErr
+}
+
 func (e *unreplayableError) KeyRejected() bool { return true }
