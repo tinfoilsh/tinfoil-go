@@ -51,9 +51,9 @@ type ListFunc func(ctx context.Context) ([]string, error)
 // It is bounded the same way attestation fetching is: discovery runs before
 // anything is verified, so an unresponsive or oversized reply must not stall
 // client construction or exhaust memory. It reports failures as network
-// errors, except that a request or read that ctx interrupts returns its error
-// with no category, matching ctx.Err() with errors.Is; its own 30-second
-// limit is a network error.
+// errors, except that a request or read that stops because ctx ended returns
+// its error with no category, matching ctx.Err() with errors.Is. A failure
+// that came first, or its own 30-second limit, is a network error.
 func FetchList(ctx context.Context, listURL string) ([]string, error) {
 	fetchCtx, cancel := context.WithTimeout(ctx, routerFetchTimeout)
 	defer cancel()

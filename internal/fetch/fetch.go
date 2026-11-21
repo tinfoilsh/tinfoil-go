@@ -48,9 +48,9 @@ func Relayed(ctx context.Context, relayURL, host string, nonce []byte) ([]byte, 
 // limit bytes of a successful response; what describes the response in
 // errors. It refuses a redirect to a non-HTTPS URL, stops when ctx is done or
 // after 30 seconds, whichever comes first, and reports failures as network
-// errors, except that a request or read that ctx interrupts returns its error
-// with no category, matching ctx.Err() with errors.Is. Its own 30-second
-// limit is a network error.
+// errors, except that a request or read that stops because ctx ended returns
+// its error with no category, matching ctx.Err() with errors.Is. A failure
+// that came first, or its own 30-second limit, is a network error.
 func Get(ctx context.Context, target string, limit int, what string) ([]byte, error) {
 	fetchCtx, cancel := context.WithTimeout(ctx, attestationFetchTimeout)
 	defer cancel()

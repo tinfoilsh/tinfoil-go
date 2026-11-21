@@ -67,21 +67,16 @@ func WrapAttestation(err error) error {
 }
 
 // Interrupted classifies err, which a blocking call made under ctx, the
-// caller's own context, returned. When ctx is done, it returns err as it is,
-// with no category, so that the caller's cancellation passes through; when
-// err doesn't already match ctx.Err() with errors.Is, it joins the two so that
-// it does. Otherwise it returns err as a network error, unless it already is
-// an SDK error. Checking ctx, rather than whether err is a context error,
-// keeps a timeout that the SDK imposes on its own work a network error.
+// caller's own context, returned. When the call stopped because ctx ended,
+// that is, when ctx is done and err matches ctx.Err() with errors.Is, it
+// returns err as it is, with no category, so that the caller's cancellation
+// passes through. Otherwise the call failed first, and it returns err as a
+// network error, unless it already is an SDK error: a failure that came
+// before the caller cancelled, or a timeout that the SDK imposes on its own
+// work, keeps its category even if the caller cancels afterwards.
 func Interrupted(ctx context.Context, err error) error {
-	if err == nil {
-		return nil
-	}
-	if ctxErr := ctx.Err(); ctxErr != nil {
-		if errors.Is(err, ctxErr) {
-			return err
-		}
-		return errors.Join(ctxErr, err)
+	if ctxErr := ctx.Err(); ctxErr != nil && errors.Is(err, ctxErr) {
+		return err
 	}
 	return WrapNetwork(err)
 }

@@ -118,6 +118,50 @@ func TestAnErrorStatusIsNotACancellation(t *testing.T) {
 	}
 }
 
+// A failure that comes before the caller cancels keeps its category, whether
+// the request fails on its own or reaches the SDK's limit first.
+func TestAFailureBeforeTheCancellationIsANetworkError(t *testing.T) {
+	client, transport := http.DefaultClient, http.DefaultTransport
+	t.Cleanup(func() { http.DefaultClient, http.DefaultTransport = client, transport })
+	refused := errors.New("connection refused")
+	var cancel context.CancelFunc
+	var fail func(*http.Request) error
+	http.DefaultClient = &http.Client{}
+	http.DefaultTransport = roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		return nil, fail(req)
+	})
+	for name, failure := range map[string]struct {
+		fail  func(*http.Request) error
+		cause error
+	}{
+		"failed first": {func(*http.Request) error {
+			cancel()
+			return refused
+		}, refused},
+		"SDK timeout first": {func(req *http.Request) error {
+			<-req.Context().Done()
+			err := req.Context().Err()
+			cancel()
+			return err
+		}, context.DeadlineExceeded},
+	} {
+		for helperName, helper := range fetchHelpers {
+			t.Run(name+"/"+helperName, func(t *testing.T) {
+				synctest.Test(t, func(t *testing.T) {
+					fail = failure.fail
+					var ctx context.Context
+					ctx, cancel = context.WithCancel(context.Background())
+					err := helper.fetch(ctx)
+					require.Equal(t, context.Canceled, ctx.Err(), "the caller cancelled after the failure")
+					require.ErrorIs(t, err, ErrNetwork)
+					require.ErrorIs(t, err, failure.cause)
+					require.NotErrorIs(t, err, context.Canceled)
+				})
+			})
+		}
+	}
+}
+
 // A client verifies under a context of its own, which serves every waiting
 // caller, so its end is the SDK's timeout, whichever fetcher sees it.
 func TestTheVerificationTimeoutIsANetworkError(t *testing.T) {
