@@ -38,8 +38,11 @@ type CatalogEntry struct {
 type Catalog map[string]CatalogEntry
 
 // FetchCatalog reads the catalog of the gateway at host, keeping only models
-// with replicas of a bare tinfoilsh/ repository, without a tag or digest.
-func FetchCatalog(ctx context.Context, host string) (Catalog, error) {
+// with replicas of a bare tinfoilsh/ repository, without a tag or digest. It
+// reports a failure to fetch or read the catalog as a network error, except that it returns ctx.Err()
+// unchanged when ctx is done; its own 10-second limit is a network error.
+func FetchCatalog(ctx context.Context, host string) (_ Catalog, err error) {
+	defer func() { err = errs.PassCancellation(ctx, err) }()
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "https://"+host+catalogPath, nil)
 	if err != nil {
 		return nil, errs.Configuration(err)

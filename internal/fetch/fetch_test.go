@@ -166,6 +166,7 @@ func TestFetchTimeout(t *testing.T) {
 			start := time.Now()
 			_, err := Document(t.Context(), "enclave.example", testNonce())
 			require.ErrorIs(t, err, context.DeadlineExceeded)
+			require.ErrorIs(t, err, errs.ErrNetwork, "a limit that isn't the caller's is a network error")
 			if timeout == 0 {
 				timeout = 30 * time.Second
 			}
@@ -190,7 +191,7 @@ func TestFetchHonorsCallerDeadline(t *testing.T) {
 		defer cancel()
 		start := time.Now()
 		_, err := Document(ctx, "enclave.example", testNonce())
-		require.ErrorIs(t, err, context.DeadlineExceeded)
+		require.Equal(t, context.DeadlineExceeded, err, "the caller's deadline, unchanged")
 		require.Equal(t, 5*time.Second, time.Since(start), "a caller deadline shorter than the cap applies")
 	})
 }

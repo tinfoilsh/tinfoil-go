@@ -25,7 +25,7 @@ type Func func(ctx context.Context, host string, nonce []byte) ([]byte, error)
 // Document retrieves a v3 attestation document directly from an enclave host
 // using a fresh challenge nonce, returning the raw response bytes for
 // verification. The fetch stops when ctx is done or after 30 seconds,
-// whichever comes first.
+// whichever comes first; see Get for how it reports each.
 func Document(ctx context.Context, host string, nonce []byte) ([]byte, error) {
 	target, err := URL(host, "", nonce)
 	if err != nil {
@@ -48,9 +48,11 @@ func Relayed(ctx context.Context, relayURL, host string, nonce []byte) ([]byte, 
 // limit bytes of a successful response; what describes the response in
 // errors. It refuses a redirect to a non-HTTPS URL, stops when ctx is done or
 // after 30 seconds, whichever comes first, and reports failures as network
-// errors.
+// errors, except that it returns ctx.Err() unchanged when ctx is done. Its
+// own 30-second limit is a network error.
 func Get(ctx context.Context, target string, limit int, what string) (result []byte, err error) {
-	defer func() { err = errs.WrapNetwork(err) }()
+	callerCtx := ctx
+	defer func() { err = errs.PassCancellation(callerCtx, errs.WrapNetwork(err)) }()
 	ctx, cancel := context.WithTimeout(ctx, attestationFetchTimeout)
 	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, target, nil)

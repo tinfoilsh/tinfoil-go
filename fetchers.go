@@ -23,7 +23,8 @@ import (
 // isn't the context of any one caller, since one verification can serve many
 // requests, and each caller's cancellation ends only that caller's wait. An
 // error that FetchAttestation returns is reported as an ErrNetwork error that
-// wraps it, unless it already is an SDK error. It may be called concurrently.
+// wraps it, unless it already is an SDK error; that includes ctx.Err() once
+// ctx ends, since the timeout is the SDK's. It may be called concurrently.
 type AttestationFetcher interface {
 	FetchAttestation(ctx context.Context, host string, nonce []byte) ([]byte, error)
 }
@@ -59,7 +60,12 @@ type AttestationRelay struct {
 }
 
 // FetchAttestation fetches the attestation document of host for nonce
-// through the relay.
+// through the relay. A failure to fetch it is an ErrNetwork error, including
+// when the fetch reaches its own limit of 30 seconds, except that the
+// caller's cancellation is returned unchanged: when ctx is done, the error is
+// ctx.Err() itself, which matches no category. A client that verifies through
+// the relay reports the end of its own context as ErrNetwork, since that
+// context is the SDK's, not the caller's; see AttestationFetcher.
 func (r AttestationRelay) FetchAttestation(ctx context.Context, host string, nonce []byte) ([]byte, error) {
 	if err := validateServiceURL("attestation relay URL", r.URL); err != nil {
 		return nil, err
@@ -104,7 +110,11 @@ type RouterListRelay struct {
 	URL string
 }
 
-// FetchRouterList fetches the router list through the relay.
+// FetchRouterList fetches the router list through the relay. A failure to
+// fetch it is an ErrNetwork error, including when the fetch reaches its own
+// limit of 30 seconds, except that the caller's cancellation is returned
+// unchanged: when ctx is done, the error is ctx.Err() itself, which matches no
+// category.
 func (r RouterListRelay) FetchRouterList(ctx context.Context) ([]string, error) {
 	if err := validateServiceURL("router list relay URL", r.URL); err != nil {
 		return nil, err
@@ -114,7 +124,10 @@ func (r RouterListRelay) FetchRouterList(ctx context.Context) ([]string, error) 
 		return nil, errs.Configuration(err)
 	}
 	routers, err := router.FetchList(ctx, target)
-	return routers, errs.WrapNetwork(err)
+	if err != nil {
+		return nil, errs.PassCancellation(ctx, errs.WrapNetwork(err))
+	}
+	return routers, nil
 }
 
 // attestationFetchFunc returns the function that obtains documents for f, or
