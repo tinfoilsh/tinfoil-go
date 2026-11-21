@@ -123,11 +123,7 @@ func (r RouterListRelay) FetchRouterList(ctx context.Context) ([]string, error) 
 	if err != nil {
 		return nil, errs.Configuration(err)
 	}
-	routers, err := router.FetchList(ctx, target)
-	if err != nil {
-		return nil, errs.PassCancellation(ctx, errs.WrapNetwork(err))
-	}
-	return routers, nil
+	return router.FetchList(ctx, target)
 }
 
 // attestationFetchFunc returns the function that obtains documents for f, or

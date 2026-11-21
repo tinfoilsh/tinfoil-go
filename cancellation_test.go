@@ -95,6 +95,29 @@ func TestFetchHelpersReportTheirOwnTimeoutAsANetworkError(t *testing.T) {
 	}
 }
 
+// A response that arrives before the caller cancels is the server's answer,
+// not an interruption, so an error status stays a network error.
+func TestAnErrorStatusIsNotACancellation(t *testing.T) {
+	client, transport := http.DefaultClient, http.DefaultTransport
+	t.Cleanup(func() { http.DefaultClient, http.DefaultTransport = client, transport })
+	var cancel context.CancelFunc
+	http.DefaultClient = &http.Client{}
+	http.DefaultTransport = roundTripFunc(func(*http.Request) (*http.Response, error) {
+		cancel()
+		return &http.Response{StatusCode: http.StatusServiceUnavailable, Status: "503 Service Unavailable", Body: http.NoBody}, nil
+	})
+	for name, helper := range fetchHelpers {
+		t.Run(name, func(t *testing.T) {
+			var ctx context.Context
+			ctx, cancel = context.WithCancel(context.Background())
+			err := helper.fetch(ctx)
+			require.Error(t, ctx.Err(), "the caller cancelled after the response arrived")
+			require.ErrorIs(t, err, ErrNetwork)
+			require.NotErrorIs(t, err, context.Canceled)
+		})
+	}
+}
+
 // A client verifies under a context of its own, which serves every waiting
 // caller, so its end is the SDK's timeout, whichever fetcher sees it.
 func TestTheVerificationTimeoutIsANetworkError(t *testing.T) {

@@ -16,17 +16,17 @@ import (
 func TestReadCatalogRejectsOversizedCatalog(t *testing.T) {
 	entry := `{"m":{"repo":"tinfoilsh/m","hosts":["a.example"]}}`
 	maximal := entry + strings.Repeat(" ", maxCatalogBytes-len(entry))
-	catalog, err := readCatalog(strings.NewReader(maximal))
+	catalog, err := readCatalog(context.Background(), strings.NewReader(maximal))
 	require.NoError(t, err)
 	require.Contains(t, catalog, "m")
 
-	_, err = readCatalog(strings.NewReader(maximal + " "))
+	_, err = readCatalog(context.Background(), strings.NewReader(maximal+" "))
 	require.ErrorIs(t, err, errs.ErrNetwork)
 	require.ErrorContains(t, err, "exceeds")
 }
 
 func TestReadCatalogKeepsOnlyTrustedEntries(t *testing.T) {
-	catalog, err := readCatalog(strings.NewReader(`{
+	catalog, err := readCatalog(context.Background(), strings.NewReader(`{
 		"ok": {"repo": "tinfoilsh/ok", "hosts": ["a.example"]},
 		"tagged": {"repo": "tinfoilsh/ok@v1", "hosts": ["a.example"]},
 		"other": {"repo": "acme/ok", "hosts": ["a.example"]},

@@ -66,20 +66,20 @@ func WrapAttestation(err error) error {
 	return Attestation(err)
 }
 
-// PassCancellation returns ctx.Err() in place of err when err is not nil and
-// ctx, the caller's own context, is done, so that the caller's cancellation
-// passes through unchanged and with no category. It keeps err otherwise, and
-// keeps a configuration error, which no cancellation causes. Checking ctx,
-// rather than whether err is a context error, keeps a timeout that the SDK
-// imposes on its own work a network error.
-func PassCancellation(ctx context.Context, err error) error {
-	if err == nil || errors.Is(err, ErrConfiguration) {
-		return err
+// Interrupted classifies err, which a blocking call made under ctx, the
+// caller's own context, returned: ctx.Err() itself when ctx is done, so that
+// the caller's cancellation passes through unchanged and with no category, and
+// otherwise err as a network error, unless it already is an SDK error.
+// Checking ctx, rather than whether err is a context error, keeps a timeout
+// that the SDK imposes on its own work a network error.
+func Interrupted(ctx context.Context, err error) error {
+	if err == nil {
+		return nil
 	}
 	if ctxErr := ctx.Err(); ctxErr != nil {
 		return ctxErr
 	}
-	return err
+	return WrapNetwork(err)
 }
 
 func classified(err error) bool {

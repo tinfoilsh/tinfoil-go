@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/tinfoilsh/tinfoil-go/internal/enclave"
+	"github.com/tinfoilsh/tinfoil-go/internal/errs"
 	"github.com/tinfoilsh/tinfoil-go/internal/fetch"
 	"github.com/tinfoilsh/tinfoil-go/internal/transport"
 	"github.com/tinfoilsh/tinfoil-go/verify"
@@ -49,13 +50,15 @@ type ListFunc func(ctx context.Context) ([]string, error)
 // FetchList fetches the router list from listURL, as from Tinfoil's list.
 // It is bounded the same way attestation fetching is: discovery runs before
 // anything is verified, so an unresponsive or oversized reply must not stall
-// client construction or exhaust memory.
+// client construction or exhaust memory. It reports failures as network
+// errors, except that a request or read that ctx interrupts returns ctx.Err()
+// unchanged; its own 30-second limit is a network error.
 func FetchList(ctx context.Context, listURL string) ([]string, error) {
-	ctx, cancel := context.WithTimeout(ctx, routerFetchTimeout)
+	fetchCtx, cancel := context.WithTimeout(ctx, routerFetchTimeout)
 	defer cancel()
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, listURL, nil)
+	req, err := http.NewRequestWithContext(fetchCtx, http.MethodGet, listURL, nil)
 	if err != nil {
-		return nil, err
+		return nil, errs.Configuration(err)
 	}
 	// Copy http.DefaultClient so an application's process-wide settings still
 	// apply, while refusing a redirect that would fetch the list in plaintext.
@@ -63,23 +66,23 @@ func FetchList(ctx context.Context, listURL string) ([]string, error) {
 	client.CheckRedirect = fetch.RefuseInsecureRedirects
 	resp, err := client.Do(req)
 	if err != nil {
-		return nil, err
+		return nil, errs.Interrupted(ctx, err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode > 299 {
-		return nil, fmt.Errorf("fetching routers from %s: %d %s", listURL, resp.StatusCode, resp.Status)
+		return nil, errs.Network(fmt.Errorf("fetching routers from %s: %d %s", listURL, resp.StatusCode, resp.Status))
 	}
 	body, err := io.ReadAll(io.LimitReader(resp.Body, maxRouterBytes+1))
 	if err != nil {
-		return nil, err
+		return nil, errs.Interrupted(ctx, err)
 	}
 	if len(body) > maxRouterBytes {
-		return nil, fmt.Errorf("router list from %s exceeds %d bytes", listURL, maxRouterBytes)
+		return nil, errs.Network(fmt.Errorf("router list from %s exceeds %d bytes", listURL, maxRouterBytes))
 	}
 
 	var routers []string
 	if err := json.Unmarshal(body, &routers); err != nil {
-		return nil, err
+		return nil, errs.Network(err)
 	}
 
 	return routers, nil
