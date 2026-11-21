@@ -79,6 +79,11 @@ type customIs struct{ msg string }
 func (e *customIs) Error() string        { return e.msg }
 func (e *customIs) Is(target error) bool { return target == fs.ErrNotExist }
 
+// uncomparable is an error type that == can't compare.
+type uncomparable struct{ _ []int }
+
+func (uncomparable) Error() string { return "uncomparable" }
+
 // claimsCategory delegates Is and As to an SDK error that it doesn't wrap.
 type claimsCategory struct{ inner error }
 
@@ -123,6 +128,10 @@ func TestUncategorized(t *testing.T) {
 	require.False(t, errors.As(claiming, &sdkError))
 	var claimer *claimsCategory
 	require.ErrorAs(t, claiming, &claimer, "the callback's error is still found")
+
+	// A target of a type that can't be compared is no category, and
+	// comparing it with one doesn't panic.
+	require.False(t, errors.Is(claiming, uncomparable{}))
 
 	sentinel := Uncategorized(ErrNetwork)
 	require.Equal(t, ErrNetwork.Error(), sentinel.Error())
