@@ -3,10 +3,12 @@ package transport
 import (
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 
 	ehbpclient "github.com/tinfoilsh/encrypted-http-body-protocol/client"
 	ehbpidentity "github.com/tinfoilsh/encrypted-http-body-protocol/identity"
+	ehbpprotocol "github.com/tinfoilsh/encrypted-http-body-protocol/protocol"
 	"github.com/tinfoilsh/tinfoil-go/internal/enclave"
 	"github.com/tinfoilsh/tinfoil-go/internal/errs"
 	"github.com/tinfoilsh/tinfoil-go/verify"
@@ -54,9 +56,43 @@ func (t *ehbpRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) 
 	// The enclave answers a body sealed to a key it no longer holds with a
 	// key config mismatch, which ehbpclient reports as a KeyConfigError.
 	if ehbpidentity.IsKeyConfigError(err) {
-		err = &peerLacksKeyError{err}
+		return resp, &peerLacksKeyError{err}
 	}
-	return resp, err
+	if err != nil {
+		return resp, classifyEHBP(err)
+	}
+	if resp != nil && resp.Body != nil && resp.Body != http.NoBody {
+		resp.Body = &ehbpBody{resp.Body}
+	}
+	return resp, nil
+}
+
+// classifyEHBP returns err as an attestation error when it reports that a
+// response failed EHBP's authentication: a response nonce that is missing,
+// repeated or invalid, or a chunk that doesn't decrypt or that breaks the
+// framing's bounds. The response then may not come from the attested key, so
+// EHBP fails closed. Any other error, such as a reset of the connection or a
+// body that ends early, which EHBP reports as truncated framing, is left for
+// the client's backstop, since the network can cause it.
+func classifyEHBP(err error) error {
+	switch ehbpprotocol.CodeOf(err) {
+	case ehbpprotocol.MissingResponseNonce, ehbpprotocol.InvalidResponseNonce, ehbpprotocol.DuplicateResponseNonce,
+		ehbpprotocol.AEADDecryptFailed, ehbpprotocol.ChunkTooLarge, ehbpprotocol.SequenceOverflow:
+		return errs.Attestation(err)
+	}
+	return err
+}
+
+// ehbpBody classifies the errors of a response body that EHBP decrypts while
+// it is read, as classifyEHBP describes.
+type ehbpBody struct{ io.ReadCloser }
+
+func (b *ehbpBody) Read(p []byte) (int, error) {
+	n, err := b.ReadCloser.Read(p)
+	if err != nil && err != io.EOF {
+		err = classifyEHBP(err)
+	}
+	return n, err
 }
 
 // CheckEHBP returns a configuration error for a request whose traffic continues

@@ -131,7 +131,7 @@ func unverifiedGatewayHTTPClient(opts *GatewayOptions) (*GatewayHTTPClient, erro
 	if err != nil {
 		return nil, err
 	}
-	secure := &http.Client{Transport: guarded}
+	secure := &http.Client{Transport: transport.WithBackstop(guarded)}
 	return &GatewayHTTPClient{Client: &http.Client{Transport: secure.Transport}, secure: secure, baseURL: baseURL, transport: gatewayTransport}, nil
 }
 
