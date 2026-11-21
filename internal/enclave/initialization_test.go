@@ -8,8 +8,44 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"github.com/tinfoilsh/tinfoil-go/internal/errs"
+	"github.com/tinfoilsh/tinfoil-go/internal/testutil"
 	"github.com/tinfoilsh/tinfoil-go/verify"
 )
+
+func TestRetriedVerificationReportsOnlyTheFinalCategory(t *testing.T) {
+	firstCause, lastCause := errors.New("first attempt"), &rejectedError{host: "enclave.example", err: errors.New("last attempt")}
+	for _, tc := range []struct {
+		name        string
+		first, last error
+		category    error
+	}{
+		{"network then attestation", errs.Network(firstCause), errs.Attestation(lastCause), errs.ErrAttestation},
+		{"attestation then network", errs.Attestation(firstCause), errs.Network(lastCause), errs.ErrNetwork},
+		{"attestation then configuration", errs.Attestation(firstCause), errs.Configuration(lastCause), errs.ErrConfiguration},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				var attempts int
+				s := NewForTest("enclave.example", func() (*verify.Verification, error) {
+					attempts++
+					if attempts == 1 {
+						return nil, tc.first
+					}
+					return nil, tc.last
+				})
+				_, err := s.Verify()
+				require.Equal(t, 2, attempts)
+				testutil.RequireCategory(t, err, tc.category)
+				var rejected *rejectedError
+				require.ErrorAs(t, err, &rejected)
+				require.Same(t, lastCause, rejected)
+				require.NotErrorIs(t, err, firstCause)
+				require.ErrorContains(t, err, tc.last.Error())
+				require.ErrorContains(t, err, "first attempt: "+tc.first.Error())
+			})
+		})
+	}
+}
 
 func TestInitializationRecovery(t *testing.T) {
 	firstCause, lastCause := errors.New("first attempt"), errors.New("last attempt")
@@ -23,7 +59,6 @@ func TestInitializationRecovery(t *testing.T) {
 		{"both attempts fail", errs.Network(firstCause), errs.Attestation(lastCause), 2},
 		{"configuration", errs.Configuration(firstCause), nil, 1},
 		{"native error", firstCause, nil, 1},
-		{"native error with fetch diagnostics", errors.Join(firstCause, errs.Network(lastCause)), nil, 1},
 		{"configuration among causes", errors.Join(errs.Network(lastCause), errs.Configuration(firstCause)), nil, 1},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -44,11 +79,15 @@ func TestInitializationRecovery(t *testing.T) {
 				if attempts == 2 && tc.last == nil {
 					require.NoError(t, err)
 					require.Equal(t, "fresh", verified.CodeTag())
+				} else if tc.last != nil {
+					// Only the final attempt's error, as net/http.Transport
+					// reports; the first is in the message alone.
+					require.Same(t, tc.last, errors.Unwrap(err))
+					require.NotErrorIs(t, err, firstCause)
+					require.ErrorContains(t, err, firstCause.Error())
+					require.Nil(t, verified)
 				} else {
-					require.ErrorIs(t, err, firstCause)
-					if tc.last != nil {
-						require.ErrorIs(t, err, lastCause)
-					}
+					require.Same(t, tc.first, err)
 					require.Nil(t, verified)
 				}
 			})

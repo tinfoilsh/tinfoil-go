@@ -9,9 +9,13 @@ import (
 	"net/http/httptrace"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
+	ehbpidentity "github.com/tinfoilsh/encrypted-http-body-protocol/identity"
 	"github.com/tinfoilsh/tinfoil-go/internal/errs"
+	"github.com/tinfoilsh/tinfoil-go/internal/testutil"
+	"github.com/tinfoilsh/tinfoil-go/verify"
 )
 
 type testKeyRejection struct{ error }
@@ -68,13 +72,21 @@ func TestRequestRecovery(t *testing.T) {
 				require.Equal(t, http.StatusOK, resp.StatusCode)
 				resp.Body.Close()
 			} else {
+				// Each failure reports one error, as net/http.Transport does.
 				require.Nil(t, resp)
-				require.ErrorIs(t, err, first)
-				if tc.last != nil {
+				switch {
+				case tc.cancel:
+					require.Equal(t, context.Canceled, err, "the context's error, unwrapped")
+					testutil.RequireCategory(t, err, nil)
+				case !tc.replayable:
+					testutil.RequireCategory(t, err, errs.ErrNetwork)
+					require.NotErrorIs(t, err, first)
+					require.ErrorContains(t, err, first.Error())
+				case tc.last != nil:
 					require.ErrorIs(t, err, last)
-				}
-				if tc.cancel {
-					require.ErrorIs(t, err, context.Canceled)
+					require.NotErrorIs(t, err, first)
+				default:
+					require.Equal(t, first, err)
 				}
 			}
 		})
@@ -123,7 +135,7 @@ func TestRequestRecoveryDiscardsErrorResponses(t *testing.T) {
 		}
 		resp, err := transport.RoundTrip(req)
 		require.Nil(t, resp)
-		require.ErrorIs(t, err, cause)
+		require.ErrorContains(t, err, cause.Error())
 		for _, body := range bodies {
 			require.Equal(t, 1, body.closes)
 		}
@@ -158,4 +170,123 @@ func TestReplayAsksOnlyAboutErrors(t *testing.T) {
 	resp, err := transport.RoundTrip(req)
 	require.NoError(t, err)
 	resp.Body.Close()
+}
+
+// rejectingModes are the transport modes, each with a round tripper that
+// rejects every request the way that mode reports a rotated key.
+var rejectingModes = []struct {
+	name      string
+	rejection error
+	mode      testMode
+}{
+	{"TLS", errCertMismatch, testMode(func(*verify.Verification) (http.RoundTripper, error) {
+		return roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			closeRequestBody(req)
+			// As TLSBoundRoundTripper reports a certificate error.
+			return nil, &peerLacksKeyError{errs.WrapAttestation(errCertMismatch)}
+		}), nil
+	})},
+	{"EHBP", ehbpKeyConfigError, testMode(func(*verify.Verification) (http.RoundTripper, error) {
+		return &ehbpRoundTripper{sealing: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			closeRequestBody(req)
+			return nil, ehbpKeyConfigError
+		})}, nil
+	})},
+}
+
+var ehbpKeyConfigError = ehbpidentity.NewKeyConfigError(errors.New("rotated"))
+
+func TestUnreplayableKeyRejectionIsANetworkError(t *testing.T) {
+	bodyErr := errors.New("body is gone")
+	for _, mode := range rejectingModes {
+		for _, body := range []struct {
+			name    string
+			getBody func() (io.ReadCloser, error)
+		}{
+			{"no GetBody", nil},
+			{"GetBody fails", func() (io.ReadCloser, error) { return nil, bodyErr }},
+		} {
+			t.Run(mode.name+"/"+body.name, func(t *testing.T) {
+				var refreshes int
+				tr := newTestTransport(t, testState(time.Now().Add(time.Hour), "old"), func() (*verify.Verification, error) {
+					refreshes++
+					return testState(time.Now().Add(time.Hour), "new"), nil
+				}, mode.mode)
+				req, err := http.NewRequest(http.MethodPost, "https://enclave.example", strings.NewReader("payload"))
+				require.NoError(t, err)
+				req.GetBody = body.getBody
+				resp, err := WithReplay(tr, IsKeyRejection).RoundTrip(req)
+				require.Nil(t, resp)
+				testutil.RequireCategory(t, err, errs.ErrNetwork)
+				require.NotErrorIs(t, err, mode.rejection, "the rejection is only in the message")
+				require.ErrorContains(t, err, mode.rejection.Error())
+				require.ErrorContains(t, err, "the request body can't be replayed")
+				require.True(t, IsKeyRejection(err))
+				if body.getBody != nil {
+					require.ErrorIs(t, err, bodyErr)
+				}
+				require.False(t, currentValid(tr), "the rejection still invalidates the verification")
+				require.Zero(t, refreshes)
+			})
+		}
+	}
+}
+
+func TestReplayReportsOnlyTheReplaysError(t *testing.T) {
+	cause := errors.New("replay failed")
+	for _, tc := range []struct {
+		name     string
+		err      error
+		category error
+	}{
+		{"configuration", errs.Configuration(cause), errs.ErrConfiguration},
+		{"network", errs.Network(cause), errs.ErrNetwork},
+		{"attestation", errs.Attestation(cause), errs.ErrAttestation},
+		{"uncategorized", cause, nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var attempts int
+			transport := WithReplay(roundTripFunc(func(req *http.Request) (*http.Response, error) {
+				closeRequestBody(req)
+				attempts++
+				if attempts == 1 {
+					// A TLS key rejection, which is an attestation error.
+					return nil, &keyRejectionError{&peerLacksKeyError{errs.WrapAttestation(errCertMismatch)}}
+				}
+				return nil, tc.err
+			}), IsKeyRejection)
+			req, err := http.NewRequest(http.MethodPost, "https://enclave.example", strings.NewReader("payload"))
+			require.NoError(t, err)
+			_, err = transport.RoundTrip(req)
+			require.Equal(t, 2, attempts)
+			require.Same(t, tc.err, err)
+			testutil.RequireCategory(t, err, tc.category)
+		})
+	}
+}
+
+func TestReplayReportsOnlyTheCallersCancellation(t *testing.T) {
+	for _, mode := range rejectingModes {
+		t.Run(mode.name, func(t *testing.T) {
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			var refreshes int
+			tr := newTestTransport(t, testState(time.Now().Add(time.Hour), "old"), func() (*verify.Verification, error) {
+				refreshes++
+				return testState(time.Now().Add(time.Hour), "new"), nil
+			}, testMode(func(v *verify.Verification) (http.RoundTripper, error) {
+				rt, err := mode.mode(v)
+				return roundTripFunc(func(req *http.Request) (*http.Response, error) {
+					cancel()
+					return rt.RoundTrip(req)
+				}), err
+			}))
+			req, err := http.NewRequestWithContext(ctx, http.MethodPost, "https://enclave.example", strings.NewReader("payload"))
+			require.NoError(t, err)
+			_, err = WithReplay(tr, IsKeyRejection).RoundTrip(req)
+			require.Equal(t, context.Canceled, err, "the context's error, unwrapped")
+			testutil.RequireCategory(t, err, nil)
+			require.Zero(t, refreshes)
+		})
+	}
 }
