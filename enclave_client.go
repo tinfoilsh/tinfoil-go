@@ -56,7 +56,7 @@ type EnclaveHTTPClient struct {
 func NewEnclaveHTTPClient(ctx context.Context, host string, trust Trust, opts *EnclaveOptions) (*EnclaveHTTPClient, error) {
 	c, err := unverifiedEnclaveHTTPClient(host, trust, opts)
 	if err != nil {
-		return nil, err
+		return nil, errs.Finish(ctx, err)
 	}
 	if _, err := c.EnsureVerified(ctx); err != nil {
 		return nil, err
@@ -169,12 +169,14 @@ func (c *EnclaveHTTPClient) Trust() Trust {
 // only if the cached one has expired or been rejected. It also prepares the
 // TLS pin or HPKE key for it, so a nil error means requests can be sent.
 func (c *attestedClient) EnsureVerified(ctx context.Context) (*verify.Verification, error) {
-	return c.keyed.EnsureVerified(ctx)
+	v, err := c.keyed.EnsureVerified(ctx)
+	return v, errs.Finish(ctx, err)
 }
 
 // Reverify verifies again even if the cached verification is still valid.
 func (c *attestedClient) Reverify(ctx context.Context) (*verify.Verification, error) {
-	return c.keyed.Reverify(ctx)
+	v, err := c.keyed.Reverify(ctx)
+	return v, errs.Finish(ctx, err)
 }
 
 // Current returns the last successful verification without checking it. It

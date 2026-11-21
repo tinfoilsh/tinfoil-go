@@ -1,6 +1,7 @@
 package tinfoil
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net/http"
@@ -63,6 +64,12 @@ type OpenAIClient struct {
 // openaiOpts, OPENAI_BASE_URL in the environment, and a data residency option
 // have no effect; set opts.APIPath to change the API path.
 func NewOpenAIClient(hc AttestedHTTPClient, opts *OpenAIOptions, openaiOpts ...option.RequestOption) (*OpenAIClient, error) {
+	c, err := newOpenAIClient(hc, opts, openaiOpts...)
+	// It does no I/O, so that no context of the caller's applies.
+	return c, errs.Finish(context.Background(), err)
+}
+
+func newOpenAIClient(hc AttestedHTTPClient, opts *OpenAIOptions, openaiOpts ...option.RequestOption) (*OpenAIClient, error) {
 	if opts == nil {
 		opts = &OpenAIOptions{}
 	}

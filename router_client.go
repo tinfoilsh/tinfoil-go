@@ -6,6 +6,7 @@ import (
 
 	"github.com/tinfoilsh/tinfoil-go/internal/cachesecret"
 	"github.com/tinfoilsh/tinfoil-go/internal/enclave"
+	"github.com/tinfoilsh/tinfoil-go/internal/errs"
 	"github.com/tinfoilsh/tinfoil-go/internal/router"
 	"github.com/tinfoilsh/tinfoil-go/internal/transport"
 	"github.com/tinfoilsh/tinfoil-go/verify"
@@ -68,6 +69,11 @@ type RouterHTTPClient struct {
 // each time it is called. The client verifies its router
 // again by itself when the verification expires or is rejected.
 func NewRouterHTTPClient(ctx context.Context, opts *RouterOptions) (*RouterHTTPClient, error) {
+	c, err := newRouterHTTPClient(ctx, opts)
+	return c, errs.Finish(ctx, err)
+}
+
+func newRouterHTTPClient(ctx context.Context, opts *RouterOptions) (*RouterHTTPClient, error) {
 	if opts == nil {
 		opts = &RouterOptions{}
 	}
