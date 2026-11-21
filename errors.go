@@ -10,8 +10,9 @@ import "github.com/tinfoilsh/tinfoil-go/internal/errs"
 // OpenAI's, keep their own types.
 //
 // The caller's own cancellation is in no category. A function that takes a
-// context, such as a client constructor, EnsureVerified, FetchCatalog or a
-// relay's fetch, returns that context's Err() itself once the context is done.
+// context, such as NewEnclaveHTTPClient, EnsureVerified, FetchCatalog or a
+// relay's fetch, returns that context's Err() itself once the context is
+// done; NewClient wraps it with a message, so errors.Is still finds it.
 // A request sent through a client fails as net/http reports a cancellation,
 // with a *url.Error that wraps it. A timeout that the SDK imposes on its own
 // work is an ErrNetwork error.
