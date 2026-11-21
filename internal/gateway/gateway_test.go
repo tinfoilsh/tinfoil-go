@@ -14,6 +14,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/tinfoilsh/tinfoil-go/internal/cachesecret"
 	"github.com/tinfoilsh/tinfoil-go/internal/errs"
+	"github.com/tinfoilsh/tinfoil-go/internal/testutil"
 	"github.com/tinfoilsh/tinfoil-go/internal/verifytest"
 	"github.com/tinfoilsh/tinfoil-go/verify"
 )
@@ -152,6 +153,7 @@ func TestSealUploadReplay(t *testing.T) {
 		{name: "replays", getBody: true},
 		{name: "no GetBody"},
 		{name: "GetBody fails", getBody: true, replayErr: replayErr},
+		{name: "GetBody fails with an SDK error", getBody: true, replayErr: errs.Attestation(replayErr)},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			original := &sealTestBody{Reader: strings.NewReader(payload)}
@@ -198,7 +200,8 @@ func TestSealUploadReplay(t *testing.T) {
 				require.Zero(t, responseBody.closes, "the caller owns the returned response")
 				resp.Body.Close()
 			case tc.replayErr != nil:
-				require.ErrorIs(t, err, tc.replayErr)
+				require.ErrorIs(t, err, replayErr)
+				testutil.RequireCategory(t, err, errs.ErrNetwork)
 				require.Nil(t, resp)
 				require.Equal(t, 1, attempts)
 				require.Equal(t, 1, responseBody.closes)

@@ -81,7 +81,7 @@ func Get(ctx context.Context, target string, limit int, what string) ([]byte, er
 	client.CheckRedirect = RefuseInsecureRedirects
 	resp, err := client.Do(req)
 	if err != nil {
-		return nil, errs.Interrupted(ctx, err)
+		return nil, errs.Finish(ctx, err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode > 299 {
@@ -91,7 +91,7 @@ func Get(ctx context.Context, target string, limit int, what string) ([]byte, er
 	// oversized response apart from one of exactly the maximum size.
 	body, err := io.ReadAll(io.LimitReader(resp.Body, int64(limit)+1))
 	if err != nil {
-		return nil, errs.Interrupted(ctx, err)
+		return nil, errs.Finish(ctx, err)
 	}
 	if len(body) > limit {
 		return nil, errs.Network(fmt.Errorf("%s exceeds %d bytes", what, limit))

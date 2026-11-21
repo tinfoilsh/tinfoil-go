@@ -6,6 +6,7 @@ import (
 
 	"github.com/tinfoilsh/tinfoil-go/internal/cachesecret"
 	"github.com/tinfoilsh/tinfoil-go/internal/enclave"
+	"github.com/tinfoilsh/tinfoil-go/internal/errs"
 	"github.com/tinfoilsh/tinfoil-go/internal/router"
 	"github.com/tinfoilsh/tinfoil-go/internal/transport"
 	"github.com/tinfoilsh/tinfoil-go/verify"
@@ -24,9 +25,10 @@ type RouterOptions struct {
 	// passes Policy, before the client uses the router's keys: for each
 	// router tried during discovery, and whenever the client verifies again.
 	// Return an error to reject the router. Discovery then moves on to the
-	// next router; otherwise verification fails with an ErrAttestation error that
-	// wraps the error and isn't retried. Requests wait while it runs, so keep
-	// it fast; it may be called concurrently.
+	// next router; otherwise verification fails with an ErrAttestation error
+	// that wraps the error and isn't retried; a category that the error
+	// carries, as a *tinfoil.Error does, is not kept. Requests wait while it
+	// runs, so keep it fast; it may be called concurrently.
 	VerificationCheck func(v *verify.Verification) error
 	// UserCacheSecret is the default prompt-cache scope for the client's
 	// requests. A non-empty user_cache_secret string in a request's JSON body
@@ -68,6 +70,11 @@ type RouterHTTPClient struct {
 // each time it is called. The client verifies its router
 // again by itself when the verification expires or is rejected.
 func NewRouterHTTPClient(ctx context.Context, opts *RouterOptions) (*RouterHTTPClient, error) {
+	c, err := newRouterHTTPClient(ctx, opts)
+	return c, errs.Finish(ctx, err)
+}
+
+func newRouterHTTPClient(ctx context.Context, opts *RouterOptions) (*RouterHTTPClient, error) {
 	if opts == nil {
 		opts = &RouterOptions{}
 	}

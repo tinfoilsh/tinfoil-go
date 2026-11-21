@@ -68,7 +68,7 @@ func FetchList(ctx context.Context, listURL string) ([]string, error) {
 	client.CheckRedirect = fetch.RefuseInsecureRedirects
 	resp, err := client.Do(req)
 	if err != nil {
-		return nil, errs.Interrupted(ctx, err)
+		return nil, errs.Finish(ctx, err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode > 299 {
@@ -76,7 +76,7 @@ func FetchList(ctx context.Context, listURL string) ([]string, error) {
 	}
 	body, err := io.ReadAll(io.LimitReader(resp.Body, maxRouterBytes+1))
 	if err != nil {
-		return nil, errs.Interrupted(ctx, err)
+		return nil, errs.Finish(ctx, err)
 	}
 	if len(body) > maxRouterBytes {
 		return nil, errs.Network(fmt.Errorf("router list from %s exceeds %d bytes", listURL, maxRouterBytes))

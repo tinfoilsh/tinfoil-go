@@ -110,13 +110,17 @@ func pinnedTransport(dt *http.Transport, key string) (*http.Transport, error) {
 		// the pin, and the callbacks can only reject, so none of them can
 		// admit a peer the pin refuses.
 		tlsConfig.RootCAs = c.RootCAs
-		tlsConfig.VerifyPeerCertificate = c.VerifyPeerCertificate
+		if callerVerifyPeer := c.VerifyPeerCertificate; callerVerifyPeer != nil {
+			tlsConfig.VerifyPeerCertificate = func(rawCerts [][]byte, chains [][]*x509.Certificate) error {
+				return callerRejection(callerVerifyPeer(rawCerts, chains))
+			}
+		}
 		callerVerifyConnection = c.VerifyConnection
 	}
 	tlsConfig.VerifyConnection = func(state tls.ConnectionState) error {
 		if callerVerifyConnection != nil {
 			if err := callerVerifyConnection(state); err != nil {
-				return errs.WrapAttestation(err)
+				return callerRejection(err)
 			}
 		}
 
@@ -165,6 +169,16 @@ func pinnedTransport(dt *http.Transport, key string) (*http.Transport, error) {
 		pinned.TLSNextProto = base.TLSNextProto
 	}
 	return pinned, nil
+}
+
+// callerRejection returns the error of a caller's certificate check, or nil.
+// The check rejects the peer, a trust decision, and so its error is an
+// attestation error whatever category it carries.
+func callerRejection(err error) error {
+	if err == nil {
+		return nil
+	}
+	return errs.Attestation(errs.Uncategorized(err))
 }
 
 func (t *TLSBoundRoundTripper) RoundTrip(r *http.Request) (*http.Response, error) {

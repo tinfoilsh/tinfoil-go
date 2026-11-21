@@ -24,7 +24,8 @@ type EnclaveOptions struct {
 	// passes the trust argument and Policy, before the client uses the
 	// enclave's keys: when the client is created and whenever it verifies
 	// again. Return an error to reject the enclave. Verification then fails
-	// with an ErrAttestation error that wraps the error and isn't retried.
+	// with an ErrAttestation error that wraps the error and isn't retried; a
+	// category that the error carries, as a *tinfoil.Error does, is not kept.
 	// Requests wait while it runs, so keep it fast; it may be called
 	// concurrently.
 	VerificationCheck func(v *verify.Verification) error
@@ -56,7 +57,7 @@ type EnclaveHTTPClient struct {
 func NewEnclaveHTTPClient(ctx context.Context, host string, trust Trust, opts *EnclaveOptions) (*EnclaveHTTPClient, error) {
 	c, err := unverifiedEnclaveHTTPClient(host, trust, opts)
 	if err != nil {
-		return nil, err
+		return nil, errs.Finish(ctx, err)
 	}
 	if _, err := c.EnsureVerified(ctx); err != nil {
 		return nil, err
@@ -137,14 +138,18 @@ func (c *attestedClient) embedded() *http.Client {
 
 // enclaveChain stacks what an enclave client sends through around keyed, from
 // the inside out: the proxy header, one replay after a key rejection, the
-// cache secret when there is one, and origin pinning. The cache secret sits
-// above keyed, so the field that it adds is sealed with the rest of the body
-// (EHBP) or sent over the pinned connection (TLS).
+// cache secret when there is one, origin pinning, and the error backstop. The
+// cache secret sits above keyed, so the field that it adds is sealed with the
+// rest of the body (EHBP) or sent over the pinned connection (TLS).
 func enclaveChain(keyed http.RoundTripper, host, proxyURL, secret string) (http.RoundTripper, error) {
 	rt := transport.WithEnclaveURL(keyed, host, proxyURL)
 	rt = transport.WithReplay(rt, transport.IsKeyRejection)
 	rt = transport.WithCacheSecret(rt, secret)
-	return transport.WithOriginRestriction(rt, host, proxyURL)
+	rt, err := transport.WithOriginRestriction(rt, host, proxyURL)
+	if err != nil {
+		return nil, err
+	}
+	return transport.WithBackstop(rt), nil
 }
 
 // BaseURL returns the URL that requests are sent to: the EHBP ProxyURL, or
@@ -169,12 +174,14 @@ func (c *EnclaveHTTPClient) Trust() Trust {
 // only if the cached one has expired or been rejected. It also prepares the
 // TLS pin or HPKE key for it, so a nil error means requests can be sent.
 func (c *attestedClient) EnsureVerified(ctx context.Context) (*verify.Verification, error) {
-	return c.keyed.EnsureVerified(ctx)
+	v, err := c.keyed.EnsureVerified(ctx)
+	return v, errs.Finish(ctx, err)
 }
 
 // Reverify verifies again even if the cached verification is still valid.
 func (c *attestedClient) Reverify(ctx context.Context) (*verify.Verification, error) {
-	return c.keyed.Reverify(ctx)
+	v, err := c.keyed.Reverify(ctx)
+	return v, errs.Finish(ctx, err)
 }
 
 // Current returns the last successful verification without checking it. It

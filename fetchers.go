@@ -74,7 +74,8 @@ func (r AttestationRelay) FetchAttestation(ctx context.Context, host string, non
 	if err := validateServiceURL("attestation relay URL", r.URL); err != nil {
 		return nil, err
 	}
-	return fetch.Relayed(ctx, r.URL, host, nonce)
+	document, err := fetch.Relayed(ctx, r.URL, host, nonce)
+	return document, errs.Finish(ctx, err)
 }
 
 // RouterListFetcher obtains the candidate routers for router discovery, in
@@ -129,7 +130,8 @@ func (r RouterListRelay) FetchRouterList(ctx context.Context) ([]string, error) 
 	if err != nil {
 		return nil, errs.Configuration(err)
 	}
-	return router.FetchList(ctx, target)
+	routers, err := router.FetchList(ctx, target)
+	return routers, errs.Finish(ctx, err)
 }
 
 // attestationFetchFunc returns the function that obtains documents for f, or

@@ -12,6 +12,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"testing/iotest"
 	"testing/synctest"
 
 	"github.com/openai/openai-go/v3"
@@ -151,6 +152,36 @@ func TestEnclaveChainWithoutSecretLeavesBodiesAlone(t *testing.T) {
 		resp.Body.Close()
 	}
 	require.Equal(t, []string{`{"model":"m"}`, `{"model":"m","user_cache_secret":"end-user"}`}, got)
+}
+
+// The client's chain ends with the backstop, which classifies a response
+// body that fails to read.
+func TestEnclaveChainClassifiesAResponseBodyReadFailure(t *testing.T) {
+	reset := errors.New("connection reset by peer")
+	conn := roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		body := io.MultiReader(strings.NewReader(`{"partial"`), iotest.ErrReader(reset))
+		return &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: io.NopCloser(body), Request: req}, nil
+	})
+	rt, err := enclaveChain(conn, "enclave.example", "", "")
+	require.NoError(t, err)
+	req, err := http.NewRequest(http.MethodGet, "https://enclave.example/v1/models", nil)
+	require.NoError(t, err)
+	resp, err := rt.RoundTrip(req)
+	require.NoError(t, err)
+	_, err = io.ReadAll(resp.Body)
+	testutil.RequireCategory(t, err, ErrNetwork)
+	require.ErrorIs(t, err, reset)
+}
+
+// The gateway client's chain ends with the backstop too, which classifies a
+// request body that fails to read.
+func TestGatewayHTTPClientClassifiesARequestBodyReadFailure(t *testing.T) {
+	reset := errors.New("connection reset by peer")
+	gw, err := unverifiedGatewayHTTPClient(&GatewayOptions{Catalog: func() Catalog { return Catalog{} }})
+	require.NoError(t, err)
+	_, err = gw.Post(defaultGatewayURL+"chat/completions", "application/json", iotest.ErrReader(reset))
+	testutil.RequireCategory(t, err, ErrNetwork)
+	require.ErrorIs(t, err, reset)
 }
 
 func TestEnclaveHTTPClientReportsItsEnclaveAndTrust(t *testing.T) {

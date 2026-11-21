@@ -3,6 +3,7 @@ package tinfoil
 import (
 	"context"
 
+	"github.com/tinfoilsh/tinfoil-go/internal/errs"
 	"github.com/tinfoilsh/tinfoil-go/internal/gateway"
 )
 
@@ -22,5 +23,6 @@ type Catalog = gateway.Catalog
 // the caller cancelled keeps its category. A host that doesn't form a valid
 // URL is an ErrConfiguration error, even when ctx is done.
 func FetchCatalog(ctx context.Context, host string) (Catalog, error) {
-	return gateway.FetchCatalog(ctx, host)
+	catalog, err := gateway.FetchCatalog(ctx, host)
+	return catalog, errs.Finish(ctx, err)
 }

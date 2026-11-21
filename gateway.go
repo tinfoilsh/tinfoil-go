@@ -91,9 +91,9 @@ type GatewayHTTPClient struct {
 func NewGatewayHTTPClient(ctx context.Context, opts *GatewayOptions) (*GatewayHTTPClient, error) {
 	c, err := unverifiedGatewayHTTPClient(opts)
 	if err != nil {
-		return nil, err
+		return nil, errs.Finish(ctx, err)
 	}
-	if _, err := c.transport.Models(ctx); err != nil {
+	if _, err := c.Models(ctx); err != nil {
 		return nil, err
 	}
 	return c, nil
@@ -131,7 +131,7 @@ func unverifiedGatewayHTTPClient(opts *GatewayOptions) (*GatewayHTTPClient, erro
 	if err != nil {
 		return nil, err
 	}
-	secure := &http.Client{Transport: guarded}
+	secure := &http.Client{Transport: transport.WithBackstop(guarded)}
 	return &GatewayHTTPClient{Client: &http.Client{Transport: secure.Transport}, secure: secure, baseURL: baseURL, transport: gatewayTransport}, nil
 }
 
@@ -160,13 +160,15 @@ func (c *GatewayHTTPClient) BaseURL() string {
 // sorted, without verifying replicas. A failed catalog refresh doesn't fail
 // it; only the first fetch can.
 func (c *GatewayHTTPClient) Models(ctx context.Context) ([]string, error) {
-	return c.transport.Models(ctx)
+	models, err := c.transport.Models(ctx)
+	return models, errs.Finish(ctx, err)
 }
 
 // EnsureVerified returns a verification that is valid now of a replica
 // serving model, verifying replicas only if needed.
 func (c *GatewayHTTPClient) EnsureVerified(ctx context.Context, model string) (*verify.Verification, error) {
-	return c.transport.EnsureVerified(ctx, model)
+	v, err := c.transport.EnsureVerified(ctx, model)
+	return v, errs.Finish(ctx, err)
 }
 
 // Current returns the last successful verification of each replica used so

@@ -50,7 +50,7 @@ func FetchCatalog(ctx context.Context, host string) (Catalog, error) {
 	}
 	resp, err := (&http.Client{Timeout: catalogFetchTimeout, CheckRedirect: fetch.RefuseInsecureRedirects}).Do(req)
 	if err != nil {
-		return nil, errs.Interrupted(ctx, err)
+		return nil, errs.Finish(ctx, err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
@@ -67,7 +67,7 @@ func readCatalog(ctx context.Context, r io.Reader) (Catalog, error) {
 	// oversized catalog apart from one of exactly the maximum size.
 	body, err := io.ReadAll(io.LimitReader(r, maxCatalogBytes+1))
 	if err != nil {
-		return nil, errs.Interrupted(ctx, fmt.Errorf("reading gateway catalog: %w", err))
+		return nil, errs.Finish(ctx, fmt.Errorf("reading gateway catalog: %w", err))
 	}
 	if len(body) > maxCatalogBytes {
 		return nil, errs.Network(fmt.Errorf("gateway catalog exceeds %d bytes", maxCatalogBytes))

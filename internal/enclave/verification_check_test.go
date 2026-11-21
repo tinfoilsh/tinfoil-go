@@ -2,12 +2,14 @@ package enclave
 
 import (
 	"errors"
+	"fmt"
 	"testing"
 	"testing/synctest"
 	"time"
 
 	"github.com/stretchr/testify/require"
 	"github.com/tinfoilsh/tinfoil-go/internal/errs"
+	"github.com/tinfoilsh/tinfoil-go/internal/testutil"
 	"github.com/tinfoilsh/tinfoil-go/verify"
 )
 
@@ -48,6 +50,32 @@ func TestVerificationCheckRejectsWithoutRetry(t *testing.T) {
 		require.ErrorContains(t, err, "verification check rejected enclave.example")
 		require.Equal(t, 1, verifications, "a rejection is a decision about the evidence, so it isn't retried")
 	})
+}
+
+// A check's error is an attestation error, even when it is an SDK error of
+// another category, which would otherwise make the result match two.
+func TestVerificationCheckRejectionHasOneCategory(t *testing.T) {
+	cause := errors.New("unapproved release")
+	for _, returned := range []error{errs.Network(cause), errs.Configuration(cause), fmt.Errorf("check: %w", errs.Attestation(cause))} {
+		t.Run(returned.Error(), func(t *testing.T) {
+			s, err := New(Config{Host: "enclave.example", Pin: verify.Pin{Repo: "org/repo"}, VerificationCheck: func(*verify.Verification) error {
+				return returned
+			}})
+			require.NoError(t, err)
+			var verifications int
+			s.fetch = func() (*verify.Verification, error) {
+				verifications++
+				return testState(time.Now().Add(time.Hour), "key"), nil
+			}
+			_, err = s.Verify()
+			testutil.RequireCategory(t, err, errs.ErrAttestation)
+			require.ErrorIs(t, err, cause, "the check's error stays reachable")
+			require.ErrorContains(t, err, returned.Error())
+			var rejected *rejectedError
+			require.ErrorAs(t, err, &rejected)
+			require.Equal(t, 1, verifications, "a rejection isn't retried, whatever it carries")
+		})
+	}
 }
 
 func TestSlowVerificationCheckFetchesFreshEvidence(t *testing.T) {

@@ -13,6 +13,7 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"math/rand/v2"
@@ -397,7 +398,8 @@ func (t *Transport) RoundTrip(req *http.Request) (*http.Response, error) {
 			var err error
 			out.Body, err = req.GetBody()
 			if err != nil {
-				return nil, fmt.Errorf("replaying request after enclave reroute: %w", err)
+				// GetBody is the caller's when it supplied the body.
+				return nil, errs.Network(fmt.Errorf("replaying request after enclave reroute: %w", errs.Uncategorized(err)))
 			}
 		}
 		resp, err := rt.RoundTrip(out)
@@ -514,6 +516,9 @@ func prepareMultipart(req *http.Request, boundary string) error {
 		return errs.Configuration(fmt.Errorf("multipart upload is missing its boundary"))
 	}
 	body, err := io.ReadAll(http.MaxBytesReader(nil, req.Body, maxMultipartBodySize))
+	if tooLarge := (*http.MaxBytesError)(nil); errors.As(err, &tooLarge) {
+		return errs.Configuration(fmt.Errorf("multipart upload exceeds %d bytes", tooLarge.Limit))
+	}
 	if err != nil {
 		return fmt.Errorf("reading multipart upload: %w", err)
 	}

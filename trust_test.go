@@ -10,6 +10,8 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	"github.com/tinfoilsh/tinfoil-go/internal/errs"
+	"github.com/tinfoilsh/tinfoil-go/internal/testutil"
 	"github.com/tinfoilsh/tinfoil-go/verify"
 	"github.com/tinfoilsh/tinfoil-go/verify/document/collateral"
 )
@@ -57,6 +59,24 @@ func TestTrustSelectsConfigTrustAndPin(t *testing.T) {
 	require.IsType(t, verify.ConfigAuthorizer{}, config, "functions can't be compared")
 	require.NotNil(t, config.(verify.ConfigAuthorizer).Authorize)
 	require.Equal(t, verify.Pin{}, pin, "approval authenticates no name, so there is no pin")
+}
+
+// The verifier reports an authorizer's refusal as a provenance failure, an
+// attestation error, and so a category in the authorizer's error is not
+// kept.
+func TestAnAuthorizersErrorCarriesNoCategory(t *testing.T) {
+	cause := errors.New("config is not authorized")
+	for _, returned := range []error{cause, errs.Network(cause), errs.Configuration(cause)} {
+		config, _, err := verifierInputs(AuthorizedBy{Authorize: func(collateral.ConfigEndorsement) error { return returned }})
+		require.NoError(t, err)
+		got := config.(verify.ConfigAuthorizer).Authorize(collateral.ConfigEndorsement{})
+		require.ErrorIs(t, got, cause)
+		require.Equal(t, returned.Error(), got.Error())
+		testutil.RequireCategory(t, errs.Attestation(&verify.VerificationError{Layer: verify.LayerProvenance, Err: got}), ErrAttestation)
+	}
+	config, _, err := verifierInputs(AuthorizedBy{Authorize: func(collateral.ConfigEndorsement) error { return nil }})
+	require.NoError(t, err)
+	require.NoError(t, config.(verify.ConfigAuthorizer).Authorize(collateral.ConfigEndorsement{}))
 }
 
 // Each variant's own requirements fail before any network I/O, and so does a

@@ -198,7 +198,8 @@ var ehbpKeyConfigError = ehbpidentity.NewKeyConfigError(errors.New("rotated"))
 
 func TestUnreplayableKeyRejectionIsANetworkError(t *testing.T) {
 	bodyErr := errors.New("body is gone")
-	classifiedBodyErr := errs.Attestation(errors.New("classified body failure"))
+	classifiedCause := errors.New("classified body failure")
+	classifiedBodyErr := errs.Attestation(classifiedCause)
 	for _, mode := range rejectingModes {
 		for _, body := range []struct {
 			name    string
@@ -210,8 +211,8 @@ func TestUnreplayableKeyRejectionIsANetworkError(t *testing.T) {
 		}{
 			{"no GetBody", nil, false, nil},
 			{"GetBody fails", func() (io.ReadCloser, error) { return nil, bodyErr }, true, bodyErr},
-			// A GetBody error that has a category of its own is reported in
-			// the message only, so that the result keeps one category.
+			// A GetBody error that has a category of its own is reached
+			// without it, so that the result keeps one category.
 			{"GetBody fails with a category", func() (io.ReadCloser, error) { return nil, classifiedBodyErr }, false, classifiedBodyErr},
 		} {
 			t.Run(mode.name+"/"+body.name, func(t *testing.T) {
@@ -236,6 +237,7 @@ func TestUnreplayableKeyRejectionIsANetworkError(t *testing.T) {
 						require.ErrorIs(t, err, body.bodyErr)
 					} else {
 						require.NotErrorIs(t, err, body.bodyErr)
+						require.ErrorIs(t, err, classifiedCause, "its cause is still reached")
 					}
 				}
 				require.False(t, currentValid(tr), "the rejection still invalidates the verification")

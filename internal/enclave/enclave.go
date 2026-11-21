@@ -191,7 +191,9 @@ func (e *Enclave) fetchVerification() (*verify.Verification, error) {
 	defer cancel()
 	docBytes, err := e.fetchDocument(ctx, e.host, nonce)
 	if err != nil {
-		// A caller's fetcher may already report an SDK category.
+		// A caller's fetcher may report an SDK category, which it keeps, as
+		// a relay's fetch does. Anything else, including the end of ctx, which
+		// is the SDK's, is a network error.
 		return nil, errs.WrapNetwork(err)
 	}
 
@@ -214,13 +216,15 @@ func checkFreshness(v *verify.Verification) error {
 	return nil
 }
 
-// checkVerification runs the caller's VerificationCheck on a copy of v.
+// checkVerification runs the caller's VerificationCheck on a copy of v. A
+// rejection is a trust decision, and so an attestation error whatever the
+// check returns: a category in the check's error is not kept.
 func (e *Enclave) checkVerification(v *verify.Verification) error {
 	if e.check == nil {
 		return nil
 	}
 	if err := e.check(Detached(v)); err != nil {
-		return errs.Attestation(&rejectedError{host: e.host, err: err})
+		return errs.Attestation(&rejectedError{host: e.host, err: errs.Uncategorized(err)})
 	}
 	return nil
 }
