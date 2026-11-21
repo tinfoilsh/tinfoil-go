@@ -17,7 +17,7 @@ import "github.com/tinfoilsh/tinfoil-go/internal/errs"
 // errors.As into a *tinfoil.Error. The SDK error need not be the outermost
 // error: net/http wraps a request's error in a *url.Error, a wrapped
 // library such as openai-go may wrap that in turn, and the SDK may add
-// context, so that the message can start with that context before the
+// context, and so the message can start with that context before the
 // category, as in
 // "following gateway route to enclave e.example: attestation error: <cause>".
 // An SDK error never contains another one.

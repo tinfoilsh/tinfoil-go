@@ -223,8 +223,8 @@ func checkFreshness(v *verify.Verification) error {
 }
 
 // checkVerification runs the caller's VerificationCheck on a copy of v. A
-// rejection is a trust decision, so that it is an attestation error whatever
-// the check returns: a category in the check's error is not kept.
+// rejection is a trust decision, and so an attestation error whatever the
+// check returns: a category in the check's error is not kept.
 func (e *Enclave) checkVerification(v *verify.Verification) error {
 	if e.check == nil {
 		return nil

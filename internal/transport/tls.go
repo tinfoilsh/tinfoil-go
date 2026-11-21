@@ -172,7 +172,7 @@ func pinnedTransport(dt *http.Transport, key string) (*http.Transport, error) {
 }
 
 // callerRejection returns the error of a caller's certificate check, or nil.
-// The check rejects the peer, a trust decision, so that its error is an
+// The check rejects the peer, a trust decision, and so its error is an
 // attestation error whatever category it carries.
 func callerRejection(err error) error {
 	if err == nil {

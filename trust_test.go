@@ -62,7 +62,7 @@ func TestTrustSelectsConfigTrustAndPin(t *testing.T) {
 }
 
 // The verifier reports an authorizer's refusal as a provenance failure, an
-// attestation error, so that a category in the authorizer's error is not
+// attestation error, and so a category in the authorizer's error is not
 // kept.
 func TestAnAuthorizersErrorCarriesNoCategory(t *testing.T) {
 	cause := errors.New("config is not authorized")

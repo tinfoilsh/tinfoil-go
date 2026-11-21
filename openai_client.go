@@ -65,7 +65,7 @@ type OpenAIClient struct {
 // have no effect; set opts.APIPath to change the API path.
 func NewOpenAIClient(hc AttestedHTTPClient, opts *OpenAIOptions, openaiOpts ...option.RequestOption) (*OpenAIClient, error) {
 	c, err := newOpenAIClient(hc, opts, openaiOpts...)
-	// It does no I/O, so that no context of the caller's applies.
+	// It does no I/O, and so no context of the caller's applies.
 	return c, errs.Finish(context.Background(), err)
 }
 
