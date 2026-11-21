@@ -25,9 +25,10 @@ type RouterOptions struct {
 	// passes Policy, before the client uses the router's keys: for each
 	// router tried during discovery, and whenever the client verifies again.
 	// Return an error to reject the router. Discovery then moves on to the
-	// next router; otherwise verification fails with an ErrAttestation error that
-	// wraps the error and isn't retried. Requests wait while it runs, so keep
-	// it fast; it may be called concurrently.
+	// next router; otherwise verification fails with an ErrAttestation error
+	// that wraps the error and isn't retried; a category that the error
+	// carries, as a *tinfoil.Error does, is not kept. Requests wait while it
+	// runs, so keep it fast; it may be called concurrently.
 	VerificationCheck func(v *verify.Verification) error
 	// UserCacheSecret is the default prompt-cache scope for the client's
 	// requests. A non-empty user_cache_secret string in a request's JSON body

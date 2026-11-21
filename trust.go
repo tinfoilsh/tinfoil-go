@@ -59,7 +59,8 @@ type SignedBy struct {
 // must reject unauthorized config bytes; it may be called concurrently.
 // Runtime, platform and hardware checks still apply. Approval authenticates
 // no registry name or timestamp, so AuthorizedBy has no pin. Authorize must
-// not be nil.
+// not be nil. An error that it returns rejects the enclave with an
+// ErrAttestation error that wraps it, without a category that it carries.
 type AuthorizedBy struct {
 	Authorize func(collateral.ConfigEndorsement) error
 }
