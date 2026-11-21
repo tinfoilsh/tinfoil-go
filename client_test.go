@@ -31,6 +31,21 @@ func TestNewClientDiscoversUnderItsContext(t *testing.T) {
 	})
 }
 
+// NewClient returns the router constructor's error as it is, in one
+// category and without a prefix of its own.
+func TestNewClientReturnsTheRoutersError(t *testing.T) {
+	original := http.DefaultTransport
+	t.Cleanup(func() { http.DefaultTransport = original })
+	refused := errors.New("connection refused")
+	synctest.Test(t, func(t *testing.T) {
+		http.DefaultTransport = roundTripFunc(func(*http.Request) (*http.Response, error) { return nil, refused })
+		_, err := NewClient(context.Background())
+		testutil.RequireCategory(t, err, ErrNetwork)
+		require.ErrorIs(t, err, refused)
+		require.True(t, strings.HasPrefix(err.Error(), "network error: "), err.Error())
+	})
+}
+
 func TestLiveClientStreamingChat(t *testing.T) {
 	testutil.RequireLive(t, "TINFOIL_API_KEY")
 	apiKey := os.Getenv("TINFOIL_API_KEY")

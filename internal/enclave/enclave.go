@@ -98,12 +98,6 @@ func NewForTest(host string, fetch func() (*verify.Verification, error)) *Enclav
 	return &Enclave{host: host, fetch: fetch}
 }
 
-// NewForTestWithCheck is NewForTest with a VerificationCheck, which each
-// verification that fetch returns must pass.
-func NewForTestWithCheck(host string, fetch func() (*verify.Verification, error), check func(v *verify.Verification) error) *Enclave {
-	return &Enclave{host: host, fetch: fetch, check: check}
-}
-
 // Host returns the enclave host.
 func (e *Enclave) Host() string {
 	return e.host
