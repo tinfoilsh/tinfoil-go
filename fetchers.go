@@ -62,8 +62,9 @@ type AttestationRelay struct {
 // FetchAttestation fetches the attestation document of host for nonce
 // through the relay. A failure to fetch it is an ErrNetwork error, including
 // when the fetch reaches its own limit of 30 seconds, except that the
-// caller's cancellation is returned unchanged: when ctx is done, the error is
-// ctx.Err() itself, which matches no category. A client that verifies through
+// caller's cancellation is returned with no category: once ctx is done, the
+// error matches ctx.Err() with errors.Is, possibly wrapped, as net/http wraps
+// it in a *url.Error. A client that verifies through
 // the relay reports the end of its own context as ErrNetwork, since that
 // context is the SDK's, not the caller's; see AttestationFetcher.
 func (r AttestationRelay) FetchAttestation(ctx context.Context, host string, nonce []byte) ([]byte, error) {
@@ -112,9 +113,9 @@ type RouterListRelay struct {
 
 // FetchRouterList fetches the router list through the relay. A failure to
 // fetch it is an ErrNetwork error, including when the fetch reaches its own
-// limit of 30 seconds, except that the caller's cancellation is returned
-// unchanged: when ctx is done, the error is ctx.Err() itself, which matches no
-// category.
+// limit of 30 seconds, except that the caller's cancellation is returned with
+// no category: once ctx is done, the error matches ctx.Err() with errors.Is,
+// possibly wrapped, as net/http wraps it in a *url.Error.
 func (r RouterListRelay) FetchRouterList(ctx context.Context) ([]string, error) {
 	if err := validateServiceURL("router list relay URL", r.URL); err != nil {
 		return nil, err

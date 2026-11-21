@@ -40,8 +40,9 @@ type Catalog map[string]CatalogEntry
 // FetchCatalog reads the catalog of the gateway at host, keeping only models
 // with replicas of a bare tinfoilsh/ repository, without a tag or digest. It
 // reports a failure to fetch or read the catalog as a network error, except
-// that a request or read that ctx interrupts returns ctx.Err() unchanged; its
-// own 10-second limit is a network error.
+// that a request or read that ctx interrupts returns its error with no
+// category, matching ctx.Err() with errors.Is; its own 10-second limit is a
+// network error.
 func FetchCatalog(ctx context.Context, host string) (Catalog, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "https://"+host+catalogPath, nil)
 	if err != nil {

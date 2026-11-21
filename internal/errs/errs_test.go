@@ -3,6 +3,7 @@ package errs
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -15,7 +16,12 @@ func TestInterrupted(t *testing.T) {
 	cancel()
 
 	require.NoError(t, Interrupted(done, nil))
-	require.Equal(t, context.Canceled, Interrupted(done, cause), "the caller's cancellation replaces the failure")
+	interrupted := fmt.Errorf("Get: %w", context.Canceled)
+	require.Equal(t, interrupted, Interrupted(done, interrupted), "the call's own error, as it is")
+	joined := Interrupted(done, cause)
+	require.ErrorIs(t, joined, context.Canceled, "a cause that doesn't name the cancellation is joined with it")
+	require.ErrorIs(t, joined, cause)
+	require.NotErrorIs(t, joined, ErrNetwork)
 
 	err := Interrupted(live, cause)
 	require.ErrorIs(t, err, ErrNetwork)

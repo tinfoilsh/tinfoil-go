@@ -191,7 +191,8 @@ func TestFetchHonorsCallerDeadline(t *testing.T) {
 		defer cancel()
 		start := time.Now()
 		_, err := Document(ctx, "enclave.example", testNonce())
-		require.Equal(t, context.DeadlineExceeded, err, "the caller's deadline, unchanged")
+		require.ErrorIs(t, err, context.DeadlineExceeded, "the caller's deadline")
+		require.NotErrorIs(t, err, errs.ErrNetwork, "the caller's deadline has no category")
 		require.Equal(t, 5*time.Second, time.Since(start), "a caller deadline shorter than the cap applies")
 	})
 }

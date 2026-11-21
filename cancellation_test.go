@@ -26,10 +26,10 @@ func hangEveryFetch(t *testing.T) {
 	http.DefaultTransport = hang
 }
 
-// requireNoCategory fails unless err is want itself, in no SDK category.
+// requireNoCategory fails unless err matches want and no SDK category.
 func requireNoCategory(t *testing.T, want, err error) {
 	t.Helper()
-	require.Equal(t, want, err, "the caller's context error, unchanged")
+	require.ErrorIs(t, err, want, "the caller's context error")
 	for _, category := range []error{ErrNetwork, ErrAttestation, ErrConfiguration} {
 		require.NotErrorIs(t, err, category)
 	}

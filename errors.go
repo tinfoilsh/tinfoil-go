@@ -9,13 +9,11 @@ import "github.com/tinfoilsh/tinfoil-go/internal/errs"
 // the cause, as in "attestation error: <cause>". Upstream API errors, such as
 // OpenAI's, keep their own types.
 //
-// The caller's own cancellation is in no category. A function that takes a
-// context, such as NewEnclaveHTTPClient, EnsureVerified, FetchCatalog or a
-// relay's fetch, returns that context's Err() itself once the context is
-// done; NewClient wraps it with a message, so errors.Is still finds it.
-// A request sent through a client fails as net/http reports a cancellation,
-// with a *url.Error that wraps it. A timeout that the SDK imposes on its own
-// work is an ErrNetwork error.
+// The caller's own cancellation is in no category. Once the context that the
+// caller passed in is done, the error matches that context's Err() with
+// errors.Is, possibly wrapped: net/http wraps it in a *url.Error, for example,
+// and NewClient adds a message. A timeout that the SDK imposes on its own work
+// is an ErrNetwork error.
 type Error = errs.Error
 
 // The categories of an Error. Check one with errors.Is, for example
