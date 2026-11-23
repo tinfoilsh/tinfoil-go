@@ -72,7 +72,8 @@ func (t *ehbpRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) 
 // repeated or invalid, or a chunk that doesn't decrypt or that breaks the
 // framing's bounds. Such a response may not come from the attested key, so
 // EHBP fails closed. Any other error, such as a body that ends early, which
-// the network can cause, is returned as it is.
+// the network can cause, is returned as it is, so that Transport classifies it
+// as it classifies other failures of the network.
 func classifyEHBP(err error) error {
 	switch ehbpprotocol.CodeOf(err) {
 	case ehbpprotocol.MissingResponseNonce, ehbpprotocol.InvalidResponseNonce, ehbpprotocol.DuplicateResponseNonce,
