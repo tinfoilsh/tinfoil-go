@@ -9,24 +9,136 @@ import (
 	"github.com/tinfoilsh/tinfoil-go/verify/measurement"
 )
 
-// VerificationSchemaVersion identifies the JSON below. It changes when a field
-// is removed or its meaning changes, so a caller can refuse a payload it does
-// not understand rather than read a renamed field as absent.
-const VerificationSchemaVersion = 1
+// VerificationSchemaVersion identifies the result JSON below. It changes when
+// a field is removed or its meaning changes, so a caller can refuse a payload
+// it does not understand rather than read a renamed field as absent. Version
+// 2 replaced the verification object of version 1 with the result object and
+// its verification report.
+const VerificationSchemaVersion = 2
 
-// verificationJSON is the payload a caller decodes. This struct is the schema
-// that forms the FFI contract that the Swift SDK expects. This schema is
-// expected to remain stable to decouple the internal implementation details of
-// the Go SDK from the interface that Swift sees. Avoid changing this struct if
+// resultJSON is what Verify returns for a verification that ran: the
+// verifier accepted the document, or rejected it with a VerificationError.
+// This struct and the ones that it contains are the schema of the FFI
+// contract that the Swift and Kotlin SDKs decode. The schema is expected to
+// remain stable, to decouple the internal implementation details of the Go
+// SDK from the interface that Swift and Kotlin see. Avoid changing it if
 // possible.
 //
-// If this struct needs non-backwards-compatible modifications, be sure to:
+// If it needs non-backwards-compatible modifications, be sure to:
 // 1. Bump the VerificationSchemaVersion
-// 2. Update the code that decodes this struct in the tinfoil-swift SDK
-// 3. Update tests/mobile/Smoke.swift
-type verificationJSON struct {
-	SchemaVersion int    `json:"schema_version"`
-	ConfigRepo    string `json:"config_repo"`
+// 2. Update the code that decodes it in the tinfoil-swift and tinfoil-kt SDKs
+// 3. Update tests/mobile/Smoke.swift and tests/mobile/Smoke.java
+//
+// The JSON, with every optional member shown:
+//
+//	{
+//	  "schema_version": 2,
+//	  "report": {
+//	    "steps": [
+//	      {"layer": "envelope", "status": "passed"},
+//	      {"layer": "provenance", "status": "passed"},
+//	      {"layer": "quote", "status": "failed", "message": "verification error: quote: <detail>"},
+//	      {"layer": "policy", "status": "not_run"}
+//	    ],
+//	    "verified_facts": { ...verifiedFactsJSON, on success only... },
+//	    "partial_facts": {
+//	      "expected": {
+//	        "config_repo": "<owner/name>",
+//	        "artifact": { ...artifactJSON... },
+//	        "config": { ...configJSON... },
+//	        "platform": { ...artifactJSON... },
+//	        "code_measurement": {"type": "<measurement type>", "registers": ["<hex or empty>", "..."]},
+//	        "measurement": {"type": "<measurement type>", "registers": ["<hex>", "..."]}
+//	      },
+//	      "measured": {
+//	        "cpu_measurement": {"type": "<measurement type>", "registers": ["<hex>", "..."]},
+//	        "tls_public_key_fp": "<hex>",
+//	        "hpke_public_key_fp": "<hex>"
+//	      }
+//	    },
+//	    "metadata": {"verified_at": "<RFC 3339>"}
+//	  },
+//	  "error": {"layer": "quote", "message": "verification error: quote: <detail>"}
+//	}
+//
+// On success, error is absent and the report carries verified_facts and no
+// partial_facts. On a rejection, error is present, and the report carries
+// partial_facts and no verified_facts; the caller throws its verification
+// error with the report. The steps are envelope, provenance, quote and
+// policy, in that order, each "passed", "failed", "skipped" or "not_run";
+// more layers may be added, so a caller tolerates a layer that it doesn't
+// know. A failed step's message is the error's message, and a skipped
+// step's is the reason; other steps have none. In partial_facts, expected is
+// present once provenance passed or was skipped, and measured once the
+// envelope passed. code_measurement is in the layout of the platform that
+// the document's evidence names, with "" for a register that the release
+// leaves to the platform. measurement, the full set of registers that the
+// quote had to attest, is present only once the policy step resolved it, and
+// cpu_measurement only once the quote step passed. The key fingerprints in
+// a rejection are only the document's claim, never verified, and a report
+// never carries a channel key: hpke_public_key_fp is the lowercase-hex
+// SHA-256 of the HPKE key's bytes.
+//
+// Optional objects are omitted only when they are absent, never because
+// they are empty: an envelope that passed for a document that endorses no
+// keys still has "measured": {}.
+type resultJSON struct {
+	SchemaVersion int        `json:"schema_version"`
+	Report        reportJSON `json:"report"`
+	Error         *errorJSON `json:"error,omitzero"`
+}
+
+// errorJSON is a VerificationError: the layer that rejected the document, and
+// the message in the format that errors.go describes.
+type errorJSON struct {
+	Layer   string `json:"layer"`
+	Message string `json:"message"`
+}
+
+type reportJSON struct {
+	Steps         []stepJSON         `json:"steps"`
+	VerifiedFacts *verifiedFactsJSON `json:"verified_facts,omitzero"`
+	PartialFacts  *partialFactsJSON  `json:"partial_facts,omitzero"`
+	Metadata      metadataJSON       `json:"metadata"`
+}
+
+type stepJSON struct {
+	Layer   string `json:"layer"`
+	Status  string `json:"status"`
+	Message string `json:"message,omitempty"`
+}
+
+// metadataJSON describes the verification. VerifiedAt is RFC 3339: the
+// instant that the document was appraised at. The caller records which SDK
+// did the verifying; this package is built from source, so it could only
+// report its own version as "devel".
+type metadataJSON struct {
+	VerifiedAt string `json:"verified_at"`
+}
+
+type partialFactsJSON struct {
+	Expected *expectedFactsJSON `json:"expected,omitzero"`
+	Measured *measuredFactsJSON `json:"measured,omitzero"`
+}
+
+type expectedFactsJSON struct {
+	ConfigRepo      string           `json:"config_repo"`
+	Artifact        *artifactJSON    `json:"artifact"`
+	Config          *configJSON      `json:"config,omitempty"`
+	Platform        *artifactJSON    `json:"platform,omitempty"`
+	CodeMeasurement *measurementJSON `json:"code_measurement,omitempty"`
+	Measurement     *measurementJSON `json:"measurement,omitempty"`
+}
+
+type measuredFactsJSON struct {
+	CPUMeasurement  *measurementJSON `json:"cpu_measurement,omitempty"`
+	TLSPublicKeyFP  string           `json:"tls_public_key_fp,omitempty"`
+	HPKEPublicKeyFP string           `json:"hpke_public_key_fp,omitempty"`
+}
+
+// verifiedFactsJSON is what a verification proved.
+type verifiedFactsJSON struct {
+	ConfigRepo string `json:"config_repo"`
 
 	CodeDigest         string           `json:"code_digest"`
 	CodeTag            string           `json:"code_tag,omitempty"`
@@ -41,7 +153,7 @@ type verificationJSON struct {
 
 	// TLSPublicKeyFP and HPKEPublicKey are lifted out of CryptoMaterial by ID
 	// and format, because binding a channel to them is what a caller does with
-	// a verification. A TLS-only enclave endorses no HPKE key.
+	// verified facts. A TLS-only enclave endorses no HPKE key.
 	TLSPublicKeyFP string `json:"tls_public_key_fp"`
 	HPKEPublicKey  string `json:"hpke_public_key,omitempty"`
 	// CryptoMaterial carries every endorsed item, including any this contract
@@ -51,11 +163,6 @@ type verificationJSON struct {
 	// FreshnessExpiresAt is RFC 3339. A caller must stop authorizing new
 	// requests at or after it, and verify again.
 	FreshnessExpiresAt string `json:"freshness_expires_at"`
-
-	// VerifiedAt is RFC 3339: the instant the document was appraised at. The
-	// caller records which SDK did the verifying; this package is built from
-	// source, so it could only report its own version as "devel".
-	VerifiedAt string `json:"verified_at"`
 }
 
 // measurementJSON is a measurement in the contract: a type and its registers
@@ -86,9 +193,10 @@ type configJSON struct {
 	SignatureTime  string `json:"signature_time,omitempty"`
 }
 
-// artifactJSON is a runtime or platform artifact a config-based verification
-// accepted. Source is "endorsement" or "embedded"; an embedded artifact has no
-// name, commit or approval time, and an embedded platform has only a digest.
+// artifactJSON is a code release, or a runtime or platform artifact that a
+// config-based verification accepted. Source is "endorsement" or "embedded";
+// an embedded artifact has no name, commit or approval time, and an embedded
+// platform has only a digest.
 type artifactJSON struct {
 	Source       string `json:"source"`
 	Repo         string `json:"repo,omitempty"`
@@ -105,13 +213,71 @@ type cryptoMaterialJSON struct {
 	Data   string `json:"data"`
 }
 
-// toVerificationJSON maps a verification onto the contract. A missing
+// toResultJSON maps the outcome of a verification that ran onto the
+// contract: report for an accepted document, or rejected for a rejected one.
+func toResultJSON(report *verify.VerificationReport, rejected *verify.VerificationError) resultJSON {
+	out := resultJSON{SchemaVersion: VerificationSchemaVersion}
+	if rejected != nil {
+		report = rejected.Report
+		out.Error = &errorJSON{Layer: string(rejected.Layer), Message: toMobileError(rejected).Error()}
+	}
+	out.Report = toReportJSON(report)
+	if out.Error != nil {
+		// A failed step's message is the error's, in the bridge's format.
+		for i := range out.Report.Steps {
+			if out.Report.Steps[i].Status == string(verify.StepFailed) {
+				out.Report.Steps[i].Message = out.Error.Message
+			}
+		}
+	}
+	return out
+}
+
+func toReportJSON(r *verify.VerificationReport) reportJSON {
+	out := reportJSON{Steps: []stepJSON{}}
+	if r == nil {
+		return out
+	}
+	for _, s := range r.Steps {
+		out.Steps = append(out.Steps, stepJSON{Layer: string(s.Layer), Status: string(s.Status), Message: s.Message})
+	}
+	out.Metadata.VerifiedAt = formatTime(r.Metadata.VerifiedAt)
+	if r.VerifiedFacts != nil {
+		facts := toVerifiedFactsJSON(r.VerifiedFacts)
+		out.VerifiedFacts = &facts
+	}
+	if p := r.PartialFacts; p != nil {
+		out.PartialFacts = &partialFactsJSON{}
+		if e := p.Expected; e != nil {
+			out.PartialFacts.Expected = &expectedFactsJSON{
+				ConfigRepo:      e.ConfigRepo,
+				Artifact:        toArtifactJSON(e.Artifact),
+				CodeMeasurement: toExpectedJSON(e.CodeMeasurement),
+				Measurement:     toMeasurementJSON(e.Measurement),
+			}
+			if e.Config != nil {
+				out.PartialFacts.Expected.Config = toConfigJSON(*e.Config)
+			}
+			if e.Platform != nil {
+				out.PartialFacts.Expected.Platform = toArtifactJSON(*e.Platform)
+			}
+		}
+		if m := p.Measured; m != nil {
+			out.PartialFacts.Measured = &measuredFactsJSON{TLSPublicKeyFP: m.TLSPublicKeyFP, HPKEPublicKeyFP: m.HPKEPublicKeyFP}
+			if m.CPU != nil {
+				out.PartialFacts.Measured.CPUMeasurement = toMeasurementJSON(m.CPU.Measurement)
+			}
+		}
+	}
+	return out
+}
+
+// toVerifiedFactsJSON maps verified facts onto the contract. A missing
 // endorsed key is left empty rather than failing: the document is verified
 // either way, and a caller that needs a channel key checks for it.
-func toVerificationJSON(v *verify.Verification) verificationJSON {
+func toVerifiedFactsJSON(v *verify.VerifiedFacts) verifiedFactsJSON {
 	items := v.CryptoMaterial()
-	out := verificationJSON{
-		SchemaVersion:      VerificationSchemaVersion,
+	out := verifiedFactsJSON{
 		ConfigRepo:         v.ConfigRepo(),
 		CodeDigest:         v.CodeDigest(),
 		CodeTag:            v.CodeTag(),
@@ -119,15 +285,9 @@ func toVerificationJSON(v *verify.Verification) verificationJSON {
 		EnclaveMeasurement: toMeasurementJSON(v.EnclaveMeasurement()),
 		CryptoMaterial:     make([]cryptoMaterialJSON, 0, len(items)),
 		FreshnessExpiresAt: v.FreshnessExpiresAt().UTC().Format(time.RFC3339Nano),
-		VerifiedAt:         v.Metadata().VerifiedAt.UTC().Format(time.RFC3339Nano),
 	}
 	if config, ok := v.Config(); ok {
-		out.Config = &configJSON{
-			Source: string(config.Source), Name: config.Name, Digest: config.Digest,
-			Reference: config.Reference, SigningKeyHint: config.SigningKeyHint,
-			ApprovalTime: formatTime(config.ApprovalTime), RegistryID: config.RegistryID,
-			SignatureTime: formatTime(config.SignatureTime),
-		}
+		out.Config = toConfigJSON(config)
 	}
 	if runtime, ok := v.Runtime(); ok {
 		out.Runtime = toArtifactJSON(runtime)
@@ -141,6 +301,15 @@ func toVerificationJSON(v *verify.Verification) verificationJSON {
 		out.CryptoMaterial = append(out.CryptoMaterial, cryptoMaterialJSON{ID: item.ID, Format: item.Format, Data: item.Data})
 	}
 	return out
+}
+
+func toConfigJSON(config verify.ConfigVerification) *configJSON {
+	return &configJSON{
+		Source: string(config.Source), Name: config.Name, Digest: config.Digest,
+		Reference: config.Reference, SigningKeyHint: config.SigningKeyHint,
+		ApprovalTime: formatTime(config.ApprovalTime), RegistryID: config.RegistryID,
+		SignatureTime: formatTime(config.SignatureTime),
+	}
 }
 
 func toArtifactJSON(a verify.ArtifactVerification) *artifactJSON {

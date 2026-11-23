@@ -30,7 +30,9 @@ final class Smoke {
         boolean callerAuthorizes = verifier.callerAuthorizesConfig();
         verifier.checkPinVerifiability("org/repo", "");
 
-        // Verifying performs no I/O; it appraises the fetched bytes.
+        // Verifying performs no I/O; it appraises the fetched bytes. Both an
+        // accepted and a rejected document return the result JSON with the
+        // report; only an error without a report is thrown.
         String payload = verifier.verify(new byte[0], nonce, "org/repo", "");
 
         // Errors cross as java.lang.Exception with only a message; the prefix

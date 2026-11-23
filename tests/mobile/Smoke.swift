@@ -7,9 +7,9 @@ import TinfoilGo
 //
 // In particular it cannot detect a change to the JSON contract — the CodingKeys
 // below are string literals with no link to the Go struct that produces them.
-// The Verification type below records the Swift side of that shape; the Go side
-// is verificationJSON in mobile/verification.go, whose doc says to update this
-// file when it changes.
+// The VerificationResult type below records the Swift side of that shape; the
+// Go side is resultJSON in mobile/verification.go, whose doc says to update
+// this file when it changes.
 func checkMobileSurface() throws {
     var error: NSError?
     let _: Int64 = MobileVerificationSchemaVersion
@@ -40,10 +40,12 @@ func checkMobileSurface() throws {
     let _: Bool = verifier.callerAuthorizesConfig()
     try verifier.checkPinVerifiability("org/repo", project: "")
 
-    // Verifying performs no I/O; it appraises the fetched bytes.
+    // Verifying performs no I/O; it appraises the fetched bytes. Both an
+    // accepted and a rejected document return a result with the report; only
+    // an error without a report, such as a usage error, is thrown.
     let payload: String = verifier.verify(Data(), nonce: nonce, repo: "org/repo", project: "", error: &error)
     if let error { throw error }
-    _ = try decodeVerification(payload)
+    _ = try decodeVerificationResult(payload)
 
     // Errors cross as NSError with only a message; the prefix is the category.
     let _: [String] = [
@@ -58,11 +60,85 @@ final class SmokeAuthorizer: NSObject, MobileConfigAuthorizerProtocol {
     }
 }
 
-/// The fields a caller is expected to find in a verification payload.
+/// The fields a caller is expected to find in a verification result.
 /// `mobile/verification.go` owns the shape; this mirrors it so the Swift side
 /// of the contract is written down next to the surface that carries it.
-struct Verification: Decodable {
+struct VerificationResult: Decodable {
     let schemaVersion: Int
+    let report: Report
+    let error: RejectionError?
+
+    struct RejectionError: Decodable {
+        let layer: String
+        let message: String
+    }
+
+    struct Report: Decodable {
+        let steps: [Step]
+        let verifiedFacts: VerifiedFacts?
+        let partialFacts: PartialFacts?
+        let metadata: Metadata
+
+        private enum CodingKeys: String, CodingKey {
+            case steps, metadata
+            case verifiedFacts = "verified_facts"
+            case partialFacts = "partial_facts"
+        }
+    }
+
+    struct Step: Decodable {
+        let layer: String
+        let status: String
+        let message: String?
+    }
+
+    struct Metadata: Decodable {
+        let verifiedAt: String
+
+        private enum CodingKeys: String, CodingKey {
+            case verifiedAt = "verified_at"
+        }
+    }
+
+    struct PartialFacts: Decodable {
+        let expected: ExpectedFacts?
+        let measured: MeasuredFacts?
+    }
+
+    struct ExpectedFacts: Decodable {
+        let configRepo: String
+        let artifact: VerifiedFacts.Artifact
+        let config: VerifiedFacts.Config?
+        let platform: VerifiedFacts.Artifact?
+        let codeMeasurement: VerifiedFacts.Measurement?
+        let measurement: VerifiedFacts.Measurement?
+
+        private enum CodingKeys: String, CodingKey {
+            case artifact, config, platform, measurement
+            case configRepo = "config_repo"
+            case codeMeasurement = "code_measurement"
+        }
+    }
+
+    struct MeasuredFacts: Decodable {
+        let cpuMeasurement: VerifiedFacts.Measurement?
+        let tlsPublicKeyFP: String?
+        let hpkePublicKeyFP: String?
+
+        private enum CodingKeys: String, CodingKey {
+            case cpuMeasurement = "cpu_measurement"
+            case tlsPublicKeyFP = "tls_public_key_fp"
+            case hpkePublicKeyFP = "hpke_public_key_fp"
+        }
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case schemaVersion = "schema_version"
+        case report, error
+    }
+}
+
+struct VerifiedFacts: Decodable {
     let configRepo: String
     let codeDigest: String
     let codeTag: String?
@@ -75,7 +151,6 @@ struct Verification: Decodable {
     let hpkePublicKey: String?
     let cryptoMaterial: [CryptoMaterial]
     let freshnessExpiresAt: String
-    let verifiedAt: String
 
     struct Measurement: Decodable {
         let type: String
@@ -123,7 +198,6 @@ struct Verification: Decodable {
     }
 
     private enum CodingKeys: String, CodingKey {
-        case schemaVersion = "schema_version"
         case configRepo = "config_repo"
         case codeDigest = "code_digest"
         case codeTag = "code_tag"
@@ -134,10 +208,9 @@ struct Verification: Decodable {
         case hpkePublicKey = "hpke_public_key"
         case cryptoMaterial = "crypto_material"
         case freshnessExpiresAt = "freshness_expires_at"
-        case verifiedAt = "verified_at"
     }
 }
 
-func decodeVerification(_ payload: String) throws -> Verification {
-    try JSONDecoder().decode(Verification.self, from: Data(payload.utf8))
+func decodeVerificationResult(_ payload: String) throws -> VerificationResult {
+    try JSONDecoder().decode(VerificationResult.self, from: Data(payload.utf8))
 }

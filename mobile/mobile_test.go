@@ -69,7 +69,6 @@ func TestErrorsLeadWithCategory(t *testing.T) {
 		{"URL as host", UsageErrorPrefix, func() error { _, err := AttestationURL("https://enclave.example", "", nonce); return err }},
 		{"invalid repo", UsageErrorPrefix, func() error { _, err := verifier.Verify(doc, nonce, "owner", ""); return err }},
 		{"short nonce", UsageErrorPrefix, func() error { _, err := verifier.Verify([]byte("{}"), nonce[1:], routerRepo, ""); return err }},
-		{"malformed document", VerificationErrorPrefix + "envelope: ", func() error { _, err := verifier.Verify([]byte("{}"), nonce, routerRepo, ""); return err }},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			err := tt.call()
@@ -140,13 +139,40 @@ func TestLiveVerify(t *testing.T) {
 	payload, err := verifier.Verify(doc, nonce, routerRepo, routerRepo)
 	require.NoError(t, err)
 
-	var got verificationJSON
+	var got resultJSON
 	require.NoError(t, json.Unmarshal([]byte(payload), &got))
-	assert.Equal(t, routerRepo, got.ConfigRepo)
-	assert.NotEmpty(t, got.HPKEPublicKey)
+	require.Nil(t, got.Error)
+	require.NotNil(t, got.Report.VerifiedFacts)
+	assert.Equal(t, routerRepo, got.Report.VerifiedFacts.ConfigRepo)
+	assert.NotEmpty(t, got.Report.VerifiedFacts.HPKEPublicKey)
 
 	_, err = verifier.Verify(doc, nonce[:len(nonce)-1], routerRepo, "")
-	require.Error(t, err, "a document verifies only against the nonce it was fetched with")
-	_, err = verifier.Verify(doc, NewNonce(), routerRepo, "")
-	require.Error(t, err, "a document verifies only against the nonce it was fetched with")
+	require.Error(t, err, "a nonce of the wrong size is a usage error")
+	payload, err = verifier.Verify(doc, NewNonce(), routerRepo, "")
+	require.NoError(t, err, "a rejection is a result")
+	got = resultJSON{}
+	require.NoError(t, json.Unmarshal([]byte(payload), &got))
+	require.NotNil(t, got.Error, "a document verifies only against the nonce it was fetched with")
+	assert.Equal(t, "envelope", got.Error.Layer)
+}
+
+// A rejected document is a result that carries the report, not an error.
+func TestVerifyReturnsARejectionAsAResult(t *testing.T) {
+	verifier, err := NewVerifier("")
+	require.NoError(t, err)
+	nonce := NewNonce()
+	payload, err := verifier.Verify([]byte("{}"), nonce, routerRepo, "")
+	require.NoError(t, err)
+	var got resultJSON
+	require.NoError(t, json.Unmarshal([]byte(payload), &got))
+	require.NotNil(t, got.Error)
+	assert.Equal(t, "envelope", got.Error.Layer)
+	assert.True(t, strings.HasPrefix(got.Error.Message, VerificationErrorPrefix+"envelope: "), got.Error.Message)
+	assert.Equal(t, VerificationSchemaVersion, got.SchemaVersion)
+	require.Len(t, got.Report.Steps, 4)
+	assert.Equal(t, stepJSON{Layer: "envelope", Status: "failed", Message: got.Error.Message}, got.Report.Steps[0])
+	assert.Nil(t, got.Report.VerifiedFacts)
+	require.NotNil(t, got.Report.PartialFacts)
+	assert.Nil(t, got.Report.PartialFacts.Expected)
+	assert.Nil(t, got.Report.PartialFacts.Measured)
 }

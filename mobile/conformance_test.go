@@ -9,6 +9,7 @@ import (
 	"encoding/json/v2"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -88,13 +89,35 @@ func TestConformanceVectorsMatchTheAdapter(t *testing.T) {
 				return
 			}
 			if err != nil {
+				// Only an error without a report is returned rather than
+				// encoded in the result.
 				code, _ := conformance.RejectionCode(err)
 				require.NotNil(t, want.Rejection, "the binding rejected with %v where the adapter accepted", err)
+				assert.Equal(t, "MALFORMED_INPUT", code, "%v", err)
 				assert.Equal(t, want.Rejection.Code, code, "%v", err)
 				return
 			}
-			var got verificationJSON
-			require.NoError(t, json.Unmarshal([]byte(payload), &got))
+			var result resultJSON
+			require.NoError(t, json.Unmarshal([]byte(payload), &result))
+			if want.Report != nil {
+				var steps []conformance.ReportStep
+				for _, s := range result.Report.Steps {
+					steps = append(steps, conformance.ReportStep{Layer: s.Layer, Status: s.Status})
+				}
+				assert.Equal(t, want.Report.Steps, steps)
+			}
+			if result.Error != nil {
+				require.NotNil(t, want.Report, "the adapter reports every rejection by the verifier")
+				require.NotNil(t, want.Rejection, "the binding rejected with %+v where the adapter accepted", result.Error)
+				assert.Equal(t, want.Rejection.Code, strings.ToUpper(result.Error.Layer)+"_REJECTED")
+				assert.Nil(t, result.Report.VerifiedFacts)
+				require.NotNil(t, result.Report.PartialFacts)
+				assert.Equal(t, want.Report.PartialFacts.Measured != nil, result.Report.PartialFacts.Measured != nil)
+				assert.Equal(t, want.Report.PartialFacts.Expected != nil, result.Report.PartialFacts.Expected != nil)
+				return
+			}
+			require.NotNil(t, result.Report.VerifiedFacts)
+			got := result.Report.VerifiedFacts
 			if got.TLSPublicKeyFP == "" || got.HPKEPublicKey == "" {
 				// The adapter refuses a document without both channel keys
 				// at the envelope; so does each client.

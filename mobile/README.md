@@ -4,8 +4,8 @@ The gomobile surface: the one package bound into `TinfoilGo.xcframework`, which
 [tinfoil-swift](https://github.com/tinfoilsh/tinfoil-swift) uses, and into
 `TinfoilGo.aar` for Android. Everything
 structured crosses as a JSON string whose shape is declared in
-`verification.go`. That struct is the contract, and `schema_version` says which
-version a payload is.
+`verification.go`. That struct, `resultJSON`, is the contract, and
+`schema_version` says which version a payload is.
 
 ## What the caller does
 
@@ -99,16 +99,35 @@ needs an explicit enclave and cannot be used to discover a router.
 
 ## Result
 
-`Verify` returns the JSON declared in `verification.go`. A verification against
-a config also carries `config`, `runtime` and `platform`, each with the
-`source` that it was accepted from (`endorsement`, `embedded`, or `policy` for
-a config that an authorizer approved).
+`Verify` returns one result JSON, declared and documented on `resultJSON` in
+`verification.go`, for both outcomes of a verification that ran, because
+gomobile can't carry a report on an error:
+
+- **Accepted:** `report.verified_facts` holds what the document proved, and
+  there is no `error`.
+- **Rejected:** `error` holds the layer and the message (in the format under
+  [Errors](#errors)), and `report.partial_facts` holds what the steps before
+  the failure established. The caller throws its verification error with the
+  report.
+
+Either way, `report.steps` lists the four layers (`envelope`, `provenance`,
+`quote`, `policy`) in order, each `passed`, `failed`, `skipped` or `not_run`,
+and `report.metadata.verified_at` is the appraisal instant. Verified facts
+from a verification against a config also carry `config`, `runtime` and
+`platform`, each with the `source` that it was accepted from (`endorsement`,
+`embedded`, or `policy` for a config that an authorizer approved). Channel
+keys come only from `verified_facts`; partial facts hold key fingerprints,
+which are unverified.
 
 ## Errors
 
-Errors reach Swift as an `NSError` carrying only a message. Every error this
-package returns leads with `UsageErrorPrefix` or `VerificationErrorPrefix` from
-`errors.go`, so callers match on those constants instead of on literals. A
+Errors reach Swift as an `NSError` carrying only a message. `Verify` returns
+an error rather than a result only when there is no report: a usage error,
+and a document that verified but whose freshness deadline passed before
+`Verify` returned. Every error this package returns, and every result's
+`error.message`, leads with `UsageErrorPrefix` or `VerificationErrorPrefix`
+from `errors.go`, so callers match on those constants instead of on
+literals. A
 verification error's message then names the layer that rejected the document
 (`envelope`, `provenance`, `quote` or `policy`) and `: `, as in
 `verification error: quote: <detail>`.
