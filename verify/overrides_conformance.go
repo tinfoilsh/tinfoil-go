@@ -5,6 +5,7 @@ package verify
 import (
 	"bytes"
 
+	"github.com/tinfoilsh/tinfoil-go/verify/document"
 	"github.com/tinfoilsh/tinfoil-go/verify/internal/endorsement"
 	"github.com/tinfoilsh/tinfoil-go/verify/internal/quote"
 )
@@ -51,4 +52,13 @@ func DangerousTestOnlyNewVerifier(config ConfigTrust, policy Policy, roots Dange
 		amdRootPEM:   bytes.Clone(roots.AMDRootPEM),
 		intelRootPEM: bytes.Clone(roots.IntelRootPEM),
 	})
+}
+
+// DangerousTestOnlyResolveContainers authenticates the container builds that
+// config requires against the build attestations in doc, as VerifyV3 does
+// once it has approved config. It approves nothing itself, so the
+// requirements are whatever the caller's bytes declare, which is why it
+// exists only in the conformance build.
+func (v *Verifier) DangerousTestOnlyResolveContainers(doc *document.Document, config []byte) ([]ContainerVerification, error) {
+	return v.resolveContainers(doc, config)
 }

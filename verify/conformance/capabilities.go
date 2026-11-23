@@ -17,7 +17,7 @@ func Capabilities() map[string]any {
 		"sdk":            SDKName,
 		"v3": map[string]any{
 			"supported":          true,
-			"stages_supported":   []string{StageVerify, StageCheckEnvelope, StageAuthenticateProvenance, StageAssemblePolicy, StageAuthenticateQuote, StageAuthenticateApproval, StageVerifyTimestamp},
+			"stages_supported":   []string{StageVerify, StageCheckEnvelope, StageAuthenticateProvenance, StageAssemblePolicy, StageAuthenticateQuote, StageAuthenticateApproval, StageVerifyTimestamp, StageAuthenticateContainers},
 			"synthetic_roots":    map[string]bool{"amd": true, "intel": true, "sigstore": true},
 			"freshness_enforced": true,
 			"live_verify":        true,

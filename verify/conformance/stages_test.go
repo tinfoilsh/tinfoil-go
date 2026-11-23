@@ -7,6 +7,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"encoding/pem"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -16,6 +17,8 @@ import (
 
 	"github.com/tinfoilsh/tinfoil-go/internal/sigstoretest"
 	"github.com/tinfoilsh/tinfoil-go/internal/statement"
+	"github.com/tinfoilsh/tinfoil-go/verify/document"
+	"github.com/tinfoilsh/tinfoil-go/verify/document/collateral"
 )
 
 // approvalFixture is a synthetic Sigstore world for the approval and
@@ -204,8 +207,108 @@ func TestVerifyTimestampStage(t *testing.T) {
 	})
 }
 
+// The recorded bundle is the published build attestation of this image,
+// which verifies against the embedded production root.
+const (
+	recordedContainerBundle     = "../internal/endorsement/testdata/container-provenance-bundle.json"
+	recordedContainerDigest     = "85306e3ab312a2d80466e901081e855cc53f21c4802c638f861e6ef31ba4f5d1"
+	recordedContainerRepository = "tinfoilsh/measure-image-action"
+	recordedContainerWorkflow   = "build.yml"
+	recordedContainerRef        = "refs/tags/build-v0.14.2"
+	recordedContainerCommit     = "01a05df207140a8e8e1d2cd26028ab7c51dad9d1"
+
+	recordedContainerRequirement = `    provenance:
+      github:
+        repository: ` + recordedContainerRepository + `
+        repository_id: 924941172
+        workflow: ` + recordedContainerWorkflow + `
+        ref: refs/tags/build-v*
+`
+)
+
+// containersInput is a v3-authenticate-containers input: a document that
+// carries a config whose one container, "app", runs the recorded image under
+// the given provenance member, and the given collateral beside it.
+func containersInput(t *testing.T, provenance string, proofs ...collateral.Entry) Input {
+	t.Helper()
+	config := "containers:\n  - name: app\n    image: ghcr.io/" + recordedContainerRepository + "@sha256:" + recordedContainerDigest + "\n" + provenance
+	data, err := json.Marshal(map[string][]byte{"config_base64": []byte(config)})
+	require.NoError(t, err)
+	entries := append([]collateral.Entry{{ID: collateral.ConfigID, Role: collateral.RoleReferenceValues, Format: collateral.ConfigV1Format, Data: data}}, proofs...)
+	return Input{SchemaVersion: SchemaVersion, DocumentB64: containersDocument(t, entries...)}
+}
+
+func containersDocument(t *testing.T, entries ...collateral.Entry) string {
+	t.Helper()
+	doc, err := document.Build(document.BuildInput{
+		Nonce: make([]byte, document.NonceSize), Collateral: entries, CollateralFormat: collateral.FormatV3,
+	}, func([64]byte) (string, []byte, error) {
+		return document.SEVSNPReportV1Format, []byte("unauthenticated quote"), nil
+	})
+	require.NoError(t, err)
+	return base64.StdEncoding.EncodeToString(doc)
+}
+
+func recordedContainerProof(t *testing.T) collateral.Entry {
+	t.Helper()
+	bundle, err := os.ReadFile(recordedContainerBundle)
+	require.NoError(t, err)
+	data, err := json.Marshal(map[string]any{"digest": recordedContainerDigest, "sigstore_bundle": json.RawMessage(bundle)})
+	require.NoError(t, err)
+	return collateral.Entry{ID: "container", Role: collateral.RoleReferenceValues, Format: collateral.ContainerProvenanceV1Format, Data: data}
+}
+
+func TestAuthenticateContainersStage(t *testing.T) {
+	proof := recordedContainerProof(t)
+
+	t.Run("accept", func(t *testing.T) {
+		out, code := Run(StageAuthenticateContainers, containersInput(t, recordedContainerRequirement, proof))
+		require.Equal(t, ExitAccepted, code, "%+v", out.Rejection)
+		require.True(t, out.Accepted)
+		require.Equal(t, []Container{{
+			Container: "app", Digest: recordedContainerDigest, Repository: recordedContainerRepository,
+			Workflow: recordedContainerWorkflow, Ref: recordedContainerRef, Commit: recordedContainerCommit,
+		}}, out.Outputs.Containers)
+	})
+	t.Run("no requirement", func(t *testing.T) {
+		out, code := Run(StageAuthenticateContainers, containersInput(t, ""))
+		require.Equal(t, ExitAccepted, code, "%+v", out.Rejection)
+		// The wire carries an empty list, not an absent member.
+		wire, err := json.Marshal(out)
+		require.NoError(t, err)
+		require.JSONEq(t, `{"stage":"v3-authenticate-containers","accepted":true,"outputs":{"containers":[]}}`, string(wire))
+	})
+	for name, in := range map[string]Input{
+		"missing proof":          containersInput(t, recordedContainerRequirement),
+		"another workflow":       containersInput(t, strings.Replace(recordedContainerRequirement, recordedContainerWorkflow, "release.yml", 1), proof),
+		"unreadable requirement": containersInput(t, recordedContainerRequirement+"      gitlab: {}\n", proof),
+		"no config":              {SchemaVersion: SchemaVersion, DocumentB64: containersDocument(t, proof)},
+	} {
+		t.Run(name, func(t *testing.T) {
+			out, code := Run(StageAuthenticateContainers, in)
+			require.Equal(t, ExitRejected, code)
+			require.False(t, out.Accepted)
+			require.Equal(t, "PROVENANCE_REJECTED", out.Rejection.Code)
+			require.Nil(t, out.Outputs)
+		})
+	}
+	t.Run("injected root replaces the embedded one", func(t *testing.T) {
+		in := containersInput(t, recordedContainerRequirement, proof)
+		in.SigstoreTrustedRootB64 = newApprovalFixture(t).trustRootB64
+		out, code := Run(StageAuthenticateContainers, in)
+		require.Equal(t, ExitRejected, code)
+		require.Equal(t, "PROVENANCE_REJECTED", out.Rejection.Code)
+	})
+	t.Run("undecodable document", func(t *testing.T) {
+		out, code := Run(StageAuthenticateContainers, Input{SchemaVersion: SchemaVersion, DocumentB64: base64.StdEncoding.EncodeToString([]byte("{}"))})
+		require.Equal(t, ExitMalformed, code)
+		require.Equal(t, "MALFORMED_INPUT", out.Rejection.Code)
+	})
+}
+
 func TestNewStagesAdvertised(t *testing.T) {
 	stages := Capabilities()["v3"].(map[string]any)["stages_supported"].([]string)
 	require.Contains(t, stages, StageAuthenticateApproval)
 	require.Contains(t, stages, StageVerifyTimestamp)
+	require.Contains(t, stages, StageAuthenticateContainers)
 }

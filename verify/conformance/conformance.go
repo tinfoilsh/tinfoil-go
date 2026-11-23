@@ -8,7 +8,9 @@
 // The full-verify stage is one Verifier.VerifyV3 call, so the shared fixtures
 // appraise exactly the code production runs; the layer on its
 // VerificationError names the rejection. The block stages isolate a single layer by calling into
-// the document, endorsement and quote packages the verifier uses.
+// the document, endorsement and quote packages the verifier uses. The
+// container stage runs the verifier's own container step instead, on a config
+// it takes as given.
 //
 // Synthetic roots and the appraisal clock travel as ordinary per-call options,
 // so the adapter mutates no production state.
@@ -50,6 +52,7 @@ const (
 	StageAuthenticateQuote      = "v3-authenticate-quote"      // CPU quote signature chain to the vendor root
 	StageAuthenticateApproval   = "v3-authenticate-approval"   // key-signed approval bundle under pinned keys
 	StageVerifyTimestamp        = "v3-verify-timestamp"        // RFC 3161 response against the trusted TSAs
+	StageAuthenticateContainers = "v3-authenticate-containers" // container builds the document's config requires
 )
 
 // Input is the stdin JSON: a v3 document, the verifier-supplied nonce, the
@@ -120,6 +123,21 @@ type AcceptOutputs struct {
 	// Timestamp is the authenticated genTime, RFC 3339 in UTC at second
 	// precision (v3-verify-timestamp).
 	Timestamp string `json:"timestamp,omitempty"`
+	// Containers are the container images whose required build was
+	// authenticated, in config order (v3-authenticate-containers). The stage
+	// reports an empty list for a config that requires none; other stages
+	// leave it nil, which omits the member.
+	Containers []Container `json:"containers,omitzero"`
+}
+
+// Container mirrors verify.ContainerVerification as plain JSON.
+type Container struct {
+	Container  string `json:"container"`
+	Digest     string `json:"digest"`
+	Repository string `json:"repository"`
+	Workflow   string `json:"workflow"`
+	Ref        string `json:"ref"`
+	Commit     string `json:"commit"`
 }
 
 // Measurement mirrors verify/measurement.Measurement as plain JSON.
@@ -243,6 +261,29 @@ func Run(stage string, in Input) (Output, int) {
 		return Output{Stage: stage, Accepted: true, Outputs: &AcceptOutputs{
 			EnclaveMeasurement: MeasurementOf(auth.Measurement),
 		}}, ExitAccepted
+	case StageAuthenticateContainers:
+		parsed, err := document.DangerousTestOnlyDecode(doc)
+		if err != nil {
+			return malformed(stage)
+		}
+		// The stage authenticates what the config requires, not the config:
+		// its bytes are read as the document carries them.
+		config, err := parsed.ConfigEndorsement()
+		if err != nil {
+			return reject(stage, "PROVENANCE_REJECTED")
+		}
+		verified, err := verifier.DangerousTestOnlyResolveContainers(parsed, config.Config)
+		if err != nil {
+			return reject(stage, "PROVENANCE_REJECTED")
+		}
+		containers := make([]Container, 0, len(verified))
+		for _, c := range verified {
+			containers = append(containers, Container{
+				Container: c.Container, Digest: c.Digest, Repository: c.Repository,
+				Workflow: c.Workflow, Ref: c.Ref, Commit: c.Commit,
+			})
+		}
+		return Output{Stage: stage, Accepted: true, Outputs: &AcceptOutputs{Containers: containers}}, ExitAccepted
 	default:
 		return Output{Stage: stage}, ExitUnsupported
 	}
