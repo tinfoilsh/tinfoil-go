@@ -31,6 +31,26 @@ func TestNewClientDiscoversUnderItsContext(t *testing.T) {
 	})
 }
 
+// NewClient returns the router constructor's error as it is, without a message
+// of its own: an SDK error in exactly one category. A verification that failed
+// again when it was retried reports its first attempt in its message, so the
+// SDK error is the one that errors.As finds.
+func TestNewClientReturnsTheRouterError(t *testing.T) {
+	original := http.DefaultTransport
+	t.Cleanup(func() { http.DefaultTransport = original })
+	synctest.Test(t, func(t *testing.T) {
+		http.DefaultTransport = roundTripFunc(func(*http.Request) (*http.Response, error) {
+			return nil, errors.New("no network in this test")
+		})
+		c, err := NewClient(context.Background())
+		require.Nil(t, c)
+		var sdkError *Error
+		require.ErrorAs(t, err, &sdkError)
+		require.True(t, strings.HasPrefix(err.Error(), ErrNetwork.Error()+": "), "no message ahead of the SDK error's: %v", err)
+		testutil.RequireCategory(t, err, ErrNetwork)
+	})
+}
+
 func TestLiveClientStreamingChat(t *testing.T) {
 	testutil.RequireLive(t, "TINFOIL_API_KEY")
 	apiKey := os.Getenv("TINFOIL_API_KEY")

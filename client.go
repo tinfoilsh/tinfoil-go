@@ -2,7 +2,6 @@ package tinfoil
 
 import (
 	"context"
-	"fmt"
 
 	"github.com/openai/openai-go/v3/option"
 )
@@ -14,7 +13,7 @@ import (
 func NewClient(ctx context.Context, openaiOpts ...option.RequestOption) (*OpenAIClient, error) {
 	router, err := NewRouterHTTPClient(ctx, nil)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create client: %w", err)
+		return nil, err
 	}
 	return NewOpenAIClient(router, nil, openaiOpts...)
 }

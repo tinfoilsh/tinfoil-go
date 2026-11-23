@@ -12,9 +12,9 @@ import "github.com/tinfoilsh/tinfoil-go/internal/errs"
 // The caller's own cancellation is in no category. When a call stops because
 // the context that the caller passed in ended, the error matches that
 // context's Err() with errors.Is, possibly wrapped: net/http wraps it in a
-// *url.Error, for example, and NewClient adds a message. A failure that came
-// before the caller cancelled keeps its category, and a timeout that the SDK
-// imposes on its own work is an ErrNetwork error.
+// *url.Error, for example. A failure that came before the caller cancelled
+// keeps its category, and a timeout that the SDK imposes on its own work is an
+// ErrNetwork error.
 type Error = errs.Error
 
 // The categories of an Error. Check one with errors.Is, for example
