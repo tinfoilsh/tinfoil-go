@@ -6,7 +6,6 @@ import (
 	"io"
 	"regexp"
 	"slices"
-	"strconv"
 
 	"gopkg.in/yaml.v3"
 )
@@ -20,6 +19,10 @@ const (
 	maxGitHubRepositoryLength = 140
 	maxGitHubWorkflowLength   = 255
 	maxGitHubRefLength        = 255
+
+	yamlNullTag = "!!null"
+	yamlIntTag  = "!!int"
+	yamlMapTag  = "!!map"
 )
 
 var (
@@ -27,6 +30,9 @@ var (
 	githubWorkflowPattern   = regexp.MustCompile(`^[A-Za-z0-9_.-]+\.ya?ml$`)
 	githubRefPattern        = regexp.MustCompile(`^refs/(tags|heads)/[A-Za-z0-9_.*-]+(/[A-Za-z0-9_.*-]+)*$`)
 	imageDigestPattern      = regexp.MustCompile(`^[^@\s]+@sha256:([0-9a-f]{64})$`)
+	// YAML libraries disagree on other spellings of an integer, such as a
+	// leading zero, so the ID must be written in plain decimal.
+	repositoryIDPattern = regexp.MustCompile(`^[1-9][0-9]{0,17}$`)
 )
 
 // ContainerProvenance is the build a config requires for one container image:
@@ -71,7 +77,7 @@ func ContainerProvenanceFromConfig(data []byte) (requirements []ContainerProvena
 	}
 	for index, container := range fields.Containers {
 		node := resolveAlias(&container.Provenance)
-		if node.Kind == 0 || node.Tag == "!!null" {
+		if node.Kind == 0 || node.Kind == yaml.ScalarNode && node.Tag == yamlNullTag {
 			continue
 		}
 		requirement, err := githubProvenance(node)
@@ -96,10 +102,10 @@ func githubProvenance(node *yaml.Node) (ContainerProvenance, error) {
 		return ContainerProvenance{}, err
 	}
 	var github struct {
-		Repository   string `yaml:"repository"`
-		RepositoryID int64  `yaml:"repository_id"`
-		Workflow     string `yaml:"workflow"`
-		Ref          string `yaml:"ref"`
+		Repository   string    `yaml:"repository"`
+		RepositoryID yaml.Node `yaml:"repository_id"`
+		Workflow     string    `yaml:"workflow"`
+		Ref          string    `yaml:"ref"`
 	}
 	if provenance.GitHub.Kind == 0 {
 		return ContainerProvenance{}, fmt.Errorf("%s is required", githubProvenanceField)
@@ -107,10 +113,11 @@ func githubProvenance(node *yaml.Node) (ContainerProvenance, error) {
 	if err := decodeKnownFields(resolveAlias(&provenance.GitHub), githubProvenanceField, &github, "repository", "repository_id", "workflow", "ref"); err != nil {
 		return ContainerProvenance{}, err
 	}
+	repositoryID := resolveAlias(&github.RepositoryID)
 	switch {
 	case len(github.Repository) > maxGitHubRepositoryLength || !githubRepositoryPattern.MatchString(github.Repository):
 		return ContainerProvenance{}, fmt.Errorf("%s.repository %q must be owner/name", githubProvenanceField, github.Repository)
-	case github.RepositoryID <= 0:
+	case repositoryID.Kind != yaml.ScalarNode || repositoryID.Tag != yamlIntTag || !repositoryIDPattern.MatchString(repositoryID.Value):
 		return ContainerProvenance{}, fmt.Errorf("%s.repository_id must be the repository's numeric ID", githubProvenanceField)
 	case len(github.Workflow) > maxGitHubWorkflowLength || !githubWorkflowPattern.MatchString(github.Workflow):
 		return ContainerProvenance{}, fmt.Errorf("%s.workflow %q must be a workflow file name", githubProvenanceField, github.Workflow)
@@ -118,13 +125,13 @@ func githubProvenance(node *yaml.Node) (ContainerProvenance, error) {
 		return ContainerProvenance{}, fmt.Errorf("%s.ref %q must be a tag or branch ref pattern", githubProvenanceField, github.Ref)
 	}
 	return ContainerProvenance{
-		Repository: github.Repository, RepositoryID: strconv.FormatInt(github.RepositoryID, 10),
+		Repository: github.Repository, RepositoryID: repositoryID.Value,
 		Workflow: github.Workflow, Ref: github.Ref,
 	}, nil
 }
 
 func decodeKnownFields(node *yaml.Node, name string, target any, allowed ...string) error {
-	if node.Kind != yaml.MappingNode {
+	if node.Kind != yaml.MappingNode || node.ShortTag() != yamlMapTag {
 		return fmt.Errorf("%s must be a mapping", name)
 	}
 	seen := map[string]bool{}
