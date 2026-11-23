@@ -7,9 +7,12 @@ import (
 	"crypto/x509"
 	"errors"
 	"io"
+	"net"
 	"net/http"
+	"net/http/httptest"
 	"net/http/httptrace"
 	"net/url"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"testing/synctest"
@@ -18,6 +21,8 @@ import (
 	"github.com/stretchr/testify/require"
 	ehbpidentity "github.com/tinfoilsh/encrypted-http-body-protocol/identity"
 	"github.com/tinfoilsh/tinfoil-go/internal/enclave"
+	"github.com/tinfoilsh/tinfoil-go/internal/errs"
+	"github.com/tinfoilsh/tinfoil-go/internal/testutil"
 	"github.com/tinfoilsh/tinfoil-go/internal/verifytest"
 	"github.com/tinfoilsh/tinfoil-go/verify"
 	"github.com/tinfoilsh/tinfoil-go/verify/document"
@@ -197,15 +202,30 @@ func TestRequestsUseExplicitVerification(t *testing.T) {
 	require.Equal(t, 2, attempts)
 }
 
+// A failure of the HTTP stack after verification, such as a refused
+// connection, is a network error.
+func TestRoundTripFailureIsANetworkError(t *testing.T) {
+	server := httptest.NewServer(http.NotFoundHandler())
+	url := server.URL
+	server.Close()
+	transport := newTestTransport(t, testState(time.Now().Add(time.Hour), strings.Repeat("01", 32)), nil, ehbpMode{})
+	_, err := transport.RoundTrip(newRequest(t, http.MethodGet, url, nil))
+	testutil.RequireCategory(t, err, errs.ErrNetwork)
+	var opError *net.OpError
+	require.ErrorAs(t, err, &opError, "the HTTP stack's error is the cause")
+}
+
 func TestKeyRejectionInvalidatesWithoutReplay(t *testing.T) {
 	for _, mode := range []struct {
 		name     string
 		err      error
 		lacksKey bool
+		category error
 	}{
-		{"TLS", errCertMismatch, true},
-		{"EHBP", ehbpidentity.NewKeyConfigError(errors.New("rotated")), true},
-		{"network", errors.New("connection refused"), false},
+		{"TLS", errs.Attestation(errCertMismatch), true, errs.ErrAttestation},
+		// A rotated key that no replay recovers from.
+		{"EHBP", ehbpidentity.NewKeyConfigError(errors.New("rotated")), true, errs.ErrNetwork},
+		{"network", errors.New("connection refused"), false, errs.ErrNetwork},
 	} {
 		t.Run(mode.name, func(t *testing.T) {
 			var sends, refreshes int
@@ -228,6 +248,7 @@ func TestKeyRejectionInvalidatesWithoutReplay(t *testing.T) {
 			req.GetBody = nil
 			_, err := transport.RoundTrip(req)
 			require.ErrorIs(t, err, mode.err)
+			testutil.RequireCategory(t, err, mode.category)
 			require.Equal(t, mode.lacksKey, IsKeyRejection(err))
 			rejected := !currentValid(transport)
 			require.Equal(t, mode.lacksKey, rejected)

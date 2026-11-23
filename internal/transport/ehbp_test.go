@@ -13,6 +13,7 @@ import (
 	ehbpprotocol "github.com/tinfoilsh/encrypted-http-body-protocol/protocol"
 	"github.com/tinfoilsh/tinfoil-go/internal/enclave"
 	"github.com/tinfoilsh/tinfoil-go/internal/errs"
+	"github.com/tinfoilsh/tinfoil-go/internal/testutil"
 	"github.com/tinfoilsh/tinfoil-go/internal/verifytest"
 	"github.com/tinfoilsh/tinfoil-go/verify"
 	"github.com/tinfoilsh/tinfoil-go/verify/document"
@@ -164,5 +165,31 @@ func TestEHBPRefusesARedirectToASealedRequest(t *testing.T) {
 		}
 		require.Equal(t, ehbpprotocol.UnexpectedRedirect, ehbpprotocol.CodeOf(err), "status %d", status)
 		require.Equal(t, []string{"POST /v1/chat/completions"}, sent, "status %d", status)
+	}
+}
+
+// A response that fails EHBP's authentication is an attestation error,
+// whether the round trip finds it or a read of the body does.
+func TestEHBPAuthenticationFailureIsAnAttestationError(t *testing.T) {
+	key := strings.Repeat("01", 32)
+	for name, respond := range map[string]func() *http.Response{
+		"missing nonce": testResponse,
+		"chunk that doesn't decrypt": func() *http.Response {
+			resp := testResponse()
+			resp.Header.Set(ehbpprotocol.ResponseNonceHeader, strings.Repeat("00", 32))
+			resp.Body = io.NopCloser(strings.NewReader("\x00\x00\x00\x10" + strings.Repeat("x", 16)))
+			return resp
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			next := roundTripFunc(func(*http.Request) (*http.Response, error) { return respond(), nil })
+			sealing := newTestTransport(t, testState(time.Now().Add(time.Hour), key), nil, ehbpMode{next: next})
+			resp, err := sealing.RoundTrip(newRequest(t, http.MethodPost, "https://enclave.example/v1/chat/completions", strings.NewReader(`{}`)))
+			if err == nil {
+				defer resp.Body.Close()
+				_, err = io.ReadAll(resp.Body)
+			}
+			testutil.RequireCategory(t, err, errs.ErrAttestation)
+		})
 	}
 }

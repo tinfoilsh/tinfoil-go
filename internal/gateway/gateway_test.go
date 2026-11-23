@@ -6,14 +6,18 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"os"
+	"os/exec"
 	"strings"
 	"sync"
 	"testing"
+	"testing/iotest"
 	"time"
 
 	"github.com/stretchr/testify/require"
 	"github.com/tinfoilsh/tinfoil-go/internal/cachesecret"
 	"github.com/tinfoilsh/tinfoil-go/internal/errs"
+	"github.com/tinfoilsh/tinfoil-go/internal/testutil"
 	"github.com/tinfoilsh/tinfoil-go/internal/verifytest"
 	"github.com/tinfoilsh/tinfoil-go/verify"
 )
@@ -199,6 +203,7 @@ func TestSealUploadReplay(t *testing.T) {
 				resp.Body.Close()
 			case tc.replayErr != nil:
 				require.ErrorIs(t, err, tc.replayErr)
+				testutil.RequireCategory(t, err, errs.ErrNetwork)
 				require.Nil(t, resp)
 				require.Equal(t, 1, attempts)
 				require.Equal(t, 1, responseBody.closes)
@@ -493,6 +498,57 @@ func TestPrepareRefusesRepeatedRoutedMembers(t *testing.T) {
 			require.EqualError(t, err, "configuration error: "+want, "%s %s", path, body)
 		}
 	}
+}
+
+// A body that the gateway can't read while it prepares the request fails it
+// as the HTTP stack would: with a network error. An upload over the limit is
+// the caller's mistake.
+func TestPrepareClassifiesBodyFailures(t *testing.T) {
+	cause := errors.New("read failed")
+	for name, tc := range map[string]struct {
+		contentType string
+		body        io.Reader
+		category    error
+	}{
+		"JSON body that fails to read":      {"application/json", iotest.ErrReader(cause), errs.ErrNetwork},
+		"multipart body that fails to read": {"multipart/form-data; boundary=b", iotest.ErrReader(cause), errs.ErrNetwork},
+		"multipart body over the limit":     {"multipart/form-data; boundary=b", io.LimitReader(zeros{}, maxMultipartBodySize+1), errs.ErrConfiguration},
+	} {
+		t.Run(name, func(t *testing.T) {
+			tr := sealTestTransport(func(string) (http.RoundTripper, error) {
+				t.Error("a request that failed to prepare reached a replica")
+				return nil, errors.New("unreachable")
+			})
+			req, err := http.NewRequest(http.MethodPost, "https://gateway.example/v1/chat/completions", tc.body)
+			require.NoError(t, err)
+			req.Header.Set("Content-Type", tc.contentType)
+			_, err = tr.RoundTrip(req)
+			testutil.RequireCategory(t, err, tc.category)
+		})
+	}
+}
+
+// zeros reads as an endless run of zero bytes.
+type zeros struct{}
+
+func (zeros) Read(p []byte) (int, error) {
+	clear(p)
+	return len(p), nil
+}
+
+// In FIPS 140-only mode, a cache secret that is too short to derive the cache
+// salt from is the caller's mistake. The test runs itself again in that mode.
+func TestCacheScopeRefusesAShortSecretInFIPSOnlyMode(t *testing.T) {
+	if os.Getenv("TINFOIL_TEST_FIPS_ONLY") == "" {
+		cmd := exec.Command(os.Args[0], "-test.run=^TestCacheScopeRefusesAShortSecretInFIPSOnlyMode$")
+		cmd.Env = append(os.Environ(), "TINFOIL_TEST_FIPS_ONLY=1", "GODEBUG=fips140=only")
+		out, err := cmd.CombinedOutput()
+		require.NoError(t, err, "%s", out)
+		return
+	}
+	tr := &Transport{secret: "short"}
+	_, err := tr.scopeCache(http.Header{}, map[string]json.RawMessage{}, []byte(`{}`))
+	testutil.RequireCategory(t, err, errs.ErrConfiguration)
 }
 
 func TestPrepareForwardsOtherBodiesWithRepeats(t *testing.T) {

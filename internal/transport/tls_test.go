@@ -24,6 +24,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"github.com/tinfoilsh/tinfoil-go/internal/errs"
+	"github.com/tinfoilsh/tinfoil-go/internal/testutil"
 	"github.com/tinfoilsh/tinfoil-go/internal/verifytest"
 	"github.com/tinfoilsh/tinfoil-go/verify"
 	"github.com/tinfoilsh/tinfoil-go/verify/document"
@@ -375,7 +376,9 @@ func TestPinnedTransportRunsTheCallersChecks(t *testing.T) {
 	roots.AddCert(server.Certificate())
 	key, err := verify.CertPubkeyFP(server.Certificate())
 	require.NoError(t, err)
-	rejection := errors.New("rejected by the caller")
+	cause := errors.New("rejected by the caller")
+	// A category in the check's error must not add to the attestation error.
+	rejection := errs.Network(cause)
 	original := http.DefaultTransport
 	t.Cleanup(func() { http.DefaultTransport = original })
 	for name, config := range map[string]*tls.Config{
@@ -388,7 +391,8 @@ func TestPinnedTransportRunsTheCallersChecks(t *testing.T) {
 			require.NoError(t, err)
 			defer bound.CloseIdleConnections()
 			_, err = (&http.Client{Transport: bound}).Get(server.URL)
-			require.ErrorIs(t, err, rejection, "the pin matches, so only the caller's check rejects")
+			require.ErrorIs(t, err, cause, "the pin matches, so only the caller's check rejects")
+			testutil.RequireCategory(t, err, errs.ErrAttestation)
 		})
 	}
 }
