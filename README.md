@@ -55,7 +55,7 @@ func main() {
 
 - [Go SDK documentation](https://docs.tinfoil.sh/sdk/go-sdk) and [error handling](https://docs.tinfoil.sh/sdk/error-handling).
 - Multi-user services must scope prompt caches to each end user with a per-request `user_cache_secret`, or `UserCacheSecret` in the router or gateway client's options; see [Prompt caching](https://docs.tinfoil.sh/sdk/prompt-caching). The enclave client never adds or changes `user_cache_secret`, so a caller that points it at Tinfoil's router sets the field in each request body, for example with `option.WithJSONSet("user_cache_secret", s)`.
-- `tinfoil.NewEnclaveHTTPClient` returns a client for one enclave that embeds an `*http.Client` for requests to it; `tinfoil.NewGatewayHTTPClient` returns one that seals each request to a verified replica of its model through Tinfoil's gateway. The gateway constructors are experimental and may change in a later release. Each checks its configuration before it returns, so a misconfigured client fails at construction: the enclave client verifies its enclave, and the gateway client fetches its catalog and verifies each model's replicas on first use. `tinfoil.NewRouterHTTPClient` discovers and verifies Tinfoil's router the same way, and returns a `RouterHTTPClient` configured by `RouterOptions`. All three take a [`verify.Policy`](verify/README.md#verification-options) in their options to pin registers or set freshness, and a `VerificationCheck` that can reject a verified enclave by its `verify.Verification`. `tinfoil.NewOpenAIClient(httpClient, opts, openaiOpts...)` builds an OpenAI client on top of any of the three, without further network I/O. Its base URL is `OpenAIOptions.APIPath` (`/v1/` by default) under the proxy URL or the enclave's origin, or the gateway's `URL` as given. The SDK sets the base URL after the OpenAI options, so an `option.WithBaseURL` has no effect; set `APIPath` to change the path, or, for a gateway client, which takes no `APIPath`, the gateway's `URL`.
+- `tinfoil.NewEnclaveHTTPClient` returns a client for one enclave that embeds an `*http.Client` for requests to it; `tinfoil.NewGatewayHTTPClient` returns one that seals each request to a verified replica of its model through Tinfoil's gateway. The gateway constructors are experimental and may change in a later release. Each checks its configuration before it returns, so a misconfigured client fails at construction: the enclave client verifies its enclave, and the gateway client fetches its catalog and verifies each model's replicas on first use. `tinfoil.NewRouterHTTPClient` discovers and verifies Tinfoil's router the same way, and returns a `RouterHTTPClient` configured by `RouterOptions`. All three take a [`verify.Policy`](verify/README.md#verification-options) in their options to pin registers or set freshness, a `VerificationCheck` that can reject a verified enclave by its `verify.VerifiedFacts`, and an `OnVerification` callback that sees every verification attempt. `tinfoil.NewOpenAIClient(httpClient, opts, openaiOpts...)` builds an OpenAI client on top of any of the three, without further network I/O. Its base URL is `OpenAIOptions.APIPath` (`/v1/` by default) under the proxy URL or the enclave's origin, or the gateway's `URL` as given. The SDK sets the base URL after the OpenAI options, so an `option.WithBaseURL` has no effect; set `APIPath` to change the path, or, for a gateway client, which takes no `APIPath`, the gateway's `URL`.
 - The enclave clients take a required `tinfoil.Trust` that names who vouches for the enclave's config: `RepoPin` (a GitHub repository, v2 collateral), `ProjectPin` (a config registry project, v3 collateral), `SignedBy` (your own config signing keys), `AuthorizedBy` (a callback that approves each config), `EmbeddedConfig` (the exact config bytes) or `EitherPin` (a repository and a project, both required, that accepts v2 collateral for the repository or v3 collateral for the project, for the move from v2 to v3 collateral):
 
   ```go
@@ -65,6 +65,19 @@ func main() {
   ```
 
   A `ProjectPin` with nil `RegistryIDs` trusts Tinfoil's public registry; a non-empty list trusts exactly the registries that it names, and an empty but non-nil list is an `ErrConfiguration` error.
+- Every verification produces a `verify.VerificationReport` that lists the four verification steps (envelope, provenance, quote and policy) and what each one established. The enclave and router clients' `EnsureVerified` and `Reverify` return it, and `LastVerification()` returns the most recent attempt without I/O: its report, or the error that the client reported for it. When the verifier rejects a document, the client's `ErrAttestation` error wraps a `*verify.VerificationError` whose `Report` shows the step that failed, next to what the earlier steps established:
+
+  ```go
+  _, err := client.EnsureVerified(ctx)
+  var rejected *verify.VerificationError
+  if errors.As(err, &rejected) {
+      for _, step := range rejected.Report.Steps {
+          fmt.Println(step.Layer, step.Status, step.Message)
+      }
+  }
+  ```
+
+  `OnVerification(host, report, err)` is called once for every attempt, including retries, re-verification after a key rotation and each router that discovery tries, and is a way to show verification status as it happens. The gateway client's `LastVerification()` returns each replica's last attempt. A failed fetch is an `ErrNetwork` error with no report. Channel keys come only from a report's `VerifiedFacts`; a failed report holds key fingerprints only, which are unverified.
 - All OpenAI methods and types are unchanged; see the [OpenAI Go client documentation](https://pkg.go.dev/github.com/openai/openai-go/v3).
 
 ## Reaching Only Your Own Origin
