@@ -174,7 +174,7 @@ func TestVerifyReturnsARejectionAsAResult(t *testing.T) {
 	assert.Equal(t, "failed", got.Report.Steps[0].Status)
 	assert.NotEmpty(t, got.Report.Steps[0].Message)
 	assert.False(t, strings.HasPrefix(got.Report.Steps[0].Message, VerificationErrorPrefix), "a step's message carries no prefix")
-	assert.True(t, strings.HasSuffix(got.Error.Message, got.Report.Steps[0].Message), "the error's message is the step's, with the prefix")
+	assert.Equal(t, VerificationErrorPrefix+"envelope: "+got.Report.Steps[0].Message, got.Error.Message, "the error's message is the step's, with the prefix")
 	assert.Nil(t, got.Report.VerifiedFacts)
 	require.NotNil(t, got.Report.PartialFacts)
 	assert.Nil(t, got.Report.PartialFacts.Expected)
