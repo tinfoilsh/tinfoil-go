@@ -26,6 +26,11 @@ type fixture struct {
 		EnclaveMeasurement *Measurement `json:"enclave_measurement,omitempty"`
 		SigningKeyHint     string       `json:"signing_key_hint,omitempty"`
 		Timestamp          string       `json:"timestamp,omitempty"`
+		// FailedStep and Report, when declared, are what a full-verify
+		// vector expects of the report: the layer of the failed step, every
+		// step's status, and the partial facts.
+		FailedStep string  `json:"failed_step,omitempty"`
+		Report     *Report `json:"report,omitempty"`
 	} `json:"expected"`
 }
 
@@ -68,6 +73,25 @@ func TestFixtures(t *testing.T) {
 				}
 				if got != f.Expected.Code {
 					t.Errorf("rejection code=%q, want %q", got, f.Expected.Code)
+				}
+			}
+			// Every full-verify report must agree with its verdict, and match
+			// what the vector declares of it.
+			if err := CheckReport(out); err != nil {
+				t.Errorf("report: %v (%+v)", err, out.Report)
+			}
+			if f.Expected.FailedStep != "" && out.Report.FailedStep() != f.Expected.FailedStep {
+				t.Errorf("failed step=%q, want %q", out.Report.FailedStep(), f.Expected.FailedStep)
+			}
+			if want := f.Expected.Report; want != nil {
+				if out.Report == nil {
+					t.Fatalf("no report; want %+v", want)
+				}
+				if !reflect.DeepEqual(out.Report.Steps, want.Steps) {
+					t.Errorf("steps=%+v, want %+v", out.Report.Steps, want.Steps)
+				}
+				if !reflect.DeepEqual(out.Report.PartialFacts, want.PartialFacts) {
+					t.Errorf("partial_facts=%+v, want %+v", out.Report.PartialFacts, want.PartialFacts)
 				}
 			}
 			// When an accept fixture declares the verified facts, assert the

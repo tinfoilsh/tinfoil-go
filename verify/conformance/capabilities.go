@@ -16,12 +16,13 @@ func Capabilities() map[string]any {
 		"schema_version": SchemaVersion,
 		"sdk":            SDKName,
 		"v3": map[string]any{
-			"supported":          true,
-			"stages_supported":   []string{StageVerify, StageCheckEnvelope, StageAuthenticateProvenance, StageAssemblePolicy, StageAuthenticateQuote, StageAuthenticateApproval, StageVerifyTimestamp},
-			"synthetic_roots":    map[string]bool{"amd": true, "intel": true, "sigstore": true},
-			"freshness_enforced": true,
-			"live_verify":        true,
-			"channel_binding":    "tls-spki",
+			"supported":           true,
+			"stages_supported":    []string{StageVerify, StageCheckEnvelope, StageAuthenticateProvenance, StageAssemblePolicy, StageAuthenticateQuote, StageAuthenticateApproval, StageVerifyTimestamp},
+			"synthetic_roots":     map[string]bool{"amd": true, "intel": true, "sigstore": true},
+			"freshness_enforced":  true,
+			"live_verify":         true,
+			"channel_binding":     "tls-spki",
+			"verification_report": true,
 		},
 	}
 }

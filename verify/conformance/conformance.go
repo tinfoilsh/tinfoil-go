@@ -98,6 +98,10 @@ type Output struct {
 	Accepted  bool           `json:"accepted"`
 	Outputs   *AcceptOutputs `json:"outputs,omitempty"`
 	Rejection *Rejection     `json:"rejection,omitempty"`
+	// Report is the verifier's report, for the full-verify stage only. A
+	// malformed input has none, and neither does the adapter's own rejection
+	// of an accepted document that endorses no channel keys.
+	Report *Report `json:"report,omitempty"`
 }
 
 // AcceptOutputs are the verified facts, in a shape every SDK can produce and
@@ -249,16 +253,22 @@ func Run(stage string, in Input) (Output, int) {
 }
 
 // verifyFull runs the whole flow through the verifier; the layer on its
-// VerificationError names the rejection.
+// VerificationError names the rejection, and the output carries the
+// verifier's report.
 func verifyFull(doc, nonce []byte, pin verify.Pin, verifier *verify.Verifier, appraisal time.Time) (Output, int) {
-	verified, err := verifier.VerifyV3At(doc, nonce, pin, appraisal)
+	report, err := verifier.VerifyV3At(doc, nonce, pin, appraisal)
 	if err != nil {
 		code, exit := RejectionCode(err)
 		if exit == ExitInternal {
 			return Output{Stage: StageVerify}, exit
 		}
-		return Output{Stage: StageVerify, Rejection: &Rejection{Code: code}}, exit
+		var rejected *verify.VerificationError
+		if !errors.As(err, &rejected) {
+			return Output{Stage: StageVerify, Rejection: &Rejection{Code: code}}, exit
+		}
+		return Output{Stage: StageVerify, Rejection: &Rejection{Code: code}, Report: ReportOf(rejected.Report)}, exit
 	}
+	verified := report.VerifiedFacts
 	// A document that verifies but endorses no usable channel keys is useless
 	// to every real client (an enclave.Enclave rejects it), so the full
 	// stage requires both — mirroring the deployed end-to-end behavior.
@@ -276,7 +286,7 @@ func verifyFull(doc, nonce []byte, pin verify.Pin, verifier *verify.Verifier, ap
 		EnclaveMeasurement: MeasurementOf(verified.EnclaveMeasurement()),
 		TLSPublicKeyFP:     tlsFP,
 		HPKEPublicKey:      hpke,
-	}}, ExitAccepted
+	}, Report: ReportOf(report)}, ExitAccepted
 }
 
 // authenticateApproval runs the key-signed approval verifier (the one behind
