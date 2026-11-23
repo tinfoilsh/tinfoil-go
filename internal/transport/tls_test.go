@@ -435,3 +435,100 @@ func nonZero(t *testing.T, typ reflect.Type) reflect.Value {
 	t.Fatalf("no non-zero value for %s", typ)
 	return reflect.Value{}
 }
+
+// pinnedClient returns a client whose Transport pins server's key in TLS mode.
+func pinnedClient(t *testing.T, server *httptest.Server) *http.Client {
+	t.Helper()
+	original := http.DefaultTransport
+	base := &http.Transport{TLSClientConfig: &tls.Config{RootCAs: x509.NewCertPool()}}
+	base.TLSClientConfig.RootCAs.AddCert(server.Certificate())
+	http.DefaultTransport = base
+	t.Cleanup(func() { http.DefaultTransport = original; base.CloseIdleConnections() })
+	certFP, err := verify.CertPubkeyFP(server.Certificate())
+	require.NoError(t, err)
+	return &http.Client{Transport: newTestTransport(t, testState(time.Now().Add(time.Hour), certFP), nil, tlsMode{})}
+}
+
+// A response body that fails while the caller reads it is a network error,
+// unless the caller cancelled.
+func TestTLSBodyReadErrors(t *testing.T) {
+	t.Run("connection reset mid-body", func(t *testing.T) {
+		server := newECDSATLSServer(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set("Content-Length", "100")
+			_, _ = io.WriteString(w, "partial")
+			conn, _, err := http.NewResponseController(w).Hijack()
+			if err != nil {
+				t.Error(err)
+				return
+			}
+			_ = conn.(*tls.Conn).NetConn().(*net.TCPConn).SetLinger(0)
+			_ = conn.Close()
+		}))
+		defer server.Close()
+		resp, err := pinnedClient(t, server).Get(server.URL)
+		require.NoError(t, err)
+		defer resp.Body.Close()
+		_, err = io.ReadAll(resp.Body)
+		testutil.RequireCategory(t, err, errs.ErrNetwork)
+	})
+	t.Run("caller cancellation", func(t *testing.T) {
+		server := newECDSATLSServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			_, _ = io.WriteString(w, "partial")
+			_ = http.NewResponseController(w).Flush()
+			<-r.Context().Done()
+		}))
+		defer server.Close()
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, server.URL, nil)
+		require.NoError(t, err)
+		resp, err := pinnedClient(t, server).Do(req)
+		require.NoError(t, err)
+		defer resp.Body.Close()
+		_, err = resp.Body.Read(make([]byte, 1))
+		require.NoError(t, err)
+		cancel()
+		_, err = io.ReadAll(resp.Body)
+		testutil.RequireCategory(t, err, nil)
+		require.ErrorIs(t, err, context.Canceled)
+	})
+	t.Run("end of body", func(t *testing.T) {
+		server := newECDSATLSServer(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			_, _ = io.WriteString(w, "complete")
+		}))
+		defer server.Close()
+		resp, err := pinnedClient(t, server).Get(server.URL)
+		require.NoError(t, err)
+		defer resp.Body.Close()
+		body := make([]byte, 64)
+		n, err := io.ReadAtLeast(resp.Body, body, len("complete"))
+		require.NoError(t, err)
+		require.Equal(t, "complete", string(body[:n]))
+		_, err = resp.Body.Read(body)
+		require.Same(t, io.EOF, err)
+	})
+}
+
+// A protocol switch's body stays writable.
+func TestTLSProtocolSwitchBodyIsWritable(t *testing.T) {
+	server := newECDSATLSServer(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		conn, buf, err := http.NewResponseController(w).Hijack()
+		if err != nil {
+			t.Error(err)
+			return
+		}
+		defer conn.Close()
+		_, _ = buf.WriteString("HTTP/1.1 101 Switching Protocols\r\nUpgrade: test\r\nConnection: Upgrade\r\n\r\n")
+		_ = buf.Flush()
+	}))
+	defer server.Close()
+	req, err := http.NewRequest(http.MethodGet, server.URL, nil)
+	require.NoError(t, err)
+	req.Header.Set("Upgrade", "test")
+	req.Header.Set("Connection", "Upgrade")
+	resp, err := pinnedClient(t, server).Do(req)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	require.Equal(t, http.StatusSwitchingProtocols, resp.StatusCode)
+	require.Implements(t, (*io.Writer)(nil), resp.Body)
+}

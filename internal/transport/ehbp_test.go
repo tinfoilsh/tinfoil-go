@@ -193,3 +193,22 @@ func TestEHBPAuthenticationFailureIsAnAttestationError(t *testing.T) {
 		})
 	}
 }
+
+// A response body that ends inside a chunk, which the network can cause, is a
+// network error.
+func TestEHBPTruncatedBodyIsANetworkError(t *testing.T) {
+	key := strings.Repeat("01", 32)
+	next := roundTripFunc(func(*http.Request) (*http.Response, error) {
+		resp := testResponse()
+		resp.Header.Set(ehbpprotocol.ResponseNonceHeader, strings.Repeat("00", 32))
+		resp.Body = io.NopCloser(strings.NewReader("\x00\x00\x00\x10xx"))
+		return resp, nil
+	})
+	sealing := newTestTransport(t, testState(time.Now().Add(time.Hour), key), nil, ehbpMode{next: next})
+	resp, err := sealing.RoundTrip(newRequest(t, http.MethodPost, "https://enclave.example/v1/chat/completions", strings.NewReader(`{}`)))
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	_, err = io.ReadAll(resp.Body)
+	testutil.RequireCategory(t, err, errs.ErrNetwork)
+	require.Equal(t, ehbpprotocol.FramingTruncated, ehbpprotocol.CodeOf(err))
+}

@@ -6,7 +6,9 @@
 package transport
 
 import (
+	"context"
 	"errors"
+	"io"
 	"net/http"
 	"sync"
 
@@ -81,6 +83,8 @@ func (t *Transport) RoundTrip(req *http.Request) (*http.Response, error) {
 		// the caller cancelled.
 		if err != nil {
 			err = errs.Interrupted(req.Context(), err)
+		} else {
+			classifyBody(req.Context(), resp)
 		}
 		return resp, err
 	}
@@ -90,6 +94,36 @@ func (t *Transport) RoundTrip(req *http.Request) (*http.Response, error) {
 	// already has a category, as a failed certificate check does.
 	t.invalidate(s)
 	return resp, &keyRejectionError{errs.WrapNetwork(err)}
+}
+
+// classifyBody wraps resp's body so that a read error that has no category,
+// such as a connection reset or a truncated EHBP stream, is classified as
+// errs.Interrupted classifies it under ctx. It leaves a body that the caller
+// can write to, which a protocol switch returns, as it is.
+func classifyBody(ctx context.Context, resp *http.Response) {
+	if resp == nil || resp.Body == nil || resp.Body == http.NoBody {
+		return
+	}
+	if _, ok := resp.Body.(io.Writer); ok {
+		return
+	}
+	resp.Body = &interruptedBody{ReadCloser: resp.Body, ctx: ctx}
+}
+
+// interruptedBody is a response body that classifies its read errors, other
+// than io.EOF, with errs.Interrupted, which leaves an error that already has a
+// category as it is.
+type interruptedBody struct {
+	io.ReadCloser
+	ctx context.Context
+}
+
+func (b *interruptedBody) Read(p []byte) (int, error) {
+	n, err := b.ReadCloser.Read(p)
+	if err != nil && err != io.EOF {
+		err = errs.Interrupted(b.ctx, err)
+	}
+	return n, err
 }
 
 func (t *Transport) CloseIdleConnections() {
