@@ -41,12 +41,12 @@ func TestContainerProvenanceFromConfig(t *testing.T) {
 	for name, tt := range map[string]struct {
 		image, provenance, wantError string
 	}{
-		"unknown kind of requirement": {image, "    provenance:\n      gitlab:\n        project: a/b\n", `unknown provenance field "gitlab"`},
-		"extra requirement":           {image, github + "      require_signed_commits: true\n", `unknown provenance field "require_signed_commits"`},
-		"extra detail":                {image, github + "        environment: release\n", `unknown provenance.github field "environment"`},
+		"unknown kind of requirement": {image, "    provenance:\n      gitlab:\n        project: a/b\n", `provenance has unknown field "gitlab"`},
+		"extra requirement":           {image, github + "      require_signed_commits: true\n", `provenance has unknown field "require_signed_commits"`},
+		"extra detail":                {image, github + "        environment: release\n", `provenance.github has unknown field "environment"`},
 		"empty requirement":           {image, "    provenance: {}\n", "provenance.github is required"},
 		"not a mapping":               {image, "    provenance: tinfoilsh/inference\n", "provenance must be a mapping"},
-		"duplicate detail":            {image, github + "        ref: refs/heads/main\n", `duplicate provenance.github field "ref"`},
+		"duplicate detail":            {image, github + "        ref: refs/heads/main\n", `provenance.github has duplicate field "ref"`},
 		"repository without owner":    {image, replace("tinfoilsh/inference", "inference"), "must be owner/name"},
 		"missing repository ID":       {image, replace("        repository_id: 902195777\n", ""), "repository_id"},
 		"workflow path":               {image, replace("containers.yml", "sub/containers.yml"), "workflow file name"},
@@ -61,6 +61,17 @@ func TestContainerProvenanceFromConfig(t *testing.T) {
 		})
 	}
 
-	_, err = configendorsement.ContainerProvenanceFromConfig([]byte("? [a]\n: 1\n<<: {b: 2}\ncontainers: x\n"))
-	require.Error(t, err)
+}
+
+// A mapping that combines a non-scalar key with a merge key makes yaml.v3
+// panic while decoding into a struct.
+func TestContainerProvenanceFromConfigReturnsErrorOnDecoderPanic(t *testing.T) {
+	for _, config := range []string{
+		"? [a]\n: 1\n<<: {b: 2}\ncontainers: []\n",
+		"<<: {b: 2}\n? [a]\n: 1\n",
+		"? {a: 1}\n: 1\n<<: {b: 2}\n",
+	} {
+		_, err := configendorsement.ContainerProvenanceFromConfig([]byte(config))
+		require.ErrorContains(t, err, "parsing config provenance", "config %q", config)
+	}
 }

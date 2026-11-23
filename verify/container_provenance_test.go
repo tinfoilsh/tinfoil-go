@@ -86,6 +86,6 @@ func TestConfigRequiringContainerProvenance(t *testing.T) {
 	})
 	t.Run("requirement the verifier cannot read", func(t *testing.T) {
 		_, err := verify(t, container("app")+provenance+"      gitlab: {}\n", proof("container", recordedContainerDigest))
-		require.ErrorContains(t, err, `unknown provenance field "gitlab"`)
+		require.ErrorContains(t, err, `provenance has unknown field "gitlab"`)
 	})
 }

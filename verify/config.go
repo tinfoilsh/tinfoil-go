@@ -241,7 +241,8 @@ func (v *Verifier) resolveConfig(doc *document.Document, pins endorsement.Config
 // resolveContainers authenticates the build of every container image for
 // which the config requires provenance. config is the bytes bound to the
 // approved digest; a document that omits them carries no requirement the
-// verifier can read.
+// verifier can read. The attested runtime attaches them for every config
+// that declares provenance, which config validation ties to disclosure.
 func (v *Verifier) resolveContainers(doc *document.Document, config []byte) ([]ContainerVerification, error) {
 	if len(config) == 0 {
 		return nil, nil

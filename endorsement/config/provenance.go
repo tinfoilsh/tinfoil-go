@@ -58,6 +58,9 @@ func ContainerProvenanceFromConfig(data []byte) (requirements []ContainerProvena
 	}
 	var extra yaml.Node
 	if err := decoder.Decode(&extra); err != io.EOF {
+		if err != nil {
+			return nil, fmt.Errorf("parsing config provenance: %w", err)
+		}
 		return nil, fmt.Errorf("config must contain exactly one YAML document")
 	}
 	for index, container := range fields.Containers {
@@ -122,11 +125,11 @@ func decodeKnownFields(node *yaml.Node, name string, target any, allowed ...stri
 	for index := 0; index < len(node.Content); index += 2 {
 		field := node.Content[index].Value
 		if seen[field] {
-			return fmt.Errorf("duplicate %s field %q", name, field)
+			return fmt.Errorf("%s has duplicate field %q", name, field)
 		}
 		seen[field] = true
 		if !slices.Contains(allowed, field) {
-			return fmt.Errorf("unknown %s field %q", name, field)
+			return fmt.Errorf("%s has unknown field %q", name, field)
 		}
 	}
 	if err := node.Decode(target); err != nil {
