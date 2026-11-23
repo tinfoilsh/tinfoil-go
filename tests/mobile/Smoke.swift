@@ -91,14 +91,24 @@ struct Verification: Decodable {
         let approvalTime: String?
         let registryID: String?
         let signatureTime: String?
+        let containers: [Container]?
 
         private enum CodingKeys: String, CodingKey {
-            case source, name, digest, reference
+            case source, name, digest, reference, containers
             case signingKeyHint = "signing_key_hint"
             case approvalTime = "approval_time"
             case registryID = "registry_id"
             case signatureTime = "signature_time"
         }
+    }
+
+    struct Container: Decodable {
+        let container: String
+        let digest: String
+        let repository: String
+        let workflow: String
+        let ref: String
+        let commit: String
     }
 
     struct Artifact: Decodable {
