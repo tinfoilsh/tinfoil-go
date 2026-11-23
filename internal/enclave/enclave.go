@@ -214,13 +214,15 @@ func checkFreshness(v *verify.Verification) error {
 	return nil
 }
 
-// checkVerification runs the caller's VerificationCheck on a copy of v.
+// checkVerification runs the caller's VerificationCheck on a copy of v. A
+// rejection is a trust decision, and so an attestation error, without a
+// category that the check's error carries.
 func (e *Enclave) checkVerification(v *verify.Verification) error {
 	if e.check == nil {
 		return nil
 	}
 	if err := e.check(Detached(v)); err != nil {
-		return errs.Attestation(&rejectedError{host: e.host, err: err})
+		return errs.Attestation(&rejectedError{host: e.host, err: errs.Uncategorized(err)})
 	}
 	return nil
 }

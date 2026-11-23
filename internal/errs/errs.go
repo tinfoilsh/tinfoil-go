@@ -81,6 +81,30 @@ func Interrupted(ctx context.Context, err error) error {
 	return WrapNetwork(err)
 }
 
+// Uncategorized returns err without the SDK category that it carries, for an
+// adapter that classifies the error of a caller's callback, which can return
+// an SDK error of its own. The result has err's message, and errors.Is and
+// errors.As reach the cause of the SDK error in err but not the SDK error or
+// its category, so that the adapter's category is the only one. An err that
+// carries no category is returned as it is.
+func Uncategorized(err error) error {
+	var sdkError *Error
+	if !errors.As(err, &sdkError) {
+		return err
+	}
+	return &uncategorizedError{msg: err.Error(), cause: Uncategorized(sdkError.Err)}
+}
+
+// uncategorizedError is an error that Uncategorized has taken the category
+// from. It keeps the message but unwraps only to the SDK error's cause.
+type uncategorizedError struct {
+	msg   string
+	cause error
+}
+
+func (e *uncategorizedError) Error() string { return e.msg }
+func (e *uncategorizedError) Unwrap() error { return e.cause }
+
 func classified(err error) bool {
 	var sdkError *Error
 	return errors.As(err, &sdkError)

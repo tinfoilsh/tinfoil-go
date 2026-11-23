@@ -10,6 +10,8 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	"github.com/tinfoilsh/tinfoil-go/internal/errs"
+	"github.com/tinfoilsh/tinfoil-go/internal/testutil"
 	"github.com/tinfoilsh/tinfoil-go/verify"
 	"github.com/tinfoilsh/tinfoil-go/verify/document/collateral"
 )
@@ -57,6 +59,19 @@ func TestTrustSelectsConfigTrustAndPin(t *testing.T) {
 	require.IsType(t, verify.ConfigAuthorizer{}, config, "functions can't be compared")
 	require.NotNil(t, config.(verify.ConfigAuthorizer).Authorize)
 	require.Equal(t, verify.Pin{}, pin, "approval authenticates no name, so there is no pin")
+}
+
+// The verifier reports an authorizer's refusal as an attestation error, so a
+// category in the authorizer's own error must not reach the caller as well.
+func TestAuthorizerErrorLosesItsCategory(t *testing.T) {
+	cause := errors.New("approval service unavailable")
+	config, _, err := verifierInputs(AuthorizedBy{Authorize: func(collateral.ConfigEndorsement) error {
+		return errs.Network(cause)
+	}})
+	require.NoError(t, err)
+	err = config.(verify.ConfigAuthorizer).Authorize(collateral.ConfigEndorsement{})
+	require.ErrorIs(t, err, cause)
+	testutil.RequireCategory(t, err, nil)
 }
 
 // Each variant's own requirements fail before any network I/O, and so does a

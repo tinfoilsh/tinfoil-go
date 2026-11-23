@@ -8,6 +8,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"github.com/tinfoilsh/tinfoil-go/internal/errs"
+	"github.com/tinfoilsh/tinfoil-go/internal/testutil"
 	"github.com/tinfoilsh/tinfoil-go/verify"
 )
 
@@ -48,6 +49,20 @@ func TestVerificationCheckRejectsWithoutRetry(t *testing.T) {
 		require.ErrorContains(t, err, "verification check rejected enclave.example")
 		require.Equal(t, 1, verifications, "a rejection is a decision about the evidence, so it isn't retried")
 	})
+}
+
+func TestVerificationCheckRejectionIsOnlyAnAttestationError(t *testing.T) {
+	cause := errors.New("release lookup failed")
+	s, err := New(Config{Host: "enclave.example", Pin: verify.Pin{Repo: "org/repo"}, VerificationCheck: func(*verify.Verification) error {
+		return errs.Network(cause)
+	}})
+	require.NoError(t, err)
+	s.fetch = func() (*verify.Verification, error) {
+		return testState(time.Now().Add(time.Hour), "key"), nil
+	}
+	_, err = s.Verify()
+	testutil.RequireCategory(t, err, errs.ErrAttestation)
+	require.ErrorIs(t, err, cause)
 }
 
 func TestSlowVerificationCheckFetchesFreshEvidence(t *testing.T) {

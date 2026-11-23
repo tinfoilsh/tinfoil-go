@@ -34,3 +34,17 @@ func TestInterrupted(t *testing.T) {
 	attestation := Attestation(cause)
 	require.Equal(t, attestation, Interrupted(live, attestation), "an SDK error keeps its category")
 }
+
+func TestUncategorized(t *testing.T) {
+	cause := errors.New("cause")
+	require.Same(t, cause, Uncategorized(cause), "an error without a category, as it is")
+	require.NoError(t, Uncategorized(nil))
+
+	callback := fmt.Errorf("callback: %w", Network(Configuration(cause)))
+	err := Uncategorized(callback)
+	require.Equal(t, callback.Error(), err.Error())
+	require.ErrorIs(t, err, cause)
+	for _, category := range []error{ErrConfiguration, ErrNetwork, ErrAttestation} {
+		require.NotErrorIs(t, err, category)
+	}
+}
