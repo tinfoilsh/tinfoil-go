@@ -1,12 +1,14 @@
 package verify
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
 
 	configendorsement "github.com/tinfoilsh/tinfoil-go/endorsement/config"
 	"github.com/tinfoilsh/tinfoil-go/internal/canonical"
+	"github.com/tinfoilsh/tinfoil-go/verify/document"
 	"github.com/tinfoilsh/tinfoil-go/verify/internal/runtime"
 )
 
@@ -14,7 +16,8 @@ import (
 // of a registry endorsement. Name optionally associates them with a trusted
 // /org/project/revision identity, which a Project pin must then match. The
 // config must come from trusted client configuration, and requires
-// attestation-collaterals/v3.
+// attestation-collaterals/v3. The attestation must still prove every
+// container build that the config requires.
 type EmbeddedConfig struct {
 	Name  string
 	Bytes []byte
@@ -22,7 +25,9 @@ type EmbeddedConfig struct {
 
 // EmbeddedConfigReference trusts an exact config, identified by the hex
 // SHA-256 Digest of its bytes, and the runtime that it pins, in place of a
-// registry endorsement. Otherwise it is EmbeddedConfig.
+// registry endorsement. Otherwise it is EmbeddedConfig, except that the
+// container builds the config requires are checked only when the attestation
+// carries the config bytes.
 type EmbeddedConfigReference struct {
 	Name    string
 	Digest  string
@@ -38,6 +43,9 @@ type embeddedReferences struct {
 	config   *EmbeddedConfigReference
 	runtime  []byte
 	platform []byte
+	// configBytes are the bytes of a config embedded in full. A config
+	// embedded by reference has none.
+	configBytes []byte
 }
 
 // reference returns the config reference that c's bytes determine.
@@ -49,13 +57,17 @@ func (c EmbeddedConfig) reference() (EmbeddedConfigReference, error) {
 	if err != nil {
 		return EmbeddedConfigReference{}, err
 	}
+	if _, err := configendorsement.ContainerProvenanceFromConfig(c.Bytes); err != nil {
+		return EmbeddedConfigReference{}, err
+	}
 	digest := sha256.Sum256(c.Bytes)
 	return EmbeddedConfigReference{Name: c.Name, Digest: hex.EncodeToString(digest[:]), Runtime: expected}, nil
 }
 
 // applyEmbeddedConfig checks reference, and any embedded runtime against it,
-// and stores it in v. It runs after applyArtifactTrust.
-func (v *Verifier) applyEmbeddedConfig(reference EmbeddedConfigReference) error {
+// and stores it in v with the config's bytes, if the caller supplied them. It
+// runs after applyArtifactTrust.
+func (v *Verifier) applyEmbeddedConfig(reference EmbeddedConfigReference, config []byte) error {
 	if reference.Name != "" {
 		if _, _, err := configendorsement.ParseName(reference.Name); err != nil {
 			return err
@@ -74,8 +86,24 @@ func (v *Verifier) applyEmbeddedConfig(reference EmbeddedConfigReference) error 
 			return err
 		}
 	}
-	v.embedded.config = &reference
+	v.embedded.config, v.embedded.configBytes = &reference, bytes.Clone(config)
 	return nil
+}
+
+// embeddedConfigBytes returns the bytes of the embedded config: the caller's,
+// or for a config embedded by reference those the document carries, if any.
+func (v *Verifier) embeddedConfigBytes(doc *document.Document) []byte {
+	if v.embedded.configBytes != nil {
+		return v.embedded.configBytes
+	}
+	config, err := doc.ConfigEndorsement()
+	if err != nil {
+		return nil
+	}
+	if digest := sha256.Sum256(config.Config); hex.EncodeToString(digest[:]) != v.embedded.config.Digest {
+		return nil
+	}
+	return config.Config
 }
 
 func (v *Verifier) requiresConfigCollateral() bool {

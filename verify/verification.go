@@ -31,8 +31,9 @@ type ConfigVerification struct {
 	RegistryID    string `json:"Scope"`
 	SignatureTime time.Time
 	// Containers lists the container images whose build the config requires
-	// and the attestation proves. It is empty when the config requires none,
-	// its bytes are not in the attestation, or the config is embedded.
+	// and the attestation proves. It is empty when the config requires none
+	// or the verifier has no bytes to read: the attestation does not carry
+	// them and the caller did not embed them.
 	Containers []ContainerVerification `json:",omitempty"`
 }
 
