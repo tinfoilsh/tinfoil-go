@@ -56,13 +56,14 @@ func TestLiveArchivedVerification(t *testing.T) {
 	require.NoError(t, err)
 	defaults, err := NewVerifier(nil, Policy{})
 	require.NoError(t, err)
-	want, err := defaults.VerifyV3(raw, nonce, Pin{Repo: repo})
+	wantReport, err := defaults.VerifyV3(raw, nonce, Pin{Repo: repo})
 	require.NoError(t, err)
+	want := wantReport.VerifiedFacts
 	require.False(t, want.FreshnessExpiresAt().IsZero())
-	verifiedAt := want.Metadata().VerifiedAt
+	verifiedAt := wantReport.Metadata.VerifiedAt
 	got, err := defaults.VerifyV3At(raw, nonce, Pin{Repo: repo}, verifiedAt)
 	require.NoError(t, err)
-	require.Equal(t, want, got)
+	require.Equal(t, wantReport, got)
 	_, err = defaults.VerifyV3At(raw, nonce, Pin{Repo: repo}, want.FreshnessExpiresAt().Add(-time.Nanosecond))
 	require.NoError(t, err)
 	_, err = defaults.VerifyV3At(raw, nonce, Pin{Repo: repo}, want.FreshnessExpiresAt().Add(time.Second))
@@ -151,8 +152,9 @@ func TestLiveFreshnessWitnessExpiration(t *testing.T) {
 	require.NoError(t, err)
 	verifier, err := NewVerifier(nil, Policy{})
 	require.NoError(t, err)
-	verified, err := verifier.VerifyV3(raw, nonce, Pin{Repo: repo})
+	report, err := verifier.VerifyV3(raw, nonce, Pin{Repo: repo})
 	require.NoError(t, err)
+	verified := report.VerifiedFacts
 	doc, err := document.Parse(raw, nonce)
 	require.NoError(t, err)
 	codeRef, err := doc.SigstoreCode()
@@ -167,7 +169,7 @@ func TestLiveFreshnessWitnessExpiration(t *testing.T) {
 	require.NoError(t, err)
 	platform, err := provClient.AuthenticatePlatformEndorsements(platformRef.Bundle, platformRef.Repo, platformRef.Tag, platformRef.Digest, policy.ArtifactFormat)
 	require.NoError(t, err)
-	appraisalTime := verified.Metadata().VerifiedAt
+	appraisalTime := report.Metadata.VerifiedAt
 	cpu, err := quote.Authenticate(doc.CPUEvidence(), doc.CPUEndorsements(), appraisalTime, nil)
 	require.NoError(t, err)
 	var firstWitness time.Time
@@ -196,6 +198,6 @@ func TestLiveFreshnessWitnessExpiration(t *testing.T) {
 		require.NoError(t, err)
 		got, err := custom.VerifyV3At(raw, nonce, Pin{Repo: repo}, appraisalTime)
 		require.NoError(t, err)
-		require.Equal(t, validity.Earliest(firstWitness.Add(age), cpu.ExpiresAt), got.FreshnessExpiresAt())
+		require.Equal(t, validity.Earliest(firstWitness.Add(age), cpu.ExpiresAt), got.VerifiedFacts.FreshnessExpiresAt())
 	}
 }

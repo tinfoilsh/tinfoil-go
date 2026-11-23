@@ -9,8 +9,8 @@ import (
 	"github.com/tinfoilsh/tinfoil-go/verify/measurement"
 )
 
-// Fields are the facts a test verification reports. They cover what tests
-// outside package verify read.
+// Fields are the facts that a test verification reports. They cover what
+// tests outside package verify read.
 type Fields struct {
 	ConfigRepo         string
 	CodeDigest         string
@@ -19,9 +19,6 @@ type Fields struct {
 	EnclaveMeasurement measurement.Measurement
 	CryptoMaterial     []document.CryptoMaterialItem
 	FreshnessExpiresAt time.Time
-	VerifierName       string
-	VerifierVersion    string
-	VerifiedAt         time.Time
 	// Config, Runtime and Platform are a *verify.ConfigVerification and two
 	// *verify.ArtifactVerification, or nil for a code-release verification.
 	// They are untyped because package verify imports this one.
@@ -30,6 +27,6 @@ type Fields struct {
 	Platform any
 }
 
-// NewVerification is installed by package verify and returns a
-// *verify.Verification.
-var NewVerification func(Fields) any
+// NewVerifiedFacts is installed by package verify and returns a
+// *verify.VerifiedFacts.
+var NewVerifiedFacts func(Fields) any

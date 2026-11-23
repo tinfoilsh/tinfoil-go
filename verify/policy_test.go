@@ -91,8 +91,9 @@ func TestLivePinsForTheOtherPlatformReject(t *testing.T) {
 	require.NoError(t, err)
 	verifier, err := NewVerifier(nil, Policy{})
 	require.NoError(t, err)
-	verified, err := verifier.VerifyV3(raw, nonce, Pin{Repo: repo})
+	report, err := verifier.VerifyV3(raw, nonce, Pin{Repo: repo})
 	require.NoError(t, err)
+	verified := report.VerifiedFacts
 
 	var own, other measurement.Expected
 	switch m := verified.EnclaveMeasurement().(type) {

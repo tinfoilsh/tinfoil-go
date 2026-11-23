@@ -44,13 +44,14 @@ type ArtifactVerification struct {
 	ApprovalTime time.Time
 }
 
-// Verification holds the facts proven during the verification of an
-// attestation document, and metadata the verifier adds about the verification
-// itself. Only the verifier creates one, and its fields cannot be changed:
-// accessors return copies. Assigning through a pointer still replaces the whole
-// value, so code that keeps a Verification hands out copies of it, as
-// the SDK's clients do.
-type Verification struct {
+// VerifiedFacts holds the facts proven by the verification of an attestation
+// document, including the channel keys that a caller binds its traffic to.
+// Only the verifier creates one, as the VerifiedFacts of a report on a
+// document that it accepted, and its fields cannot be changed: accessors
+// return copies. Assigning through a pointer still replaces the whole value,
+// so code that keeps a VerifiedFacts hands out copies of it, as the SDK's
+// clients do.
+type VerifiedFacts struct {
 	configRepo         string
 	codeDigest         string
 	codeTag            string
@@ -61,22 +62,17 @@ type Verification struct {
 	enclaveMeasurement measurement.Measurement
 	cryptoMaterial     []document.CryptoMaterialItem
 	freshnessExpiresAt time.Time
-	metadata           VerificationMetadata
 }
 
 func init() {
-	verifyhook.NewVerification = func(f verifyhook.Fields) any {
-		v := &Verification{
+	verifyhook.NewVerifiedFacts = func(f verifyhook.Fields) any {
+		v := &VerifiedFacts{
 			configRepo:         f.ConfigRepo,
 			codeDigest:         f.CodeDigest,
 			codeTag:            f.CodeTag,
 			enclaveMeasurement: f.EnclaveMeasurement,
 			cryptoMaterial:     slices.Clone(f.CryptoMaterial),
 			freshnessExpiresAt: f.FreshnessExpiresAt,
-			metadata: VerificationMetadata{
-				Verifier:   SoftwareIdentity{Name: f.VerifierName, Version: f.VerifierVersion},
-				VerifiedAt: f.VerifiedAt,
-			},
 		}
 		if f.CodeMeasurement != nil {
 			v.codeMeasurement = f.CodeMeasurement.Clone()
@@ -99,18 +95,18 @@ func init() {
 
 // ConfigRepo identifies the selected code or runtime, without version pins.
 // Runtime reports its source of trust for config-based verification.
-func (v *Verification) ConfigRepo() string { return v.configRepo }
+func (v *VerifiedFacts) ConfigRepo() string { return v.configRepo }
 
 // CodeDigest is the digest of the verified code or runtime artifact.
-func (v *Verification) CodeDigest() string { return v.codeDigest }
+func (v *VerifiedFacts) CodeDigest() string { return v.codeDigest }
 
 // CodeTag is the release tag of the verified code or runtime artifact.
-func (v *Verification) CodeTag() string { return v.codeTag }
+func (v *VerifiedFacts) CodeTag() string { return v.codeTag }
 
 // CodeMeasurement returns the registers the release fixes on the enclave's
 // platform: an ExpectedSEVSNP or ExpectedTDX, with nil for a register the
 // release leaves to the platform.
-func (v *Verification) CodeMeasurement() measurement.Expected {
+func (v *VerifiedFacts) CodeMeasurement() measurement.Expected {
 	if v.codeMeasurement == nil {
 		return nil
 	}
@@ -119,7 +115,7 @@ func (v *Verification) CodeMeasurement() measurement.Expected {
 
 // Config describes the config bound to hardware. ok is false for
 // verification against a code release, which has no config.
-func (v *Verification) Config() (config ConfigVerification, ok bool) {
+func (v *VerifiedFacts) Config() (config ConfigVerification, ok bool) {
 	if v.config == nil {
 		return ConfigVerification{}, false
 	}
@@ -128,7 +124,7 @@ func (v *Verification) Config() (config ConfigVerification, ok bool) {
 
 // Runtime describes the runtime a config-based verification accepted. ok is
 // false for verification against a code release.
-func (v *Verification) Runtime() (runtime ArtifactVerification, ok bool) {
+func (v *VerifiedFacts) Runtime() (runtime ArtifactVerification, ok bool) {
 	if v.runtime == nil {
 		return ArtifactVerification{}, false
 	}
@@ -137,7 +133,7 @@ func (v *Verification) Runtime() (runtime ArtifactVerification, ok bool) {
 
 // Platform describes the platform endorsements a config-based verification
 // accepted. ok is false for verification against a code release.
-func (v *Verification) Platform() (platform ArtifactVerification, ok bool) {
+func (v *VerifiedFacts) Platform() (platform ArtifactVerification, ok bool) {
 	if v.platform == nil {
 		return ArtifactVerification{}, false
 	}
@@ -146,11 +142,11 @@ func (v *Verification) Platform() (platform ArtifactVerification, ok bool) {
 
 // EnclaveMeasurement returns the quote's authenticated registers, proven to
 // match the expectations: an SEVSNP or TDX.
-func (v *Verification) EnclaveMeasurement() measurement.Measurement { return v.enclaveMeasurement }
+func (v *VerifiedFacts) EnclaveMeasurement() measurement.Measurement { return v.enclaveMeasurement }
 
 // CryptoMaterial returns a copy of the endorsed key items, which are
 // hash-bound into the quote.
-func (v *Verification) CryptoMaterial() []document.CryptoMaterialItem {
+func (v *VerifiedFacts) CryptoMaterial() []document.CryptoMaterialItem {
 	return slices.Clone(v.cryptoMaterial)
 }
 
@@ -160,10 +156,7 @@ func (v *Verification) CryptoMaterial() []document.CryptoMaterialItem {
 // signing certificates are checked at the authenticated signature timestamp; their
 // historical validity does not add an approval deadline. Embedded reference
 // values add no deadline; hardware collateral still bounds the result.
-func (v *Verification) FreshnessExpiresAt() time.Time { return v.freshnessExpiresAt }
-
-// Metadata describes the verification rather than the document.
-func (v *Verification) Metadata() VerificationMetadata { return v.metadata }
+func (v *VerifiedFacts) FreshnessExpiresAt() time.Time { return v.freshnessExpiresAt }
 
 // VerificationMetadata describes how a verification was performed. The
 // verifier fills it in from its own state; none of it is attested by or
@@ -171,7 +164,7 @@ func (v *Verification) Metadata() VerificationMetadata { return v.metadata }
 type VerificationMetadata struct {
 	// Verifier identifies the SDK that performed the verification.
 	Verifier SoftwareIdentity
-	// VerifiedAt is the instant the document was appraised at: read once from
+	// VerifiedAt is the instant that the document was appraised at: read once from
 	// the local clock by VerifyV3, or the caller's verificationTime for
 	// VerifyV3At. It is not a freshness guarantee.
 	VerifiedAt time.Time
@@ -186,21 +179,21 @@ type SoftwareIdentity struct {
 // TLSPublicKeyFP returns the endorsed TLS key fingerprint: the id=tls
 // crypto_material entry in KeySPKIFPSHA256V1Format. ok is false if the
 // document endorses no such entry, including a tls entry in another format.
-func (v *Verification) TLSPublicKeyFP() (fp string, ok bool) {
+func (v *VerifiedFacts) TLSPublicKeyFP() (fp string, ok bool) {
 	return v.CryptoMaterialData(document.CryptoMaterialIDTLS, document.KeySPKIFPSHA256V1Format)
 }
 
 // HPKEPublicKey returns the endorsed HPKE public key: the id=hpke
 // crypto_material entry in KeyX25519HPKEV1Format. ok is false if the
 // document endorses no such entry, including an hpke entry in another format.
-func (v *Verification) HPKEPublicKey() (key string, ok bool) {
+func (v *VerifiedFacts) HPKEPublicKey() (key string, ok bool) {
 	return v.CryptoMaterialData(document.CryptoMaterialIDHPKE, document.KeyX25519HPKEV1Format)
 }
 
 // CryptoMaterialData returns the endorsed lowercase-hex data for exactly id
 // and format. ok is false if the document endorses no such item or v is nil.
 // Lookup does not refresh evidence or enforce FreshnessExpiresAt.
-func (v *Verification) CryptoMaterialData(id, format string) (data string, ok bool) {
+func (v *VerifiedFacts) CryptoMaterialData(id, format string) (data string, ok bool) {
 	if v == nil {
 		return "", false
 	}

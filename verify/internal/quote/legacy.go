@@ -17,18 +17,24 @@ type LegacyReferenceValues struct {
 	Shape  *policy.Shape
 }
 
+func (r LegacyReferenceValues) code(platform string) (measurement.Expected, error) {
+	switch platform {
+	case policy.PlatformSEVSNP:
+		return r.SEVSNP, nil
+	case policy.PlatformTDX:
+		return r.TDX, nil
+	default:
+		return nil, fmt.Errorf("unsupported platform %q", platform)
+	}
+}
+
 func (r LegacyReferenceValues) resolve(q *Authenticated, pins measurement.Expected) (*resolvedValues, error) {
 	resolved, err := resolvePolicy(r.Endorsements, q)
 	if err != nil {
 		return nil, err
 	}
-	switch q.platform {
-	case policy.PlatformSEVSNP:
-		resolved.code = r.SEVSNP
-	case policy.PlatformTDX:
-		resolved.code = r.TDX
-	default:
-		return nil, fmt.Errorf("unsupported platform %q", q.platform)
+	if resolved.code, err = r.code(q.platform); err != nil {
+		return nil, err
 	}
 	resolved.expected, err = applyPins(resolved.code, q.platform, pins)
 	if err != nil {

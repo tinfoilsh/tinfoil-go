@@ -41,8 +41,9 @@ collateral. Verification then runs offline using the embedded trust roots:
    when selecting EHBP. A TLS-only enclave may omit HPKE material.
 
 Code and platform witnesses have a seven-day maximum age by default; the
-earliest approval or CPU collateral expiry is exposed by `VerifyV3` and the clients'
-`EnsureVerified` as `FreshnessExpiresAt`.
+earliest approval or CPU collateral expiry is exposed by the verified facts of
+the report that `VerifyV3` and the clients' `EnsureVerified` return, as
+`FreshnessExpiresAt`.
 Callers using these APIs must retain the deadline and stop authorizing new
 requests at or after it, then verify again before accepting more requests.
 Re-verifying unchanged witnesses does not extend their deadline. The SDK's
@@ -65,7 +66,7 @@ windows, never from the local clock.
 
 To appraise an archived document as of an earlier instant, `VerifyV3At` takes
 that instant in place of the clock for every one of those checks, and reports
-it as `Metadata().VerifiedAt`. The caller must authenticate the instant
+it as the report's `Metadata.VerifiedAt`. The caller must authenticate the instant
 independently, for example from a trusted timestamp recorded when the document
 was received: an earlier instant accepts collateral that has since expired or
 been revoked.
@@ -81,10 +82,11 @@ verifier, err := verify.NewVerifier(nil, verify.Policy{})
 if err != nil {
     return err
 }
-verified, err := verifier.VerifyV3(documentBytes, expectedNonce, verify.Pin{Project: trustedProject})
+report, err := verifier.VerifyV3(documentBytes, expectedNonce, verify.Pin{Project: trustedProject})
 if err != nil {
     return err
 }
+verified := report.VerifiedFacts
 ```
 
 The nonce and the pin are caller-owned expectations; the document cannot
@@ -121,10 +123,34 @@ config := &tls.Config{
 }
 ```
 
-The returned `Verification` cannot be changed: its
-accessors return copies. Only verification creates one, so a `Verification`
-that holds data always came from `VerifyV3` or `VerifyV3At`. To test code that
-takes one, verify a captured document with `VerifyV3At` at its capture time.
+The report's `VerifiedFacts` cannot be changed: their
+accessors return copies. Only verification creates them, so `VerifiedFacts`
+that hold data always came from `VerifyV3` or `VerifyV3At`. To test code that
+takes them, verify a captured document with `VerifyV3At` at its capture time.
+
+### Verification reports
+
+`VerifyV3` returns a `VerificationReport` on success, and a
+`*VerificationError` whose `Report` describes the failure otherwise; a
+`UsageError` carries no report. A report lists one `Step` for each layer, in
+order: `envelope`, `provenance`, `quote` and `policy`, each `passed`,
+`failed`, `skipped` (provenance, when the verifier embeds every reference
+value) or `not_run`. A failed step's message is the error's.
+
+On success, `VerifiedFacts` holds what the document proved. On failure,
+`PartialFacts` holds what the steps before the failure established, so that
+a caller can show an expected-against-measured comparison without parsing
+anything itself:
+
+| Fact | Set once |
+|---|---|
+| `Measured.TLSPublicKeyFP`, `Measured.HPKEPublicKeyFP` | The envelope passed. Only the policy step binds them to the enclave, so in a failed report they are unverified. The HPKE value is the SHA-256 of the key, never the key |
+| `Expected` (identities and `CodeMeasurement`) | Provenance passed or was skipped |
+| `Measured.CPU.Measurement` | The quote passed. A quote whose authentication failed is never parsed to show its registers |
+| `Expected.Measurement`, every register that the quote must attest, including the TDX platform registers | The policy step resolved them, even if a later check of that step failed |
+
+Channel keys come only from `VerifiedFacts`. Never bind a connection to a
+value in a failed report.
 
 The SDK's clients add fetching, caching and transport binding on top.
 
@@ -226,7 +252,7 @@ See the [tinfoil-js documentation](https://github.com/tinfoilsh/tinfoil-js) for 
 
 ## Arbitrary endorsed material
 
-A successful `VerifyV3` or `EnsureVerified` result retains every endorsed
+The verified facts of a successful `VerifyV3` or `EnsureVerified` report retain every endorsed
 `CryptoMaterial` item. Select by exact ID and format:
 
 ```go
