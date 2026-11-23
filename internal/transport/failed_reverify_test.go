@@ -25,7 +25,7 @@ func newKeyedServer() *keyedServer {
 }
 
 func (k *keyedServer) mode() mode {
-	return testMode(func(v *verify.Verification) (http.RoundTripper, error) {
+	return testMode(func(v *verify.VerifiedFacts) (http.RoundTripper, error) {
 		key := v.CodeTag()
 		return &closeRecorder{
 			RoundTripper: roundTripFunc(func(*http.Request) (*http.Response, error) {
@@ -46,21 +46,21 @@ func (c *closeRecorder) CloseIdleConnections() { c.close() }
 
 // verifications returns a fetch that returns each result in turn and repeats
 // the last one.
-func verifications(results ...func() (*verify.Verification, error)) (func() (*verify.Verification, error), *int) {
+func verifications(results ...func() (*verify.VerificationReport, error)) (func() (*verify.VerificationReport, error), *int) {
 	var calls int
-	return func() (*verify.Verification, error) {
+	return func() (*verify.VerificationReport, error) {
 		result := results[min(calls, len(results)-1)]
 		calls++
 		return result()
 	}, &calls
 }
 
-func fresh(key string) func() (*verify.Verification, error) {
-	return func() (*verify.Verification, error) { return testState(time.Now().Add(time.Hour), key), nil }
+func fresh(key string) func() (*verify.VerificationReport, error) {
+	return func() (*verify.VerificationReport, error) { return testState(time.Now().Add(time.Hour), key), nil }
 }
 
-func failing(err error) func() (*verify.Verification, error) {
-	return func() (*verify.Verification, error) { return nil, err }
+func failing(err error) func() (*verify.VerificationReport, error) {
+	return func() (*verify.VerificationReport, error) { return nil, err }
 }
 
 var errBadDocument = errs.Attestation(errors.New("the document fails verification"))
@@ -139,7 +139,7 @@ func TestFailedReverifyKeepsVerificationOnOtherFailures(t *testing.T) {
 func TestCancelledReverifyKeepsVerification(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		release := make(chan struct{})
-		fetch, _ := verifications(fresh("old"), func() (*verify.Verification, error) {
+		fetch, _ := verifications(fresh("old"), func() (*verify.VerificationReport, error) {
 			<-release
 			return nil, errs.Network(errors.New("attestation source unavailable"))
 		})
@@ -169,7 +169,7 @@ func TestFailedRecoveryAfterKeyRejectionSendsNothing(t *testing.T) {
 		var sent int
 		var closes int
 		fetch, calls := verifications(fresh("old"), failing(errBadDocument))
-		transport := newTestTransport(t, nil, fetch, testMode(func(*verify.Verification) (http.RoundTripper, error) {
+		transport := newTestTransport(t, nil, fetch, testMode(func(*verify.VerifiedFacts) (http.RoundTripper, error) {
 			return &closeRecorder{
 				RoundTripper: roundTripFunc(func(*http.Request) (*http.Response, error) {
 					sent++
@@ -192,7 +192,7 @@ func TestFailedRecoveryAfterKeyRejectionSendsNothing(t *testing.T) {
 func TestFailedRefreshAfterExpiryClosesExpiredConnections(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		server := newKeyedServer()
-		fetch, _ := verifications(func() (*verify.Verification, error) {
+		fetch, _ := verifications(func() (*verify.VerificationReport, error) {
 			return testState(time.Now().Add(time.Minute), "old"), nil
 		}, failing(errBadDocument))
 		transport := newTestTransport(t, nil, fetch, server.mode())

@@ -20,14 +20,20 @@ type RouterOptions struct {
 	// fixed trust; the zero Policy keeps every default. The client copies it,
 	// so later changes by the caller have no effect.
 	Policy verify.Policy
-	// VerificationCheck, when set, is called with each verification that
-	// passes Policy, before the client uses the router's keys: for each
-	// router tried during discovery, and whenever the client verifies again.
-	// Return an error to reject the router. Discovery then moves on to the
-	// next router; otherwise verification fails with an ErrAttestation error that
-	// wraps the error and isn't retried. Requests wait while it runs, so keep
-	// it fast; it may be called concurrently.
-	VerificationCheck func(v *verify.Verification) error
+	// VerificationCheck, when set, is called with the verified facts of each
+	// verification that passes Policy, before the client uses the router's
+	// keys: for each router tried during discovery, and whenever the client
+	// verifies again. Return an error to reject the router. Discovery then
+	// moves on to the next router; otherwise verification fails with an
+	// ErrAttestation error that wraps the error and isn't retried. Requests
+	// wait while it runs, so keep it fast; it may be called concurrently.
+	VerificationCheck func(v *verify.VerifiedFacts) error
+	// OnVerification, when set, is called once for every attempt to verify a
+	// router, after the attempt's outcome is decided, as
+	// EnclaveOptions.OnVerification describes: for each router that
+	// discovery tries, including the fallback, each with its own host, and
+	// for the chosen router whenever the client verifies it again.
+	OnVerification func(host string, report *verify.VerificationReport, err error)
 	// UserCacheSecret is the default prompt-cache scope for the client's
 	// requests. A non-empty user_cache_secret string in a request's JSON body
 	// overrides it, so a server can scope the cache to each end user, for
@@ -88,8 +94,9 @@ func NewRouterHTTPClient(ctx context.Context, opts *RouterOptions) (*RouterHTTPC
 		return nil, err
 	}
 	keyed, err := router.Discover(ctx, router.Options{
-		Verifier: verifier,
-		Check:    opts.VerificationCheck,
+		Verifier:       verifier,
+		Check:          opts.VerificationCheck,
+		OnVerification: opts.OnVerification,
 		NewTransport: func(e *enclave.Enclave) *transport.Transport {
 			return keyedTransport(tr, e)
 		},

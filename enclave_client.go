@@ -20,14 +20,25 @@ type EnclaveOptions struct {
 	// argument; the zero Policy keeps every default. The client copies it, so
 	// later changes by the caller have no effect.
 	Policy verify.Policy
-	// VerificationCheck, when set, is called with each verification that
-	// passes the trust argument and Policy, before the client uses the
-	// enclave's keys: when the client is created and whenever it verifies
-	// again. Return an error to reject the enclave. Verification then fails
-	// with an ErrAttestation error that wraps the error and isn't retried.
-	// Requests wait while it runs, so keep it fast; it may be called
+	// VerificationCheck, when set, is called with the verified facts of each
+	// verification that passes the trust argument and Policy, before the
+	// client uses the enclave's keys: when the client is created and whenever
+	// it verifies again. Return an error to reject the enclave. Verification
+	// then fails with an ErrAttestation error that wraps the error and isn't
+	// retried. Requests wait while it runs, so keep it fast; it may be called
 	// concurrently.
-	VerificationCheck func(v *verify.Verification) error
+	VerificationCheck func(v *verify.VerifiedFacts) error
+	// OnVerification, when set, is called once for every attempt to verify
+	// the enclave, after the attempt's outcome is decided: the verification
+	// when the client is created, each retry, and every verification again,
+	// whether after expiry, after a key rotation or through Reverify. It
+	// receives the enclave's host and the attempt's outcome, the same report
+	// or error that LastVerification returns for it, and the report is a
+	// copy for the callback to keep. The client holds none of its locks while
+	// it calls the callback, so the callback can call the client, but requests
+	// that wait for the verification wait for it too, so keep it fast. It
+	// can't change the outcome; reject an enclave with VerificationCheck.
+	OnVerification func(host string, report *verify.VerificationReport, err error)
 	// FetchAttestation, when set, obtains the enclave's attestation documents,
 	// for example through an AttestationRelay on the application's own
 	// origin; nil fetches them directly from the enclave. Every document is
@@ -92,7 +103,7 @@ func unverifiedEnclaveHTTPClient(host string, trust Trust, opts *EnclaveOptions)
 	if err != nil {
 		return nil, err
 	}
-	e, err := enclave.New(enclave.Config{Host: host, Pin: pin, Verifier: verifier, VerificationCheck: opts.VerificationCheck, FetchAttestation: fetchAttestation})
+	e, err := enclave.New(enclave.Config{Host: host, Pin: pin, Verifier: verifier, VerificationCheck: opts.VerificationCheck, OnVerification: opts.OnVerification, FetchAttestation: fetchAttestation})
 	if err != nil {
 		return nil, err
 	}
@@ -165,10 +176,12 @@ func (c *EnclaveHTTPClient) Trust() Trust {
 	return cloneTrust(c.trust)
 }
 
-// EnsureVerified returns a verification that is valid now, verifying first
-// only if the cached one has expired or been rejected. It also prepares the
-// TLS pin or HPKE key for it, so a nil error means requests can be sent.
-func (c *attestedClient) EnsureVerified(ctx context.Context) (*verify.Verification, error) {
+// EnsureVerified returns the report of a verification that is valid now,
+// verifying first only if the cached one has expired or been rejected. It
+// also prepares the TLS pin or HPKE key for the report's verified facts, so a
+// nil error means requests can be sent. The report is a copy for the caller
+// to keep.
+func (c *attestedClient) EnsureVerified(ctx context.Context) (*verify.VerificationReport, error) {
 	return c.keyed.EnsureVerified(ctx)
 }
 
@@ -179,14 +192,25 @@ func (c *attestedClient) EnsureVerified(ctx context.Context) (*verify.Verificati
 // verifies again, and fails while the problem persists. Requests already in
 // flight may complete. A failure of any other category, such as a brief
 // outage of the attestation source, keeps the cached verification while it is
-// still valid.
-func (c *attestedClient) Reverify(ctx context.Context) (*verify.Verification, error) {
+// still valid. It returns the new report, a copy for the caller to keep.
+func (c *attestedClient) Reverify(ctx context.Context) (*verify.VerificationReport, error) {
 	return c.keyed.Reverify(ctx)
 }
 
-// Current returns the last successful verification without checking it. It
-// may have expired or been rejected; use EnsureVerified for one that is
-// valid.
-func (c *attestedClient) Current() *verify.Verification {
-	return c.keyed.Current()
+// LastVerification returns the outcome of the client's most recent attempt
+// to verify its enclave, or its router for a RouterHTTPClient, without I/O:
+// the attempt's report if it passed, and otherwise no report and the error
+// that the client reported for the attempt. When the verifier rejected the
+// enclave's document, errors.As finds its *verify.VerificationError, whose
+// Report shows the step that failed. An attempt that failed before the
+// verifier ran, such as a failed fetch, or that VerificationCheck rejected,
+// has no report. Every attempt counts: the first verification, retries, and
+// every verification again, so a failure replaces an earlier success.
+//
+// It doesn't check freshness, so a report that it returns may have expired
+// or been rejected since; use EnsureVerified for one that is valid now. The
+// report is a copy for the caller to keep. Before the first attempt, it
+// returns neither a report nor an error.
+func (c *attestedClient) LastVerification() (*verify.VerificationReport, error) {
+	return c.keyed.LastVerification()
 }

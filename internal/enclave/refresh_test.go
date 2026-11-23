@@ -27,7 +27,7 @@ func TestVerificationFetchStillTimesOut(t *testing.T) {
 		start := time.Now()
 		client, err := New(Config{Host: "enclave.example", Pin: verify.Pin{Repo: "org/repo"}})
 		require.NoError(t, err)
-		_, err = client.Verify()
+		_, err = client.Verify(nil)
 		require.ErrorIs(t, err, context.DeadlineExceeded)
 		require.ErrorIs(t, err, errs.ErrNetwork)
 		require.True(t, strings.HasPrefix(err.Error(), "network error: "), "verification fetch retains its SDK category prefix")
@@ -47,7 +47,7 @@ func TestRejectedDocumentIsAttestationError(t *testing.T) {
 		})}
 		client, err := New(Config{Host: "enclave.example", Pin: verify.Pin{Repo: "org/repo"}})
 		require.NoError(t, err)
-		_, err = client.Verify()
+		_, err = client.Verify(nil)
 		require.ErrorIs(t, err, errs.ErrAttestation)
 		var rejected *verify.VerificationError
 		require.ErrorAs(t, err, &rejected, "verify's error remains the cause")

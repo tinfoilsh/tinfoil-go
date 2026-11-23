@@ -18,8 +18,8 @@ type roundTripFunc func(*http.Request) (*http.Response, error)
 
 func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
 
-func testState(deadline time.Time, key string) *verify.Verification {
-	return verifytest.New(verifytest.Fields{
+func testState(deadline time.Time, key string) *verify.VerificationReport {
+	return verifytest.NewReport(verifytest.Fields{
 		CodeTag: key, FreshnessExpiresAt: deadline,
 		CryptoMaterial: []document.CryptoMaterialItem{
 			{ID: document.CryptoMaterialIDTLS, Format: document.KeySPKIFPSHA256V1Format, Data: key},

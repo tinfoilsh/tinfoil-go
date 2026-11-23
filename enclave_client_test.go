@@ -100,7 +100,7 @@ func TestConstructorsVerifyBeforeReturning(t *testing.T) {
 		})
 		require.NoError(t, err, "pins may name models the catalog doesn't list")
 		require.Empty(t, hosts(), "with a supplied catalog, nothing is fetched")
-		require.Empty(t, gw.Current(), "a model's replicas are verified on its first request")
+		require.Empty(t, gw.LastVerification(), "a model's replicas are verified on its first request")
 	})
 }
 
@@ -199,10 +199,10 @@ func TestTransportDefaultsToTLS(t *testing.T) {
 }
 
 func TestKeyedTransportFollowsTheTransport(t *testing.T) {
-	e := enclave.NewForTest("enclave.example", func() (*verify.Verification, error) {
+	e := enclave.NewForTest("enclave.example", func() (*verify.VerificationReport, error) {
 		t.Error("each transport refuses its request before verifying")
 		return nil, errors.New("unreachable")
-	})
+	}, nil)
 	upgrade, err := http.NewRequest(http.MethodGet, "https://enclave.example/v1/realtime", nil)
 	require.NoError(t, err)
 	upgrade.Header.Set("Upgrade", "websocket")
@@ -260,7 +260,7 @@ func TestGatewayHTTPClientServesPinnedModels(t *testing.T) {
 	models, err := gw.Models(context.Background())
 	require.NoError(t, err)
 	require.Equal(t, []string{"pinned"}, models)
-	require.Empty(t, gw.Current(), "no replica is verified before it is used")
+	require.Empty(t, gw.LastVerification(), "no replica is verified before it is used")
 	canceled, cancel := context.WithCancel(context.Background())
 	cancel()
 	_, err = gw.Models(canceled)
@@ -296,9 +296,11 @@ func TestLiveRouterClient(t *testing.T) {
 			require.NoError(t, err)
 			verified, err := c.EnsureVerified(context.Background())
 			require.NoError(t, err)
-			require.Equal(t, verified.FreshnessExpiresAt(), c.Current().FreshnessExpiresAt(), "a valid verification is reused")
+			last, err := c.LastVerification()
+			require.NoError(t, err)
+			require.Equal(t, verified, last, "a valid verification is reused")
 			require.Equal(t, "https://"+c.Enclave()+"/", c.BaseURL(), "Enclave is the router discovery chose")
-			require.Equal(t, "tinfoilsh/confidential-model-router", verified.ConfigRepo(), "the router is verified under Tinfoil's router repository")
+			require.Equal(t, "tinfoilsh/confidential-model-router", verified.VerifiedFacts.ConfigRepo(), "the router is verified under Tinfoil's router repository")
 
 			completion, err := oc.Chat.Completions.New(context.Background(), openai.ChatCompletionNewParams{
 				Model:    "llama3-3-70b",
@@ -322,13 +324,15 @@ func TestLiveNewEnclaveHTTPClient(t *testing.T) {
 	testutil.RequireLive(t, "TINFOIL_ENCLAVE", "TINFOIL_REPO")
 	c, err := NewEnclaveHTTPClient(context.Background(), os.Getenv("TINFOIL_ENCLAVE"), RepoPin{Repo: os.Getenv("TINFOIL_REPO")}, nil)
 	require.NoError(t, err)
-	require.NotNil(t, c.Current(), "the client is verified when it's returned")
+	last, err := c.LastVerification()
+	require.NoError(t, err)
+	require.NotNil(t, last, "the client is verified when it's returned")
 	before, err := c.EnsureVerified(context.Background())
 	require.NoError(t, err)
-	require.Equal(t, c.Current().Metadata().VerifiedAt, before.Metadata().VerifiedAt, "the constructor's verification is reused")
+	require.Equal(t, last.Metadata.VerifiedAt, before.Metadata.VerifiedAt, "the constructor's verification is reused")
 	after, err := c.Reverify(context.Background())
 	require.NoError(t, err)
-	require.False(t, after.Metadata().VerifiedAt.Before(before.Metadata().VerifiedAt))
+	require.False(t, after.Metadata.VerifiedAt.Before(before.Metadata.VerifiedAt))
 }
 
 func TestLiveVerificationCheck(t *testing.T) {
@@ -336,10 +340,10 @@ func TestLiveVerificationCheck(t *testing.T) {
 	rejection := errors.New("rejected by the test")
 	// recorder returns a check that records the TLS key of each verification
 	// it sees and rejects while reject says to.
-	recorder := func(reject func(seen int) bool) (func(*verify.Verification) error, func() []string) {
+	recorder := func(reject func(seen int) bool) (func(*verify.VerifiedFacts) error, func() []string) {
 		var mu sync.Mutex
 		var keys []string
-		check := func(v *verify.Verification) error {
+		check := func(v *verify.VerifiedFacts) error {
 			mu.Lock()
 			defer mu.Unlock()
 			key, _ := v.TLSPublicKeyFP()
@@ -362,7 +366,9 @@ func TestLiveVerificationCheck(t *testing.T) {
 		require.NoError(t, err)
 		seen := keys()
 		require.GreaterOrEqual(t, len(seen), 2)
-		accepted, _ := c.Current().TLSPublicKeyFP()
+		last, err := c.LastVerification()
+		require.NoError(t, err)
+		accepted, _ := last.VerifiedFacts.TLSPublicKeyFP()
 		require.NotEqual(t, seen[0], accepted, "the rejected router isn't used")
 		require.Equal(t, seen[len(seen)-1], accepted)
 	})
@@ -407,7 +413,7 @@ func TestLiveVerificationCheck(t *testing.T) {
 		require.NoError(t, err)
 		seen := keys()
 		require.GreaterOrEqual(t, len(seen), 2)
-		accepted, _ := verified.TLSPublicKeyFP()
+		accepted, _ := verified.VerifiedFacts.TLSPublicKeyFP()
 		require.NotEqual(t, seen[0], accepted, "the rejected replica isn't used")
 		require.Equal(t, seen[len(seen)-1], accepted)
 	})
@@ -426,7 +432,10 @@ func TestLiveVerificationCheck(t *testing.T) {
 			distinct[key] = true
 		}
 		require.Len(t, distinct, len(seen), "a rejected replica isn't retried")
-		require.Empty(t, gw.Current(), "no rejected replica is kept")
+		for _, replica := range gw.LastVerification() {
+			require.Nil(t, replica.Report, "no rejected replica is kept")
+			require.ErrorIs(t, replica.Err, rejection)
+		}
 	})
 }
 

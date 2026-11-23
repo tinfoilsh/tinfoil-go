@@ -56,6 +56,6 @@ func TestLiveVerify(t *testing.T) {
 	testutil.RequireLive(t, enclaveEnvVar, repoEnvVar)
 	client, err := New(Config{Host: os.Getenv(enclaveEnvVar), Pin: verify.Pin{Repo: os.Getenv(repoEnvVar)}})
 	require.NoError(t, err)
-	_, err = client.Verify()
+	_, err = client.Verify(nil)
 	assert.NoError(t, err)
 }

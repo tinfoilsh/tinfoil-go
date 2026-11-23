@@ -77,7 +77,7 @@ func TestPublicInputErrors(t *testing.T) {
 	require.NoError(t, err)
 	_, err = fetch.Document(t.Context(), "", make([]byte, document.NonceSize))
 	require.ErrorIs(t, err, tinfoil.ErrConfiguration)
-	var verified *verify.Verification
+	var verified *verify.VerifiedFacts
 	_, ok := verified.TLSPublicKeyFP()
 	require.False(t, ok, "a nil verification endorses nothing")
 

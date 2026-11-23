@@ -179,14 +179,14 @@ var rejectingModes = []struct {
 	rejection error
 	mode      testMode
 }{
-	{"TLS", errCertMismatch, testMode(func(*verify.Verification) (http.RoundTripper, error) {
+	{"TLS", errCertMismatch, testMode(func(*verify.VerifiedFacts) (http.RoundTripper, error) {
 		return roundTripFunc(func(req *http.Request) (*http.Response, error) {
 			closeRequestBody(req)
 			// As TLSBoundRoundTripper reports a certificate error.
 			return nil, &peerLacksKeyError{errs.WrapAttestation(errCertMismatch)}
 		}), nil
 	})},
-	{"EHBP", ehbpKeyConfigError, testMode(func(*verify.Verification) (http.RoundTripper, error) {
+	{"EHBP", ehbpKeyConfigError, testMode(func(*verify.VerifiedFacts) (http.RoundTripper, error) {
 		return &ehbpRoundTripper{sealing: roundTripFunc(func(req *http.Request) (*http.Response, error) {
 			closeRequestBody(req)
 			return nil, ehbpKeyConfigError
@@ -216,7 +216,7 @@ func TestUnreplayableKeyRejectionIsANetworkError(t *testing.T) {
 		} {
 			t.Run(mode.name+"/"+body.name, func(t *testing.T) {
 				var refreshes int
-				tr := newTestTransport(t, testState(time.Now().Add(time.Hour), "old"), func() (*verify.Verification, error) {
+				tr := newTestTransport(t, testState(time.Now().Add(time.Hour), "old"), func() (*verify.VerificationReport, error) {
 					refreshes++
 					return testState(time.Now().Add(time.Hour), "new"), nil
 				}, mode.mode)
@@ -284,10 +284,10 @@ func TestReplayReportsOnlyTheCallersCancellation(t *testing.T) {
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
 			var refreshes int
-			tr := newTestTransport(t, testState(time.Now().Add(time.Hour), "old"), func() (*verify.Verification, error) {
+			tr := newTestTransport(t, testState(time.Now().Add(time.Hour), "old"), func() (*verify.VerificationReport, error) {
 				refreshes++
 				return testState(time.Now().Add(time.Hour), "new"), nil
-			}, testMode(func(v *verify.Verification) (http.RoundTripper, error) {
+			}, testMode(func(v *verify.VerifiedFacts) (http.RoundTripper, error) {
 				rt, err := mode.mode(v)
 				return roundTripFunc(func(req *http.Request) (*http.Response, error) {
 					cancel()

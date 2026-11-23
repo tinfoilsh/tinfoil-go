@@ -19,7 +19,7 @@ import (
 	"github.com/tinfoilsh/tinfoil-go/verify/document"
 )
 
-func hpkeVerification(key string) *verify.Verification {
+func hpkeVerification(key string) *verify.VerifiedFacts {
 	return verifytest.New(verifytest.Fields{CryptoMaterial: []document.CryptoMaterialItem{
 		{ID: document.CryptoMaterialIDHPKE, Format: document.KeyX25519HPKEV1Format, Data: key},
 	}})
@@ -27,7 +27,7 @@ func hpkeVerification(key string) *verify.Verification {
 
 func TestEHBPRequiresHPKEKey(t *testing.T) {
 	sealing := ehbpMode{}
-	_, err := sealing.newRoundTripper(&verify.Verification{})
+	_, err := sealing.newRoundTripper(&verify.VerifiedFacts{})
 	require.ErrorIs(t, err, errs.ErrAttestation)
 	require.ErrorContains(t, err, "use the TLS transport mode")
 
@@ -91,10 +91,10 @@ func TestKeyTransportsRefuseRequestsTheyCantProtect(t *testing.T) {
 }
 
 func TestTransportChecksBeforeVerifying(t *testing.T) {
-	e := enclave.NewForTest("enclave.example", func() (*verify.Verification, error) {
+	e := enclave.NewForTest("enclave.example", func() (*verify.VerificationReport, error) {
 		t.Error("verified for a request the transport refuses")
 		return nil, errors.New("unreachable")
-	})
+	}, nil)
 	for _, tc := range []struct {
 		keyed   *Transport
 		req     *http.Request

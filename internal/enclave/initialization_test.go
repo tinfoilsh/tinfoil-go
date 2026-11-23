@@ -26,14 +26,14 @@ func TestRetriedVerificationReportsOnlyTheFinalCategory(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
 				var attempts int
-				s := NewForTest("enclave.example", func() (*verify.Verification, error) {
+				s := NewForTest("enclave.example", func() (*verify.VerificationReport, error) {
 					attempts++
 					if attempts == 1 {
 						return nil, tc.first
 					}
 					return nil, tc.last
-				})
-				_, err := s.Verify()
+				}, nil)
+				_, err := s.Verify(nil)
 				require.Equal(t, 2, attempts)
 				testutil.RequireCategory(t, err, tc.category)
 				var rejected *rejectedError
@@ -65,7 +65,7 @@ func TestInitializationRecovery(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
 				s := &Enclave{}
 				var attempts int
-				s.fetch = func() (*verify.Verification, error) {
+				s.fetch = func() (*verify.VerificationReport, error) {
 					attempts++
 					if attempts == 1 {
 						return testState(time.Now().Add(time.Hour), "rejected"), tc.first
@@ -73,12 +73,12 @@ func TestInitializationRecovery(t *testing.T) {
 					return testState(time.Now().Add(time.Hour), "fresh"), tc.last
 				}
 				start := time.Now()
-				verified, err := s.Verify()
+				verified, err := s.Verify(nil)
 				require.Equal(t, tc.attempts, attempts)
 				require.Equal(t, time.Duration(attempts-1)*time.Second, time.Since(start))
 				if attempts == 2 && tc.last == nil {
 					require.NoError(t, err)
-					require.Equal(t, "fresh", verified.CodeTag())
+					require.Equal(t, "fresh", verified.VerifiedFacts.CodeTag())
 				} else if tc.last != nil {
 					// Only the final attempt's error, as net/http.Transport
 					// reports; the first is in the message alone.

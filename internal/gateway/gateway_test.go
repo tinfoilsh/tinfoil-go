@@ -12,14 +12,18 @@ import (
 	"sync"
 	"testing"
 	"testing/iotest"
+	"testing/synctest"
 	"time"
 
 	"github.com/stretchr/testify/require"
 	"github.com/tinfoilsh/tinfoil-go/internal/cachesecret"
+	"github.com/tinfoilsh/tinfoil-go/internal/enclave"
 	"github.com/tinfoilsh/tinfoil-go/internal/errs"
 	"github.com/tinfoilsh/tinfoil-go/internal/testutil"
+	"github.com/tinfoilsh/tinfoil-go/internal/transport"
 	"github.com/tinfoilsh/tinfoil-go/internal/verifytest"
 	"github.com/tinfoilsh/tinfoil-go/verify"
+	"github.com/tinfoilsh/tinfoil-go/verify/document"
 )
 
 type roundTripFunc func(*http.Request) (*http.Response, error)
@@ -53,7 +57,7 @@ func sealTestTransport(connect func(host string) (http.RoundTripper, error)) *Tr
 					defer mu.Unlock()
 					return verified.RoundTrip(req)
 				}),
-				ensureVerified: func(context.Context) (*verify.Verification, error) {
+				ensureVerified: func(context.Context) (*verify.VerificationReport, error) {
 					mu.Lock()
 					defer mu.Unlock()
 					if verified == nil {
@@ -362,22 +366,86 @@ func TestSealCacheScopeUsesTheBearerCredential(t *testing.T) {
 	require.NotEqual(t, noKeyPrefix, otherPrefix, "each API key routes on its own prefix")
 }
 
-func TestGatewayVerificationsNameReplicaHosts(t *testing.T) {
+func TestGatewayLastVerificationNamesReplicaHosts(t *testing.T) {
 	seal := &Transport{}
-	for _, host := range []string{"b.example", "a.example"} {
-		verified := verifytest.New(verifytest.Fields{ConfigRepo: "tinfoilsh/model"})
+	failure := errors.New("verification failed")
+	for _, host := range []string{"c.example", "b.example", "a.example"} {
+		verified := verifytest.NewReport(verifytest.Fields{ConfigRepo: "tinfoilsh/model"})
 		seal.enclaves.Store(replica{host: host, ref: "tinfoilsh/model"}, &verifiedReplicaTransport{
-			verification: func() *verify.Verification { return verified },
+			lastVerification: func() (*verify.VerificationReport, error) {
+				switch host {
+				case "b.example":
+					return nil, failure
+				case "c.example":
+					return nil, nil // never attempted
+				}
+				return verified, nil
+			},
 		})
 	}
-	got := seal.Verifications()
-	require.Len(t, got, 2)
+	got := seal.LastVerification()
+	require.Len(t, got, 2, "a replica with no attempt has no entry")
 	require.Equal(t, "a.example", got[0].Host)
+	require.NotNil(t, got[0].Report)
+	require.NoError(t, got[0].Err)
 	require.Equal(t, "b.example", got[1].Host)
+	require.Nil(t, got[1].Report)
+	require.Same(t, failure, got[1].Err, "a failed replica keeps its error")
+}
+
+// Each replica's entry holds its own last attempt, through the transports
+// that the gateway builds, and every attempt is reported with its replica's
+// host.
+func TestGatewayReplicasKeepTheirOwnLastAttempt(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		rejected := errs.Attestation(verifytest.Rejected("report signature is invalid"))
+		var mu sync.Mutex
+		var hosts []string
+		onVerification := func(host string, _ *verify.VerificationReport, _ error) {
+			mu.Lock()
+			defer mu.Unlock()
+			hosts = append(hosts, host)
+		}
+		hostsOrder := []string{"a.example", "b.example"}
+		order := rank(hostsOrder, sealTestModel, "")
+		bad, good := order[0], order[1]
+		seal := &Transport{
+			catalog: staticCatalog(Catalog{sealTestModel: {Repo: "tinfoilsh/test", Hosts: hostsOrder}}),
+			build: func(r replica) (*verifiedReplicaTransport, error) {
+				e := enclave.NewForTest(r.host, func() (*verify.VerificationReport, error) {
+					if r.host == bad {
+						return nil, rejected
+					}
+					return verifytest.NewReport(verifytest.Fields{CodeTag: r.host, FreshnessExpiresAt: time.Now().Add(time.Hour), CryptoMaterial: []document.CryptoMaterialItem{
+						{ID: document.CryptoMaterialIDTLS, Format: document.KeySPKIFPSHA256V1Format, Data: "aa"},
+						{ID: document.CryptoMaterialIDHPKE, Format: document.KeyX25519HPKEV1Format, Data: strings.Repeat("11", 32)},
+					}}), nil
+				}, onVerification)
+				keyed := transport.WithEHBP(nil, e)
+				return &verifiedReplicaTransport{transport: keyed, lastVerification: keyed.LastVerification, ensureVerified: keyed.EnsureVerified}, nil
+			},
+		}
+		got, err := seal.EnsureVerified(context.Background(), sealTestModel)
+		require.NoError(t, err)
+		require.Equal(t, good, got.VerifiedFacts.CodeTag())
+
+		entries := seal.LastVerification()
+		require.Len(t, entries, 2)
+		byHost := map[string]ReplicaVerification{entries[0].Host: entries[0], entries[1].Host: entries[1]}
+		require.Nil(t, byHost[bad].Report)
+		var verr *verify.VerificationError
+		require.ErrorAs(t, byHost[bad].Err, &verr, "the verifier's error and report are reachable")
+		require.NotNil(t, verr.Report)
+		require.NoError(t, byHost[good].Err)
+		require.Equal(t, good, byHost[good].Report.VerifiedFacts.CodeTag())
+		mu.Lock()
+		defer mu.Unlock()
+		require.Equal(t, []string{bad, bad, good}, hosts, "the bad replica's verification has one retry")
+	})
 }
 
 func TestGatewayEnsureVerifiedFallsOver(t *testing.T) {
-	verified := verifytest.New(verifytest.Fields{ConfigRepo: "tinfoilsh/test"})
+	verified := verifytest.NewReport(verifytest.Fields{ConfigRepo: "tinfoilsh/test"})
 	failure := errors.New("verification failed")
 	hosts := []string{"a.example", "b.example", "c.example"}
 	order := rank(hosts, sealTestModel, "")
@@ -396,9 +464,9 @@ func TestGatewayEnsureVerifiedFallsOver(t *testing.T) {
 		case buildFails:
 			return nil, failure
 		case expired:
-			return &verifiedReplicaTransport{ensureVerified: func(context.Context) (*verify.Verification, error) { return nil, failure }}, nil
+			return &verifiedReplicaTransport{ensureVerified: func(context.Context) (*verify.VerificationReport, error) { return nil, failure }}, nil
 		}
-		return &verifiedReplicaTransport{ensureVerified: func(context.Context) (*verify.Verification, error) { return verified, nil }}, nil
+		return &verifiedReplicaTransport{ensureVerified: func(context.Context) (*verify.VerificationReport, error) { return verified, nil }}, nil
 	})
 	got, err := seal.EnsureVerified(context.Background(), sealTestModel)
 	require.NoError(t, err)

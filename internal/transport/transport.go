@@ -35,6 +35,8 @@ type Transport struct {
 	// finishes after the check can't be followed by a redundant one.
 	mu      sync.RWMutex
 	current *state
+	// last is the most recent attempt, whether it passed or failed.
+	last *attempt
 }
 
 // A mode protects requests with the keys of one verification: TLS pins
@@ -46,7 +48,7 @@ type mode interface {
 	// newRoundTripper returns a round tripper tied to v's keys. It marks an
 	// error meaning the peer doesn't hold those keys, detected before the
 	// application processes the request, with peerLacksKeyError.
-	newRoundTripper(v *verify.Verification) (http.RoundTripper, error)
+	newRoundTripper(v *verify.VerifiedFacts) (http.RoundTripper, error)
 }
 
 // peerLacksKeyError is a mode's round tripper reporting that the peer doesn't

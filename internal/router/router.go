@@ -112,8 +112,12 @@ type Options struct {
 	// Verifier is the policy, which must use default config trust, as the
 	// router's pin requires; nil selects the default policy.
 	Verifier *verify.Verifier
-	// Check, when set, can reject each router's verification.
-	Check func(v *verify.Verification) error
+	// Check, when set, can reject each router's verified facts.
+	Check func(v *verify.VerifiedFacts) error
+	// OnVerification, when set, is called with the outcome of each attempt
+	// to verify a router: each router tried, the fallback, and the chosen
+	// router whenever it is verified again.
+	OnVerification func(host string, report *verify.VerificationReport, err error)
 	// NewTransport makes the transport that verifies a router.
 	NewTransport func(*enclave.Enclave) *transport.Transport
 	// List, when set, replaces fetching Tinfoil's router list.
@@ -134,7 +138,7 @@ func Discover(ctx context.Context, o Options) (*transport.Transport, error) {
 		list = fetchRouters
 	}
 	newTransport := o.NewTransport
-	fallback, err := enclave.New(enclave.Config{Host: "inference.tinfoil.sh", Pin: defaultRouterPin, Verifier: o.Verifier, VerificationCheck: o.Check, FetchAttestation: o.FetchAttestation})
+	fallback, err := enclave.New(enclave.Config{Host: "inference.tinfoil.sh", Pin: defaultRouterPin, Verifier: o.Verifier, VerificationCheck: o.Check, OnVerification: o.OnVerification, FetchAttestation: o.FetchAttestation})
 	if err != nil {
 		return nil, err
 	}
@@ -152,7 +156,7 @@ func Discover(ctx context.Context, o Options) (*transport.Transport, error) {
 		if !time.Now().Before(deadline) {
 			break
 		}
-		e, err := enclave.New(enclave.Config{Host: router, Pin: fallback.Pin(), Verifier: fallback.Verifier(), VerificationCheck: o.Check, FetchAttestation: o.FetchAttestation})
+		e, err := enclave.New(enclave.Config{Host: router, Pin: fallback.Pin(), Verifier: fallback.Verifier(), VerificationCheck: o.Check, OnVerification: o.OnVerification, FetchAttestation: o.FetchAttestation})
 		if err != nil {
 			return nil, err
 		}

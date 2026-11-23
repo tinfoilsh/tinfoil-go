@@ -29,7 +29,7 @@ type ehbpMode struct{ next http.RoundTripper }
 
 func (ehbpMode) validateRequest(req *http.Request) error { return CheckEHBP(req) }
 
-func (m ehbpMode) newRoundTripper(v *verify.Verification) (http.RoundTripper, error) {
+func (m ehbpMode) newRoundTripper(v *verify.VerifiedFacts) (http.RoundTripper, error) {
 	key, ok := v.HPKEPublicKey()
 	if !ok {
 		return nil, errs.Attestation(errors.New("document endorses no HPKE key; cannot use the EHBP transport mode (use the TLS transport mode)"))
