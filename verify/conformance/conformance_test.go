@@ -26,6 +26,9 @@ type fixture struct {
 		EnclaveMeasurement *Measurement `json:"enclave_measurement,omitempty"`
 		SigningKeyHint     string       `json:"signing_key_hint,omitempty"`
 		Timestamp          string       `json:"timestamp,omitempty"`
+		// Containers is nil unless the fixture declares it; a declared empty
+		// list asserts that the accept reports no container.
+		Containers []Container `json:"containers,omitempty"`
 	} `json:"expected"`
 }
 
@@ -75,7 +78,7 @@ func TestFixtures(t *testing.T) {
 			// different code digest, measurement register set, or channel key is
 			// not conformant — this is what forces cross-SDK output equivalence.
 			e := f.Expected
-			if e.Accepted && (e.TLSPublicKeyFP != "" || e.HPKEPublicKey != "" || e.CodeDigest != "" || e.CodeMeasurement != nil || e.EnclaveMeasurement != nil || e.SigningKeyHint != "" || e.Timestamp != "") {
+			if e.Accepted && (e.TLSPublicKeyFP != "" || e.HPKEPublicKey != "" || e.CodeDigest != "" || e.CodeMeasurement != nil || e.EnclaveMeasurement != nil || e.SigningKeyHint != "" || e.Timestamp != "" || e.Containers != nil) {
 				if out.Outputs == nil {
 					t.Fatalf("accepted but no outputs; want declared facts")
 				}
@@ -100,6 +103,9 @@ func TestFixtures(t *testing.T) {
 				}
 				if e.Timestamp != "" && o.Timestamp != e.Timestamp {
 					t.Errorf("timestamp=%q, want %q", o.Timestamp, e.Timestamp)
+				}
+				if e.Containers != nil && !reflect.DeepEqual(o.Containers, e.Containers) {
+					t.Errorf("containers=%+v, want %+v", o.Containers, e.Containers)
 				}
 			}
 		})
