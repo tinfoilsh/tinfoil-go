@@ -9,6 +9,7 @@ import (
 	"testing/synctest"
 	"time"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/tinfoilsh/tinfoil-go/internal/enclave"
@@ -258,13 +259,11 @@ func TestOnVerificationCanCallTheTransport(t *testing.T) {
 		transport = &Transport{mode: sendOK, enclave: enclave.NewForTest("enclave.example", fetch, func(_ string, report *verify.VerificationReport, err error) {
 			lastReport, lastErr := transport.LastVerification()
 			inCallback = append(inCallback, seen{lastReport, lastErr})
-			require.Equal(t, report, lastReport)
-			require.Equal(t, err, lastErr)
 			// EnsureVerified needs no refresh while the verification is
 			// valid, and the callback holds no lock that it waits for.
 			if err == nil {
 				_, ensureErr := transport.EnsureVerified(context.Background())
-				require.NoError(t, ensureErr)
+				assert.NoError(t, ensureErr)
 			}
 		})}
 		_, err := transport.EnsureVerified(context.Background())
@@ -272,7 +271,10 @@ func TestOnVerificationCanCallTheTransport(t *testing.T) {
 		_, err = transport.Reverify(context.Background())
 		require.Error(t, err)
 		require.Len(t, inCallback, 3)
-		require.NotNil(t, inCallback[0].report)
+		require.NotNil(t, inCallback[0].report, "the attempt that the callback was called for")
+		// The retried attempt is reported once the refresh is done, when the
+		// last verification is already the later, final attempt.
+		require.Same(t, err, inCallback[1].err)
 		require.Same(t, err, inCallback[2].err)
 	})
 }
@@ -290,4 +292,28 @@ func TestRoundTripperFailureIsReportedWithoutAReport(t *testing.T) {
 	calls := o.all()
 	require.Len(t, calls, 1)
 	require.Nil(t, calls[0].report)
+}
+
+// A callback that verifies again after a failed attempt starts a refresh of
+// its own rather than waiting for the one that is calling it.
+func TestOnVerificationCanVerifyAgainAfterAFailure(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		var transport *Transport
+		fetch, _ := verifications(failing(errRejected()), failing(errRejected()), fresh("key"))
+		var calls int
+		var again *verify.VerificationReport
+		transport = &Transport{mode: sendOK, enclave: enclave.NewForTest("enclave.example", fetch, func(_ string, _ *verify.VerificationReport, err error) {
+			calls++
+			if calls == 2 {
+				var againErr error
+				again, againErr = transport.EnsureVerified(context.Background())
+				assert.NoError(t, againErr)
+			}
+		})}
+		_, err := transport.EnsureVerified(context.Background())
+		require.Error(t, err)
+		require.NotNil(t, again)
+		require.Equal(t, "key", again.VerifiedFacts.CodeTag())
+		require.Equal(t, 3, calls)
+	})
 }

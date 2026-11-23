@@ -85,15 +85,6 @@ func (t *Transport) LastVerification() (*verify.VerificationReport, error) {
 	return t.last.report.Clone(), t.last.err
 }
 
-// record makes a failed attempt that the enclave retries the last one, and
-// reports it.
-func (t *Transport) record(err error) {
-	t.mu.Lock()
-	t.last = &attempt{err: err}
-	t.mu.Unlock()
-	t.enclave.Notify(nil, err)
-}
-
 // verified returns a valid state, refreshing it first when force is set or
 // the current one is invalid. Concurrent callers share one refresh, including
 // its failure.
@@ -134,22 +125,38 @@ func (t *Transport) verified(ctx context.Context, force bool, verify verifyFunc)
 // A refresh that fails attestation discards the state that it was replacing:
 // the enclave no longer proves that it holds that state's keys. Any other
 // failure, such as a brief outage of the attestation source, keeps that state
-// while it is still valid. Each attempt, retried or final, becomes the last
-// verification and is reported to the enclave's OnVerification once its
-// outcome is decided, outside mu.
+// while it is still valid.
+//
+// Each attempt, retried or final, becomes the last verification as soon as
+// its outcome is decided, and is reported to the enclave's OnVerification
+// once the refresh is done, outside mu and outside the shared refresh: the
+// refresh is forgotten first, so that a callback that calls EnsureVerified or
+// Reverify starts a refresh of its own rather than waiting for the one that
+// is calling it.
 func (t *Transport) refresh(verify verifyFunc) error {
 	t.mu.RLock()
 	replacing := t.current
 	t.mu.RUnlock()
+	var attempts []*attempt
+	retried := func(err error) {
+		t.mu.Lock()
+		t.last = &attempt{err: err}
+		t.mu.Unlock()
+		attempts = append(attempts, &attempt{err: err})
+	}
 	// The attestation fetch bounds its network I/O. Local verification has no
 	// SDK deadline; each caller can independently cancel its wait above.
-	verified, err := verify(t.enclave, t.record)
+	verified, err := verify(t.enclave, retried)
 	var s *state
 	if err == nil {
 		s, err = t.newState(verified)
 	}
 	last := t.publish(s, err, replacing)
-	t.enclave.Notify(last.report.Clone(), last.err)
+	attempts = append(attempts, last)
+	t.refreshes.Forget("")
+	for _, a := range attempts {
+		t.enclave.Notify(a.report.Clone(), a.err)
+	}
 	return last.err
 }
 

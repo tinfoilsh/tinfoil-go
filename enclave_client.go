@@ -36,8 +36,10 @@ type EnclaveOptions struct {
 	// or error that LastVerification returns for it, and the report is a
 	// copy for the callback to keep. The client holds none of its locks while
 	// it calls the callback, so the callback can call the client, but requests
-	// that wait for the verification wait for it too, so keep it fast. It
-	// can't change the outcome; reject an enclave with VerificationCheck.
+	// that wait for the verification wait for it too, so keep it fast. A
+	// retried attempt is reported, in order, once the verification that
+	// retried it is done. The callback can't change the outcome; reject an
+	// enclave with VerificationCheck.
 	OnVerification func(host string, report *verify.VerificationReport, err error)
 	// FetchAttestation, when set, obtains the enclave's attestation documents,
 	// for example through an AttestationRelay on the application's own

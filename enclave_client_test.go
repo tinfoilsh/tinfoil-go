@@ -432,7 +432,9 @@ func TestLiveVerificationCheck(t *testing.T) {
 			distinct[key] = true
 		}
 		require.Len(t, distinct, len(seen), "a rejected replica isn't retried")
-		for _, replica := range gw.LastVerification() {
+		replicas := gw.LastVerification()
+		require.Len(t, replicas, len(seen), "every replica tried has an entry")
+		for _, replica := range replicas {
 			require.Nil(t, replica.Report, "no rejected replica is kept")
 			require.ErrorIs(t, replica.Err, rejection)
 		}

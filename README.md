@@ -77,7 +77,7 @@ func main() {
   }
   ```
 
-  `OnVerification(host, report, err)` is called once for every attempt, including retries, re-verification after a key rotation and each router that discovery tries, and is a way to show verification status as it happens. The gateway client's `LastVerification()` returns each replica's last attempt. A failed fetch is an `ErrNetwork` error with no report. Channel keys come only from a report's `VerifiedFacts`; a failed report holds key fingerprints only, which are unverified.
+  `OnVerification(host, report, err)` is called once for every attempt, including retries, re-verification after a key rotation and each router that discovery tries, and is a way to show verification status as it happens. The gateway client's `LastVerification()` returns each replica's last attempt. An attempt that fails before the verifier runs, such as a fetch that fails with an `ErrNetwork` error, has no report. Channel keys come only from a report's `VerifiedFacts`; a failed report holds key fingerprints only, which are unverified.
 - All OpenAI methods and types are unchanged; see the [OpenAI Go client documentation](https://pkg.go.dev/github.com/openai/openai-go/v3).
 
 ## Reaching Only Your Own Origin

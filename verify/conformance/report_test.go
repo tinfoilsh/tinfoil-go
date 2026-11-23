@@ -41,7 +41,12 @@ func verifyVector(t *testing.T, path string) (*verify.VerificationReport, error)
 	require.NoError(t, err)
 	nonce, err := hex.DecodeString(f.Input.NonceHex)
 	require.NoError(t, err)
-	return verifier.VerifyV3At(doc, nonce, verify.Pin{Repo: f.Input.Repo, Project: f.Input.Project}, time.Unix(f.Input.VerificationTimeUnix, 0))
+	// As in Run, a vector without a verification time is appraised now.
+	at := time.Now()
+	if f.Input.VerificationTimeUnix != 0 {
+		at = time.Unix(f.Input.VerificationTimeUnix, 0)
+	}
+	return verifier.VerifyV3At(doc, nonce, verify.Pin{Repo: f.Input.Repo, Project: f.Input.Project}, at)
 }
 
 func statuses(r *verify.VerificationReport) []verify.StepStatus {
@@ -173,6 +178,7 @@ func TestCheckReportRejectsInconsistentReports(t *testing.T) {
 		"cpu early":        func(o *Output) { o.Report.PartialFacts.Measured.CPUMeasurement = &Measurement{} },
 		"three steps":      func(o *Output) { o.Report.Steps = o.Report.Steps[:3] },
 		"no partial facts": func(o *Output) { o.Report.PartialFacts = nil },
+		"accepted":         func(o *Output) { o.Accepted = true },
 	} {
 		o := ok
 		r := *ok.Report

@@ -169,8 +169,9 @@ func (c *GatewayHTTPClient) Models(ctx context.Context) ([]string, error) {
 	return c.transport.Models(ctx)
 }
 
-// EnsureVerified returns a verification that is valid now of a replica
-// serving model, verifying replicas only if needed.
+// EnsureVerified returns the report of a verification that is valid now of
+// a replica serving model, verifying replicas only if needed. The report is a
+// copy for the caller to keep.
 func (c *GatewayHTTPClient) EnsureVerified(ctx context.Context, model string) (*verify.VerificationReport, error) {
 	return c.transport.EnsureVerified(ctx, model)
 }

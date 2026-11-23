@@ -116,6 +116,9 @@ var rejectionLayers = map[string]verify.Layer{
 // checks don't always run in layer order.
 func CheckReport(out Output) error {
 	r := out.Report
+	if out.Accepted && out.Rejection != nil {
+		return fmt.Errorf("an accepted verdict carries rejection %s", out.Rejection.Code)
+	}
 	if out.Stage != StageVerify {
 		if r != nil {
 			return fmt.Errorf("stage %s carries a report", out.Stage)
