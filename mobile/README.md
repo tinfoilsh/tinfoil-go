@@ -111,9 +111,10 @@ gomobile can't carry a report on an error:
   report.
 
 Either way, `report.steps` lists the four layers (`envelope`, `provenance`,
-`quote`, `policy`) in order, each `passed`, `failed`, `skipped` or `not_run`,
-and `report.metadata.verified_at` is the appraisal instant. Verified facts
-from a verification against a config also carry `config`, `runtime` and
+`quote`, `policy`) in order, each `passed`, `failed`, `skipped` or `not_run`;
+a failed step's `message` is the failing check's message without the prefix
+that `error.message` carries. `report.metadata.verified_at` is the appraisal
+instant. Verified facts from a verification against a config also carry `config`, `runtime` and
 `platform`, each with the `source` that it was accepted from (`endorsement`,
 `embedded`, or `policy` for a config that an authorizer approved). Channel
 keys come only from `verified_facts`; partial facts hold key fingerprints,

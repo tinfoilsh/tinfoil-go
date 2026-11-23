@@ -128,7 +128,7 @@ func TestRejectionResult(t *testing.T) {
 	assert.Equal(t, []any{
 		map[string]any{"layer": "envelope", "status": "passed"},
 		map[string]any{"layer": "provenance", "status": "passed"},
-		map[string]any{"layer": "quote", "status": "failed", "message": message},
+		map[string]any{"layer": "quote", "status": "failed", "message": "report signature is invalid"},
 		map[string]any{"layer": "policy", "status": "not_run"},
 	}, report["steps"])
 	assert.Equal(t, map[string]any{

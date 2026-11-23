@@ -37,7 +37,7 @@ const VerificationSchemaVersion = 2
 //	    "steps": [
 //	      {"layer": "envelope", "status": "passed"},
 //	      {"layer": "provenance", "status": "passed"},
-//	      {"layer": "quote", "status": "failed", "message": "verification error: quote: <detail>"},
+//	      {"layer": "quote", "status": "failed", "message": "<detail>"},
 //	      {"layer": "policy", "status": "not_run"}
 //	    ],
 //	    "verified_facts": { ...verifiedFactsJSON, on success only... },
@@ -67,8 +67,9 @@ const VerificationSchemaVersion = 2
 // error with the report. The steps are envelope, provenance, quote and
 // policy, in that order, each "passed", "failed", "skipped" or "not_run";
 // more layers may be added, so a caller tolerates a layer that it doesn't
-// know. A failed step's message is the error's message, and a skipped
-// step's is the reason; other steps have none. In partial_facts, expected is
+// know. A failed step's message is the failing check's message, without the
+// "verification error: <layer>: " prefix that error.message carries, and a
+// skipped step's is the reason; other steps have none. In partial_facts, expected is
 // present once provenance passed or was skipped, and measured once the
 // envelope passed. code_measurement is in the layout of the platform that
 // the document's evidence names, with "" for a register that the release
@@ -221,15 +222,9 @@ func toResultJSON(report *verify.VerificationReport, rejected *verify.Verificati
 		report = rejected.Report
 		out.Error = &errorJSON{Layer: string(rejected.Layer), Message: toMobileError(rejected).Error()}
 	}
+	// Step messages pass through unchanged: a failed step's is the failing
+	// check's message, without the prefix that error.message carries.
 	out.Report = toReportJSON(report)
-	if out.Error != nil {
-		// A failed step's message is the error's, in the bridge's format.
-		for i := range out.Report.Steps {
-			if out.Report.Steps[i].Status == string(verify.StepFailed) {
-				out.Report.Steps[i].Message = out.Error.Message
-			}
-		}
-	}
 	return out
 }
 
