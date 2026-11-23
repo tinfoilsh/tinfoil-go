@@ -2,6 +2,7 @@ package document
 
 import (
 	"encoding/base64"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -86,4 +87,36 @@ func TestReferenceValuesReturnCopies(t *testing.T) {
 	witness, err = doc.Freshness(collateral.FreshnessIDCode)
 	require.NoError(t, err)
 	assert.JSONEq(t, `{"b":2}`, string(witness.Bundle))
+}
+
+func TestContainerProvenanceIsKeyedByImageDigest(t *testing.T) {
+	first, second := strings.Repeat("ab", 32), strings.Repeat("cd", 32)
+	entry := func(id, digest, bundle string) collateral.Entry {
+		return collateral.Entry{ID: id, Role: collateral.RoleReferenceValues, Format: collateral.ContainerProvenanceV1Format, Data: []byte(`{"digest":"` + digest + `","sigstore_bundle":` + bundle + `}`)}
+	}
+	doc := documentWithCollateral(t, "", []collateral.Entry{
+		entry("one", first, `{"a":1}`), entry("two", second, `{"b":2}`), entry("again", first, `{"c":3}`),
+	})
+	provenance, err := doc.ContainerProvenance(first)
+	require.NoError(t, err)
+	assert.JSONEq(t, `{"a":1}`, string(provenance.Bundle))
+	provenance.Bundle[0] = '!'
+	provenance, err = doc.ContainerProvenance(first)
+	require.NoError(t, err)
+	assert.JSONEq(t, `{"a":1}`, string(provenance.Bundle))
+	provenance, err = doc.ContainerProvenance(second)
+	require.NoError(t, err)
+	assert.JSONEq(t, `{"b":2}`, string(provenance.Bundle))
+	_, err = doc.ContainerProvenance(strings.Repeat("ef", 32))
+	require.ErrorIs(t, err, collateral.ErrNotFound)
+
+	for name, malformed := range map[string]collateral.Entry{
+		"uppercase digest": entry("one", strings.ToUpper(first), `{"a":1}`),
+		"prefixed digest":  entry("one", "sha256:"+first, `{"a":1}`),
+		"missing bundle":   {ID: "one", Role: collateral.RoleReferenceValues, Format: collateral.ContainerProvenanceV1Format, Data: []byte(`{"digest":"` + first + `"}`)},
+		"unknown member":   {ID: "one", Role: collateral.RoleReferenceValues, Format: collateral.ContainerProvenanceV1Format, Data: []byte(`{"digest":"` + first + `","sigstore_bundle":{},"repo":"o/r"}`)},
+	} {
+		_, err := collateral.Decode([]collateral.Entry{malformed})
+		require.Error(t, err, name)
+	}
 }

@@ -106,6 +106,8 @@ type Set struct {
 	configPlatform   *SigstoreRef
 	// Freshness holds the freshness witnesses by entry ID.
 	Freshness map[string]Freshness
+	// Containers holds the container build attestations by image digest.
+	Containers map[string]ContainerProvenance
 }
 
 // Decode checks the entries' shape and decodes every entry of a known role and
@@ -116,7 +118,7 @@ type Set struct {
 // An endorsement entry serves the CPU only when its subjects include
 // SubjectCPU.
 func Decode(entries []Entry) (Set, error) {
-	set := Set{Freshness: make(map[string]Freshness)}
+	set := Set{Freshness: make(map[string]Freshness), Containers: make(map[string]ContainerProvenance)}
 	if err := validate(entries); err != nil {
 		return set, err
 	}
@@ -196,6 +198,14 @@ func Decode(entries []Entry) (Set, error) {
 			}
 			if entry.ID == PlatformID {
 				set.configPlatform = v
+			}
+		case entry.Role == RoleReferenceValues && entry.Format == ContainerProvenanceV1Format:
+			v, err := decodeContainerProvenance(entry)
+			if err != nil {
+				return set, err
+			}
+			if _, ok := set.Containers[v.Digest]; !ok {
+				set.Containers[v.Digest] = v
 			}
 		case entry.Role == RoleReferenceValues && entry.Format == SigstoreFreshnessV1Format:
 			f, err := decodeFreshness(entry)
