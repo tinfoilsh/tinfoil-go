@@ -196,9 +196,13 @@ func (v *Verifier) resolveConfig(doc *document.Document, pins endorsement.Config
 		if err := v.configAuthorizer(config.Clone()); err != nil {
 			return expected, nil, &VerificationError{Layer: LayerProvenance, Err: fmt.Errorf("authorizing config: %w", err)}
 		}
+		containers, err := v.resolveContainers(doc, config.Config)
+		if err != nil {
+			return expected, nil, err
+		}
 		digest := sha256.Sum256(config.Config)
 		expected, err := configendorsement.RuntimeFromConfig(config.Config)
-		return expected, &ConfigVerification{Source: SourcePolicy, Digest: hex.EncodeToString(digest[:])}, err
+		return expected, &ConfigVerification{Source: SourcePolicy, Digest: hex.EncodeToString(digest[:]), Containers: containers}, err
 	}
 	if len(config.Bundle) == 0 {
 		return expected, nil, fmt.Errorf("unsigned config requires a config authorizer")
@@ -223,11 +227,45 @@ func (v *Verifier) resolveConfig(doc *document.Document, pins endorsement.Config
 			return expected, nil, err
 		}
 	}
+	containers, err := v.resolveContainers(doc, config.Config)
+	if err != nil {
+		return expected, nil, err
+	}
 	return expected, &ConfigVerification{
 		Source: SourceEndorsement, Name: approved.Name, Digest: approved.Digest,
 		Reference: approved.Reference, SigningKeyHint: approved.SigningKeyHint, ApprovalTime: approved.ApprovalTime,
-		RegistryID: approved.RegistryID, SignatureTime: approved.SignatureTime,
+		RegistryID: approved.RegistryID, SignatureTime: approved.SignatureTime, Containers: containers,
 	}, nil
+}
+
+// resolveContainers authenticates the build of every container image for
+// which the config requires provenance. config is the bytes bound to the
+// approved digest; a document that omits them carries no requirement the
+// verifier can read.
+func (v *Verifier) resolveContainers(doc *document.Document, config []byte) ([]ContainerVerification, error) {
+	if len(config) == 0 {
+		return nil, nil
+	}
+	required, err := configendorsement.ContainerProvenanceFromConfig(config)
+	if err != nil {
+		return nil, err
+	}
+	var containers []ContainerVerification
+	for _, requirement := range required {
+		material, err := doc.ContainerProvenance(requirement.Digest)
+		if err != nil {
+			return nil, fmt.Errorf("container %q requires provenance: %w", requirement.Container, err)
+		}
+		authenticated, err := v.endorsements.AuthenticateContainer(material.Bundle, requirement)
+		if err != nil {
+			return nil, fmt.Errorf("container %q: %w", requirement.Container, err)
+		}
+		containers = append(containers, ContainerVerification{
+			Container: requirement.Container, Digest: authenticated.Digest, Repository: authenticated.Repository,
+			Workflow: authenticated.Workflow, Ref: authenticated.Ref, Commit: authenticated.Commit,
+		})
+	}
+	return containers, nil
 }
 
 func (v *Verifier) resolveRuntime(doc *document.Document, expected collateral.RuntimeReference, now time.Time) (*runtime.Manifest, ArtifactVerification, error) {

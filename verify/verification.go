@@ -30,6 +30,21 @@ type ConfigVerification struct {
 	// RegistryID is authenticated by the certificate, or public for legacy registry approvals.
 	RegistryID    string `json:"Scope"`
 	SignatureTime time.Time
+	// Containers lists the container images whose build the config requires
+	// and the attestation proves. It is empty when the config requires none
+	// or its bytes are not in the attestation.
+	Containers []ContainerVerification `json:",omitempty"`
+}
+
+// ContainerVerification describes a container image built by the GitHub
+// Actions workflow its config requires.
+type ContainerVerification struct {
+	Container  string
+	Digest     string
+	Repository string
+	Workflow   string
+	Ref        string
+	Commit     string
 }
 
 // ArtifactVerification describes accepted reference values and their authority.
