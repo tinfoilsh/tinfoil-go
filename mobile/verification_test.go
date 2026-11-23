@@ -132,6 +132,10 @@ func TestVerificationConfigFacts(t *testing.T) {
 		Source: verify.SourceEndorsement, Name: "/org/project/v1", Digest: "c0",
 		Reference: "sha256:c0", SigningKeyHint: "hint", ApprovalTime: approved,
 		RegistryID: "registry", SignatureTime: approved.Add(time.Minute),
+		Containers: []verify.ContainerVerification{{
+			Container: "app", Digest: "d0", Repository: "example/app",
+			Workflow: "release.yml", Ref: "refs/tags/v1", Commit: "abc",
+		}},
 	}
 	f.Runtime = &verify.ArtifactVerification{
 		Source: verify.SourceEndorsement, Repo: "tinfoilsh/cvmimage", Tag: "v0.15.0",
@@ -149,6 +153,10 @@ func TestVerificationConfigFacts(t *testing.T) {
 		"reference": "sha256:c0", "signing_key_hint": "hint",
 		"approval_time": "2026-09-20T08:00:00.0000005Z", "registry_id": "registry",
 		"signature_time": "2026-09-20T08:01:00.0000005Z",
+		"containers": []any{map[string]any{
+			"container": "app", "digest": "d0", "repository": "example/app",
+			"workflow": "release.yml", "ref": "refs/tags/v1", "commit": "abc",
+		}},
 	}, got["config"])
 	assert.Equal(t, map[string]any{
 		"source": "endorsement", "repo": "tinfoilsh/cvmimage", "tag": "v0.15.0",

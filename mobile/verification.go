@@ -84,6 +84,19 @@ type configJSON struct {
 	ApprovalTime   string `json:"approval_time,omitempty"`
 	RegistryID     string `json:"registry_id,omitempty"`
 	SignatureTime  string `json:"signature_time,omitempty"`
+	// Containers are the container images whose required build was proven.
+	Containers []containerJSON `json:"containers,omitempty"`
+}
+
+// containerJSON is a container image built by the GitHub Actions workflow
+// its config requires. Ref and Commit are the ones the build ran from.
+type containerJSON struct {
+	Container  string `json:"container"`
+	Digest     string `json:"digest"`
+	Repository string `json:"repository"`
+	Workflow   string `json:"workflow"`
+	Ref        string `json:"ref"`
+	Commit     string `json:"commit"`
 }
 
 // artifactJSON is a runtime or platform artifact a config-based verification
@@ -127,6 +140,9 @@ func toVerificationJSON(v *verify.Verification) verificationJSON {
 			Reference: config.Reference, SigningKeyHint: config.SigningKeyHint,
 			ApprovalTime: formatTime(config.ApprovalTime), RegistryID: config.RegistryID,
 			SignatureTime: formatTime(config.SignatureTime),
+		}
+		for _, container := range config.Containers {
+			out.Config.Containers = append(out.Config.Containers, containerJSON(container))
 		}
 	}
 	if runtime, ok := v.Runtime(); ok {
