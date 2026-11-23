@@ -173,6 +173,13 @@ func (c *attestedClient) EnsureVerified(ctx context.Context) (*verify.Verificati
 }
 
 // Reverify verifies again even if the cached verification is still valid.
+// When it fails with an ErrAttestation error, the client discards the cached
+// verification and closes the idle connections that were made under it, so
+// that no request that starts afterwards is sent under it: the next request
+// verifies again, and fails while the problem persists. Requests already in
+// flight may complete. A failure of any other category, such as a brief
+// outage of the attestation source, keeps the cached verification while it is
+// still valid.
 func (c *attestedClient) Reverify(ctx context.Context) (*verify.Verification, error) {
 	return c.keyed.Reverify(ctx)
 }
