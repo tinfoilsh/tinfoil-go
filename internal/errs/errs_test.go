@@ -47,4 +47,9 @@ func TestUncategorized(t *testing.T) {
 	for _, category := range []error{ErrConfiguration, ErrNetwork, ErrAttestation} {
 		require.NotErrorIs(t, err, category)
 	}
+
+	sentinel := fmt.Errorf("callback: %w", ErrNetwork)
+	err = Uncategorized(sentinel)
+	require.Equal(t, sentinel.Error(), err.Error())
+	require.NotErrorIs(t, err, ErrNetwork, "a category that the error wraps without an SDK error")
 }

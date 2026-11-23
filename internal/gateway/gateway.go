@@ -520,7 +520,7 @@ func prepareMultipart(req *http.Request, boundary string) error {
 	if err != nil {
 		var tooLarge *http.MaxBytesError
 		if errors.As(err, &tooLarge) {
-			return errs.Configuration(fmt.Errorf("multipart upload exceeds %d bytes", tooLarge.Limit))
+			return errs.Configuration(fmt.Errorf("multipart upload exceeds %d bytes: %w", tooLarge.Limit, err))
 		}
 		return errs.Interrupted(req.Context(), fmt.Errorf("reading multipart upload: %w", err))
 	}
