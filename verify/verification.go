@@ -36,6 +36,11 @@ type ConfigVerification struct {
 	Containers []ContainerVerification `json:",omitempty"`
 }
 
+func (c ConfigVerification) clone() ConfigVerification {
+	c.Containers = slices.Clone(c.Containers)
+	return c
+}
+
 // ContainerVerification describes a container image built by the GitHub
 // Actions workflow its config requires.
 type ContainerVerification struct {
@@ -97,7 +102,7 @@ func init() {
 			v.codeMeasurement = f.CodeMeasurement.Clone()
 		}
 		if config, ok := f.Config.(*ConfigVerification); ok && config != nil {
-			copied := *config
+			copied := config.clone()
 			v.config = &copied
 		}
 		if runtime, ok := f.Runtime.(*ArtifactVerification); ok && runtime != nil {
@@ -138,7 +143,7 @@ func (v *Verification) Config() (config ConfigVerification, ok bool) {
 	if v.config == nil {
 		return ConfigVerification{}, false
 	}
-	return *v.config, true
+	return v.config.clone(), true
 }
 
 // Runtime describes the runtime a config-based verification accepted. ok is

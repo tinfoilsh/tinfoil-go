@@ -89,3 +89,12 @@ func TestConfigRequiringContainerProvenance(t *testing.T) {
 		require.ErrorContains(t, err, `provenance has unknown field "gitlab"`)
 	})
 }
+
+func TestConfigVerificationOwnsItsContainers(t *testing.T) {
+	v := &Verification{config: &ConfigVerification{Containers: []ContainerVerification{{Container: "app"}}}}
+	config, ok := v.Config()
+	require.True(t, ok)
+	config.Containers[0].Container = "changed"
+	config, _ = v.Config()
+	require.Equal(t, "app", config.Containers[0].Container)
+}
