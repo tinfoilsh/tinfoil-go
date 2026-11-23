@@ -13,6 +13,7 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"math/rand/v2"
@@ -397,7 +398,7 @@ func (t *Transport) RoundTrip(req *http.Request) (*http.Response, error) {
 			var err error
 			out.Body, err = req.GetBody()
 			if err != nil {
-				return nil, fmt.Errorf("replaying request after enclave reroute: %w", err)
+				return nil, errs.Interrupted(req.Context(), fmt.Errorf("replaying request after enclave reroute: %w", err))
 			}
 		}
 		resp, err := rt.RoundTrip(out)
@@ -442,7 +443,9 @@ func (t *Transport) prepare(req *http.Request) error {
 	body, err := io.ReadAll(req.Body)
 	req.Body.Close()
 	if err != nil {
-		return err
+		// The caller's body failed to read, which the HTTP stack would report
+		// in its place: a network error, unless the caller cancelled.
+		return errs.Interrupted(req.Context(), err)
 	}
 	if err := refuseRepeatedMembers(body); err != nil {
 		return err
@@ -515,7 +518,11 @@ func prepareMultipart(req *http.Request, boundary string) error {
 	}
 	body, err := io.ReadAll(http.MaxBytesReader(nil, req.Body, maxMultipartBodySize))
 	if err != nil {
-		return fmt.Errorf("reading multipart upload: %w", err)
+		var tooLarge *http.MaxBytesError
+		if errors.As(err, &tooLarge) {
+			return errs.Configuration(fmt.Errorf("multipart upload exceeds %d bytes", tooLarge.Limit))
+		}
+		return errs.Interrupted(req.Context(), fmt.Errorf("reading multipart upload: %w", err))
 	}
 	form, err := multipart.NewReader(bytes.NewReader(body), boundary).ReadForm(maxMultipartBodySize)
 	if err != nil {
@@ -541,13 +548,14 @@ func (t *Transport) scopeCache(h http.Header, fields map[string]json.RawMessage,
 	apiKey := []byte(bearerCredential(h.Get("Authorization")))
 	salt, err := hkdf.Key(sha256.New, []byte(secret), apiKey, cacheSaltDomainTag, sha256.Size)
 	if err != nil {
-		return nil, fmt.Errorf("deriving the cache salt: %w", err)
+		// Only a secret that FIPS 140-only mode refuses as too short can fail.
+		return nil, errs.Configuration(fmt.Errorf("deriving the cache salt: %w", err))
 	}
 	h.Del(cachePrefixHeader)
 	if head := promptHead(fields); head != nil {
 		key, err := hkdf.Key(sha256.New, []byte(secret), apiKey, cacheRouteDomainTag, sha256.Size)
 		if err != nil {
-			return nil, fmt.Errorf("deriving the cache prefix key: %w", err)
+			return nil, errs.Configuration(fmt.Errorf("deriving the cache prefix key: %w", err))
 		}
 		mac := hmac.New(sha256.New, key)
 		mac.Write(head)
