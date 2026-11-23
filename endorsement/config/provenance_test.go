@@ -53,6 +53,11 @@ func TestContainerProvenanceFromConfig(t *testing.T) {
 		"pull request ref":            {image, replace("refs/tags/vllm-v*", "refs/pull/*/merge"), "tag or branch ref pattern"},
 		"ref with identity separator": {image, replace("refs/tags/vllm-v*", "refs/tags/v@refs/heads/main"), "tag or branch ref pattern"},
 		"image without digest":        {"ghcr.io/tinfoilsh/inference-vllm:latest", github, "must pin a SHA-256 digest"},
+		"image with two digests":      {image + "@sha256:" + strings.Repeat("ef", 32), github, "must pin a SHA-256 digest"},
+		"image without a name":        {"\"@sha256:" + digest + "\"", github, "must pin a SHA-256 digest"},
+		"oversized ref":               {image, replace("refs/tags/vllm-v*", "refs/tags/"+strings.Repeat("*", 300)), "tag or branch ref pattern"},
+		"oversized repository":        {image, replace("tinfoilsh/inference", "tinfoilsh/"+strings.Repeat("a", 200)), "must be owner/name"},
+		"oversized workflow":          {image, replace("containers.yml", strings.Repeat("a", 300)+".yml"), "workflow file name"},
 		"second document":             {image, github + "---\ncontainers: []\n", "exactly one YAML document"},
 	} {
 		t.Run(name, func(t *testing.T) {

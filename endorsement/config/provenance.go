@@ -14,13 +14,19 @@ import (
 const (
 	provenanceField       = "provenance"
 	githubProvenanceField = "provenance.github"
+
+	// Verifiers build a regular expression from these values, so their
+	// length bounds its size.
+	maxGitHubRepositoryLength = 140
+	maxGitHubWorkflowLength   = 255
+	maxGitHubRefLength        = 255
 )
 
 var (
 	githubRepositoryPattern = regexp.MustCompile(`^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$`)
 	githubWorkflowPattern   = regexp.MustCompile(`^[A-Za-z0-9_.-]+\.ya?ml$`)
 	githubRefPattern        = regexp.MustCompile(`^refs/(tags|heads)/[A-Za-z0-9_.*-]+(/[A-Za-z0-9_.*-]+)*$`)
-	imageDigestPattern      = regexp.MustCompile(`@sha256:([0-9a-f]{64})$`)
+	imageDigestPattern      = regexp.MustCompile(`^[^@\s]+@sha256:([0-9a-f]{64})$`)
 )
 
 // ContainerProvenance is the build a config requires for one container image:
@@ -102,13 +108,13 @@ func githubProvenance(node *yaml.Node) (ContainerProvenance, error) {
 		return ContainerProvenance{}, err
 	}
 	switch {
-	case !githubRepositoryPattern.MatchString(github.Repository):
+	case len(github.Repository) > maxGitHubRepositoryLength || !githubRepositoryPattern.MatchString(github.Repository):
 		return ContainerProvenance{}, fmt.Errorf("%s.repository %q must be owner/name", githubProvenanceField, github.Repository)
 	case github.RepositoryID <= 0:
 		return ContainerProvenance{}, fmt.Errorf("%s.repository_id must be the repository's numeric ID", githubProvenanceField)
-	case !githubWorkflowPattern.MatchString(github.Workflow):
+	case len(github.Workflow) > maxGitHubWorkflowLength || !githubWorkflowPattern.MatchString(github.Workflow):
 		return ContainerProvenance{}, fmt.Errorf("%s.workflow %q must be a workflow file name", githubProvenanceField, github.Workflow)
-	case !githubRefPattern.MatchString(github.Ref):
+	case len(github.Ref) > maxGitHubRefLength || !githubRefPattern.MatchString(github.Ref):
 		return ContainerProvenance{}, fmt.Errorf("%s.ref %q must be a tag or branch ref pattern", githubProvenanceField, github.Ref)
 	}
 	return ContainerProvenance{
