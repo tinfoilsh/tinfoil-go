@@ -11,6 +11,7 @@ import (
 	"sync"
 
 	"github.com/tinfoilsh/tinfoil-go/internal/enclave"
+	"github.com/tinfoilsh/tinfoil-go/internal/errs"
 	"github.com/tinfoilsh/tinfoil-go/verify"
 	"golang.org/x/sync/singleflight"
 )
@@ -75,12 +76,20 @@ func (t *Transport) RoundTrip(req *http.Request) (*http.Response, error) {
 	resp, err := s.roundTripper.RoundTrip(req)
 	var lacksKey *peerLacksKeyError
 	if !errors.As(err, &lacksKey) {
+		// A failure that the mode didn't classify, such as a refused
+		// connection or a reset, is the HTTP stack's: a network error, unless
+		// the caller cancelled.
+		if err != nil {
+			err = errs.Interrupted(req.Context(), err)
+		}
 		return resp, err
 	}
 	// Invalidate the state the request was sent under, not the current one,
-	// so a late rejection can't retire a newer verification.
+	// so a late rejection can't retire a newer verification. A rotated key
+	// that no replay recovers from is a network error, unless the rejection
+	// already has a category, as a failed certificate check does.
 	t.invalidate(s)
-	return resp, &keyRejectionError{err}
+	return resp, &keyRejectionError{errs.WrapNetwork(err)}
 }
 
 func (t *Transport) CloseIdleConnections() {

@@ -9,6 +9,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/tinfoilsh/tinfoil-go/internal/cachesecret"
+	"github.com/tinfoilsh/tinfoil-go/internal/errs"
 )
 
 // userCacheSecretTransport injects the client-level secret into request bodies
@@ -43,7 +44,9 @@ func (t *userCacheSecretTransport) RoundTrip(req *http.Request) (*http.Response,
 	raw, err := io.ReadAll(req.Body)
 	req.Body.Close()
 	if err != nil {
-		return nil, err
+		// The caller's body failed to read, which the HTTP stack would report
+		// in its place: a network error, unless the caller cancelled.
+		return nil, errs.Interrupted(req.Context(), err)
 	}
 
 	newBody, changed := injectUserCacheSecret(raw, t.secret)

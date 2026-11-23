@@ -4,17 +4,21 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
 	"strings"
 	"testing"
+	"testing/iotest"
 
 	"github.com/openai/openai-go/v3"
 	"github.com/openai/openai-go/v3/option"
 	"github.com/stretchr/testify/require"
 	"github.com/tinfoilsh/tinfoil-go/internal/cachesecret"
+	"github.com/tinfoilsh/tinfoil-go/internal/errs"
+	"github.com/tinfoilsh/tinfoil-go/internal/testutil"
 )
 
 func captureTransport(secret string, gotBody *[]byte, gotReq **http.Request) *userCacheSecretTransport {
@@ -80,6 +84,18 @@ func TestUserCacheSecretTransportInjects(t *testing.T) {
 			require.Equal(t, got, replayed)
 		})
 	}
+}
+
+// A body that fails to read while the secret is added fails the request as
+// the HTTP stack would: with a network error.
+func TestUserCacheSecretTransportBodyReadFailureIsANetworkError(t *testing.T) {
+	var got []byte
+	cause := errors.New("read failed")
+	req := postJSONRequest(t, "https://enclave.example.com/v1/chat/completions", "")
+	req.Body = io.NopCloser(iotest.ErrReader(cause))
+	_, err := captureTransport("s1", &got, nil).RoundTrip(req)
+	testutil.RequireCategory(t, err, errs.ErrNetwork)
+	require.ErrorIs(t, err, cause)
 }
 
 func TestUserCacheSecretTransportSkipsIneligibleRequests(t *testing.T) {
