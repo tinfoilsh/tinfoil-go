@@ -2,6 +2,7 @@ package transport
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"time"
@@ -38,6 +39,8 @@ func (t *Transport) EnsureVerified(ctx context.Context) (*verify.Verification, e
 }
 
 // Reverify verifies again even if the current verification is still valid.
+// An attestation failure discards the current verification, so that the next
+// request verifies again; any other failure keeps it while it is still valid.
 func (t *Transport) Reverify(ctx context.Context) (*verify.Verification, error) {
 	s, err := t.verified(ctx, true, (*enclave.Enclave).Verify)
 	if err != nil {
@@ -105,7 +108,14 @@ func (t *Transport) verified(ctx context.Context, force bool, verify func(*encla
 }
 
 // refresh verifies the enclave and publishes the result as the current state.
+// A refresh that fails attestation discards the state that it was replacing:
+// the enclave no longer proves that it holds that state's keys. Any other
+// failure, such as a brief outage of the attestation source, keeps that state
+// while it is still valid.
 func (t *Transport) refresh(verify func(*enclave.Enclave) (*verify.Verification, error)) error {
+	t.mu.RLock()
+	replacing := t.current
+	t.mu.RUnlock()
 	// The attestation fetch bounds its network I/O. Local verification has no
 	// SDK deadline; each caller can independently cancel its wait above.
 	verified, err := verify(t.enclave)
@@ -127,6 +137,11 @@ func (t *Transport) refresh(verify func(*enclave.Enclave) (*verify.Verification,
 		}
 		t.current = s
 	}
+	// Refreshes run one at a time, so only a refresh can have replaced the
+	// state since this one began; the check keeps the rule explicit.
+	if errors.Is(err, errs.ErrAttestation) && replacing != nil && t.current == replacing {
+		t.discard(replacing)
+	}
 	return err
 }
 
@@ -142,6 +157,14 @@ func (t *Transport) newState(v *verify.Verification) (*state, error) {
 		return nil, err
 	}
 	return &state{verification: v, roundTripper: rt}, nil
+}
+
+// discard marks s rejected, so that no request starts under it again, and
+// closes its idle connections, which are tied to its keys. Requests already
+// sent under it may complete. It is called with mu held.
+func (t *Transport) discard(s *state) {
+	s.rejected = true
+	closeIdleConnections(s.roundTripper)
 }
 
 // invalidate marks s rejected, so the next request verifies again.

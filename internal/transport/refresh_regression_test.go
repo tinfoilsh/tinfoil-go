@@ -113,8 +113,8 @@ func TestRefreshRejectsExpiredVerification(t *testing.T) {
 	}, sendOK)
 	_, err := transport.Reverify(context.Background())
 	require.ErrorIs(t, err, enclave.ErrFreshnessExpired)
-	require.Equal(t, "old", transport.Current().CodeTag())
-	require.True(t, currentValid(transport), "a failed refresh leaves a valid verification in place")
+	require.Equal(t, "old", transport.Current().CodeTag(), "an expired verification is never published")
+	require.False(t, currentValid(transport), "an attestation failure discards the verification it was replacing")
 }
 
 func TestRefreshRejectsVerificationThatExpiresDuringCreation(t *testing.T) {
