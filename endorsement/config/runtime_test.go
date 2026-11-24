@@ -77,6 +77,17 @@ func TestRuntimeFromConfigReadsOnlyJSON(t *testing.T) {
 
 // A pin is read whatever version it names, for callers that take it from a
 // config that RuntimeFromConfig does not read.
+// A config over the size limit is refused before it is parsed, also when a
+// statement is built from it.
+func TestOversizedConfigIsRefusedUnparsed(t *testing.T) {
+	// Not JSON: a parser would report a syntax error instead of the size.
+	oversized := []byte(strings.Repeat("x", configendorsement.MaxConfigSize+1))
+	_, err := configendorsement.RuntimeFromConfig(oversized)
+	require.ErrorContains(t, err, "larger than")
+	_, err = configendorsement.NewDeploymentStatement("project/app", configendorsement.PublicRegistryID, oversized)
+	require.ErrorContains(t, err, "larger than")
+}
+
 func TestRuntimeFromPin(t *testing.T) {
 	digest := strings.Repeat("ab", sha256.Size)
 	for version, wantTag := range map[string]string{

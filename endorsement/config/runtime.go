@@ -57,6 +57,9 @@ func (r RuntimeReference) Validate() error {
 // caller that has such a config reads its cvm-version itself and uses
 // RuntimeFromPin.
 func RuntimeFromConfig(data []byte) (RuntimeReference, error) {
+	if len(data) > MaxConfigSize {
+		return RuntimeReference{}, fmt.Errorf("parsing config runtime pin: the config is larger than %d bytes", MaxConfigSize)
+	}
 	pin, err := jsonConfigPin(data)
 	if err != nil {
 		return RuntimeReference{}, fmt.Errorf("parsing config runtime pin: not a JSON config that states cvm-version (%w); the YAML configs of versions before %s are not read", err, JSONConfigMinVersion)
