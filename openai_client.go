@@ -1,6 +1,7 @@
 package tinfoil
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -28,22 +29,55 @@ func (*EnclaveHTTPClient) attestedHTTPClient() {}
 func (*RouterHTTPClient) attestedHTTPClient()  {}
 func (*GatewayHTTPClient) attestedHTTPClient() {}
 
-// OpenAIOptions configures an OpenAIClient.
-type OpenAIOptions struct {
-	// APIPath is the path of the OpenAI API, joined under the HTTP client's
-	// BaseURL: the EHBP ProxyURL or, when there is none, the enclave's
-	// origin, or the gateway's URL. Empty selects "/v1/". It must be an
-	// absolute path that consists only of RFC 3986 path characters, without a
-	// query, a fragment, an encoded slash or backslash, or a "." or ".."
-	// segment, percent-encoded or not.
-	APIPath string
+// WithAPIPath sets the path of the OpenAI API, which NewOpenAIClient joins
+// under the HTTP client's BaseURL: the EHBP ProxyURL or, when there is none,
+// the enclave's origin, or the gateway's URL. Without it, the path is "/v1/".
+// It must be an absolute path that consists only of RFC 3986 path characters,
+// without a query, a fragment, an encoded slash or backslash, or a "." or ".."
+// segment, percent-encoded or not; anything else, the empty string included,
+// is an ErrConfiguration error from NewOpenAIClient.
+//
+// It is an option of NewOpenAIClient and NewClient, which take it among their
+// openai-go options and don't pass it on to openai-go. When it is given more
+// than once, each must be valid and the last one wins. It configures the
+// client, not a request: passed to a request method, it fails that request
+// with an ErrConfiguration error before anything is sent.
+func WithAPIPath(path string) option.RequestOption {
+	return apiPathOption{RequestOption: refusePerRequest, path: path}
+}
+
+// apiPathOption is the option that WithAPIPath returns. NewOpenAIClient takes
+// it out of its options; openai-go applies it only when it is passed to a
+// request, and its Apply method, refusePerRequest's, then fails.
+type apiPathOption struct {
+	option.RequestOption
+	path string
+}
+
+// refusePerRequest is an option.RequestOption whose Apply method fails.
+var refusePerRequest = refusalFor(option.RequestOption.Apply, errs.Configuration(errors.New(
+	"tinfoil.WithAPIPath configures the client, not a request: pass it to tinfoil.NewOpenAIClient")))
+
+// refusal is a request option whose Apply method returns err. C is the
+// parameter of option.RequestOption's Apply method, a type that openai-go
+// declares in an internal package, so that this package can't name it.
+type refusal[C any] struct{ err error }
+
+func (r refusal[C]) Apply(C) error { return r.err }
+
+// refusalFor returns a refusal of err for the option interface whose Apply
+// method apply is, inferring C from it. The method sets of refusal[C] and the
+// interface then match, which the compiler can't see inside a generic
+// function, so the conversion to the interface is checked at run time.
+func refusalFor[C any](apply func(option.RequestOption, C) error, err error) option.RequestOption {
+	return any(refusal[C]{err}).(option.RequestOption)
 }
 
 // OpenAIClient is an OpenAI client whose requests go through an
 // AttestedHTTPClient. A per-request option.WithHTTPClient bypasses the
 // attested client and its protections. A per-request option.WithBaseURL
 // replaces the base URL for that request, and the attested client refuses one
-// on another origin.
+// on another origin. A per-request WithAPIPath fails the request.
 type OpenAIClient struct {
 	*openai.Client
 	httpClient AttestedHTTPClient
@@ -56,15 +90,14 @@ type OpenAIClient struct {
 // ErrConfiguration error. It does no network I/O: hc was verified when it was
 // created and verifies again by itself.
 //
-// The base URL is opts.APIPath joined under hc.BaseURL(), whatever the
-// route. The client applies openaiOpts, then sets the HTTP client and the
-// base URL so that openaiOpts can't replace them. An option.WithBaseURL among
-// openaiOpts, OPENAI_BASE_URL in the environment, and a data residency option
-// have no effect; set opts.APIPath to change the API path.
-func NewOpenAIClient(hc AttestedHTTPClient, opts *OpenAIOptions, openaiOpts ...option.RequestOption) (*OpenAIClient, error) {
-	if opts == nil {
-		opts = &OpenAIOptions{}
-	}
+// The base URL is the API path, "/v1/" unless a WithAPIPath among opts sets
+// it, joined under hc.BaseURL(), whatever the route. The client takes its own
+// options, such as WithAPIPath, out of opts and applies the rest, which are
+// openai-go's, then sets the HTTP client and the base URL so that they can't
+// replace them. An option.WithBaseURL among opts, OPENAI_BASE_URL in the
+// environment, and a data residency option have no effect; use WithAPIPath to
+// change the API path.
+func NewOpenAIClient(hc AttestedHTTPClient, opts ...option.RequestOption) (*OpenAIClient, error) {
 	var secure *http.Client
 	var root string
 	switch c := hc.(type) {
@@ -84,10 +117,11 @@ func NewOpenAIClient(hc AttestedHTTPClient, opts *OpenAIOptions, openaiOpts ...o
 	if secure == nil {
 		return nil, errs.Configuration(fmt.Errorf("the HTTP client must be an *EnclaveHTTPClient, *RouterHTTPClient or *GatewayHTTPClient from its constructor, not %T", hc))
 	}
-	baseURL, err := joinAPIPath(root, opts.APIPath)
+	apiPath, openaiOpts, err := splitOptions(opts)
 	if err != nil {
 		return nil, err
 	}
+	baseURL := joinAPIPath(root, apiPath)
 	// openai-go refuses a base URL and a data residency option in the same
 	// call, so the caller's options go in an inner client's call, whose
 	// Options the outer call applies before the HTTP client and base URL.
@@ -110,21 +144,35 @@ func (c *OpenAIClient) BaseURL() string {
 	return c.baseURL
 }
 
-// defaultAPIPath is the API path of an OpenAIOptions without one.
+// splitOptions takes the client's own options out of opts: it returns the
+// API path that the last WithAPIPath sets, or defaultAPIPath without one,
+// and the other options, which are openai-go's. Every WithAPIPath must be
+// valid.
+func splitOptions(opts []option.RequestOption) (apiPath string, openaiOpts []option.RequestOption, err error) {
+	apiPath = defaultAPIPath
+	openaiOpts = make([]option.RequestOption, 0, len(opts))
+	for _, opt := range opts {
+		if o, ok := opt.(apiPathOption); ok {
+			if err := validateAPIPath(o.path); err != nil {
+				return "", nil, err
+			}
+			apiPath = o.path
+			continue
+		}
+		openaiOpts = append(openaiOpts, opt)
+	}
+	return apiPath, openaiOpts, nil
+}
+
+// defaultAPIPath is the API path of an OpenAIClient without WithAPIPath.
 const defaultAPIPath = "/v1/"
 
-// joinAPIPath returns apiPath, or defaultAPIPath when it is empty, joined
-// under root, a proxy URL, an origin or a gateway URL, whether or not root
-// ends with a slash.
-// The result ends with a slash, so that request paths join under it.
-func joinAPIPath(root, apiPath string) (string, error) {
-	if apiPath == "" {
-		apiPath = defaultAPIPath
-	}
-	if err := validateAPIPath(apiPath); err != nil {
-		return "", err
-	}
-	return withTrailingSlash(strings.TrimSuffix(root, "/") + apiPath), nil
+// joinAPIPath returns apiPath, which validateAPIPath accepted, joined under
+// root, a proxy URL, an origin or a gateway URL, whether or not root ends
+// with a slash. The result ends with a slash, so that request paths join
+// under it.
+func joinAPIPath(root, apiPath string) string {
+	return withTrailingSlash(strings.TrimSuffix(root, "/") + apiPath)
 }
 
 // withTrailingSlash returns u ending with a slash, so that request paths join

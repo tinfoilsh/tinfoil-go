@@ -303,7 +303,7 @@ func TestLiveRouterClient(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			c, err := NewRouterHTTPClient(context.Background(), &RouterOptions{Transport: tr, UserCacheSecret: "go-live-integration-cache-secret"})
 			require.NoError(t, err)
-			oc, err := NewOpenAIClient(c, nil, option.WithAPIKey(apiKey))
+			oc, err := NewOpenAIClient(c, option.WithAPIKey(apiKey))
 			require.NoError(t, err)
 			verified, err := c.EnsureVerified(context.Background())
 			require.NoError(t, err)
@@ -525,14 +525,14 @@ func TestURLOptionsWithAPathAreAccepted(t *testing.T) {
 		c, err := unverifiedEnclaveHTTPClient("enclave.example", RepoPin{Repo: "org/repo"}, &EnclaveOptions{Transport: EHBP{ProxyURL: proxyURL}})
 		require.NoError(t, err, proxyURL)
 		require.Equal(t, proxyURL, c.BaseURL())
-		oc, err := NewOpenAIClient(c, nil)
+		oc, err := NewOpenAIClient(c)
 		require.NoError(t, err)
 		require.Equal(t, proxyURL+"v1/", oc.BaseURL(), "OpenAI clients send to v1/ under the proxy URL")
 	}
 	gw, err := unverifiedGatewayHTTPClient(&GatewayOptions{ModelPins: testModelPins, URL: "https://gateway.example/custom/", Catalog: func() Catalog { return Catalog{} }})
 	require.NoError(t, err)
 	require.Equal(t, "https://gateway.example/custom/", gw.BaseURL())
-	oc, err := NewOpenAIClient(gw, nil)
+	oc, err := NewOpenAIClient(gw)
 	require.NoError(t, err)
 	require.Equal(t, "https://gateway.example/custom/v1/", oc.BaseURL(), "OpenAI clients send to v1/ under the gateway URL")
 }
@@ -542,7 +542,7 @@ func TestDirectTransportsSendToTheEnclaveOrigin(t *testing.T) {
 		c, err := unverifiedEnclaveHTTPClient("enclave.example", RepoPin{Repo: "org/repo"}, &EnclaveOptions{Transport: tr})
 		require.NoError(t, err)
 		require.Equal(t, "https://enclave.example/", c.BaseURL(), "%T", tr)
-		oc, err := NewOpenAIClient(c, nil)
+		oc, err := NewOpenAIClient(c)
 		require.NoError(t, err)
 		require.Equal(t, "https://enclave.example/v1/", oc.BaseURL(), "%T", tr)
 	}

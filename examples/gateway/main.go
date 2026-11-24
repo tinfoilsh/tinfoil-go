@@ -21,7 +21,7 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	client, err := tinfoil.NewOpenAIClient(gateway, nil, option.WithAPIKey(os.Getenv("TINFOIL_API_KEY")))
+	client, err := tinfoil.NewOpenAIClient(gateway, option.WithAPIKey(os.Getenv("TINFOIL_API_KEY")))
 	if err != nil {
 		log.Fatal(err)
 	}
