@@ -61,10 +61,6 @@ type SignedBy struct {
 // no registry name or timestamp, so AuthorizedBy has no pin. Authorize must
 // not be nil. An error that it returns rejects the enclave with an
 // ErrAttestation error that wraps it, without a category that it carries.
-//
-// The runtime pin is read from the bytes that Authorize accepts, which must
-// be a JSON config. Any other bytes, such as the YAML config that earlier
-// enclave versions take, reject the enclave.
 type AuthorizedBy struct {
 	Authorize func(collateral.ConfigEndorsement) error
 }
@@ -73,11 +69,7 @@ type AuthorizedBy struct {
 // caller supplies, which must come from trusted client configuration. Name
 // optionally associates them with a /org/project/revision identity. It has no
 // pin, because a pin would only compare the caller's input against the
-// caller's input.
-//
-// Bytes must be a JSON config, which the runtime pin is read from. Any other
-// bytes, such as the YAML config that earlier enclave versions take, are an
-// ErrConfiguration error.
+// caller's input. Bytes must be a JSON config.
 type EmbeddedConfig struct {
 	Name  string
 	Bytes []byte

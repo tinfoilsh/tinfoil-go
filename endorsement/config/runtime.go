@@ -13,8 +13,6 @@ import (
 
 const RuntimeRepo = "tinfoilsh/cvmimage"
 
-const runtimeDigestSeparator = "@sha256:"
-
 type RuntimeReference struct {
 	Repo   string `json:"repo"`
 	Tag    string `json:"tag"`
@@ -34,26 +32,22 @@ func (r RuntimeReference) Validate() error {
 
 // RuntimeFromConfig extracts the immutable runtime pin without changing config bytes.
 // The publisher and guest own validation of the workload's other fields.
-//
-// It reads the cvm-version member of a JSON config and nothing else: the
-// guest decides which configs it boots. The YAML that earlier enclave
-// versions measure is not read here: a caller that has such a config reads
-// its cvm-version itself and uses RuntimeFromPin.
 func RuntimeFromConfig(data []byte) (RuntimeReference, error) {
 	if len(data) > MaxConfigSize {
-		return RuntimeReference{}, fmt.Errorf("parsing config runtime pin: the config is larger than %d bytes", MaxConfigSize)
+		return RuntimeReference{}, fmt.Errorf("parsing config runtime pin: config exceeds %d bytes", MaxConfigSize)
 	}
-	pin, err := jsonConfigPin(data)
-	if err != nil {
-		return RuntimeReference{}, fmt.Errorf("parsing config runtime pin: not a JSON config that states cvm-version (%w); YAML configs are not read", err)
+	var fields struct {
+		Version string `json:"cvm-version"`
 	}
-	return RuntimeFromPin(pin)
+	if err := json.Unmarshal(data, &fields); err != nil {
+		return RuntimeReference{}, fmt.Errorf("parsing config runtime pin: %w", err)
+	}
+	return RuntimeFromPin(fields.Version)
 }
 
-// RuntimeFromPin reads the runtime that a cvm-version value pins:
-// <version>@sha256:<manifest digest>.
+// RuntimeFromPin reads the runtime that a cvm-version value pins.
 func RuntimeFromPin(pin string) (RuntimeReference, error) {
-	version, digest, found := strings.Cut(pin, runtimeDigestSeparator)
+	version, digest, found := strings.Cut(pin, "@sha256:")
 	if !found {
 		return RuntimeReference{}, fmt.Errorf("cvm-version must pin a runtime manifest SHA-256 digest")
 	}
@@ -62,19 +56,4 @@ func RuntimeFromPin(pin string) (RuntimeReference, error) {
 		return RuntimeReference{}, err
 	}
 	return ref, nil
-}
-
-// jsonConfigPin returns the cvm-version that data states, read as a JSON
-// object.
-func jsonConfigPin(data []byte) (string, error) {
-	var fields struct {
-		Version *string `json:"cvm-version"`
-	}
-	if err := json.Unmarshal(data, &fields); err != nil {
-		return "", err
-	}
-	if fields.Version == nil {
-		return "", fmt.Errorf("no cvm-version member")
-	}
-	return *fields.Version, nil
 }

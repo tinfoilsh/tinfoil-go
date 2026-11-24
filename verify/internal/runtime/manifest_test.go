@@ -90,34 +90,32 @@ func TestConfigRuntimePin(t *testing.T) {
 		version string
 		tag     string
 	}{
-		{"0.15.5", "v0.15.5"},
-		{"v0.15.5", "v0.15.5"},
-		{"0.15.5-rc.1", "v0.15.5-rc.1"},
-		{"0.15.5+gpu", "v0.15.5+gpu"},
-		{"v0.15.5+gpu", "v0.15.5+gpu"},
-		{"0.15.5-rc.1+gpu", "v0.15.5-rc.1+gpu"},
-		{"0.15.5+mini", "v0.15.5+mini"},
-		{"0.15.5+containers.initrd-1", "v0.15.5+containers.initrd-1"},
-		{"0.15.5+GPU", "v0.15.5+GPU"},
+		{"0.15.0", "v0.15.0"},
+		{"v0.15.0", "v0.15.0"},
+		{"0.15.0-rc.1", "v0.15.0-rc.1"},
+		{"0.15.0+gpu", "v0.15.0+gpu"},
+		{"v0.15.0+gpu", "v0.15.0+gpu"},
+		{"0.15.0-rc.1+gpu", "v0.15.0-rc.1+gpu"},
+		{"0.15.0+mini", "v0.15.0+mini"},
+		{"0.15.0+containers.initrd-1", "v0.15.0+containers.initrd-1"},
+		{"0.15.0+GPU", "v0.15.0+GPU"},
 	} {
 		config := []byte(`{"containers":[],"cvm-version":"` + test.version + `@sha256:` + digest + `"}`)
 		ref, err := configendorsement.RuntimeFromConfig(config)
 		require.NoError(t, err)
 		require.Equal(t, collateral.RuntimeReference{Repo: collateral.RuntimeRepo, Tag: test.tag, Digest: digest}, ref)
 	}
-	pin := `"cvm-version":"0.15.5@sha256:` + digest + `"`
-	good := "{" + pin + "}"
-	_, err := configendorsement.RuntimeFromConfig([]byte(good))
-	require.NoError(t, err)
+	good := `{"cvm-version":"0.15.0@sha256:` + digest + `"}`
 	for name, config := range map[string]string{
-		"unpinned":        `{"cvm-version":"0.15.5"}`,
-		"duplicate":       "{" + pin + "," + pin + "}",
-		"two documents":   good + "\n" + good,
+		"unpinned":        `{"cvm-version":"0.15.0"}`,
+		"duplicate":       strings.Replace(good, "{", `{"cvm-version":"0.15.0",`, 1),
+		"two documents":   good + good,
+		"not JSON":        "cvm-version: 0.15.0@sha256:" + digest + "\n",
 		"bad digest":      strings.ReplaceAll(good, digest, strings.ToUpper(digest)),
-		"path metadata":   strings.ReplaceAll(good, "0.15.5", "0.15.5+mini/other"),
-		"partial version": strings.ReplaceAll(good, "0.15.5", "0.15+gpu"),
-		"empty metadata":  strings.ReplaceAll(good, "0.15.5", "0.15.5+"),
-		"double metadata": strings.ReplaceAll(good, "0.15.5", "0.15.5+gpu+gpu"),
+		"path metadata":   strings.ReplaceAll(good, "0.15.0", "0.15.0+mini/other"),
+		"partial version": strings.ReplaceAll(good, "0.15.0", "0.15+gpu"),
+		"empty metadata":  strings.ReplaceAll(good, "0.15.0", "0.15.0+"),
+		"double metadata": strings.ReplaceAll(good, "0.15.0", "0.15.0+gpu+gpu"),
 		"short digest":    strings.ReplaceAll(good, digest, digest[:len(digest)-2]),
 		"extra digest":    strings.ReplaceAll(good, digest, digest+"@sha256:"+digest),
 		"missing version": `{"containers":[]}`,

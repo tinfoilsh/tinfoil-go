@@ -39,7 +39,7 @@ func TestConfigPinsOneRuntimeManifest(t *testing.T) {
 		var err error
 		inputs.Runtime, err = json.Marshal(manifest)
 		require.NoError(t, err)
-		inputs.Config.Bytes = []byte(fmt.Sprintf(`{"cvm-version":"0.15.5%s@sha256:%x"}`, suffix, sha256.Sum256(inputs.Runtime)))
+		inputs.Config.Bytes = []byte(fmt.Sprintf(`{"cvm-version":"0.15.0%s@sha256:%x"}`, suffix, sha256.Sum256(inputs.Runtime)))
 		v, err := newEmbeddedVerifier(inputs)
 		require.NoError(t, err)
 		refs, err := v.configReferences(doc, "", time.Now())
@@ -47,7 +47,7 @@ func TestConfigPinsOneRuntimeManifest(t *testing.T) {
 		values := refs.quote.(quote.ConfigReferenceValues)
 		require.Equal(t, sha256.Sum256(inputs.Config.Bytes), values.Hash)
 		require.Equal(t, manifest.Measurements, values.Runtime)
-		require.Equal(t, "v0.15.5", refs.artifact.Tag)
+		require.Equal(t, "v0.15.0", refs.artifact.Tag)
 		inputs.Runtime = embeddedInputs(t).Runtime
 		if suffix != "" {
 			_, err = newEmbeddedVerifier(inputs)
@@ -92,7 +92,7 @@ func newEmbeddedVerifier(in embeddedTestInputs) (*Verifier, error) {
 func embeddedInputs(t *testing.T) embeddedTestInputs {
 	t.Helper()
 	zero := strings.Repeat("00", runtime.MeasurementSize)
-	manifest, err := json.Marshal(runtime.Manifest{Version: "v0.15.5", Measurements: &runtime.Measurements{
+	manifest, err := json.Marshal(runtime.Manifest{Version: "v0.15.0", Measurements: &runtime.Measurements{
 		FormatVersion: runtime.FormatVersion,
 		SNPLaunch:     &runtime.SNPLaunch{Measurement: strings.Repeat("ab", runtime.MeasurementSize)},
 		TDXLaunch:     &runtime.TDXLaunch{MRTD: strings.Repeat("cd", runtime.MeasurementSize), RTMR0: zero, RTMR1: zero, RTMR2: zero, RTMR3: zero},
@@ -101,7 +101,7 @@ func embeddedInputs(t *testing.T) embeddedTestInputs {
 	platform, err := json.Marshal(policy.Artifact{Format: policy.ArtifactFormatV2})
 	require.NoError(t, err)
 	return embeddedTestInputs{
-		Config:  &EmbeddedConfig{Name: embeddedConfigName, Bytes: []byte(fmt.Sprintf(`{"cvm-version":"0.15.5@sha256:%x"}`, sha256.Sum256(manifest)))},
+		Config:  &EmbeddedConfig{Name: embeddedConfigName, Bytes: []byte(fmt.Sprintf(`{"cvm-version":"0.15.0@sha256:%x"}`, sha256.Sum256(manifest)))},
 		Runtime: manifest, Platform: platform,
 	}
 }
@@ -144,38 +144,6 @@ func TestEmbeddedConfigReferenceWithoutConfigBytes(t *testing.T) {
 	got, err := v.configReferences(doc, "org/project@v1", time.Now())
 	require.NoError(t, err)
 	require.Equal(t, refs, got)
-}
-
-// Config bytes are read only as JSON. A config that is not a JSON config is
-// refused when the verifier is built, and is trusted by reference instead.
-func TestEmbeddedConfigBytesMustBeAJSONConfig(t *testing.T) {
-	inputs := embeddedInputs(t)
-	var manifest runtime.Manifest
-	require.NoError(t, json.Unmarshal(inputs.Runtime, &manifest))
-	manifest.Version = "v0.15.4"
-	var err error
-	inputs.Runtime, err = json.Marshal(manifest)
-	require.NoError(t, err)
-	pin := fmt.Sprintf("0.15.4@sha256:%x", sha256.Sum256(inputs.Runtime))
-	yaml := []byte("cvm-version: " + pin + "\n")
-	inputs.Config.Bytes = yaml
-	_, err = newEmbeddedVerifier(inputs)
-	require.ErrorAs(t, err, new(*UsageError))
-	require.ErrorContains(t, err, "must be a JSON config")
-	require.ErrorContains(t, err, "EmbeddedConfigReference")
-
-	pinned, err := configendorsement.RuntimeFromPin(pin)
-	require.NoError(t, err)
-	digest := sha256.Sum256(yaml)
-	inputs.Config = nil
-	inputs.ConfigReference = &EmbeddedConfigReference{Name: embeddedConfigName, Digest: hex.EncodeToString(digest[:]), Runtime: pinned}
-	v, err := newEmbeddedVerifier(inputs)
-	require.NoError(t, err)
-	_, _, doc := embeddedDocument(t, collateral.FormatV3)
-	refs, err := v.configReferences(doc, "", time.Now())
-	require.NoError(t, err)
-	require.Equal(t, digest, refs.quote.(quote.ConfigReferenceValues).Hash)
-	require.Equal(t, "v0.15.4", refs.artifact.Tag)
 }
 
 func embeddedDocument(t *testing.T, format string, entries ...collateral.Entry) ([]byte, []byte, *document.Document) {

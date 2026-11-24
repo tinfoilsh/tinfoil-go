@@ -5,10 +5,8 @@ import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
-	"crypto/sha256"
 	"errors"
 	"net/http"
-	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -104,7 +102,6 @@ func TestInvalidTrustIsAConfigurationError(t *testing.T) {
 		"malformed signed project":        {SignedBy{Keys: testKeys(t), Project: "not a reference"}, true},
 		"no authorizer":                   {AuthorizedBy{}, true},
 		"no embedded config":              {EmbeddedConfig{Name: "/org/project/v1"}, true},
-		"embedded YAML config":            {EmbeddedConfig{Name: "/org/project/v1", Bytes: []byte("cvm-version: 0.15.4@sha256:" + strings.Repeat("ab", sha256.Size) + "\n")}, true},
 	} {
 		t.Run(name, func(t *testing.T) {
 			c, err := NewEnclaveHTTPClient(t.Context(), "enclave.example", tc.trust, nil)

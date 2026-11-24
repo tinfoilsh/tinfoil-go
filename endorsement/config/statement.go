@@ -86,7 +86,6 @@ func NewStatement(name string, config []byte) (*Statement, error) {
 }
 
 // NewDeploymentStatement binds the exact config digest and runtime for verification without config bytes.
-// It reads the runtime from a JSON config.
 func NewDeploymentStatement(name, registryID string, config []byte) (*Statement, error) {
 	runtime, err := RuntimeFromConfig(config)
 	if err != nil {
@@ -95,9 +94,8 @@ func NewDeploymentStatement(name, registryID string, config []byte) (*Statement,
 	return NewDeploymentStatementForRuntime(name, registryID, config, runtime)
 }
 
-// NewDeploymentStatementForRuntime is NewDeploymentStatement for a config the
-// caller has read itself, such as the YAML that earlier enclave versions
-// take. The caller vouches that the config pins runtime.
+// NewDeploymentStatementForRuntime is NewDeploymentStatement with the runtime
+// that the caller read from the config.
 func NewDeploymentStatementForRuntime(name, registryID string, config []byte, runtime RuntimeReference) (*Statement, error) {
 	if err := ValidateRegistryID(registryID); err != nil {
 		return nil, err
@@ -105,7 +103,6 @@ func NewDeploymentStatementForRuntime(name, registryID string, config []byte, ru
 	if err := runtime.Validate(); err != nil {
 		return nil, err
 	}
-	// A config this package can read has to agree with the caller.
 	if stated, err := RuntimeFromConfig(config); err == nil && stated != runtime {
 		return nil, fmt.Errorf("runtime does not match the one the config pins")
 	}

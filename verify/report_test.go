@@ -116,7 +116,7 @@ func TestReportOfAQuoteRejection(t *testing.T) {
 	expected := report.PartialFacts.Expected
 	require.NotNil(t, expected)
 	require.Equal(t, SourceEmbedded, expected.Artifact.Source)
-	require.Equal(t, "v0.15.5", expected.Artifact.Tag)
+	require.Equal(t, "v0.15.0", expected.Artifact.Tag)
 	require.Equal(t, expected.Artifact.Repo, expected.ConfigRepo)
 	require.NotNil(t, expected.Config)
 	require.Equal(t, SourceEmbedded, expected.Config.Source)

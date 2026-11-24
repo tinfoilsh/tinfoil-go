@@ -55,10 +55,10 @@ func TestTimestampCoreCanonicalization(t *testing.T) {
 }
 
 func TestDeploymentStatementRequiresRuntimeBinding(t *testing.T) {
-	_, err := configendorsement.NewDeploymentStatement(testName, configendorsement.PublicRegistryID, []byte(`{"cvm-version":"0.15.5"}`))
+	_, err := configendorsement.NewDeploymentStatement(testName, configendorsement.PublicRegistryID, []byte(`{"name":"gpt-oss-120b"}`))
 	require.ErrorContains(t, err, "cvm-version must pin")
 	f := sigstoretest.New(t)
-	config := []byte(`{"cvm-version":"0.15.5@sha256:` + strings.Repeat("ab", sha256.Size) + `"}`)
+	config := []byte(`{"cvm-version":"0.15.0@sha256:` + strings.Repeat("ab", sha256.Size) + `"}`)
 	s, err := configendorsement.NewDeploymentStatement(testName, configendorsement.PublicRegistryID, config)
 	require.NoError(t, err)
 	input, err := s.TimestampInput()

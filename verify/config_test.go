@@ -265,7 +265,7 @@ func TestConfiguredKeysPreserveProofVerification(t *testing.T) {
 	require.NoError(t, err)
 	client, err := endorsement.NewClientFromJSON(rootJSON)
 	require.NoError(t, err)
-	config := []byte(`{"cvm-version":"0.15.5@sha256:` + strings.Repeat("ab", sha256.Size) + `"}`)
+	config := []byte(`{"cvm-version":"0.15.0@sha256:` + strings.Repeat("ab", sha256.Size) + `"}`)
 	s, err := configendorsement.NewStatement("/org/project/v1", config)
 	require.NoError(t, err)
 	input, err := s.TimestampInput()
@@ -279,7 +279,7 @@ func TestConfiguredKeysPreserveProofVerification(t *testing.T) {
 	require.NoError(t, err)
 
 	f.Key = sigstoretest.New(t).Key
-	artifact := freshness.Artifact{Kind: freshness.KindRuntime, Repo: freshness.RuntimeRepo, Tag: "v0.15.5", Name: freshness.RuntimeName("v0.15.5"), Digest: strings.Repeat("ab", sha256.Size)}
+	artifact := freshness.Artifact{Kind: freshness.KindRuntime, Repo: freshness.RuntimeRepo, Tag: "v0.15.0", Name: freshness.RuntimeName("v0.15.0"), Digest: strings.Repeat("ab", sha256.Size)}
 	approval, err := freshness.NewStatement(artifact)
 	require.NoError(t, err)
 	input, err = approval.TimestampInput()

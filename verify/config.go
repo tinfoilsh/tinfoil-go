@@ -53,10 +53,6 @@ type ConfigSigningKeys struct {
 // unauthorized config bytes. It may be called concurrently. Runtime, platform
 // and hardware checks still apply; approval does not authenticate a registry
 // name or timestamp, so a Project pin is a UsageError.
-//
-// The runtime pin is read from the bytes that Authorize approves, which must
-// be a JSON config. Verification rejects any other bytes, such as the YAML
-// config that earlier enclave versions take.
 type ConfigAuthorizer struct {
 	Authorize func(collateral.ConfigEndorsement) error
 }
