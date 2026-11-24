@@ -152,6 +152,40 @@ anything itself:
 Channel keys come only from `VerifiedFacts`. Never bind a connection to a
 value in a failed report.
 
+#### JSON form
+
+`json.Marshal(report)` writes the report in the JSON form that every Tinfoil
+SDK writes, so that a user interface, a proxy that serves results to
+browsers or an app that relays them reads the reports of every SDK in the
+same way:
+
+```json
+{
+  "schema_version": 1,
+  "steps": [{"layer": "envelope", "status": "passed"}, ...],
+  "verified_facts": {"config_repo": "...", "code_digest": "...", "enclave_measurement": {"platform": "tdx", "mrtd": "...", ...}, "crypto_material": [...], "freshness_expires_at": "..."},
+  "metadata": {"verified_at": "2026-11-24T16:00:00Z"}
+}
+```
+
+Members are snake_case, hex is lowercase and times are RFC 3339 in UTC. A
+rejected report has `partial_facts` in place of `verified_facts`. A
+measurement names its `platform` (`sev-snp` or `tdx`) and its registers, and
+a code measurement omits the registers that the release leaves to the
+platform. A fact that was not established is omitted, and one that was
+established but is empty stays, as in `"measured": {}`. `ReportSchemaVersion`
+is the `schema_version` that the form carries; a consumer ignores members
+that it doesn't know. `metadata.verifier` names this module and its version
+only in a build of a released version. `json.Marshal` of `*VerifiedFacts`
+gives the `verified_facts` object on its own. `testdata/report-json` holds
+golden files of the form.
+
+The form is export only: nothing parses it back into a report or into
+verified facts. The JSON never authorizes anything. Anyone can write it, so
+it proves nothing about a verification: bind a channel only to the
+`VerifiedFacts` of a verification that you ran, never to a key that you read
+from the JSON.
+
 The SDK's clients add fetching, caching and transport binding on top.
 
 ### Migration from v2

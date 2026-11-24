@@ -28,3 +28,10 @@ func TestVersion(t *testing.T) {
 		})
 	}
 }
+
+func TestIsRelease(t *testing.T) {
+	assert.True(t, IsRelease("1.2.3"))
+	for _, v := range []string{"", "devel", "unknown"} {
+		assert.False(t, IsRelease(v), v)
+	}
+}
