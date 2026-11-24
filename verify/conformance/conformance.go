@@ -98,10 +98,13 @@ type Output struct {
 	Accepted  bool           `json:"accepted"`
 	Outputs   *AcceptOutputs `json:"outputs,omitempty"`
 	Rejection *Rejection     `json:"rejection,omitempty"`
-	// Report is the verifier's report, for the full-verify stage only. A
-	// malformed input has none, and neither does the adapter's own rejection
-	// of an accepted document that endorses no channel keys.
-	Report *Report `json:"report,omitempty"`
+	// Report is the verifier's report, for the full-verify stage only, in
+	// the JSON form that every Tinfoil SDK writes. A malformed input has
+	// none, and neither does the adapter's own rejection of an accepted
+	// document that endorses no channel keys. Its step messages and its
+	// metadata are each SDK's own, so a comparison across SDKs leaves them
+	// out.
+	Report *verify.VerificationReport `json:"report,omitzero"`
 }
 
 // AcceptOutputs are the verified facts, in a shape every SDK can produce and
@@ -266,7 +269,7 @@ func verifyFull(doc, nonce []byte, pin verify.Pin, verifier *verify.Verifier, ap
 		if !errors.As(err, &rejected) {
 			return Output{Stage: StageVerify, Rejection: &Rejection{Code: code}}, exit
 		}
-		return Output{Stage: StageVerify, Rejection: &Rejection{Code: code}, Report: ReportOf(rejected.Report)}, exit
+		return Output{Stage: StageVerify, Rejection: &Rejection{Code: code}, Report: rejected.Report}, exit
 	}
 	verified := report.VerifiedFacts
 	// A document that verifies but endorses no usable channel keys is useless
@@ -286,7 +289,7 @@ func verifyFull(doc, nonce []byte, pin verify.Pin, verifier *verify.Verifier, ap
 		EnclaveMeasurement: MeasurementOf(verified.EnclaveMeasurement()),
 		TLSPublicKeyFP:     tlsFP,
 		HPKEPublicKey:      hpke,
-	}, Report: ReportOf(report)}, ExitAccepted
+	}, Report: report}, ExitAccepted
 }
 
 // authenticateApproval runs the key-signed approval verifier (the one behind
