@@ -5,7 +5,7 @@ import sh.tinfoil.go.mobile.Verifier;
 // Compiles against the supported Java-facing API of TinfoilGo.aar. Nothing
 // here runs: CI only invokes javac, so this proves that the surface exists
 // with the expected signatures, and nothing more. In particular it cannot
-// detect a change to the JSON contract, which is verificationJSON in
+// detect a change to the JSON contract, which is resultJSON in
 // mobile/verification.go.
 final class Smoke {
     static void checkMobileSurface() throws Exception {

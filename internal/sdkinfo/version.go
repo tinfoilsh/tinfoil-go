@@ -39,3 +39,10 @@ func buildModuleVersion(module *debug.Module) string {
 	}
 	return version
 }
+
+// IsRelease reports whether version, as Version returns it, names a release
+// of this module rather than a development build ("devel") or a build
+// without the module in its build information ("unknown").
+func IsRelease(version string) bool {
+	return version != "" && version != "devel" && version != "unknown"
+}

@@ -16,6 +16,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/tinfoilsh/tinfoil-go/verify/conformance"
+	"github.com/tinfoilsh/tinfoil-go/verify/document"
 )
 
 // TestConformanceVectorsMatchTheAdapter runs every full-verify vector under
@@ -97,14 +98,13 @@ func TestConformanceVectorsMatchTheAdapter(t *testing.T) {
 				assert.Equal(t, want.Rejection.Code, code, "%v", err)
 				return
 			}
-			var result resultJSON
-			require.NoError(t, json.Unmarshal([]byte(payload), &result))
+			result := decodeResult(t, payload)
 			if want.Report != nil {
-				var steps []conformance.ReportStep
-				for _, s := range result.Report.Steps {
-					steps = append(steps, conformance.ReportStep{Layer: s.Layer, Status: s.Status})
+				require.Len(t, result.Report.Steps, len(want.Report.Steps))
+				for i, s := range want.Report.Steps {
+					assert.Equal(t, string(s.Layer), result.Report.Steps[i].Layer)
+					assert.Equal(t, string(s.Status), result.Report.Steps[i].Status)
 				}
-				assert.Equal(t, want.Report.Steps, steps)
 			}
 			if result.Error != nil {
 				require.NotNil(t, want.Report, "the adapter reports every rejection by the verifier")
@@ -118,7 +118,9 @@ func TestConformanceVectorsMatchTheAdapter(t *testing.T) {
 			}
 			require.NotNil(t, result.Report.VerifiedFacts)
 			got := result.Report.VerifiedFacts
-			if got.TLSPublicKeyFP == "" || got.HPKEPublicKey == "" {
+			tlsFP := result.key(document.CryptoMaterialIDTLS, document.KeySPKIFPSHA256V1Format)
+			hpke := result.key(document.CryptoMaterialIDHPKE, document.KeyX25519HPKEV1Format)
+			if tlsFP == "" || hpke == "" {
 				// The adapter refuses a document without both channel keys
 				// at the envelope; so does each client.
 				require.NotNil(t, want.Rejection)
@@ -127,8 +129,8 @@ func TestConformanceVectorsMatchTheAdapter(t *testing.T) {
 			}
 			require.True(t, want.Accepted, "the binding accepted where the adapter rejected with %+v", want.Rejection)
 			assert.Equal(t, want.Outputs.CodeDigest, got.CodeDigest)
-			assert.Equal(t, want.Outputs.TLSPublicKeyFP, got.TLSPublicKeyFP)
-			assert.Equal(t, want.Outputs.HPKEPublicKey, got.HPKEPublicKey)
+			assert.Equal(t, want.Outputs.TLSPublicKeyFP, tlsFP)
+			assert.Equal(t, want.Outputs.HPKEPublicKey, hpke)
 		})
 	}
 	require.NotZero(t, ran, "no full-verify vectors under %s", dir)

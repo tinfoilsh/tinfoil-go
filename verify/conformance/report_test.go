@@ -156,39 +156,35 @@ func TestReportOfATDXRegisterMismatchVector(t *testing.T) {
 }
 
 func TestCheckReportRejectsInconsistentReports(t *testing.T) {
-	steps := func(statuses ...string) []ReportStep {
-		layers := []string{"envelope", "provenance", "quote", "policy"}
-		out := make([]ReportStep, len(statuses))
+	steps := func(statuses ...verify.StepStatus) []verify.Step {
+		layers := []verify.Layer{verify.LayerEnvelope, verify.LayerProvenance, verify.LayerQuote, verify.LayerPolicy}
+		out := make([]verify.Step, len(statuses))
 		for i, s := range statuses {
-			out[i] = ReportStep{Layer: layers[i], Status: s}
+			out[i] = verify.Step{Layer: layers[i], Status: s}
 		}
 		return out
 	}
-	measured := &ReportMeasuredFacts{TLSPublicKeyFP: strings.Repeat("a", 64)}
-	ok := Output{Stage: StageVerify, Rejection: &Rejection{Code: "PROVENANCE_REJECTED"}, Report: &Report{
-		Steps:        steps("passed", "failed", "not_run", "not_run"),
-		PartialFacts: &ReportPartialFacts{Measured: measured},
+	measured := &verify.MeasuredFacts{TLSPublicKeyFP: strings.Repeat("a", 64)}
+	ok := Output{Stage: StageVerify, Rejection: &Rejection{Code: "PROVENANCE_REJECTED"}, Report: &verify.VerificationReport{
+		Steps:        steps(passed, failed, notRun, notRun),
+		PartialFacts: &verify.PartialFacts{Measured: measured},
 	}}
 	require.NoError(t, CheckReport(ok))
 	for name, mutate := range map[string]func(*Output){
 		"wrong layer":      func(o *Output) { o.Rejection.Code = "QUOTE_REJECTED" },
-		"ran after":        func(o *Output) { o.Report.Steps[2].Status = "passed" },
-		"expected early":   func(o *Output) { o.Report.PartialFacts.Expected = &ReportExpectedFacts{} },
+		"ran after":        func(o *Output) { o.Report.Steps[2].Status = passed },
+		"expected early":   func(o *Output) { o.Report.PartialFacts.Expected = &verify.ExpectedFacts{} },
 		"no measured":      func(o *Output) { o.Report.PartialFacts.Measured = nil },
-		"cpu early":        func(o *Output) { o.Report.PartialFacts.Measured.CPUMeasurement = &Measurement{} },
+		"cpu early":        func(o *Output) { o.Report.PartialFacts.Measured.CPU = &verify.CPUEvidence{} },
 		"three steps":      func(o *Output) { o.Report.Steps = o.Report.Steps[:3] },
 		"no partial facts": func(o *Output) { o.Report.PartialFacts = nil },
+		"verified facts":   func(o *Output) { o.Report.VerifiedFacts = &verify.VerifiedFacts{} },
 		"accepted":         func(o *Output) { o.Accepted = true },
 	} {
 		o := ok
-		r := *ok.Report
-		r.Steps = append([]ReportStep(nil), ok.Report.Steps...)
-		p := *ok.Report.PartialFacts
-		m := *measured
-		p.Measured = &m
-		r.PartialFacts = &p
+		o.Report = ok.Report.Clone()
 		rejection := *ok.Rejection
-		o.Report, o.Rejection = &r, &rejection
+		o.Rejection = &rejection
 		mutate(&o)
 		assert.Error(t, CheckReport(o), name)
 	}

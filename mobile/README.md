@@ -101,7 +101,11 @@ needs an explicit enclave and cannot be used to discover a router.
 
 `Verify` returns one result JSON, declared and documented on `resultJSON` in
 `verification.go`, for both outcomes of a verification that ran, because
-gomobile can't carry a report on an error:
+gomobile can't carry a report on an error. It is bridge schema 3:
+`{"schema_version": 3, "report": ..., "error": ...}`, where `report` is the
+verification report, unchanged, in the JSON form that every Tinfoil SDK
+writes (`verify.VerificationReport.MarshalJSON`), with its own
+`schema_version`.
 
 - **Accepted:** `report.verified_facts` holds what the document proved, and
   there is no `error`.
@@ -117,8 +121,9 @@ that `error.message` carries. `report.metadata.verified_at` is the appraisal
 instant. Verified facts from a verification against a config also carry `config`, `runtime` and
 `platform`, each with the `source` that it was accepted from (`endorsement`,
 `embedded`, or `policy` for a config that an authorizer approved). Channel
-keys come only from `verified_facts`; partial facts hold key fingerprints,
-which are unverified.
+keys come only from `verified_facts.crypto_material`, looked up by `id` and
+`format`; partial facts hold key fingerprints, which are unverified. The
+report's metadata has no `verifier`: the caller records which SDK verified.
 
 ## Errors
 
