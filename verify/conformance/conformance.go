@@ -22,6 +22,7 @@ import (
 	"strings"
 	"time"
 
+	configendorsement "github.com/tinfoilsh/tinfoil-go/endorsement/config"
 	"github.com/tinfoilsh/tinfoil-go/verify"
 	"github.com/tinfoilsh/tinfoil-go/verify/document"
 	"github.com/tinfoilsh/tinfoil-go/verify/internal/endorsement"
@@ -50,6 +51,7 @@ const (
 	StageAuthenticateQuote      = "v3-authenticate-quote"      // CPU quote signature chain to the vendor root
 	StageAuthenticateApproval   = "v3-authenticate-approval"   // key-signed approval bundle under pinned keys
 	StageVerifyTimestamp        = "v3-verify-timestamp"        // RFC 3161 response against the trusted TSAs
+	StageReadConfigRuntime      = "v3-read-config-runtime"     // runtime pin stated by the config a document carries
 )
 
 // Input is the stdin JSON: a v3 document, the verifier-supplied nonce, the
@@ -124,6 +126,16 @@ type AcceptOutputs struct {
 	// Timestamp is the authenticated genTime, RFC 3339 in UTC at second
 	// precision (v3-verify-timestamp).
 	Timestamp string `json:"timestamp,omitempty"`
+	// Runtime is the pin that the document's config states
+	// (v3-read-config-runtime).
+	Runtime *Runtime `json:"runtime,omitempty"`
+}
+
+// Runtime mirrors endorsement/config.RuntimeReference as plain JSON.
+type Runtime struct {
+	Repo   string `json:"repo"`
+	Tag    string `json:"tag"`
+	Digest string `json:"digest"`
 }
 
 // Measurement mirrors verify/measurement.Measurement as plain JSON.
@@ -246,6 +258,23 @@ func Run(stage string, in Input) (Output, int) {
 		}
 		return Output{Stage: stage, Accepted: true, Outputs: &AcceptOutputs{
 			EnclaveMeasurement: MeasurementOf(auth.Measurement),
+		}}, ExitAccepted
+	case StageReadConfigRuntime:
+		parsed, err := document.DangerousTestOnlyDecode(doc)
+		if err != nil {
+			return malformed(stage)
+		}
+		// The stage reads the config; it does not authenticate it.
+		config, err := parsed.ConfigEndorsement()
+		if err != nil {
+			return reject(stage, "PROVENANCE_REJECTED")
+		}
+		runtime, err := configendorsement.RuntimeFromConfig(config.Config)
+		if err != nil {
+			return reject(stage, "PROVENANCE_REJECTED")
+		}
+		return Output{Stage: stage, Accepted: true, Outputs: &AcceptOutputs{
+			Runtime: &Runtime{Repo: runtime.Repo, Tag: runtime.Tag, Digest: runtime.Digest},
 		}}, ExitAccepted
 	default:
 		return Output{Stage: stage}, ExitUnsupported

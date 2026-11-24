@@ -16,6 +16,8 @@ import (
 
 	"github.com/tinfoilsh/tinfoil-go/internal/sigstoretest"
 	"github.com/tinfoilsh/tinfoil-go/internal/statement"
+	"github.com/tinfoilsh/tinfoil-go/verify/document"
+	"github.com/tinfoilsh/tinfoil-go/verify/document/collateral"
 )
 
 // approvalFixture is a synthetic Sigstore world for the approval and
@@ -208,4 +210,59 @@ func TestNewStagesAdvertised(t *testing.T) {
 	stages := Capabilities()["v3"].(map[string]any)["stages_supported"].([]string)
 	require.Contains(t, stages, StageAuthenticateApproval)
 	require.Contains(t, stages, StageVerifyTimestamp)
+}
+
+// The runtime stage reads the pin from the config a document carries: JSON
+// from the first JSON version on, YAML before it.
+func TestReadConfigRuntimeStage(t *testing.T) {
+	digest := strings.Repeat("ab", 32)
+	input := func(config string) Input {
+		data, err := json.Marshal(map[string][]byte{"config_base64": []byte(config)})
+		require.NoError(t, err)
+		doc, err := document.Build(document.BuildInput{
+			Nonce: make([]byte, document.NonceSize), CollateralFormat: collateral.FormatV3,
+			Collateral: []collateral.Entry{{ID: collateral.ConfigID, Role: collateral.RoleReferenceValues, Format: collateral.ConfigV1Format, Data: data}},
+		}, func([64]byte) (string, []byte, error) {
+			return document.SEVSNPReportV1Format, []byte("unauthenticated quote"), nil
+		})
+		require.NoError(t, err)
+		return Input{SchemaVersion: SchemaVersion, DocumentB64: base64.StdEncoding.EncodeToString(doc)}
+	}
+	jsonConfig := `{"cvm-version":"0.15.5-rc.1@sha256:` + digest + `"}`
+	yamlConfig := "cvm-version: 0.15.4@sha256:" + digest + "\n"
+
+	for name, tt := range map[string]struct{ config, wantTag string }{
+		"JSON config": {jsonConfig, "v0.15.5-rc.1"},
+		"YAML config": {yamlConfig, "v0.15.4"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			out, code := Run(StageReadConfigRuntime, input(tt.config))
+			require.Equal(t, ExitAccepted, code, "%+v", out.Rejection)
+			require.Equal(t, &Runtime{Repo: "tinfoilsh/cvmimage", Tag: tt.wantTag, Digest: digest}, out.Outputs.Runtime)
+		})
+	}
+	for name, config := range map[string]string{
+		"YAML for a JSON version":  strings.Replace(yamlConfig, "0.15.4", "0.15.5-rc.1", 1),
+		"JSON not in its one form": strings.Replace(jsonConfig, `":"`, `": "`, 1),
+		"no pin":                   "cpus: 2\n",
+	} {
+		t.Run(name, func(t *testing.T) {
+			out, code := Run(StageReadConfigRuntime, input(config))
+			require.Equal(t, ExitRejected, code)
+			require.Equal(t, "PROVENANCE_REJECTED", out.Rejection.Code)
+			require.Nil(t, out.Outputs)
+		})
+	}
+	t.Run("no config", func(t *testing.T) {
+		in := input(jsonConfig)
+		doc, err := document.Build(document.BuildInput{Nonce: make([]byte, document.NonceSize), CollateralFormat: collateral.FormatV3}, func([64]byte) (string, []byte, error) {
+			return document.SEVSNPReportV1Format, []byte("unauthenticated quote"), nil
+		})
+		require.NoError(t, err)
+		in.DocumentB64 = base64.StdEncoding.EncodeToString(doc)
+		out, code := Run(StageReadConfigRuntime, in)
+		require.Equal(t, ExitRejected, code)
+		require.Equal(t, "PROVENANCE_REJECTED", out.Rejection.Code)
+	})
+	require.Contains(t, Capabilities()["v3"].(map[string]any)["stages_supported"].([]string), StageReadConfigRuntime)
 }

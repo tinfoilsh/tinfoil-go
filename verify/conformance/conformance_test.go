@@ -26,6 +26,7 @@ type fixture struct {
 		EnclaveMeasurement *Measurement `json:"enclave_measurement,omitempty"`
 		SigningKeyHint     string       `json:"signing_key_hint,omitempty"`
 		Timestamp          string       `json:"timestamp,omitempty"`
+		Runtime            *Runtime     `json:"runtime,omitempty"`
 		// FailedStep and Report, when declared, are what a full-verify
 		// vector expects of the report: the layer of the failed step, every
 		// step's status, and the partial facts.
@@ -99,7 +100,7 @@ func TestFixtures(t *testing.T) {
 			// different code digest, measurement register set, or channel key is
 			// not conformant — this is what forces cross-SDK output equivalence.
 			e := f.Expected
-			if e.Accepted && (e.TLSPublicKeyFP != "" || e.HPKEPublicKey != "" || e.CodeDigest != "" || e.CodeMeasurement != nil || e.EnclaveMeasurement != nil || e.SigningKeyHint != "" || e.Timestamp != "") {
+			if e.Accepted && (e.TLSPublicKeyFP != "" || e.HPKEPublicKey != "" || e.CodeDigest != "" || e.CodeMeasurement != nil || e.EnclaveMeasurement != nil || e.SigningKeyHint != "" || e.Timestamp != "" || e.Runtime != nil) {
 				if out.Outputs == nil {
 					t.Fatalf("accepted but no outputs; want declared facts")
 				}
@@ -124,6 +125,9 @@ func TestFixtures(t *testing.T) {
 				}
 				if e.Timestamp != "" && o.Timestamp != e.Timestamp {
 					t.Errorf("timestamp=%q, want %q", o.Timestamp, e.Timestamp)
+				}
+				if e.Runtime != nil && !reflect.DeepEqual(o.Runtime, e.Runtime) {
+					t.Errorf("runtime=%+v, want %+v", o.Runtime, e.Runtime)
 				}
 			}
 		})
