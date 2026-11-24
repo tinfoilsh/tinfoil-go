@@ -160,7 +160,8 @@ func TestTransportRefreshesFetchedCatalog(t *testing.T) {
 			require.Equal(t, "https://gateway.example/catalog", req.URL.String())
 			return newResponse(http.StatusOK, served), nil
 		})
-		tr, err := NewTransport(Config{BaseURL: "https://gateway.example/v1/", Relay: "gateway.example"})
+		pins := map[string]ModelPin{"old": {Repo: "tinfoilsh/old"}, "new": {Repo: "tinfoilsh/new"}}
+		tr, err := NewTransport(Config{ModelPins: pins, BaseURL: "https://gateway.example/v1/", Relay: "gateway.example"})
 		require.NoError(t, err)
 		models := func() []string {
 			models, err := tr.Models(context.Background())
@@ -168,10 +169,12 @@ func TestTransportRefreshesFetchedCatalog(t *testing.T) {
 			return models
 		}
 		require.Equal(t, []string{"old"}, models())
-		served = `{"new": {"repo": "tinfoilsh/new", "hosts": ["b.example"]}}`
+		served = `{"new": {"repo": "tinfoilsh/new", "hosts": ["b.example"]}, "added": {"repo": "tinfoilsh/added", "hosts": ["c.example"]}}`
 		time.Sleep(catalogRefreshInterval)
 		require.Equal(t, []string{"old"}, models())
 		synctest.Wait()
-		require.Equal(t, []string{"new"}, models(), "the gateway's catalog is refreshed")
+		require.Equal(t, []string{"new"}, models(), "the gateway's catalog is refreshed, and a model that it adds is not served unless it is pinned")
+		_, err = tr.EnsureVerified(context.Background(), "added")
+		require.ErrorIs(t, err, errs.ErrConfiguration, "a model that a refresh adds is refused without contacting a replica")
 	})
 }

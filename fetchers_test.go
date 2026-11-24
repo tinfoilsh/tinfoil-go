@@ -352,8 +352,9 @@ func TestGatewayRelaysAttestationThroughItsOrigin(t *testing.T) {
 			return nil, errors.New("no network in this test")
 		})
 		gw, err := NewGatewayHTTPClient(context.Background(), &GatewayOptions{
-			URL:     "https://gateway.example/v1/",
-			Catalog: func() Catalog { return Catalog{"m": {Repo: "tinfoilsh/m", Hosts: []string{"replica.example"}}} },
+			ModelPins: map[string]ModelPin{"m": {Repo: "tinfoilsh/m"}},
+			URL:       "https://gateway.example/v1/",
+			Catalog:   func() Catalog { return Catalog{"m": {Repo: "tinfoilsh/m", Hosts: []string{"replica.example"}}} },
 		})
 		require.NoError(t, err)
 		_, err = gw.EnsureVerified(context.Background(), "m")

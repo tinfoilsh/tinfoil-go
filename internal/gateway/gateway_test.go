@@ -43,11 +43,16 @@ const (
 	sealTestInitial = "initial.example"
 )
 
+// sealTestPolicy pins sealTestModel to the repository that the seal tests'
+// catalogs name.
+var sealTestPolicy = gatewayPolicy{pins: map[string]pinnedModel{sealTestModel: {repo: "tinfoilsh/test"}}}
+
 // sealTestTransport serves each replica through the transport connect returns
 // for its host. Like a transport verifying, a replica calls connect until it
 // succeeds, then reuses the result.
 func sealTestTransport(connect func(host string) (http.RoundTripper, error)) *Transport {
 	return &Transport{
+		policy: sealTestPolicy,
 		build: func(r replica) (*verifiedReplicaTransport, error) {
 			var mu sync.Mutex
 			var verified http.RoundTripper
@@ -410,6 +415,7 @@ func TestGatewayReplicasKeepTheirOwnLastAttempt(t *testing.T) {
 		order := rank(hostsOrder, sealTestModel, "")
 		bad, good := order[0], order[1]
 		seal := &Transport{
+			policy:  sealTestPolicy,
 			catalog: staticCatalog(Catalog{sealTestModel: {Repo: "tinfoilsh/test", Hosts: hostsOrder}}),
 			build: func(r replica) (*verifiedReplicaTransport, error) {
 				e := enclave.NewForTest(r.host, func() (*verify.VerificationReport, error) {
@@ -452,7 +458,7 @@ func TestGatewayEnsureVerifiedFallsOver(t *testing.T) {
 	buildFails, expired := order[0], order[1]
 	catalog := staticCatalog(Catalog{sealTestModel: {Repo: "tinfoilsh/test", Hosts: hosts}})
 	newGateway := func(attempts *[]string, build func(replica) (*verifiedReplicaTransport, error)) *Transport {
-		return &Transport{catalog: catalog, build: func(r replica) (*verifiedReplicaTransport, error) {
+		return &Transport{policy: sealTestPolicy, catalog: catalog, build: func(r replica) (*verifiedReplicaTransport, error) {
 			*attempts = append(*attempts, r.host)
 			return build(r)
 		}}
@@ -659,15 +665,16 @@ func TestPrepareForwardsOtherBodiesWithRepeats(t *testing.T) {
 func TestNewTransportCacheSecret(t *testing.T) {
 	t.Setenv("TINFOIL_USER_CACHE_SECRET", "from-env")
 	catalog := func() Catalog { return Catalog{} }
-	first, err := NewTransport(Config{Catalog: catalog})
+	pins := map[string]ModelPin{"pinned": {Repo: "tinfoilsh/pinned"}}
+	first, err := NewTransport(Config{ModelPins: pins, Catalog: catalog})
 	require.NoError(t, err)
-	second, err := NewTransport(Config{Catalog: catalog})
+	second, err := NewTransport(Config{ModelPins: pins, Catalog: catalog})
 	require.NoError(t, err)
 	require.Len(t, first.secret, 64)
 	require.Equal(t, first.secret, second.secret, "clients in one process share the generated secret")
 	require.NotEqual(t, "from-env", first.secret, "the environment is not read")
 
-	explicit, err := NewTransport(Config{Catalog: catalog, UserCacheSecret: "from-option"})
+	explicit, err := NewTransport(Config{ModelPins: pins, Catalog: catalog, UserCacheSecret: "from-option"})
 	require.NoError(t, err)
 	require.Equal(t, "from-option", explicit.secret)
 }
@@ -682,10 +689,9 @@ func TestModelPinPolicyInheritsOrReplaces(t *testing.T) {
 	p, err := newGatewayPolicy(map[string]ModelPin{
 		"inherits": {Repo: "tinfoilsh/inherits"},
 		"replaces": {Repo: "tinfoilsh/replaces", Policy: &pinPolicy},
-	}, false, gatewayPolicy)
+	}, gatewayPolicy)
 	require.NoError(t, err)
 	pinPolicy.FreshnessMaxAge = time.Minute // copied at construction
-	require.Equal(t, time.Hour, p.verifierFor(replica{}).FreshnessMaxAge(), "unpinned")
 	require.Equal(t, time.Hour, p.verifierFor(replica{model: "inherits"}).FreshnessMaxAge())
 	require.Equal(t, defaults.FreshnessMaxAge(), p.verifierFor(replica{model: "replaces"}).FreshnessMaxAge())
 }

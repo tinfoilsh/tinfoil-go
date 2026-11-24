@@ -17,7 +17,6 @@ func main() {
 		ModelPins: map[string]tinfoil.ModelPin{
 			model: {Repo: os.Getenv("TINFOIL_MODEL_REF")},
 		},
-		PinnedModelsOnly: true,
 	})
 	if err != nil {
 		log.Fatal(err)

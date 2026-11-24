@@ -58,7 +58,7 @@ func attestedCases() []attestedCase {
 		{
 			name: "gateway",
 			newClient: func(t *testing.T) (AttestedHTTPClient, *http.Client, *http.Client) {
-				c, err := unverifiedGatewayHTTPClient(&GatewayOptions{URL: "https://gateway.example/api/v1/", Catalog: func() Catalog { return Catalog{} }})
+				c, err := unverifiedGatewayHTTPClient(&GatewayOptions{ModelPins: testModelPins, URL: "https://gateway.example/api/v1/", Catalog: func() Catalog { return Catalog{} }})
 				require.NoError(t, err)
 				return c, c.secure, c.Client
 			},
@@ -249,7 +249,7 @@ func TestOpenAIClientAcceptsOnlyRFC3986PathCharacters(t *testing.T) {
 }
 
 func TestOpenAIClientEndsTheGatewayURLWithASlash(t *testing.T) {
-	gw, err := unverifiedGatewayHTTPClient(&GatewayOptions{URL: "https://gateway.example/api/v1", Catalog: func() Catalog { return Catalog{} }})
+	gw, err := unverifiedGatewayHTTPClient(&GatewayOptions{ModelPins: testModelPins, URL: "https://gateway.example/api/v1", Catalog: func() Catalog { return Catalog{} }})
 	require.NoError(t, err)
 	client, err := NewOpenAIClient(gw, nil)
 	require.NoError(t, err)
@@ -258,7 +258,7 @@ func TestOpenAIClientEndsTheGatewayURLWithASlash(t *testing.T) {
 }
 
 func TestOpenAIClientRejectsAnAPIPathForTheGateway(t *testing.T) {
-	gw, err := unverifiedGatewayHTTPClient(&GatewayOptions{Catalog: func() Catalog { return Catalog{} }})
+	gw, err := unverifiedGatewayHTTPClient(&GatewayOptions{ModelPins: testModelPins, Catalog: func() Catalog { return Catalog{} }})
 	require.NoError(t, err)
 	client, err := NewOpenAIClient(gw, &OpenAIOptions{APIPath: "/v1/"})
 	require.Nil(t, client)
