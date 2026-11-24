@@ -1,14 +1,12 @@
 package config
 
 import (
-	"bytes"
 	"crypto/sha256"
+	"encoding/json/v2"
 	"fmt"
-	"io"
 	"strings"
 
 	"golang.org/x/mod/semver"
-	"gopkg.in/yaml.v3"
 
 	"github.com/tinfoilsh/tinfoil-go/internal/canonical"
 )
@@ -34,30 +32,26 @@ func (r RuntimeReference) Validate() error {
 
 // RuntimeFromConfig extracts the immutable runtime pin without changing config bytes.
 // The publisher and guest own validation of the workload's other fields.
-func RuntimeFromConfig(data []byte) (ref RuntimeReference, err error) {
-	// yaml.v3 panics on some malformed documents, such as a mapping with a
-	// non-scalar key and a merge key, instead of returning an error.
-	defer func() {
-		if r := recover(); r != nil {
-			ref, err = RuntimeReference{}, fmt.Errorf("parsing config runtime pin: %v", r)
-		}
-	}()
-	var fields struct {
-		Version string `yaml:"cvm-version"`
+func RuntimeFromConfig(data []byte) (RuntimeReference, error) {
+	if len(data) > MaxConfigSize {
+		return RuntimeReference{}, fmt.Errorf("parsing config runtime pin: config exceeds %d bytes", MaxConfigSize)
 	}
-	decoder := yaml.NewDecoder(bytes.NewReader(data))
-	if err := decoder.Decode(&fields); err != nil {
+	var fields struct {
+		Version string `json:"cvm-version"`
+	}
+	if err := json.Unmarshal(data, &fields); err != nil {
 		return RuntimeReference{}, fmt.Errorf("parsing config runtime pin: %w", err)
 	}
-	var extra yaml.Node
-	if err := decoder.Decode(&extra); err != io.EOF {
-		return RuntimeReference{}, fmt.Errorf("config must contain exactly one YAML document")
-	}
-	version, digest, found := strings.Cut(fields.Version, "@sha256:")
+	return RuntimeFromPin(fields.Version)
+}
+
+// RuntimeFromPin reads the runtime that a cvm-version value pins.
+func RuntimeFromPin(pin string) (RuntimeReference, error) {
+	version, digest, found := strings.Cut(pin, "@sha256:")
 	if !found {
 		return RuntimeReference{}, fmt.Errorf("cvm-version must pin a runtime manifest SHA-256 digest")
 	}
-	ref = RuntimeReference{Repo: RuntimeRepo, Tag: "v" + strings.TrimPrefix(version, "v"), Digest: digest}
+	ref := RuntimeReference{Repo: RuntimeRepo, Tag: "v" + strings.TrimPrefix(version, "v"), Digest: digest}
 	if err := ref.Validate(); err != nil {
 		return RuntimeReference{}, err
 	}

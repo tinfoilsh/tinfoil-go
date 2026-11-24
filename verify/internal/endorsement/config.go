@@ -213,7 +213,7 @@ func (v *ConfigVerifier) verify(config, bundleJSON []byte, issuerDER []byte, pol
 		return nil, fmt.Errorf("approval timestamp follows signature timestamp")
 	}
 	// The config is parsed only once the statement that pins it is
-	// authenticated, so unauthenticated bytes never reach the YAML decoder.
+	// authenticated, so unauthenticated bytes never reach the JSON decoder.
 	if config != nil && s.Predicate.Runtime != nil {
 		runtime, err := configendorsement.RuntimeFromConfig(config)
 		if err != nil {

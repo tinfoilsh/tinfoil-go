@@ -265,7 +265,7 @@ func TestConfiguredKeysPreserveProofVerification(t *testing.T) {
 	require.NoError(t, err)
 	client, err := endorsement.NewClientFromJSON(rootJSON)
 	require.NoError(t, err)
-	config := []byte("cvm-version: 0.15.0@sha256:" + strings.Repeat("ab", sha256.Size) + "\n")
+	config := []byte(`{"cvm-version":"0.15.0@sha256:` + strings.Repeat("ab", sha256.Size) + `"}`)
 	s, err := configendorsement.NewStatement("/org/project/v1", config)
 	require.NoError(t, err)
 	input, err := s.TimestampInput()

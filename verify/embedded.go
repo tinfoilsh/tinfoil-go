@@ -13,8 +13,8 @@ import (
 // EmbeddedConfig trusts exact config bytes that the caller supplies, in place
 // of a registry endorsement. Name optionally associates them with a trusted
 // /org/project/revision identity, which a Project pin must then match. The
-// config must come from trusted client configuration, and requires
-// attestation-collaterals/v3.
+// config must come from trusted client configuration, be a JSON config, and
+// requires attestation-collaterals/v3.
 type EmbeddedConfig struct {
 	Name  string
 	Bytes []byte

@@ -100,16 +100,17 @@ func TestConfigRuntimePin(t *testing.T) {
 		{"0.15.0+containers.initrd-1", "v0.15.0+containers.initrd-1"},
 		{"0.15.0+GPU", "v0.15.0+GPU"},
 	} {
-		config := []byte("cvm-version: " + test.version + "@sha256:" + digest + "\ncontainers: []\n")
+		config := []byte(`{"containers":[],"cvm-version":"` + test.version + `@sha256:` + digest + `"}`)
 		ref, err := configendorsement.RuntimeFromConfig(config)
 		require.NoError(t, err)
 		require.Equal(t, collateral.RuntimeReference{Repo: collateral.RuntimeRepo, Tag: test.tag, Digest: digest}, ref)
 	}
-	good := "cvm-version: 0.15.0@sha256:" + digest + "\n"
+	good := `{"cvm-version":"0.15.0@sha256:` + digest + `"}`
 	for name, config := range map[string]string{
-		"unpinned":        "cvm-version: 0.15.0\n",
-		"duplicate":       good + good,
-		"two documents":   good + "---\n" + good,
+		"unpinned":        `{"cvm-version":"0.15.0"}`,
+		"duplicate":       strings.Replace(good, "{", `{"cvm-version":"0.15.0",`, 1),
+		"two documents":   good + good,
+		"not JSON":        "cvm-version: 0.15.0@sha256:" + digest + "\n",
 		"bad digest":      strings.ReplaceAll(good, digest, strings.ToUpper(digest)),
 		"path metadata":   strings.ReplaceAll(good, "0.15.0", "0.15.0+mini/other"),
 		"partial version": strings.ReplaceAll(good, "0.15.0", "0.15+gpu"),
@@ -117,7 +118,7 @@ func TestConfigRuntimePin(t *testing.T) {
 		"double metadata": strings.ReplaceAll(good, "0.15.0", "0.15.0+gpu+gpu"),
 		"short digest":    strings.ReplaceAll(good, digest, digest[:len(digest)-2]),
 		"extra digest":    strings.ReplaceAll(good, digest, digest+"@sha256:"+digest),
-		"missing version": "containers: []\n",
+		"missing version": `{"containers":[]}`,
 	} {
 		t.Run(name, func(t *testing.T) {
 			_, err := configendorsement.RuntimeFromConfig([]byte(config))

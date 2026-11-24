@@ -39,7 +39,7 @@ func TestConfigPinsOneRuntimeManifest(t *testing.T) {
 		var err error
 		inputs.Runtime, err = json.Marshal(manifest)
 		require.NoError(t, err)
-		inputs.Config.Bytes = []byte(fmt.Sprintf("cvm-version: 0.15.0%s@sha256:%x\n", suffix, sha256.Sum256(inputs.Runtime)))
+		inputs.Config.Bytes = []byte(fmt.Sprintf(`{"cvm-version":"0.15.0%s@sha256:%x"}`, suffix, sha256.Sum256(inputs.Runtime)))
 		v, err := newEmbeddedVerifier(inputs)
 		require.NoError(t, err)
 		refs, err := v.configReferences(doc, "", time.Now())
@@ -101,7 +101,7 @@ func embeddedInputs(t *testing.T) embeddedTestInputs {
 	platform, err := json.Marshal(policy.Artifact{Format: policy.ArtifactFormatV2})
 	require.NoError(t, err)
 	return embeddedTestInputs{
-		Config:  &EmbeddedConfig{Name: embeddedConfigName, Bytes: []byte(fmt.Sprintf("cvm-version: 0.15.0@sha256:%x\n", sha256.Sum256(manifest)))},
+		Config:  &EmbeddedConfig{Name: embeddedConfigName, Bytes: []byte(fmt.Sprintf(`{"cvm-version":"0.15.0@sha256:%x"}`, sha256.Sum256(manifest)))},
 		Runtime: manifest, Platform: platform,
 	}
 }

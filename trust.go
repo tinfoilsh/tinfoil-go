@@ -69,7 +69,7 @@ type AuthorizedBy struct {
 // caller supplies, which must come from trusted client configuration. Name
 // optionally associates them with a /org/project/revision identity. It has no
 // pin, because a pin would only compare the caller's input against the
-// caller's input.
+// caller's input. Bytes must be a JSON config.
 type EmbeddedConfig struct {
 	Name  string
 	Bytes []byte

@@ -41,7 +41,7 @@ func TestScopedConfigCertificateAndTimestampBindings(t *testing.T) {
 	leaf := sigstoretest.New(t).Key
 	certificate := f.SigningCertificate(t, leaf.Public())
 	f.Key = leaf
-	config := []byte("cvm-version: 0.15.3-rc.1@sha256:" + strings.Repeat("ab", sha256.Size) + "\n")
+	config := []byte(`{"cvm-version":"0.15.3-rc.1@sha256:` + strings.Repeat("ab", sha256.Size) + `"}`)
 	s, err := configendorsement.NewDeploymentStatement(testName, configendorsement.PublicRegistryID, config)
 	require.NoError(t, err)
 	input, err := s.TimestampInput()
@@ -203,7 +203,7 @@ func TestVerifyConfigApproval(t *testing.T) {
 
 func TestVerifyConfigDigestAndRuntime(t *testing.T) {
 	f := newFixture(t)
-	config := []byte("cvm-version: 0.15.0@sha256:" + strings.Repeat("ab", sha256.Size) + "\n")
+	config := []byte(`{"cvm-version":"0.15.0@sha256:` + strings.Repeat("ab", sha256.Size) + `"}`)
 	s, err := configendorsement.NewDeploymentStatement(testName, configendorsement.PublicRegistryID, config)
 	require.NoError(t, err)
 	input, err := s.TimestampInput()
@@ -254,7 +254,7 @@ func TestVerifyConfigDigestAndRuntime(t *testing.T) {
 
 func TestDeploymentRuntimeRequiresApprovalAndMatchesConfig(t *testing.T) {
 	f := newFixture(t)
-	config := []byte("cvm-version: 0.15.0@sha256:" + strings.Repeat("ab", sha256.Size) + "\n")
+	config := []byte(`{"cvm-version":"0.15.0@sha256:` + strings.Repeat("ab", sha256.Size) + `"}`)
 	s, err := configendorsement.NewDeploymentStatement(testName, configendorsement.PublicRegistryID, config)
 	require.NoError(t, err)
 	input, err := s.TimestampInput()
@@ -505,14 +505,13 @@ func TestRegistryLegacyPublicCannotSatisfyPrivateRegistryIDPolicy(t *testing.T) 
 	require.ErrorContains(t, err, "registry ID is not accepted")
 }
 
-// yaml.v3 panics on some malformed configs, so the config is parsed only
-// after the statement that pins its digest is authenticated, and a panic
-// becomes an error.
+// The config is parsed only after the statement that pins its digest is
+// authenticated.
 func TestConfigRuntimeParsedOnlyAfterAuthentication(t *testing.T) {
 	f := newFixture(t)
-	config := []byte("? [a]\n: 1\n<<: {b: 2}\n")
+	config := []byte("not a config")
 	s, err := configendorsement.NewDeploymentStatement(testName, configendorsement.PublicRegistryID,
-		[]byte("cvm-version: 0.15.0@sha256:"+strings.Repeat("ab", sha256.Size)+"\n"))
+		[]byte(`{"cvm-version":"0.15.0@sha256:`+strings.Repeat("ab", sha256.Size)+`"}`))
 	require.NoError(t, err)
 	digest := sha256.Sum256(config)
 	s.Subject[0].Digest["sha256"] = hex.EncodeToString(digest[:])
