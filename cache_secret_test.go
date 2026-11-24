@@ -261,7 +261,10 @@ func newFakeEHBPEnclave(t *testing.T) *fakeEHBPEnclave {
 	f := &fakeEHBPEnclave{identity: id}
 	opened := id.Middleware()(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		raw, err := io.ReadAll(r.Body)
-		require.NoError(t, err)
+		if err != nil { // a handler can't stop the test, so it fails the request
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
 		f.mu.Lock()
 		f.plain = append(f.plain, string(raw))
 		f.mu.Unlock()
@@ -270,7 +273,10 @@ func newFakeEHBPEnclave(t *testing.T) *fakeEHBPEnclave {
 	}))
 	f.Server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		raw, err := io.ReadAll(r.Body)
-		require.NoError(t, err)
+		if err != nil { // a handler can't stop the test, so it fails the request
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
 		r.Body = io.NopCloser(bytes.NewReader(raw))
 		f.mu.Lock()
 		f.wire = append(f.wire, string(raw))
