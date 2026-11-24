@@ -434,6 +434,7 @@ func TestGatewayReplicasKeepTheirOwnLastAttempt(t *testing.T) {
 		got, err := seal.EnsureVerified(context.Background(), sealTestModel)
 		require.NoError(t, err)
 		require.Equal(t, good, got.VerifiedFacts.CodeTag())
+		requireReportHost(t, good, got)
 
 		entries := seal.LastVerification()
 		require.Len(t, entries, 2)
@@ -441,9 +442,10 @@ func TestGatewayReplicasKeepTheirOwnLastAttempt(t *testing.T) {
 		require.Nil(t, byHost[bad].Report)
 		var verr *verify.VerificationError
 		require.ErrorAs(t, byHost[bad].Err, &verr, "the verifier's error and report are reachable")
-		require.NotNil(t, verr.Report)
+		requireReportHost(t, bad, verr.Report)
 		require.NoError(t, byHost[good].Err)
 		require.Equal(t, good, byHost[good].Report.VerifiedFacts.CodeTag())
+		requireReportHost(t, good, byHost[good].Report)
 		mu.Lock()
 		defer mu.Unlock()
 		require.Equal(t, []string{bad, bad, good}, hosts, "the bad replica's verification has one retry")
@@ -694,4 +696,19 @@ func TestModelPinPolicyInheritsOrReplaces(t *testing.T) {
 	pinPolicy.FreshnessMaxAge = time.Minute // copied at construction
 	require.Equal(t, time.Hour, p.verifierFor(replica{model: "inherits"}).FreshnessMaxAge())
 	require.Equal(t, defaults.FreshnessMaxAge(), p.verifierFor(replica{model: "replaces"}).FreshnessMaxAge())
+}
+
+// requireReportHost requires report to name host, in its metadata and in its
+// JSON form.
+func requireReportHost(t *testing.T, host string, report *verify.VerificationReport) {
+	t.Helper()
+	require.NotNil(t, report)
+	require.Equal(t, host, report.Metadata.Host)
+	encoded, err := json.Marshal(report)
+	require.NoError(t, err)
+	var decoded struct {
+		Metadata map[string]any `json:"metadata"`
+	}
+	require.NoError(t, json.Unmarshal(encoded, &decoded))
+	require.Equal(t, host, decoded.Metadata["host"], "%s", encoded)
 }

@@ -159,8 +159,8 @@ func (v *VerifiedFacts) CryptoMaterial() []document.CryptoMaterialItem {
 func (v *VerifiedFacts) FreshnessExpiresAt() time.Time { return v.freshnessExpiresAt }
 
 // VerificationMetadata describes how a verification was performed. The
-// verifier fills it in from its own state; none of it is attested by or
-// checked against the document.
+// verifier and the client that called it fill it in from their own state;
+// none of it is attested by or checked against the document.
 type VerificationMetadata struct {
 	// Verifier identifies the SDK that performed the verification.
 	Verifier SoftwareIdentity
@@ -168,6 +168,14 @@ type VerificationMetadata struct {
 	// the local clock by VerifyV3, or the caller's verificationTime for
 	// VerifyV3At. It is not a freshness guarantee.
 	VerifiedAt time.Time
+	// Host is the enclave that the client contacted for the document, a host
+	// with an optional port: for a router client the router that it chose, and
+	// for a gateway client the replica. It is what the client connected to, not
+	// an attested fact, so it proves nothing about the enclave. The verifier
+	// doesn't know the host and leaves Host empty; the clients set it on every
+	// report that they produce, and a caller that calls the verifier itself
+	// can set it on the report that it gets.
+	Host string
 }
 
 // SoftwareIdentity identifies software involved in verification.
