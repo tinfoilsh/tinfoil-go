@@ -85,7 +85,7 @@ func TestConstructorsVerifyBeforeReturning(t *testing.T) {
 		require.ErrorIs(t, err, unreachable)
 		require.Contains(t, hosts(), "enclave.example", "the enclave is verified before the client is returned")
 
-		gw, err := NewGatewayHTTPClient(context.Background(), &GatewayOptions{URL: "https://gateway.example/v1/"})
+		gw, err := NewGatewayHTTPClient(context.Background(), &GatewayOptions{ModelPins: testModelPins, URL: "https://gateway.example/v1/"})
 		require.Nil(t, gw)
 		require.ErrorIs(t, err, unreachable)
 		require.Equal(t, []string{"gateway.example"}, hosts(), "the catalog is fetched before the client is returned")
@@ -244,23 +244,33 @@ func TestEnclaveHTTPClientUsesItsTransport(t *testing.T) {
 	})
 }
 
+// testModelPins is a valid pin set for tests in which the pinned model is
+// never requested.
+var testModelPins = map[string]ModelPin{"pinned": {Repo: "tinfoilsh/pinned"}}
+
 func TestGatewayHTTPClientServesPinnedModels(t *testing.T) {
 	catalog := Catalog{
 		"pinned":   {Repo: "tinfoilsh/pinned", Hosts: []string{"a.example"}},
 		"unpinned": {Repo: "tinfoilsh/unpinned", Hosts: []string{"b.example"}},
 	}
 	gw, err := unverifiedGatewayHTTPClient(&GatewayOptions{
-		Catalog:          func() Catalog { return catalog },
-		ModelPins:        map[string]ModelPin{"pinned": {Repo: "tinfoilsh/pinned@v1"}},
-		PinnedModelsOnly: true,
-		UserCacheSecret:  "test-secret",
+		Catalog:         func() Catalog { return catalog },
+		ModelPins:       map[string]ModelPin{"pinned": {Repo: "tinfoilsh/pinned@v1"}},
+		UserCacheSecret: "test-secret",
 	})
 	require.NoError(t, err)
 	require.Equal(t, "https://inference-gateway.tinfoil.sh/v1/", gw.BaseURL())
 	models, err := gw.Models(context.Background())
 	require.NoError(t, err)
 	require.Equal(t, []string{"pinned"}, models)
-	require.Empty(t, gw.LastVerification(), "no replica is verified before it is used")
+	_, err = gw.EnsureVerified(context.Background(), "unpinned")
+	require.ErrorIs(t, err, ErrConfiguration, "a model that the catalog lists but that has no pin is refused")
+	resp, err := gw.Post(gw.BaseURL()+"chat/completions", "application/json", strings.NewReader(`{"model":"unpinned"}`))
+	if resp != nil {
+		resp.Body.Close()
+	}
+	require.ErrorIs(t, err, ErrConfiguration, "a request for an unpinned model is refused")
+	require.Empty(t, gw.LastVerification(), "no replica is verified before it is used, and none for an unpinned model")
 	canceled, cancel := context.WithCancel(context.Background())
 	cancel()
 	_, err = gw.Models(canceled)
@@ -270,12 +280,13 @@ func TestGatewayHTTPClientServesPinnedModels(t *testing.T) {
 func TestNewGatewayHTTPClientRejectsInvalidOptions(t *testing.T) {
 	catalog := func() Catalog { return Catalog{} }
 	for name, opts := range map[string]*GatewayOptions{
-		"plaintext URL":            {URL: "http://gateway.example/v1/", Catalog: catalog},
-		"pinned-only without pins": {PinnedModelsOnly: true, Catalog: catalog},
-		"pin outside tinfoilsh":    {ModelPins: map[string]ModelPin{"m": {Repo: "acme/m"}}, Catalog: catalog},
-		"invalid pin reference":    {ModelPins: map[string]ModelPin{"m": {Repo: "tinfoilsh/m@"}}, Catalog: catalog},
-		"invalid policy":           {Policy: verify.Policy{FreshnessMaxAge: -1}, Catalog: catalog},
-		"invalid pin policy":       {ModelPins: map[string]ModelPin{"m": {Repo: "tinfoilsh/m", Policy: &verify.Policy{FreshnessMaxAge: -1}}}, Catalog: catalog},
+		"plaintext URL":         {URL: "http://gateway.example/v1/", ModelPins: testModelPins, Catalog: catalog},
+		"no pins":               {Catalog: catalog},
+		"empty pins":            {ModelPins: map[string]ModelPin{}, Catalog: catalog},
+		"pin outside tinfoilsh": {ModelPins: map[string]ModelPin{"m": {Repo: "acme/m"}}, Catalog: catalog},
+		"invalid pin reference": {ModelPins: map[string]ModelPin{"m": {Repo: "tinfoilsh/m@"}}, Catalog: catalog},
+		"invalid policy":        {Policy: verify.Policy{FreshnessMaxAge: -1}, ModelPins: testModelPins, Catalog: catalog},
+		"invalid pin policy":    {ModelPins: map[string]ModelPin{"m": {Repo: "tinfoilsh/m", Policy: &verify.Policy{FreshnessMaxAge: -1}}}, Catalog: catalog},
 	} {
 		t.Run(name, func(t *testing.T) {
 			gw, err := NewGatewayHTTPClient(t.Context(), opts)
@@ -407,7 +418,7 @@ func TestLiveVerificationCheck(t *testing.T) {
 	t.Run("the gateway skips a rejected replica", func(t *testing.T) {
 		check, keys := recorder(func(seen int) bool { return seen == 1 })
 		catalog, model := replicatedCatalog(t)
-		gw, err := NewGatewayHTTPClient(context.Background(), &GatewayOptions{Catalog: func() Catalog { return catalog }, VerificationCheck: check})
+		gw, err := NewGatewayHTTPClient(context.Background(), &GatewayOptions{ModelPins: map[string]ModelPin{model: {Repo: catalog[model].Repo}}, Catalog: func() Catalog { return catalog }, VerificationCheck: check})
 		require.NoError(t, err)
 		verified, err := gw.EnsureVerified(context.Background(), model)
 		require.NoError(t, err)
@@ -421,7 +432,7 @@ func TestLiveVerificationCheck(t *testing.T) {
 	t.Run("the gateway checks each replica once", func(t *testing.T) {
 		check, keys := recorder(func(int) bool { return true })
 		catalog, model := replicatedCatalog(t)
-		gw, err := NewGatewayHTTPClient(context.Background(), &GatewayOptions{Catalog: func() Catalog { return catalog }, VerificationCheck: check})
+		gw, err := NewGatewayHTTPClient(context.Background(), &GatewayOptions{ModelPins: map[string]ModelPin{model: {Repo: catalog[model].Repo}}, Catalog: func() Catalog { return catalog }, VerificationCheck: check})
 		require.NoError(t, err)
 		_, err = gw.EnsureVerified(context.Background(), model)
 		require.ErrorIs(t, err, rejection)
@@ -502,7 +513,7 @@ func TestURLOptionsRefuseUserInfoQueryAndFragment(t *testing.T) {
 			r, err := NewRouterHTTPClient(t.Context(), &RouterOptions{Transport: EHBP{ProxyURL: rawURL}})
 			require.Nil(t, r)
 			requireRefused(t, err, "invalid proxy URL:")
-			gw, err := NewGatewayHTTPClient(t.Context(), &GatewayOptions{URL: rawURL, Catalog: func() Catalog { return Catalog{} }})
+			gw, err := NewGatewayHTTPClient(t.Context(), &GatewayOptions{ModelPins: testModelPins, URL: rawURL, Catalog: func() Catalog { return Catalog{} }})
 			require.Nil(t, gw)
 			requireRefused(t, err, "invalid base URL:")
 		})
@@ -518,7 +529,7 @@ func TestURLOptionsWithAPathAreAccepted(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, proxyURL+"v1/", oc.BaseURL(), "OpenAI clients send to v1/ under the proxy URL")
 	}
-	gw, err := unverifiedGatewayHTTPClient(&GatewayOptions{URL: "https://gateway.example/custom/v1/", Catalog: func() Catalog { return Catalog{} }})
+	gw, err := unverifiedGatewayHTTPClient(&GatewayOptions{ModelPins: testModelPins, URL: "https://gateway.example/custom/v1/", Catalog: func() Catalog { return Catalog{} }})
 	require.NoError(t, err)
 	require.Equal(t, "https://gateway.example/custom/v1/", gw.BaseURL())
 }
@@ -603,7 +614,7 @@ func TestEnclaveHTTPClientRefusesOtherOrigins(t *testing.T) {
 }
 
 func TestGatewayHTTPClientRefusesOtherOrigins(t *testing.T) {
-	gw, err := NewGatewayHTTPClient(t.Context(), &GatewayOptions{Catalog: func() Catalog { return Catalog{} }})
+	gw, err := NewGatewayHTTPClient(t.Context(), &GatewayOptions{ModelPins: testModelPins, Catalog: func() Catalog { return Catalog{} }})
 	require.NoError(t, err)
 	_, err = gw.Get("https://elsewhere.example/v1/models")
 	require.ErrorIs(t, err, ErrConfiguration)
