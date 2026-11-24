@@ -37,8 +37,8 @@ func TestTrustSelectsConfigTrustAndPin(t *testing.T) {
 	}{
 		"repository":                     {RepoPin{Repo: "org/repo"}, nil, verify.Pin{Repo: "org/repo"}},
 		"project in the public registry": {ProjectPin{Project: "org/project"}, nil, verify.Pin{Project: "org/project"}},
-		"project in listed registries": {
-			ProjectPin{Project: "org/project", RegistryIDs: []string{verify.PublicRegistryID}},
+		"project in a named registry": {
+			ProjectPin{Project: "org/project", RegistryID: verify.PublicRegistryID},
 			verify.Registries{IDs: []string{verify.PublicRegistryID}}, verify.Pin{Project: "org/project"},
 		},
 		"signing keys":               {SignedBy{Keys: keys}, verify.ConfigSigningKeys{Keys: keys}, verify.Pin{}},
@@ -92,12 +92,11 @@ func TestInvalidTrustIsAConfigurationError(t *testing.T) {
 		"type that embeds a variant":      {embeddedRepoPin{RepoPin{Repo: "org/repo"}}, false},
 		"empty repository":                {RepoPin{}, false},
 		"empty project":                   {ProjectPin{}, false},
-		"empty but non-nil registry IDs":  {ProjectPin{Project: "org/project", RegistryIDs: []string{}}, false},
 		"either pin without a project":    {EitherPin{Repo: "org/repo"}, false},
 		"either pin without a repository": {EitherPin{Project: "org/project"}, false},
 		"malformed repository":            {RepoPin{Repo: "not a reference"}, true},
 		"malformed project":               {ProjectPin{Project: "not a reference"}, true},
-		"malformed registry ID":           {ProjectPin{Project: "org/project", RegistryIDs: []string{"not a registry"}}, true},
+		"malformed registry ID":           {ProjectPin{Project: "org/project", RegistryID: "not a registry"}, true},
 		"no signing keys":                 {SignedBy{Project: "org/project"}, true},
 		"malformed signed project":        {SignedBy{Keys: testKeys(t), Project: "not a reference"}, true},
 		"no authorizer":                   {AuthorizedBy{}, true},
@@ -117,7 +116,7 @@ func TestValidTrustBuildsAClient(t *testing.T) {
 	for name, trust := range map[string]Trust{
 		"repository":                     RepoPin{Repo: "org/repo@v1"},
 		"project in the public registry": ProjectPin{Project: "org/project@v1"},
-		"project in listed registries":   ProjectPin{Project: "org/project", RegistryIDs: []string{verify.PublicRegistryID}},
+		"project in a named registry":    ProjectPin{Project: "org/project", RegistryID: verify.PublicRegistryID},
 		"signing keys":                   SignedBy{Keys: testKeys(t)},
 		"signing keys for a project":     SignedBy{Keys: testKeys(t), Project: "org/project"},
 		"authorizer":                     AuthorizedBy{Authorize: func(collateral.ConfigEndorsement) error { return nil }},
@@ -127,5 +126,36 @@ func TestValidTrustBuildsAClient(t *testing.T) {
 			_, err := unverifiedEnclaveHTTPClient("enclave.example", trust, nil)
 			require.NoError(t, err)
 		})
+	}
+}
+
+// Services compare trusts in tests and when they diff configurations, so every
+// pin compares with == inside a Trust, and the variants that can't are the
+// ones that Trust's documentation names.
+func TestPinsAreComparable(t *testing.T) {
+	pins := []Trust{
+		RepoPin{Repo: "org/repo"},
+		ProjectPin{Project: "org/project"},
+		ProjectPin{Project: "org/project", RegistryID: verify.PublicRegistryID},
+		EitherPin{Repo: "org/repo", Project: "org/project"},
+	}
+	for i, a := range pins {
+		require.NotPanics(t, func() {
+			// Copies of the same value are equal, and the other pins are not.
+			require.True(t, a == cloneTrust(a), "%#v", a)
+			for j, b := range pins {
+				require.Equal(t, i == j, a == b, "%#v == %#v", a, b)
+			}
+		})
+	}
+	keys := map[Trust]bool{RepoPin{Repo: "org/repo"}: true}
+	require.True(t, keys[RepoPin{Repo: "org/repo"}], "a pin can be a map key")
+
+	for _, trust := range []Trust{
+		SignedBy{Keys: testKeys(t)},
+		AuthorizedBy{Authorize: func(collateral.ConfigEndorsement) error { return nil }},
+		EmbeddedConfig{Bytes: []byte("config")},
+	} {
+		require.Panics(t, func() { _ = trust == trust }, "%T", trust)
 	}
 }

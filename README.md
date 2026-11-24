@@ -82,7 +82,7 @@ The wrapper sits above the attested transport, so the field is added before the 
       &tinfoil.EnclaveOptions{Policy: verify.Policy{FreshnessMaxAge: 24 * time.Hour}})
   ```
 
-  A `ProjectPin` with nil `RegistryIDs` trusts Tinfoil's public registry; a non-empty list trusts exactly the registries that it names, and an empty but non-nil list is an `ErrConfiguration` error.
+  A `ProjectPin` with an empty `RegistryID` trusts Tinfoil's public registry, and one that names a registry trusts exactly that registry instead. The pins (`RepoPin`, `ProjectPin` and `EitherPin`) hold only strings, so two `Trust` values that hold pins compare with `==`; `SignedBy`, `AuthorizedBy` and `EmbeddedConfig` hold keys, a function or bytes, so `==` on two of the same one panics. The `Trust` documentation says how to compare those.
 - Every verification produces a `verify.VerificationReport` that lists the four verification steps (envelope, provenance, quote and policy) and what each one established. The enclave and router clients' `EnsureVerified` and `Reverify` return it, and `LastVerification()` returns the most recent attempt without I/O: its report, or the error that the client reported for it. When the verifier rejects a document, the client's `ErrAttestation` error wraps a `*verify.VerificationError` whose `Report` shows the step that failed, next to what the earlier steps established:
 
   ```go

@@ -160,14 +160,18 @@ func TestEnclaveHTTPClientReportsItsEnclaveAndTrust(t *testing.T) {
 	require.Equal(t, "enclave.example:8443", c.Enclave(), "the enclave, not the proxy")
 	require.Equal(t, RepoPin{Repo: repo}, c.Trust(), "with its trust")
 
-	ids := []string{verify.PublicRegistryID}
-	scoped, err := unverifiedEnclaveHTTPClient("enclave.example", ProjectPin{Project: "org/project", RegistryIDs: ids}, nil)
+	scoped, err := unverifiedEnclaveHTTPClient("enclave.example", ProjectPin{Project: "org/project", RegistryID: verify.PublicRegistryID}, nil)
 	require.NoError(t, err)
-	ids[0] = "changed"
-	got := scoped.Trust().(ProjectPin)
-	require.Equal(t, []string{verify.PublicRegistryID}, got.RegistryIDs, "the client copies the trust argument")
-	got.RegistryIDs[0] = "changed"
-	require.Equal(t, []string{verify.PublicRegistryID}, scoped.Trust().(ProjectPin).RegistryIDs, "and returns copies of it")
+	require.Equal(t, ProjectPin{Project: "org/project", RegistryID: verify.PublicRegistryID}, scoped.Trust())
+
+	keys := testKeys(t)
+	signed, err := unverifiedEnclaveHTTPClient("enclave.example", SignedBy{Keys: keys}, nil)
+	require.NoError(t, err)
+	keys[0] = nil
+	got := signed.Trust().(SignedBy)
+	require.NotNil(t, got.Keys[0], "the client copies the trust argument")
+	got.Keys[0] = nil
+	require.NotNil(t, signed.Trust().(SignedBy).Keys[0], "and returns copies of it")
 
 	authorized, err := unverifiedEnclaveHTTPClient("enclave.example", AuthorizedBy{Authorize: func(collateral.ConfigEndorsement) error { return nil }}, nil)
 	require.NoError(t, err)

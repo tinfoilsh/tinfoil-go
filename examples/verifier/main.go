@@ -16,10 +16,16 @@ var (
 	repo    = flag.String("r", "tinfoilsh/confidential-model-router", "GitHub repository, owner/name[@tag][@sha256:digest]; empty accepts only v3 collateral")
 	project = flag.String("p", "tinfoilsh/confidential-model-router", "config registry project, org/project[@revision][@sha256:digest]; empty accepts only v2 collateral")
 	host    = flag.String("e", "inference.tinfoil.sh", "enclave host")
+	// A pin for v2 collateral has no registry, so -registry needs -r "".
+	registry = flag.String("registry", "", "config registry ID that endorses the project, with -r \"\"; empty selects Tinfoil's public registry")
 )
 
 func main() {
 	flag.Parse()
+	if *registry != "" && *repo != "" {
+		fmt.Fprintln(os.Stderr, "-registry names the project's registry, so it needs -r \"\"")
+		os.Exit(2)
+	}
 
 	slog.Info("verifying enclave", "enclave", *host, "repo", *repo, "project", *project)
 	var trust tinfoil.Trust = tinfoil.EitherPin{Repo: *repo, Project: *project}
@@ -27,7 +33,7 @@ func main() {
 	case *project == "":
 		trust = tinfoil.RepoPin{Repo: *repo}
 	case *repo == "":
-		trust = tinfoil.ProjectPin{Project: *project}
+		trust = tinfoil.ProjectPin{Project: *project, RegistryID: *registry}
 	}
 	c, err := tinfoil.NewEnclaveHTTPClient(context.Background(), *host, trust, &tinfoil.EnclaveOptions{
 		// Called for every attempt, including the retry of a failed one.

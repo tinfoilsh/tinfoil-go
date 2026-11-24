@@ -17,6 +17,16 @@ import (
 // that embeds one is an ErrConfiguration error. Only RepoPin and EitherPin
 // accept attestation-collaterals/v2; every other variant requires
 // attestation-collaterals/v3.
+//
+// The pins, RepoPin, ProjectPin and EitherPin, hold only strings, so two
+// Trust values that hold pins can be compared with ==, and a pin can be a map
+// key. SignedBy, AuthorizedBy and EmbeddedConfig hold keys, a function or
+// bytes, which Go can't compare, so == panics when both operands hold the
+// same one of those variants. Compare those with a type switch on their
+// fields instead: bytes.Equal for EmbeddedConfig's Bytes, and each key's
+// Equal method for SignedBy's Keys. AuthorizedBy can't be compared at all,
+// since Go can't compare functions, and reflect.DeepEqual reports two
+// non-nil functions as unequal even when they are the same one.
 type Trust interface {
 	trust()
 }
@@ -28,20 +38,19 @@ type RepoPin struct {
 }
 
 // ProjectPin trusts v3 collateral for Project, a config registry project
-// org/project[@revision][@sha256:digest], that one of the trusted registries
+// org/project[@revision][@sha256:digest], that the trusted registry
 // endorses. Project must not be empty.
 //
-// RegistryIDs selects the trusted registries, and nil and empty differ:
-//   - nil trusts Tinfoil's public registry, verify.PublicRegistryID, alone.
-//   - A non-empty list trusts exactly the registries that it names, in place
-//     of the public registry. To trust a private registry alongside the
-//     public one, list verify.PublicRegistryID too.
-//   - A non-nil empty list is an ErrConfiguration error, so that an empty list
-//     that the application computed fails closed rather than silently
-//     widening trust to the public registry.
+// RegistryID selects the registry that the project lives in. Empty trusts
+// Tinfoil's public registry, verify.PublicRegistryID; any other value trusts
+// exactly that registry in place of the public one. An application that reads
+// a private registry's ID from its configuration should reject a missing
+// value itself, since an empty RegistryID selects the public registry rather
+// than failing. To accept configs that any of several registries endorse,
+// whatever their project, build a verifier with verify.Registries.
 type ProjectPin struct {
-	Project     string
-	RegistryIDs []string
+	Project    string
+	RegistryID string
 }
 
 // SignedBy trusts v3 configs whose endorsements the caller's Keys sign, in
@@ -108,13 +117,10 @@ func verifierInputs(trust Trust) (verify.ConfigTrust, verify.Pin, error) {
 			return nil, verify.Pin{}, errs.Configuration(errors.New("ProjectPin requires Project"))
 		}
 		pin := verify.Pin{Project: t.Project}
-		if t.RegistryIDs == nil {
+		if t.RegistryID == "" {
 			return nil, pin, nil
 		}
-		if len(t.RegistryIDs) == 0 {
-			return nil, verify.Pin{}, errs.Configuration(errors.New("ProjectPin RegistryIDs must not be empty; leave it nil to trust the public registry"))
-		}
-		return verify.Registries{IDs: t.RegistryIDs}, pin, nil
+		return verify.Registries{IDs: []string{t.RegistryID}}, pin, nil
 	case SignedBy:
 		return verify.ConfigSigningKeys{Keys: t.Keys}, verify.Pin{Project: t.Project}, nil
 	case AuthorizedBy:
@@ -148,9 +154,6 @@ func uncategorizedAuthorizer(authorize func(collateral.ConfigEndorsement) error)
 // functions are shared, since a caller can't change them through a copy.
 func cloneTrust(trust Trust) Trust {
 	switch t := trust.(type) {
-	case ProjectPin:
-		t.RegistryIDs = slices.Clone(t.RegistryIDs)
-		return t
 	case SignedBy:
 		t.Keys = slices.Clone(t.Keys)
 		return t
