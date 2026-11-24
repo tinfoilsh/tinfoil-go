@@ -41,7 +41,7 @@ func TestScopedConfigCertificateAndTimestampBindings(t *testing.T) {
 	leaf := sigstoretest.New(t).Key
 	certificate := f.SigningCertificate(t, leaf.Public())
 	f.Key = leaf
-	config := []byte("cvm-version: 0.15.3-rc.1@sha256:" + strings.Repeat("ab", sha256.Size) + "\n")
+	config := []byte(`{"cvm-version":"0.15.5-rc.1@sha256:` + strings.Repeat("ab", sha256.Size) + `"}`)
 	s, err := configendorsement.NewDeploymentStatement(testName, configendorsement.PublicRegistryID, config)
 	require.NoError(t, err)
 	input, err := s.TimestampInput()
@@ -203,7 +203,7 @@ func TestVerifyConfigApproval(t *testing.T) {
 
 func TestVerifyConfigDigestAndRuntime(t *testing.T) {
 	f := newFixture(t)
-	config := []byte("cvm-version: 0.15.0@sha256:" + strings.Repeat("ab", sha256.Size) + "\n")
+	config := []byte(`{"cvm-version":"0.15.5@sha256:` + strings.Repeat("ab", sha256.Size) + `"}`)
 	s, err := configendorsement.NewDeploymentStatement(testName, configendorsement.PublicRegistryID, config)
 	require.NoError(t, err)
 	input, err := s.TimestampInput()
@@ -217,7 +217,7 @@ func TestVerifyConfigDigestAndRuntime(t *testing.T) {
 	require.Equal(t, hex.EncodeToString(digest[:]), got.Digest)
 	require.Equal(t, testName, got.Name)
 	require.Equal(t, &configendorsement.RuntimeReference{
-		Repo: configendorsement.RuntimeRepo, Tag: "v0.15.0", Digest: strings.Repeat("ab", sha256.Size),
+		Repo: configendorsement.RuntimeRepo, Tag: "v0.15.5", Digest: strings.Repeat("ab", sha256.Size),
 	}, got.Runtime)
 	require.Equal(t, f.Now, got.ApprovalTime)
 	withBytes, err := f.verifier(t).Verify(config, bundle, f.policy())
@@ -230,7 +230,7 @@ func TestVerifyConfigDigestAndRuntime(t *testing.T) {
 		"signature":   func(b *protobundle.Bundle) { b.GetDsseEnvelope().Signatures[0].Sig[0] ^= 1 },
 		"missing log": func(b *protobundle.Bundle) { b.VerificationMaterial.TlogEntries = nil },
 		"unsigned runtime change": func(b *protobundle.Bundle) {
-			b.GetDsseEnvelope().Payload = bytes.Replace(payload, []byte("v0.15.0"), []byte("v0.16.0"), 1)
+			b.GetDsseEnvelope().Payload = bytes.Replace(payload, []byte("v0.15.5"), []byte("v0.16.0"), 1)
 		},
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -254,7 +254,7 @@ func TestVerifyConfigDigestAndRuntime(t *testing.T) {
 
 func TestDeploymentRuntimeRequiresApprovalAndMatchesConfig(t *testing.T) {
 	f := newFixture(t)
-	config := []byte("cvm-version: 0.15.0@sha256:" + strings.Repeat("ab", sha256.Size) + "\n")
+	config := []byte(`{"cvm-version":"0.15.5@sha256:` + strings.Repeat("ab", sha256.Size) + `"}`)
 	s, err := configendorsement.NewDeploymentStatement(testName, configendorsement.PublicRegistryID, config)
 	require.NoError(t, err)
 	input, err := s.TimestampInput()
@@ -505,17 +505,17 @@ func TestRegistryLegacyPublicCannotSatisfyPrivateRegistryIDPolicy(t *testing.T) 
 	require.ErrorContains(t, err, "registry ID is not accepted")
 }
 
-// yaml.v3 panics on some malformed configs, so the config is parsed only
-// after the statement that pins its digest is authenticated, and a panic
-// becomes an error.
+// The config is parsed only after the statement that pins its digest is
+// authenticated. Bytes that are not a JSON config are refused then, and their
+// approval still verifies without them.
 func TestConfigRuntimeParsedOnlyAfterAuthentication(t *testing.T) {
 	f := newFixture(t)
-	config := []byte("? [a]\n: 1\n<<: {b: 2}\n")
-	s, err := configendorsement.NewDeploymentStatement(testName, configendorsement.PublicRegistryID,
-		[]byte("cvm-version: 0.15.0@sha256:"+strings.Repeat("ab", sha256.Size)+"\n"))
+	pin := "0.15.4@sha256:" + strings.Repeat("ab", sha256.Size)
+	config := []byte("cvm-version: " + pin + "\n")
+	runtime, err := configendorsement.RuntimeFromPin(pin)
 	require.NoError(t, err)
-	digest := sha256.Sum256(config)
-	s.Subject[0].Digest["sha256"] = hex.EncodeToString(digest[:])
+	s, err := configendorsement.NewDeploymentStatementForRuntime(testName, configendorsement.PublicRegistryID, config, runtime)
+	require.NoError(t, err)
 	input, err := s.TimestampInput()
 	require.NoError(t, err)
 	payload, err := s.Complete(f.Timestamp(t, input, f.Now))
@@ -526,6 +526,11 @@ func TestConfigRuntimeParsedOnlyAfterAuthentication(t *testing.T) {
 	require.Error(t, err)
 	require.NotContains(t, err.Error(), "parsing config runtime pin")
 
-	_, err = f.verifier(t).Verify(config, sigstoretest.MarshalBundle(t, f.Bundle(t, payload)), f.policy())
+	bundle := sigstoretest.MarshalBundle(t, f.Bundle(t, payload))
+	_, err = f.verifier(t).Verify(config, bundle, f.policy())
 	require.ErrorContains(t, err, "parsing config runtime pin")
+
+	approved, err := f.verifier(t).Verify(nil, bundle, f.policy())
+	require.NoError(t, err)
+	require.Equal(t, &runtime, approved.Runtime)
 }

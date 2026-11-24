@@ -212,8 +212,8 @@ func TestNewStagesAdvertised(t *testing.T) {
 	require.Contains(t, stages, StageVerifyTimestamp)
 }
 
-// The runtime stage reads the pin from the config a document carries: JSON
-// from the first JSON version on, YAML before it.
+// The runtime stage reads the pin from the config a document carries, which
+// is JSON from the first JSON version on. It reads no YAML config.
 func TestReadConfigRuntimeStage(t *testing.T) {
 	digest := strings.Repeat("ab", 32)
 	input := func(config string) Input {
@@ -232,8 +232,8 @@ func TestReadConfigRuntimeStage(t *testing.T) {
 	yamlConfig := "cvm-version: 0.15.4@sha256:" + digest + "\n"
 
 	for name, tt := range map[string]struct{ config, wantTag string }{
-		"JSON config": {jsonConfig, "v0.15.5-rc.1"},
-		"YAML config": {yamlConfig, "v0.15.4"},
+		"JSON config":                {jsonConfig, "v0.15.5-rc.1"},
+		"JSON config, later version": {strings.Replace(jsonConfig, "0.15.5-rc.1", "0.16.0+gpu", 1), "v0.16.0+gpu"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			out, code := Run(StageReadConfigRuntime, input(tt.config))
@@ -242,9 +242,11 @@ func TestReadConfigRuntimeStage(t *testing.T) {
 		})
 	}
 	for name, config := range map[string]string{
+		"YAML config":              yamlConfig,
 		"YAML for a JSON version":  strings.Replace(yamlConfig, "0.15.4", "0.15.5-rc.1", 1),
+		"JSON before the cutoff":   strings.Replace(jsonConfig, "0.15.5-rc.1", "0.15.4", 1),
 		"JSON not in its one form": strings.Replace(jsonConfig, `":"`, `": "`, 1),
-		"no pin":                   "cpus: 2\n",
+		"no pin":                   `{"cpus":2}`,
 	} {
 		t.Run(name, func(t *testing.T) {
 			out, code := Run(StageReadConfigRuntime, input(config))

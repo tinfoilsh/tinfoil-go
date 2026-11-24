@@ -21,9 +21,9 @@ import (
 // A config, the runtime manifest it pins, and an empty platform policy: the
 // smallest embedded references the verifier accepts.
 var (
-	testRuntime  = `{"version":"v0.15.0","igvm":{"format_version":1,"snp_launch":{"measurement":"` + strings.Repeat("ab", 48) + `"},"tdx_launch":{"mrtd":"` + strings.Repeat("cd", 48) + `","rtmr0":"` + strings.Repeat("00", 48) + `","rtmr1":"` + strings.Repeat("00", 48) + `","rtmr2":"` + strings.Repeat("00", 48) + `","rtmr3":"` + strings.Repeat("00", 48) + `"}}}`
+	testRuntime  = `{"version":"v0.15.5","igvm":{"format_version":1,"snp_launch":{"measurement":"` + strings.Repeat("ab", 48) + `"},"tdx_launch":{"mrtd":"` + strings.Repeat("cd", 48) + `","rtmr0":"` + strings.Repeat("00", 48) + `","rtmr1":"` + strings.Repeat("00", 48) + `","rtmr2":"` + strings.Repeat("00", 48) + `","rtmr3":"` + strings.Repeat("00", 48) + `"}}}`
 	testPlatform = `{"format":"https://tinfoil.sh/predicate/platform-endorsements/v2","machines":{},"policies":{}}`
-	testConfig   = fmt.Sprintf("cvm-version: 0.15.0@sha256:%x\n", sha256.Sum256([]byte(testRuntime)))
+	testConfig   = fmt.Sprintf(`{"cvm-version":"0.15.5@sha256:%x"}`, sha256.Sum256([]byte(testRuntime)))
 )
 
 func b64(s string) string { return base64.StdEncoding.EncodeToString([]byte(s)) }
@@ -60,7 +60,7 @@ func TestNewVerifierAcceptsTrustOptions(t *testing.T) {
 	key := quoted(testKeyPEM(t))
 	digest := sha256.Sum256([]byte(testConfig))
 	configReference := `"type":"embedded_config_reference","name":"/org/project/v1","digest":"` + hex.EncodeToString(digest[:]) +
-		`","runtime":{"repo":"tinfoilsh/cvmimage","tag":"v0.15.0","digest":"` + fmt.Sprintf("%x", sha256.Sum256([]byte(testRuntime))) + `"}`
+		`","runtime":{"repo":"tinfoilsh/cvmimage","tag":"v0.15.5","digest":"` + fmt.Sprintf("%x", sha256.Sum256([]byte(testRuntime))) + `"}`
 	embeddedArtifacts := `"type":"embedded","runtime":"` + b64(testRuntime) + `","platform":"` + b64(testPlatform) + `"`
 	for _, tc := range []struct {
 		name             string
@@ -115,7 +115,7 @@ func TestNewVerifierRejectsTrustOptions(t *testing.T) {
 		{"empty embedded runtime", withArtifacts(`"type":"embedded","runtime":""`), "must not be empty"},
 		{"unpadded base64", withArtifacts(`"type":"embedded","runtime":"` + strings.TrimRight(b64(testRuntime+"x"), "=") + `"`), "artifacts.runtime"},
 		{"malformed config", withConfigTrust(`"type":"embedded_config","bytes":"` + b64("not: a config") + `"`), "cvm-version"},
-		{"runtime the config does not pin", `{"config_trust":{"type":"embedded_config","bytes":"` + b64(testConfig) + `"},"policy":{"artifacts":{"type":"embedded","runtime":"` + b64(strings.Replace(testRuntime, "v0.15.0", "v0.15.1", 1)) + `"}}}`, "does not match"},
+		{"runtime the config does not pin", `{"config_trust":{"type":"embedded_config","bytes":"` + b64(testConfig) + `"},"policy":{"artifacts":{"type":"embedded","runtime":"` + b64(strings.Replace(testRuntime, "v0.15.5", "v0.15.6", 1)) + `"}}}`, "does not match"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			_, err := NewVerifier(tc.options)
