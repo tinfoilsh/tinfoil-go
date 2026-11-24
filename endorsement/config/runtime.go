@@ -12,7 +12,6 @@ import (
 	"strings"
 
 	"golang.org/x/mod/semver"
-	"gopkg.in/yaml.v3"
 
 	"github.com/tinfoilsh/tinfoil-go/internal/canonical"
 )
@@ -20,8 +19,8 @@ import (
 const RuntimeRepo = "tinfoilsh/cvmimage"
 
 // JSONConfigMinVersion is the first cvm-version whose config is JSON. A
-// config that pins it or a later version is canonical JSON, and YAML is
-// refused; earlier versions keep YAML.
+// config that pins it or a later version is canonical JSON. Earlier versions
+// measure YAML, which this module does not read.
 const JSONConfigMinVersion = "v0.15.5-rc.1"
 
 const (
@@ -52,42 +51,32 @@ func (r RuntimeReference) Validate() error {
 
 // RuntimeFromConfig extracts the immutable runtime pin without changing config bytes.
 // The publisher and guest own validation of the workload's other fields.
-func RuntimeFromConfig(data []byte) (ref RuntimeReference, err error) {
-	if pin, ok := jsonConfigPin(data); ok && requiresJSON(pin) {
-		if err := checkJSONConfigForm(data); err != nil {
-			return RuntimeReference{}, fmt.Errorf("parsing config runtime pin: %w", err)
-		}
-		return runtimeFromPin(pin)
+//
+// It reads a JSON config, which is what cvm-version JSONConfigMinVersion and
+// later measure. The YAML that earlier versions measure is not read here: a
+// caller that has such a config reads its cvm-version itself and uses
+// RuntimeFromPin.
+func RuntimeFromConfig(data []byte) (RuntimeReference, error) {
+	pin, ok := jsonConfigPin(data)
+	if !ok {
+		return RuntimeReference{}, fmt.Errorf("parsing config runtime pin: not a JSON config that states cvm-version; the YAML configs of versions before %s are not read", JSONConfigMinVersion)
 	}
-	// yaml.v3 panics on some malformed documents, such as a mapping with a
-	// non-scalar key and a merge key, instead of returning an error.
-	defer func() {
-		if r := recover(); r != nil {
-			ref, err = RuntimeReference{}, fmt.Errorf("parsing config runtime pin: %v", r)
-		}
-	}()
-	var fields struct {
-		Version string `yaml:"cvm-version"`
-	}
-	decoder := yaml.NewDecoder(bytes.NewReader(data))
-	if err := decoder.Decode(&fields); err != nil {
-		return RuntimeReference{}, fmt.Errorf("parsing config runtime pin: %w", err)
-	}
-	var extra yaml.Node
-	if err := decoder.Decode(&extra); err != io.EOF {
-		return RuntimeReference{}, fmt.Errorf("config must contain exactly one YAML document")
-	}
-	ref, err = runtimeFromPin(fields.Version)
+	ref, err := RuntimeFromPin(pin)
 	if err != nil {
 		return RuntimeReference{}, err
 	}
-	if requiresJSON(fields.Version) {
-		return RuntimeReference{}, fmt.Errorf("cvm-version %s and later take a JSON config", JSONConfigMinVersion)
+	if !requiresJSON(pin) {
+		return RuntimeReference{}, fmt.Errorf("a JSON config pins cvm-version %s or later", JSONConfigMinVersion)
+	}
+	if err := checkJSONConfigForm(data); err != nil {
+		return RuntimeReference{}, fmt.Errorf("parsing config runtime pin: %w", err)
 	}
 	return ref, nil
 }
 
-func runtimeFromPin(pin string) (RuntimeReference, error) {
+// RuntimeFromPin reads the runtime that a cvm-version value pins:
+// <version>@sha256:<manifest digest>.
+func RuntimeFromPin(pin string) (RuntimeReference, error) {
 	version, digest, found := strings.Cut(pin, runtimeDigestSeparator)
 	if !found {
 		return RuntimeReference{}, fmt.Errorf("cvm-version must pin a runtime manifest SHA-256 digest")

@@ -86,15 +86,26 @@ func NewStatement(name string, config []byte) (*Statement, error) {
 }
 
 // NewDeploymentStatement binds the exact config digest and runtime for verification without config bytes.
+// It reads the runtime from a JSON config.
 func NewDeploymentStatement(name, registryID string, config []byte) (*Statement, error) {
-	if err := ValidateRegistryID(registryID); err != nil {
-		return nil, err
-	}
-	s, err := NewStatement(name, config)
+	runtime, err := RuntimeFromConfig(config)
 	if err != nil {
 		return nil, err
 	}
-	runtime, err := RuntimeFromConfig(config)
+	return NewDeploymentStatementForRuntime(name, registryID, config, runtime)
+}
+
+// NewDeploymentStatementForRuntime is NewDeploymentStatement for a config the
+// caller has read itself, such as the YAML of a cvm-version before
+// JSONConfigMinVersion. The caller vouches that the config pins runtime.
+func NewDeploymentStatementForRuntime(name, registryID string, config []byte, runtime RuntimeReference) (*Statement, error) {
+	if err := ValidateRegistryID(registryID); err != nil {
+		return nil, err
+	}
+	if err := runtime.Validate(); err != nil {
+		return nil, err
+	}
+	s, err := NewStatement(name, config)
 	if err != nil {
 		return nil, err
 	}
