@@ -157,19 +157,27 @@ value in a failed report.
 `json.Marshal(report)` writes the report in the JSON form that every Tinfoil
 SDK writes, so that a user interface, a proxy that serves results to
 browsers or an app that relays them reads the reports of every SDK in the
-same way:
+same way. A rejection at the envelope step, for example:
 
 ```json
 {
   "schema_version": 1,
-  "steps": [{"layer": "envelope", "status": "passed"}, ...],
-  "verified_facts": {"config_repo": "...", "code_digest": "...", "enclave_measurement": {"platform": "tdx", "mrtd": "...", ...}, "crypto_material": [...], "freshness_expires_at": "..."},
+  "steps": [
+    {"layer": "envelope", "status": "failed", "message": "challenge nonce does not match the expected nonce"},
+    {"layer": "provenance", "status": "not_run"},
+    {"layer": "quote", "status": "not_run"},
+    {"layer": "policy", "status": "not_run"}
+  ],
+  "partial_facts": {},
   "metadata": {"verified_at": "2026-11-24T16:00:00Z"}
 }
 ```
 
+A report that every step accepted has `verified_facts` in place of
+`partial_facts`, and `testdata/report-json` holds a full example of each
+case.
+
 Members are snake_case, hex is lowercase and times are RFC 3339 in UTC. A
-rejected report has `partial_facts` in place of `verified_facts`. A
 measurement names its `platform` (`sev-snp` or `tdx`) and its registers, and
 a code measurement omits the registers that the release leaves to the
 platform. A fact that was not established is omitted, and one that was
