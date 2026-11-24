@@ -31,7 +31,7 @@ func main() {
 	}
 	c, err := tinfoil.NewEnclaveHTTPClient(context.Background(), *host, trust, &tinfoil.EnclaveOptions{
 		// Called for every attempt, including the retry of a failed one.
-		OnVerification: func(host string, _ *verify.VerificationReport, err error) {
+		OnVerificationAttempt: func(host string, _ *verify.VerificationReport, err error) {
 			if err != nil {
 				slog.Warn("verification attempt failed", "enclave", host, "error", err)
 			}
@@ -47,9 +47,10 @@ func main() {
 		}
 		os.Exit(1)
 	}
-	report, err := c.LastVerification()
-	if err != nil {
-		slog.Error("verification failed", "error", err)
+	// The verification that the client's requests are bound to now.
+	report := c.CurrentVerification()
+	if report == nil {
+		slog.Error("the verification has already expired")
 		os.Exit(1)
 	}
 	printReport(report)

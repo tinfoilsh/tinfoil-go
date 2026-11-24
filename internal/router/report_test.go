@@ -66,7 +66,7 @@ func TestDiscoveryReportsEveryRouterTried(t *testing.T) {
 		require.ErrorIs(t, err, unreachable)
 		// The fallback's verification has one retry.
 		require.Equal(t, []string{"a.example", "b.example", "inference.tinfoil.sh", "inference.tinfoil.sh"}, seen.hosts())
-		last, lastErr := h.LastVerification()
+		last, lastErr := h.LastVerificationAttempt()
 		require.Nil(t, last)
 		require.ErrorIs(t, lastErr, errs.ErrNetwork)
 	})
@@ -103,7 +103,7 @@ func TestDiscoveryReportsTheSkippedAndTheChosenRouter(t *testing.T) {
 	require.Equal(t, "bad.example", verr.Report.Metadata.Host, "the skipped router's report names it")
 	require.Equal(t, "good.example", seen.seen[1].report.VerifiedFacts.CodeTag())
 	require.Equal(t, "good.example", seen.seen[1].report.Metadata.Host)
-	last, err := h.LastVerification()
+	last, err := h.LastVerificationAttempt()
 	require.NoError(t, err)
 	require.Equal(t, "good.example", last.VerifiedFacts.CodeTag())
 	require.Equal(t, "good.example", last.Metadata.Host, "the chosen router's report names it")

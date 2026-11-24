@@ -19,14 +19,14 @@ import (
 	"github.com/tinfoilsh/tinfoil-go/verify"
 )
 
-// observed is one OnVerification call.
+// observed is one OnVerificationAttempt call.
 type observed struct {
 	host   string
 	report *verify.VerificationReport
 	err    error
 }
 
-// observer records OnVerification calls.
+// observer records OnVerificationAttempt calls.
 type observer struct {
 	mu    sync.Mutex
 	calls []observed
@@ -57,9 +57,9 @@ func errRejected() error {
 	return errs.Attestation(verifytest.Rejected("report signature is invalid"))
 }
 
-func TestLastVerificationBeforeAnyAttempt(t *testing.T) {
+func TestLastVerificationAttemptBeforeAnyAttempt(t *testing.T) {
 	transport, o := newObservedTransport(fresh("key"), sendOK)
-	report, err := transport.LastVerification()
+	report, err := transport.LastVerificationAttempt()
 	require.Nil(t, report)
 	require.NoError(t, err)
 	require.Empty(t, o.all())
@@ -70,7 +70,7 @@ func TestInitialVerificationIsReported(t *testing.T) {
 	ensured, err := transport.EnsureVerified(context.Background())
 	require.NoError(t, err)
 
-	last, err := transport.LastVerification()
+	last, err := transport.LastVerificationAttempt()
 	require.NoError(t, err)
 	require.NotNil(t, last.VerifiedFacts)
 	require.Equal(t, "key", last.VerifiedFacts.CodeTag())
@@ -97,7 +97,7 @@ func TestRejectedVerificationIsReported(t *testing.T) {
 		require.Equal(t, verify.LayerQuote, failed.Layer)
 		require.NotNil(t, verr.Report.PartialFacts)
 
-		last, lastErr := transport.LastVerification()
+		last, lastErr := transport.LastVerificationAttempt()
 		require.Nil(t, last)
 		require.Same(t, err, lastErr, "the error that the client reported")
 
@@ -121,7 +121,7 @@ func TestFailedFetchHasNoReport(t *testing.T) {
 		_, err := transport.EnsureVerified(context.Background())
 		testutil.RequireCategory(t, err, errs.ErrNetwork)
 
-		last, lastErr := transport.LastVerification()
+		last, lastErr := transport.LastVerificationAttempt()
 		require.Nil(t, last)
 		require.Same(t, err, lastErr)
 		require.NotErrorAs(t, lastErr, new(*verify.VerificationError))
@@ -134,7 +134,7 @@ func TestFailedFetchHasNoReport(t *testing.T) {
 
 // A failed re-verification replaces an earlier success, whether the failure
 // discards the cached verification (attestation) or keeps it (network).
-func TestFailedReverifyIsTheLastVerification(t *testing.T) {
+func TestFailedReverifyIsTheLastVerificationAttempt(t *testing.T) {
 	for _, tc := range []struct {
 		name     string
 		failure  error
@@ -153,7 +153,7 @@ func TestFailedReverifyIsTheLastVerification(t *testing.T) {
 
 				_, err = transport.Reverify(context.Background())
 				testutil.RequireCategory(t, err, tc.category)
-				last, lastErr := transport.LastVerification()
+				last, lastErr := transport.LastVerificationAttempt()
 				require.Nil(t, last, "never an earlier success in place of a later failure")
 				require.Same(t, err, lastErr)
 				require.Equal(t, tc.keeps, currentValid(transport))
@@ -177,14 +177,14 @@ func TestRetriedVerificationReportsEachAttempt(t *testing.T) {
 		require.Nil(t, calls[0].report)
 		require.NoError(t, calls[1].err)
 		require.Equal(t, "key", calls[1].report.VerifiedFacts.CodeTag())
-		last, err := transport.LastVerification()
+		last, err := transport.LastVerificationAttempt()
 		require.NoError(t, err)
 		require.Equal(t, calls[1].report, last)
 	})
 }
 
 // While the retry runs, the failed first attempt is the last verification.
-func TestLastVerificationDuringARetry(t *testing.T) {
+func TestLastVerificationAttemptDuringARetry(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		first := errRejected()
 		release := make(chan struct{})
@@ -201,11 +201,11 @@ func TestLastVerificationDuringARetry(t *testing.T) {
 		go func() { _, err := transport.EnsureVerified(context.Background()); done <- err }()
 		time.Sleep(2 * time.Second)
 		synctest.Wait()
-		_, err := transport.LastVerification()
+		_, err := transport.LastVerificationAttempt()
 		require.Same(t, first, err)
 		close(release)
 		require.NoError(t, <-done)
-		_, err = transport.LastVerification()
+		_, err = transport.LastVerificationAttempt()
 		require.NoError(t, err)
 	})
 }
@@ -247,7 +247,7 @@ func TestSharedVerificationIsOneAttempt(t *testing.T) {
 
 // The callback runs outside the transport's lock, so it can call the
 // transport, and sees the attempt that it was called for.
-func TestOnVerificationCanCallTheTransport(t *testing.T) {
+func TestOnVerificationAttemptCanCallTheTransport(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		var transport *Transport
 		type seen struct {
@@ -257,7 +257,7 @@ func TestOnVerificationCanCallTheTransport(t *testing.T) {
 		var inCallback []seen
 		fetch, _ := verifications(fresh("key"), failing(errRejected()), failing(errRejected()))
 		transport = &Transport{mode: sendOK, enclave: enclave.NewForTest("enclave.example", fetch, func(_ string, report *verify.VerificationReport, err error) {
-			lastReport, lastErr := transport.LastVerification()
+			lastReport, lastErr := transport.LastVerificationAttempt()
 			inCallback = append(inCallback, seen{lastReport, lastErr})
 			// EnsureVerified needs no refresh while the verification is
 			// valid, and the callback holds no lock that it waits for.
@@ -286,7 +286,7 @@ func TestRoundTripperFailureIsReportedWithoutAReport(t *testing.T) {
 	transport, o := newObservedTransport(fresh("key"), testMode(func(*verify.VerifiedFacts) (http.RoundTripper, error) { return nil, newErr }))
 	_, err := transport.EnsureVerified(context.Background())
 	require.ErrorIs(t, err, newErr)
-	last, lastErr := transport.LastVerification()
+	last, lastErr := transport.LastVerificationAttempt()
 	require.Nil(t, last)
 	require.Same(t, err, lastErr)
 	calls := o.all()
@@ -296,7 +296,7 @@ func TestRoundTripperFailureIsReportedWithoutAReport(t *testing.T) {
 
 // A callback that verifies again after a failed attempt starts a refresh of
 // its own rather than waiting for the one that is calling it.
-func TestOnVerificationCanVerifyAgainAfterAFailure(t *testing.T) {
+func TestOnVerificationAttemptCanVerifyAgainAfterAFailure(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		var transport *Transport
 		fetch, _ := verifications(failing(errRejected()), failing(errRejected()), fresh("key"))
@@ -318,7 +318,7 @@ func TestOnVerificationCanVerifyAgainAfterAFailure(t *testing.T) {
 	})
 }
 
-func TestOnVerificationPanicIsRecovered(t *testing.T) {
+func TestOnVerificationAttemptPanicIsRecovered(t *testing.T) {
 	calls := 0
 	onVerification := func(string, *verify.VerificationReport, error) {
 		calls++
@@ -331,7 +331,7 @@ func TestOnVerificationPanicIsRecovered(t *testing.T) {
 	require.Equal(t, "key", report.VerifiedFacts.CodeTag())
 	require.Equal(t, 1, calls)
 
-	last, err := transport.LastVerification()
+	last, err := transport.LastVerificationAttempt()
 	require.NoError(t, err)
 	require.Equal(t, report, last)
 
