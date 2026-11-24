@@ -32,9 +32,11 @@ type EnclaveOptions struct {
 	// verify the enclave, failed attempts included, after the attempt's
 	// outcome is decided: the verification when the client is created, each
 	// retry, and every verification again, whether after expiry, after a key
-	// rotation or through Reverify. It receives the enclave's host and the
-	// attempt's outcome, the same report or error that LastVerificationAttempt
-	// returns for it, and the report is a copy for the callback to keep. The client holds none of its locks while
+	// rotation or through Reverify. It receives the enclave's host and that
+	// attempt's own report or error, in the form that LastVerificationAttempt
+	// returns them, though by the time that a retried attempt is reported,
+	// LastVerificationAttempt may describe a later one. The report is a copy
+	// for the callback to keep. The client holds none of its locks while
 	// it calls the callback, so the callback can call the client, but requests
 	// that wait for the verification wait for it too, so keep it fast. A
 	// retried attempt is reported, in order, once the verification that
