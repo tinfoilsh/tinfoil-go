@@ -103,6 +103,7 @@ func TestGatewayReverifyVerifiesTheReplicaInUseAgain(t *testing.T) {
 
 		e := g.entry(t, g.first)
 		require.Equal(t, reverified, e.Current)
+		requireReportHost(t, g.first, e.Current)
 		require.Equal(t, reverified, e.LastAttempt.Report)
 		require.NoError(t, e.LastAttempt.Err)
 		require.Len(t, g.Replicas(), 1)

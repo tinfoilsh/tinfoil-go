@@ -98,8 +98,16 @@ func TestDiscoveryReportsTheSkippedAndTheChosenRouter(t *testing.T) {
 	require.Equal(t, "good.example", h.Enclave().Host())
 	require.Equal(t, []string{"bad.example", "good.example"}, seen.hosts())
 	require.ErrorIs(t, seen.seen[0].err, rejected)
+	var verr *verify.VerificationError
+	require.ErrorAs(t, seen.seen[0].err, &verr)
+	require.Equal(t, "bad.example", verr.Report.Metadata.Host, "the skipped router's report names it")
 	require.Equal(t, "good.example", seen.seen[1].report.VerifiedFacts.CodeTag())
+	require.Equal(t, "good.example", seen.seen[1].report.Metadata.Host)
 	last, err := h.LastVerificationAttempt()
 	require.NoError(t, err)
 	require.Equal(t, "good.example", last.VerifiedFacts.CodeTag())
+	require.Equal(t, "good.example", last.Metadata.Host, "the chosen router's report names it")
+	ensured, err := h.EnsureVerified(context.Background())
+	require.NoError(t, err)
+	require.Equal(t, "good.example", ensured.Metadata.Host)
 }

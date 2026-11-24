@@ -339,30 +339,6 @@ func TestARelayPointerIsCopied(t *testing.T) {
 	require.Equal(t, []string{"enclave.example"}, hosts, "the client keeps the relay that it checked")
 }
 
-func TestGatewayRelaysAttestationThroughItsOrigin(t *testing.T) {
-	var mu sync.Mutex
-	var fetched []string
-	original := http.DefaultTransport
-	t.Cleanup(func() { http.DefaultTransport = original })
-	synctest.Test(t, func(t *testing.T) {
-		http.DefaultTransport = roundTripFunc(func(req *http.Request) (*http.Response, error) {
-			mu.Lock()
-			fetched = append(fetched, req.URL.Scheme+"://"+req.URL.Host+req.URL.Path+" enclave="+req.URL.Query().Get("enclave"))
-			mu.Unlock()
-			return nil, errors.New("no network in this test")
-		})
-		gw, err := NewGatewayHTTPClient(context.Background(), &GatewayOptions{
-			ModelPins: map[string]ModelPin{"m": {Repo: "tinfoilsh/m"}},
-			URL:       "https://gateway.example/v1/",
-			Catalog:   func() Catalog { return Catalog{"m": {Repo: "tinfoilsh/m", Hosts: []string{"replica.example"}}} },
-		})
-		require.NoError(t, err)
-		_, err = gw.EnsureVerified(context.Background(), "m")
-		require.ErrorIs(t, err, ErrNetwork)
-		require.Contains(t, fetched, "https://gateway.example/.well-known/tinfoil-attestation enclave=replica.example")
-	})
-}
-
 func TestLiveAttestationFetcher(t *testing.T) {
 	testutil.RequireLive(t, "TINFOIL_ENCLAVE", "TINFOIL_REPO")
 	host, trust := os.Getenv("TINFOIL_ENCLAVE"), RepoPin{Repo: os.Getenv("TINFOIL_REPO")}

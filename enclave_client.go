@@ -55,7 +55,9 @@ type EnclaveOptions struct {
 // EnclaveHTTPClient is an *http.Client whose requests reach only one attested
 // enclave. It sends request bodies as they are: it never adds or changes a
 // user_cache_secret member, so a caller that points it at Tinfoil's router and
-// wants a scoped prompt cache sets that member in each request body.
+// wants a scoped prompt cache sets that member in each request body, or wraps
+// the client's Transport with NewCacheSecretTransport, which adds it as a
+// RouterHTTPClient does.
 type EnclaveHTTPClient struct {
 	*http.Client
 	attestedClient

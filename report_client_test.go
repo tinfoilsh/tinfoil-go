@@ -2,16 +2,38 @@ package tinfoil
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"strings"
 	"sync"
 	"testing"
 	"testing/synctest"
+	"time"
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/tinfoilsh/tinfoil-go/internal/enclave"
 	"github.com/tinfoilsh/tinfoil-go/internal/testutil"
+	"github.com/tinfoilsh/tinfoil-go/internal/transport"
+	"github.com/tinfoilsh/tinfoil-go/internal/verifytest"
 	"github.com/tinfoilsh/tinfoil-go/verify"
+	"github.com/tinfoilsh/tinfoil-go/verify/document"
 )
+
+// requireReportHost requires report to name host, in its metadata and in its
+// JSON form.
+func requireReportHost(t *testing.T, host string, report *verify.VerificationReport) {
+	t.Helper()
+	require.NotNil(t, report)
+	require.Equal(t, host, report.Metadata.Host)
+	encoded, err := json.Marshal(report)
+	require.NoError(t, err)
+	var decoded struct {
+		Metadata map[string]any `json:"metadata"`
+	}
+	require.NoError(t, json.Unmarshal(encoded, &decoded))
+	require.Equal(t, host, decoded.Metadata["host"], "%s", encoded)
+}
 
 type recordedAttempt struct {
 	host   string
@@ -58,6 +80,7 @@ func TestClientReportsARejectedDocument(t *testing.T) {
 		require.Equal(t, verify.LayerEnvelope, failed.Layer)
 		require.NotNil(t, rejected.Report.PartialFacts)
 		require.Nil(t, rejected.Report.VerifiedFacts)
+		requireReportHost(t, "enclave.example", rejected.Report)
 
 		last, lastErr := c.LastVerificationAttempt()
 		require.Nil(t, last)
@@ -68,6 +91,7 @@ func TestClientReportsARejectedDocument(t *testing.T) {
 			require.Equal(t, "enclave.example", a.host)
 			require.Nil(t, a.report)
 			require.ErrorAs(t, a.err, &rejected)
+			requireReportHost(t, "enclave.example", rejected.Report)
 		}
 		require.Same(t, err, attempts[1].err)
 	})
@@ -94,5 +118,39 @@ func TestClientReportsAFailedFetch(t *testing.T) {
 		attempts := seen()
 		require.Len(t, attempts, 2)
 		require.Same(t, err, attempts[1].err)
+	})
+}
+
+// Every report that a client hands out names the host that it verified,
+// since the verifier doesn't know it.
+func TestClientReportsNameTheHost(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		onVerification, seen := recordAttempts()
+		e := enclave.NewForTest("enclave.example:8443", func() (*verify.VerificationReport, error) {
+			report := verifytest.NewReport(verifytest.Fields{FreshnessExpiresAt: time.Now().Add(time.Hour), CryptoMaterial: []document.CryptoMaterialItem{
+				{ID: document.CryptoMaterialIDTLS, Format: document.KeySPKIFPSHA256V1Format, Data: "aa"},
+				{ID: document.CryptoMaterialIDHPKE, Format: document.KeyX25519HPKEV1Format, Data: strings.Repeat("11", 32)},
+			}})
+			require.Empty(t, report.Metadata.Host, "the verifier names no host")
+			return report, nil
+		}, onVerification)
+		c, err := newAttestedClient(transport.WithEHBP(nil, e), "", "")
+		require.NoError(t, err)
+
+		ensured, err := c.EnsureVerified(t.Context())
+		require.NoError(t, err)
+		requireReportHost(t, "enclave.example:8443", ensured)
+		reverified, err := c.Reverify(t.Context())
+		require.NoError(t, err)
+		requireReportHost(t, "enclave.example:8443", reverified)
+		last, err := c.LastVerificationAttempt()
+		require.NoError(t, err)
+		requireReportHost(t, "enclave.example:8443", last)
+		requireReportHost(t, "enclave.example:8443", c.CurrentVerification())
+		attempts := seen()
+		require.Len(t, attempts, 2)
+		for _, a := range attempts {
+			requireReportHost(t, "enclave.example:8443", a.report)
+		}
 	})
 }
