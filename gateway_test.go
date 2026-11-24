@@ -57,7 +57,7 @@ func TestGatewayEndpointsJoinUnderItsURL(t *testing.T) {
 				require.Equal(t, strings.TrimSuffix(tc.root, "/"), strings.TrimSuffix(gw.BaseURL(), "/"))
 
 				var sent []string
-				client, err := NewOpenAIClient(gw, nil, option.WithMaxRetries(0),
+				client, err := NewOpenAIClient(gw, option.WithMaxRetries(0),
 					option.WithMiddleware(func(req *http.Request, next option.MiddlewareNext) (*http.Response, error) {
 						sent = append(sent, req.URL.String())
 						return next(req)

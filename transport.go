@@ -37,7 +37,8 @@ type EHBP struct {
 	// ProxyURL, when set, is a proxy that forwards requests to the enclave,
 	// and requests are sent to it; empty sends them directly to the enclave.
 	// Its path, if any, is where the proxy is mounted, not the API path: an
-	// OpenAIClient joins OpenAIOptions.APIPath, "/v1/" by default, under it.
+	// OpenAIClient joins its API path, "/v1/" by default or the path that
+	// WithAPIPath sets, under it.
 	// Requests to the proxy carry X-Tinfoil-Enclave-Url so that it can forward
 	// them. The proxy must use HTTPS, since EHBP doesn't seal headers such as
 	// the API key; http:// is accepted only when its host is localhost or a

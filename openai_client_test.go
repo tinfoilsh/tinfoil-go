@@ -86,7 +86,7 @@ func TestOpenAIClientSendsThroughItsHTTPClient(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			hc, secure, embedded := tc.newClient(t)
 			caller, replaced := &recordingTransport{}, &recordingTransport{}
-			client, err := NewOpenAIClient(hc, nil,
+			client, err := NewOpenAIClient(hc,
 				option.WithHTTPClient(&http.Client{Transport: caller}),
 				option.WithMaxRetries(0),
 			)
@@ -112,7 +112,7 @@ func TestOpenAIClientIgnoresTheCallersBaseURL(t *testing.T) {
 				option.WithBaseURL(strings.Replace(tc.wantDefault, "v1/", "other/", 1)),
 				option.WithDataResidency(option.DataResidencyUS),
 			} {
-				client, err := NewOpenAIClient(hc, nil, opt)
+				client, err := NewOpenAIClient(hc, opt)
 				require.NoError(t, err)
 				require.Equal(t, []string{tc.wantDefault + "models"}, listModels(t, client, secure))
 			}
@@ -127,11 +127,11 @@ func TestOpenAIClientKeepsTheCallersOtherOptions(t *testing.T) {
 	rec := &recordingTransport{}
 	c.secure.Transport = rec
 
-	client, err := NewOpenAIClient(c, nil)
+	client, err := NewOpenAIClient(c)
 	require.NoError(t, err)
 	_, err = client.Models.List(context.Background())
 	require.NoError(t, err)
-	client, err = NewOpenAIClient(c, nil, option.WithAPIKey("from-the-caller"), option.WithQuery("q", "1"))
+	client, err = NewOpenAIClient(c, option.WithAPIKey("from-the-caller"), option.WithQuery("q", "1"))
 	require.NoError(t, err)
 	_, err = client.Models.List(context.Background())
 	require.NoError(t, err)
@@ -155,11 +155,20 @@ func TestOpenAIClientJoinsTheAPIPath(t *testing.T) {
 	} {
 		c, err := unverifiedEnclaveHTTPClient("enclave.example", RepoPin{Repo: "org/repo"}, &EnclaveOptions{Transport: tc.tr})
 		require.NoError(t, err)
-		client, err := NewOpenAIClient(c, &OpenAIOptions{APIPath: tc.apiPath})
+		client, err := NewOpenAIClient(c, apiPathOptions(tc.apiPath)...)
 		require.NoError(t, err, tc.apiPath)
 		require.Equal(t, tc.want, client.BaseURL(), "%v %q", tc.tr, tc.apiPath)
 		require.Equal(t, []string{tc.want + "models"}, listModels(t, client, c.secure))
 	}
+}
+
+// apiPathOptions returns WithAPIPath(apiPath), or no option for an empty
+// apiPath, which leaves the default.
+func apiPathOptions(apiPath string) []option.RequestOption {
+	if apiPath == "" {
+		return nil
+	}
+	return []option.RequestOption{WithAPIPath(apiPath)}
 }
 
 func TestOpenAIClientRejectsAnInvalidAPIPath(t *testing.T) {
@@ -169,6 +178,7 @@ func TestOpenAIClientRejectsAnInvalidAPIPath(t *testing.T) {
 		apiPath string
 		reason  string
 	}{
+		{"", "absolute path"},
 		{"v1", "absolute path"},
 		{"v1/", "absolute path"},
 		{"//evil.example/v1/", "absolute path"},
@@ -209,7 +219,7 @@ func TestOpenAIClientRejectsAnInvalidAPIPath(t *testing.T) {
 		{"/v1/|/", "RFC 3986"},
 		{"/v1/}/", "RFC 3986"},
 	} {
-		client, err := NewOpenAIClient(c, &OpenAIOptions{APIPath: tc.apiPath})
+		client, err := NewOpenAIClient(c, WithAPIPath(tc.apiPath))
 		require.Nil(t, client, "%q", tc.apiPath)
 		require.ErrorIs(t, err, ErrConfiguration, "%q", tc.apiPath)
 		require.ErrorContains(t, err, tc.reason, "%q", tc.apiPath)
@@ -232,7 +242,7 @@ func TestOpenAIClientAcceptsEveryRFC3986PathCharacter(t *testing.T) {
 		"/.well-known/",
 		"/.../",
 	} {
-		client, err := NewOpenAIClient(c, &OpenAIOptions{APIPath: apiPath})
+		client, err := NewOpenAIClient(c, WithAPIPath(apiPath))
 		require.NoError(t, err, "%q", apiPath)
 		require.Equal(t, "https://enclave.example"+apiPath, client.BaseURL())
 	}
@@ -263,16 +273,56 @@ func TestOpenAIClientJoinsTheAPIPathUnderTheGatewayURL(t *testing.T) {
 	} {
 		gw, err := unverifiedGatewayHTTPClient(&GatewayOptions{ModelPins: testModelPins, URL: tc.gatewayURL, Catalog: func() Catalog { return Catalog{} }})
 		require.NoError(t, err)
-		client, err := NewOpenAIClient(gw, &OpenAIOptions{APIPath: tc.apiPath})
-		require.NoError(t, err, "an APIPath is valid with a gateway client")
+		client, err := NewOpenAIClient(gw, apiPathOptions(tc.apiPath)...)
+		require.NoError(t, err, "an API path is valid with a gateway client")
 		require.Equal(t, tc.want, client.BaseURL(), "%q %q", tc.gatewayURL, tc.apiPath)
 		require.Equal(t, []string{tc.want + "models"}, listModels(t, client, gw.secure))
 	}
 	gw, err := unverifiedGatewayHTTPClient(&GatewayOptions{ModelPins: testModelPins, Catalog: func() Catalog { return Catalog{} }})
 	require.NoError(t, err)
-	client, err := NewOpenAIClient(gw, &OpenAIOptions{APIPath: "/v1/../admin/"})
+	client, err := NewOpenAIClient(gw, WithAPIPath("/v1/../admin/"))
 	require.Nil(t, client)
 	require.ErrorIs(t, err, ErrConfiguration, "the API path is checked as for the other clients")
+}
+
+func TestWithAPIPathGivenTwice(t *testing.T) {
+	c, err := unverifiedEnclaveHTTPClient("enclave.example", RepoPin{Repo: "org/repo"}, nil)
+	require.NoError(t, err)
+	client, err := NewOpenAIClient(c, WithAPIPath("/first/"), option.WithMaxRetries(0), WithAPIPath("/second/"))
+	require.NoError(t, err)
+	require.Equal(t, "https://enclave.example/second/", client.BaseURL(), "the last WithAPIPath wins")
+	require.Equal(t, []string{"https://enclave.example/second/models"}, listModels(t, client, c.secure))
+
+	client, err = NewOpenAIClient(c, WithAPIPath("/v1/../admin/"), WithAPIPath("/v1/"))
+	require.Nil(t, client)
+	require.ErrorIs(t, err, ErrConfiguration, "an invalid WithAPIPath is refused even when a later one is valid")
+}
+
+func TestWithAPIPathPerRequestFailsTheRequest(t *testing.T) {
+	c, err := unverifiedEnclaveHTTPClient("enclave.example", RepoPin{Repo: "org/repo"}, nil)
+	require.NoError(t, err)
+	client, err := NewOpenAIClient(c, WithAPIPath("/openai/v1/"))
+	require.NoError(t, err)
+	rec := &recordingTransport{}
+	c.secure.Transport = rec
+	_, err = client.Models.List(context.Background(), WithAPIPath("/other/"))
+	require.ErrorIs(t, err, ErrConfiguration)
+	require.ErrorContains(t, err, "configures the client, not a request")
+	require.Empty(t, rec.urls, "nothing is sent")
+}
+
+func TestNewClientChecksWithAPIPathBeforeNetworkIO(t *testing.T) {
+	original := http.DefaultTransport
+	t.Cleanup(func() { http.DefaultTransport = original })
+	var requested []string
+	http.DefaultTransport = roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		requested = append(requested, req.URL.String())
+		return nil, errors.New("no network in this test")
+	})
+	client, err := NewClient(t.Context(), WithAPIPath("v1/"))
+	require.Nil(t, client)
+	require.ErrorIs(t, err, ErrConfiguration)
+	require.Empty(t, requested, "router discovery doesn't start")
 }
 
 // embeddingClient embeds an attested client, so it implements
@@ -293,7 +343,7 @@ func TestOpenAIClientRejectsOtherHTTPClients(t *testing.T) {
 		"type embedding one":    embeddingClient{c},
 		"pointer embedding one": &embeddingClient{c},
 	} {
-		client, err := NewOpenAIClient(hc, nil)
+		client, err := NewOpenAIClient(hc)
 		require.Nil(t, client, name)
 		require.ErrorIs(t, err, ErrConfiguration, name)
 	}
@@ -308,7 +358,7 @@ func TestOpenAIClientSurfacesSDKErrors(t *testing.T) {
 		})
 		c, err := unverifiedEnclaveHTTPClient("enclave.example", RepoPin{Repo: "org/repo"}, nil)
 		require.NoError(t, err)
-		client, err := NewOpenAIClient(c, nil, option.WithMaxRetries(0))
+		client, err := NewOpenAIClient(c, option.WithMaxRetries(0))
 		require.NoError(t, err)
 
 		_, err = client.Models.List(context.Background(), option.WithBaseURL("https://evil.example/v1/"))
