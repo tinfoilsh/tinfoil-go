@@ -1,7 +1,6 @@
 package tinfoil
 
 import (
-	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -31,13 +30,12 @@ func (*GatewayHTTPClient) attestedHTTPClient() {}
 
 // OpenAIOptions configures an OpenAIClient.
 type OpenAIOptions struct {
-	// APIPath is the path of the OpenAI API, joined under the EHBP ProxyURL
-	// or, when there is none, under the enclave's origin. Empty selects
-	// "/v1/". It must be an absolute path that consists only of RFC 3986 path
-	// characters, without a query, a fragment, an encoded slash or backslash,
-	// or a "." or ".." segment, percent-encoded or not. A gateway client's URL
-	// already carries the API path, so a non-empty APIPath with one is an
-	// ErrConfiguration error.
+	// APIPath is the path of the OpenAI API, joined under the HTTP client's
+	// BaseURL: the EHBP ProxyURL or, when there is none, the enclave's
+	// origin, or the gateway's URL. Empty selects "/v1/". It must be an
+	// absolute path that consists only of RFC 3986 path characters, without a
+	// query, a fragment, an encoded slash or backslash, or a "." or ".."
+	// segment, percent-encoded or not.
 	APIPath string
 }
 
@@ -58,45 +56,37 @@ type OpenAIClient struct {
 // ErrConfiguration error. It does no network I/O: hc was verified when it was
 // created and verifies again by itself.
 //
-// The client applies openaiOpts, then sets the HTTP client and the base URL
-// so that openaiOpts can't replace them. An option.WithBaseURL among
+// The base URL is opts.APIPath joined under hc.BaseURL(), whatever the
+// route. The client applies openaiOpts, then sets the HTTP client and the
+// base URL so that openaiOpts can't replace them. An option.WithBaseURL among
 // openaiOpts, OPENAI_BASE_URL in the environment, and a data residency option
 // have no effect; set opts.APIPath to change the API path.
 func NewOpenAIClient(hc AttestedHTTPClient, opts *OpenAIOptions, openaiOpts ...option.RequestOption) (*OpenAIClient, error) {
 	if opts == nil {
 		opts = &OpenAIOptions{}
 	}
-	var (
-		secure  *http.Client
-		baseURL string
-		err     error
-	)
+	var secure *http.Client
+	var root string
 	switch c := hc.(type) {
 	case *EnclaveHTTPClient:
-		if c != nil && c.secure != nil {
-			secure = c.secure
-			baseURL, err = joinAPIPath(c.baseURL, opts.APIPath)
+		if c != nil {
+			secure, root = c.secure, c.baseURL
 		}
 	case *RouterHTTPClient:
-		if c != nil && c.secure != nil {
-			secure = c.secure
-			baseURL, err = joinAPIPath(c.baseURL, opts.APIPath)
+		if c != nil {
+			secure, root = c.secure, c.baseURL
 		}
 	case *GatewayHTTPClient:
-		if c != nil && c.secure != nil {
-			// The gateway URL carries no query or fragment, so a slash can end
-			// it, as option.WithBaseURL would end its path.
-			secure, baseURL = c.secure, withTrailingSlash(c.baseURL)
-			if opts.APIPath != "" {
-				err = errs.Configuration(errors.New("invalid API path: a gateway client's URL already carries the API path; set GatewayOptions.URL instead"))
-			}
+		if c != nil {
+			secure, root = c.secure, c.baseURL
 		}
-	}
-	if err != nil {
-		return nil, err
 	}
 	if secure == nil {
 		return nil, errs.Configuration(fmt.Errorf("the HTTP client must be an *EnclaveHTTPClient, *RouterHTTPClient or *GatewayHTTPClient from its constructor, not %T", hc))
+	}
+	baseURL, err := joinAPIPath(root, opts.APIPath)
+	if err != nil {
+		return nil, err
 	}
 	// openai-go refuses a base URL and a data residency option in the same
 	// call, so the caller's options go in an inner client's call, whose
@@ -124,7 +114,8 @@ func (c *OpenAIClient) BaseURL() string {
 const defaultAPIPath = "/v1/"
 
 // joinAPIPath returns apiPath, or defaultAPIPath when it is empty, joined
-// under root, a proxy URL or an origin, whether or not root ends with a slash.
+// under root, a proxy URL, an origin or a gateway URL, whether or not root
+// ends with a slash.
 // The result ends with a slash, so that request paths join under it.
 func joinAPIPath(root, apiPath string) (string, error) {
 	if apiPath == "" {

@@ -239,14 +239,14 @@ const (
 func TestSealJSONRoutingPreservesInjectedBodyAcrossRetries(t *testing.T) {
 	for _, contentType := range []string{"application/json", "application/json; charset=utf-8"} {
 		t.Run("contentType="+contentType, func(t *testing.T) {
-			var bodies []string
-			var prefixes []string
+			var bodies, prefixes, urls []string
 			seal := sealTestTransport(func(host string) (http.RoundTripper, error) {
 				return roundTripFunc(func(req *http.Request) (*http.Response, error) {
 					defer req.Body.Close()
 					body, err := io.ReadAll(req.Body)
 					require.NoError(t, err)
 					bodies = append(bodies, string(body))
+					urls = append(urls, req.URL.String())
 					require.Equal(t, "test-model", req.Header.Get(modelHeader))
 					require.Equal(t, host, req.Header.Get(sealHeader))
 					prefixes = append(prefixes, req.Header.Get(cachePrefixHeader))
@@ -257,7 +257,10 @@ func TestSealJSONRoutingPreservesInjectedBodyAcrossRetries(t *testing.T) {
 				}), nil
 			})
 			seal.secret = "test-secret"
-			req, err := http.NewRequest(http.MethodPost, "https://gateway.example/v1/chat/completions", strings.NewReader(specCacheBody))
+			// A gateway mounted under a path: the cache salt is still derived,
+			// and the re-sealed request goes to the same URL.
+			const target = "https://gateway.example/mount/v1/chat/completions"
+			req, err := http.NewRequest(http.MethodPost, target, strings.NewReader(specCacheBody))
 			require.NoError(t, err)
 			req.Header.Set("Content-Type", contentType)
 			req.Header.Set("Authorization", "Bearer test-api-key")
@@ -266,6 +269,7 @@ func TestSealJSONRoutingPreservesInjectedBodyAcrossRetries(t *testing.T) {
 			resp.Body.Close()
 			require.Len(t, bodies, 2)
 			require.Equal(t, bodies[0], bodies[1])
+			require.Equal(t, []string{target, target}, urls, "a seal redirect retries the same URL")
 			var fields map[string]json.RawMessage
 			require.NoError(t, json.Unmarshal([]byte(bodies[0]), &fields))
 			require.NotContains(t, fields, cachesecret.Field)
@@ -532,7 +536,7 @@ func TestReplicaChainReplaysAndNamesTheReplica(t *testing.T) {
 		}
 		return newResponse(http.StatusOK, ""), nil
 	})
-	rt := replicaChain(conn, "replica.example", "https://gateway.example/v1/")
+	rt := replicaChain(conn, "replica.example", "https://gateway.example/")
 	req, err := http.NewRequest(http.MethodPost, "https://gateway.example/v1/chat/completions", strings.NewReader(`{"model":"m"}`))
 	require.NoError(t, err)
 	resp, err := rt.RoundTrip(req)

@@ -13,7 +13,7 @@ import (
 	"github.com/tinfoilsh/tinfoil-go/verify"
 )
 
-const defaultGatewayURL = "https://inference-gateway.tinfoil.sh/v1/"
+const defaultGatewayURL = "https://inference-gateway.tinfoil.sh/"
 
 // GatewayOptions configures a GatewayHTTPClient.
 type GatewayOptions struct {
@@ -46,9 +46,16 @@ type GatewayOptions struct {
 	// sees a cache prefix keyed on it, and could test guesses of a guessable
 	// secret and then of the prompt.
 	UserCacheSecret string
-	// URL is the gateway's base URL; empty selects Tinfoil's gateway. It must
-	// use HTTPS. Request paths join under it, so a URL with user information,
-	// a query or a fragment, even an empty one, is an ErrConfiguration error.
+	// URL is the gateway's URL: its origin, or the URL that it is mounted
+	// under; empty selects Tinfoil's gateway, https://inference-gateway.tinfoil.sh/.
+	// Its path, if any, is where the gateway is mounted, not the API path,
+	// as for an EHBP ProxyURL: the catalog, the attestation relay and an
+	// OpenAIClient's API path, "/v1/" by default, all join under it, whether
+	// or not it ends with a slash, so that https://gateway.example/tinfoil
+	// sends chat completions to
+	// https://gateway.example/tinfoil/v1/chat/completions. It must use HTTPS.
+	// Request paths join under it, so a URL with user information, a query or
+	// a fragment, even an empty one, is an ErrConfiguration error.
 	URL string
 	// Catalog is read on every request and must return an immutable map safe
 	// for concurrent readers. nil fetches the gateway's catalog when the client
@@ -112,8 +119,7 @@ func unverifiedGatewayHTTPClient(opts *GatewayOptions) (*GatewayHTTPClient, erro
 		opts = &GatewayOptions{}
 	}
 	baseURL := cmp.Or(opts.URL, defaultGatewayURL)
-	base, err := validateGatewayURL(baseURL)
-	if err != nil {
+	if err := validateGatewayURL(baseURL); err != nil {
 		return nil, err
 	}
 	pins := make(map[string]gateway.ModelPin, len(opts.ModelPins))
@@ -122,7 +128,6 @@ func unverifiedGatewayHTTPClient(opts *GatewayOptions) (*GatewayHTTPClient, erro
 	}
 	gatewayTransport, err := gateway.NewTransport(gateway.Config{
 		BaseURL:           baseURL,
-		Relay:             base.Host,
 		Catalog:           opts.Catalog,
 		ModelPins:         pins,
 		Policy:            opts.Policy,
@@ -142,22 +147,24 @@ func unverifiedGatewayHTTPClient(opts *GatewayOptions) (*GatewayHTTPClient, erro
 }
 
 // validateGatewayURL requires an absolute HTTPS URL without user
-// information, a query or a fragment, and returns it parsed.
-func validateGatewayURL(baseURL string) (*url.URL, error) {
+// information, a query or a fragment.
+func validateGatewayURL(baseURL string) error {
 	if _, err := transport.OriginOf(baseURL); err != nil {
-		return nil, errs.Configuration(fmt.Errorf("invalid base URL: %w", err))
+		return errs.Configuration(fmt.Errorf("invalid base URL: %w", err))
 	}
 	if err := refuseQueryOrFragment("base URL", baseURL); err != nil {
-		return nil, err
+		return err
 	}
 	base, _ := url.Parse(baseURL) // OriginOf parsed it
 	if base.Scheme != "https" {
-		return nil, errs.Configuration(fmt.Errorf("invalid base URL: the gateway base URL must use HTTPS: %q", baseURL))
+		return errs.Configuration(fmt.Errorf("invalid base URL: the gateway base URL must use HTTPS: %q", baseURL))
 	}
-	return base, nil
+	return nil
 }
 
-// BaseURL returns the gateway's base URL, which requests are sent to.
+// BaseURL returns the gateway's URL, GatewayOptions.URL or Tinfoil's gateway
+// by default, which requests are sent to and which an OpenAIClient joins its
+// API path under, as EnclaveHTTPClient.BaseURL returns an EHBP ProxyURL.
 func (c *GatewayHTTPClient) BaseURL() string {
 	return c.baseURL
 }
