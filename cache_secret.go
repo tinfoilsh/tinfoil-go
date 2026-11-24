@@ -10,8 +10,8 @@ import (
 // NewCacheSecretTransport returns an http.RoundTripper that adds the
 // user_cache_secret request-body member, which scopes Tinfoil's prompt cache,
 // to the requests that the caller sends through it, exactly as a
-// RouterHTTPClient or a GatewayHTTPClient adds it to its own requests, and
-// then sends every request over next. It is for a client that reaches
+// RouterHTTPClient adds it to its own requests, and then sends every request
+// over next. It is for a client that reaches
 // Tinfoil's router without a RouterHTTPClient, such as an EnclaveHTTPClient
 // that is pointed at the router or a service that forwards raw OpenAI-style
 // requests through one, since an EnclaveHTTPClient never adds the member by
@@ -57,8 +57,9 @@ import (
 // transport that isn't attested, such as http.DefaultTransport, sends the
 // secret wherever that transport sends the request, so wrap only a transport
 // whose requests reach Tinfoil's router. A nil next uses
-// http.DefaultTransport, as http.Client does. A RouterHTTPClient and a
-// GatewayHTTPClient already add the member, so they need no wrapping. An
+// http.DefaultTransport, as http.Client does. A RouterHTTPClient already adds
+// the member, and a GatewayHTTPClient scopes the cache with a cache_salt that
+// it derives from its own secret, so neither needs wrapping. An
 // OpenAIClient sends through the attested client's own chain, not through
 // the Transport field of its embedded *http.Client, so with an OpenAIClient
 // over an EnclaveHTTPClient, set the member in each request instead, for

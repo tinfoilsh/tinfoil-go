@@ -53,7 +53,7 @@ func main() {
 
 ## Prompt-Cache Scope Through an Enclave Client
 
-The router and gateway clients add `user_cache_secret` to the bodies of chat completion, completion and response requests: a non-empty secret that the request already carries wins, then the client's `UserCacheSecret`, then a random secret that is generated once per process. An `EnclaveHTTPClient` sends bodies as they are. When you point one at Tinfoil's router, for example in a service that forwards raw OpenAI-style requests, wrap its transport with `tinfoil.NewCacheSecretTransport`, which adds the field in the same way:
+The router client adds `user_cache_secret` to the bodies of chat completion, completion and response requests: a non-empty secret that the request already carries wins, then the client's `UserCacheSecret`, then a random secret that is generated once per process. (The gateway client resolves its secret the same way and derives a `cache_salt` from it.) An `EnclaveHTTPClient` sends bodies as they are. When you point one at Tinfoil's router, for example in a service that forwards raw OpenAI-style requests, wrap its transport with `tinfoil.NewCacheSecretTransport`, which adds the field in the same way:
 
 ```go
 client, err := tinfoil.NewEnclaveHTTPClient(ctx, "inference.tinfoil.sh",
@@ -61,8 +61,9 @@ client, err := tinfoil.NewEnclaveHTTPClient(ctx, "inference.tinfoil.sh",
 if err != nil {
     log.Fatal(err)
 }
-// An empty secret selects the per-process secret; pass your own for a scope
-// that lasts across processes.
+// An empty secret selects the per-process secret; pass a stable secret of
+// your own for a scope that lasts across processes.
+secret := ""
 client.Transport = tinfoil.NewCacheSecretTransport(client.Transport, secret)
 ```
 
