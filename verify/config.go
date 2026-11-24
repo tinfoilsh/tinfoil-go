@@ -56,7 +56,7 @@ type ConfigSigningKeys struct {
 //
 // The runtime pin is read from the bytes that Authorize approves, which must
 // be a JSON config. Verification rejects any other bytes, such as the YAML
-// config of a cvm-version before configendorsement.JSONConfigMinVersion.
+// config that earlier enclave versions take.
 type ConfigAuthorizer struct {
 	Authorize func(collateral.ConfigEndorsement) error
 }

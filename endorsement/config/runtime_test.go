@@ -11,8 +11,9 @@ import (
 	configendorsement "github.com/tinfoilsh/tinfoil-go/endorsement/config"
 )
 
-// A config is read only as canonical JSON that pins JSONConfigMinVersion or a
-// later version. YAML is refused whatever version it pins.
+// A config is read only as JSON, for its cvm-version member alone. Neither
+// the version it pins nor the spelling of the JSON decides the outcome; YAML
+// is refused.
 func TestRuntimeFromConfigReadsOnlyJSON(t *testing.T) {
 	digest := strings.Repeat("ab", 32)
 	json := func(version string) string {
@@ -21,15 +22,24 @@ func TestRuntimeFromConfigReadsOnlyJSON(t *testing.T) {
 	yaml := func(version string) string {
 		return "cvm-version: " + version + "@sha256:" + digest + "\ncpus: 2\n"
 	}
+	config := json("0.15.5-rc.1")
+	replace := func(old, new string) string {
+		require.Contains(t, config, old)
+		return strings.Replace(config, old, new, 1)
+	}
 	for name, tt := range map[string]struct {
 		config  string
 		wantTag string
 	}{
-		"JSON at the first JSON version": {json("0.15.5-rc.1"), "v0.15.5-rc.1"},
-		"JSON with a v prefix":           {json("v0.15.5-rc.1"), "v0.15.5-rc.1"},
-		"JSON with build metadata":       {json("0.15.5-rc.1+gpu"), "v0.15.5-rc.1+gpu"},
-		"JSON for its release":           {json("0.15.5"), "v0.15.5"},
-		"JSON for a later version":       {json("0.16.0"), "v0.16.0"},
+		"release candidate":     {config, "v0.15.5-rc.1"},
+		"v prefix":              {json("v0.15.5-rc.1"), "v0.15.5-rc.1"},
+		"build metadata":        {json("0.15.5-rc.1+gpu"), "v0.15.5-rc.1+gpu"},
+		"earlier version":       {json("0.15.4"), "v0.15.4"},
+		"later version":         {json("0.16.0"), "v0.16.0"},
+		"whitespace":            {replace(`"cpus":2`, `"cpus": 2`) + "\n", "v0.15.5-rc.1"},
+		"members in any order":  {replace(`"containers":[],"cpus":2,`, `"cpus":2,"containers":[],`), "v0.15.5-rc.1"},
+		"other member is null":  {replace(`"cpus":2`, `"cpus":null`), "v0.15.5-rc.1"},
+		"other member fraction": {replace(`"cpus":2`, `"cpus":2.5`), "v0.15.5-rc.1"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			ref, err := configendorsement.RuntimeFromConfig([]byte(tt.config))
@@ -38,35 +48,19 @@ func TestRuntimeFromConfigReadsOnlyJSON(t *testing.T) {
 		})
 	}
 
-	canonical := json("0.15.5-rc.1")
-	replace := func(old, new string) string {
-		require.Contains(t, canonical, old)
-		return strings.Replace(canonical, old, new, 1)
-	}
 	const notJSON = "not a JSON config"
-	beforeJSON := "pins cvm-version " + configendorsement.JSONConfigMinVersion + " or later"
 	for name, tt := range map[string]struct{ config, wantError string }{
-		"YAML at the first JSON version": {yaml("0.15.5-rc.1"), notJSON},
-		"YAML with build metadata":       {yaml("0.15.5-rc.1+gpu"), notJSON},
-		"YAML for a later version":       {yaml("1.0.0"), notJSON},
-		"YAML before the JSON version":   {yaml("0.15.5-rc.0"), notJSON},
-		"YAML for an earlier release":    {yaml("0.15.4"), notJSON},
-		"JSON before the JSON version":   {json("0.15.5-rc.0"), beforeJSON},
-		"JSON for an earlier release":    {json("0.15.4"), beforeJSON},
-		"no cvm-version":                 {replace(`"cvm-version"`, `"cvm-versions"`), notJSON},
-		"cvm-version not a string":       {`{"cvm-version":2}`, notJSON},
-		"not an object":                  {`["0.15.5-rc.1@sha256:` + digest + `"]`, notJSON},
-		"whitespace":                     {replace(`"cpus":2`, `"cpus": 2`), "canonical form"},
-		"trailing newline":               {canonical + "\n", "canonical form"},
-		"members out of order":           {replace(`"containers":[],"cpus":2,`, `"cpus":2,"containers":[],`), "canonical form"},
-		"escaped character":              {replace(`"cpus"`, `"`+"\\"+`u0063pus"`), "canonical form"},
-		"null":                           {replace(`"cpus":2`, `"cpus":null`), "null is not allowed"},
-		"fraction":                       {replace(`"cpus":2`, `"cpus":2.5`), "not an integer"},
-		"exponent":                       {replace(`"cpus":2`, `"cpus":2e0`), "not an integer"},
-		"integer too large":              {replace(`"cpus":2`, `"cpus":9007199254740992`), "not an integer"},
-		"repeated member":                {replace(`"cpus":2,`, `"cpus":2,"cpus":2,`), ""},
-		"second value":                   {canonical + canonical, ""},
-		"unpinned version":               {replace("@sha256:"+digest, ""), "must pin"},
+		"YAML":                     {yaml("0.15.5-rc.1"), notJSON},
+		"YAML, earlier version":    {yaml("0.15.4"), notJSON},
+		"no cvm-version":           {replace(`"cvm-version"`, `"cvm-versions"`), notJSON},
+		"cvm-version not a string": {`{"cvm-version":2}`, notJSON},
+		"cvm-version null":         {`{"cvm-version":null}`, notJSON},
+		"not an object":            {`["0.15.5-rc.1@sha256:` + digest + `"]`, notJSON},
+		"repeated member":          {replace(`"cpus":2,`, `"cpus":2,"cpus":2,`), "duplicate"},
+		"repeated cvm-version":     {replace(`"shim"`, `"cvm-version":"x","shim"`), "duplicate"},
+		"second value":             {config + config, notJSON},
+		"unpinned version":         {replace("@sha256:"+digest, ""), "must pin"},
+		"partial version":          {json("0.15"), "full semantic version"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			_, err := configendorsement.RuntimeFromConfig([]byte(tt.config))
@@ -161,7 +155,7 @@ func TestDeploymentStatementForACallerSuppliedRuntime(t *testing.T) {
 }
 
 // A config this package can read has to agree with the runtime a caller
-// supplies, and a JSON fault is reported as such.
+// supplies.
 func TestCallerSuppliedRuntimeMustMatchAReadableConfig(t *testing.T) {
 	digest := strings.Repeat("ab", sha256.Size)
 	config := []byte(`{"cvm-version":"0.15.5-rc.1@sha256:` + digest + `"}`)
@@ -173,7 +167,4 @@ func TestCallerSuppliedRuntimeMustMatchAReadableConfig(t *testing.T) {
 	other.Tag = "v0.16.0"
 	_, err = configendorsement.NewDeploymentStatementForRuntime(testName, configendorsement.PublicRegistryID, config, other)
 	require.ErrorContains(t, err, "does not match the one the config pins")
-
-	_, err = configendorsement.RuntimeFromConfig([]byte(`{"cvm-version":"0.15.5-rc.1@sha256:` + digest + `","cvm-version":"x"}`))
-	require.ErrorContains(t, err, "duplicate")
 }

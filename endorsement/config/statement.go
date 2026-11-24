@@ -96,8 +96,8 @@ func NewDeploymentStatement(name, registryID string, config []byte) (*Statement,
 }
 
 // NewDeploymentStatementForRuntime is NewDeploymentStatement for a config the
-// caller has read itself, such as the YAML of a cvm-version before
-// JSONConfigMinVersion. The caller vouches that the config pins runtime.
+// caller has read itself, such as the YAML that earlier enclave versions
+// take. The caller vouches that the config pins runtime.
 func NewDeploymentStatementForRuntime(name, registryID string, config []byte, runtime RuntimeReference) (*Statement, error) {
 	if err := ValidateRegistryID(registryID); err != nil {
 		return nil, err

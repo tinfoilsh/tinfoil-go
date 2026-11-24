@@ -17,9 +17,8 @@ import (
 // attestation-collaterals/v3.
 //
 // Bytes must be a JSON config, which the runtime pin is read from. NewVerifier
-// refuses any other bytes, such as the YAML config of a cvm-version before
-// configendorsement.JSONConfigMinVersion; EmbeddedConfigReference trusts such
-// a config.
+// refuses any other bytes, such as the YAML config that earlier enclave
+// versions take; EmbeddedConfigReference trusts such a config.
 type EmbeddedConfig struct {
 	Name  string
 	Bytes []byte

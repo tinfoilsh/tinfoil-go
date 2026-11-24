@@ -158,17 +158,11 @@ func TestEmbeddedConfigBytesMustBeAJSONConfig(t *testing.T) {
 	require.NoError(t, err)
 	pin := fmt.Sprintf("0.15.4@sha256:%x", sha256.Sum256(inputs.Runtime))
 	yaml := []byte("cvm-version: " + pin + "\n")
-	for name, config := range map[string][]byte{
-		"YAML":                              yaml,
-		"YAML that pins a JSON version":     []byte(strings.Replace(string(yaml), "0.15.4", "0.15.5", 1)),
-		"JSON that pins an earlier version": []byte(`{"cvm-version":"` + pin + `"}`),
-	} {
-		inputs.Config.Bytes = config
-		_, err := newEmbeddedVerifier(inputs)
-		require.ErrorAs(t, err, new(*UsageError), name)
-		require.ErrorContains(t, err, "must be a JSON config", name)
-		require.ErrorContains(t, err, "EmbeddedConfigReference", name)
-	}
+	inputs.Config.Bytes = yaml
+	_, err = newEmbeddedVerifier(inputs)
+	require.ErrorAs(t, err, new(*UsageError))
+	require.ErrorContains(t, err, "must be a JSON config")
+	require.ErrorContains(t, err, "EmbeddedConfigReference")
 
 	pinned, err := configendorsement.RuntimeFromPin(pin)
 	require.NoError(t, err)
