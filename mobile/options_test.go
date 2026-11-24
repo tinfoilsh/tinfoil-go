@@ -115,6 +115,7 @@ func TestNewVerifierRejectsTrustOptions(t *testing.T) {
 		{"empty embedded runtime", withArtifacts(`"type":"embedded","runtime":""`), "must not be empty"},
 		{"unpadded base64", withArtifacts(`"type":"embedded","runtime":"` + strings.TrimRight(b64(testRuntime+"x"), "=") + `"`), "artifacts.runtime"},
 		{"malformed config", withConfigTrust(`"type":"embedded_config","bytes":"` + b64("not: a config") + `"`), "cvm-version"},
+		{"YAML config", withConfigTrust(`"type":"embedded_config","bytes":"` + b64(fmt.Sprintf("cvm-version: 0.15.4@sha256:%x\n", sha256.Sum256([]byte(testRuntime)))) + `"`), "must be a JSON config"},
 		{"runtime the config does not pin", `{"config_trust":{"type":"embedded_config","bytes":"` + b64(testConfig) + `"},"policy":{"artifacts":{"type":"embedded","runtime":"` + b64(strings.Replace(testRuntime, "v0.15.5", "v0.15.6", 1)) + `"}}}`, "does not match"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

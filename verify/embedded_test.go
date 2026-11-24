@@ -146,6 +146,44 @@ func TestEmbeddedConfigReferenceWithoutConfigBytes(t *testing.T) {
 	require.Equal(t, refs, got)
 }
 
+// Config bytes are read only as JSON. A config that is not a JSON config is
+// refused when the verifier is built, and is trusted by reference instead.
+func TestEmbeddedConfigBytesMustBeAJSONConfig(t *testing.T) {
+	inputs := embeddedInputs(t)
+	var manifest runtime.Manifest
+	require.NoError(t, json.Unmarshal(inputs.Runtime, &manifest))
+	manifest.Version = "v0.15.4"
+	var err error
+	inputs.Runtime, err = json.Marshal(manifest)
+	require.NoError(t, err)
+	pin := fmt.Sprintf("0.15.4@sha256:%x", sha256.Sum256(inputs.Runtime))
+	yaml := []byte("cvm-version: " + pin + "\n")
+	for name, config := range map[string][]byte{
+		"YAML":                              yaml,
+		"YAML that pins a JSON version":     []byte(strings.Replace(string(yaml), "0.15.4", "0.15.5", 1)),
+		"JSON that pins an earlier version": []byte(`{"cvm-version":"` + pin + `"}`),
+	} {
+		inputs.Config.Bytes = config
+		_, err := newEmbeddedVerifier(inputs)
+		require.ErrorAs(t, err, new(*UsageError), name)
+		require.ErrorContains(t, err, "must be a JSON config", name)
+		require.ErrorContains(t, err, "EmbeddedConfigReference", name)
+	}
+
+	pinned, err := configendorsement.RuntimeFromPin(pin)
+	require.NoError(t, err)
+	digest := sha256.Sum256(yaml)
+	inputs.Config = nil
+	inputs.ConfigReference = &EmbeddedConfigReference{Name: embeddedConfigName, Digest: hex.EncodeToString(digest[:]), Runtime: pinned}
+	v, err := newEmbeddedVerifier(inputs)
+	require.NoError(t, err)
+	_, _, doc := embeddedDocument(t, collateral.FormatV3)
+	refs, err := v.configReferences(doc, "", time.Now())
+	require.NoError(t, err)
+	require.Equal(t, digest, refs.quote.(quote.ConfigReferenceValues).Hash)
+	require.Equal(t, "v0.15.4", refs.artifact.Tag)
+}
+
 func embeddedDocument(t *testing.T, format string, entries ...collateral.Entry) ([]byte, []byte, *document.Document) {
 	t.Helper()
 	nonce := make([]byte, document.NonceSize)

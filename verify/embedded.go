@@ -15,6 +15,11 @@ import (
 // /org/project/revision identity, which a Project pin must then match. The
 // config must come from trusted client configuration, and requires
 // attestation-collaterals/v3.
+//
+// Bytes must be a JSON config, which the runtime pin is read from. NewVerifier
+// refuses any other bytes, such as the YAML config of a cvm-version before
+// configendorsement.JSONConfigMinVersion; EmbeddedConfigReference trusts such
+// a config.
 type EmbeddedConfig struct {
 	Name  string
 	Bytes []byte
@@ -47,7 +52,7 @@ func (c EmbeddedConfig) reference() (EmbeddedConfigReference, error) {
 	}
 	expected, err := configendorsement.RuntimeFromConfig(c.Bytes)
 	if err != nil {
-		return EmbeddedConfigReference{}, err
+		return EmbeddedConfigReference{}, fmt.Errorf("embedded config bytes must be a JSON config; trust any other config with EmbeddedConfigReference: %w", err)
 	}
 	digest := sha256.Sum256(c.Bytes)
 	return EmbeddedConfigReference{Name: c.Name, Digest: hex.EncodeToString(digest[:]), Runtime: expected}, nil

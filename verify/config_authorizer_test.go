@@ -137,6 +137,27 @@ func TestConfigAuthorizerPreservesReferencesAndHardwareChecks(t *testing.T) {
 	require.ErrorContains(t, err, "configured trust requires")
 }
 
+// The runtime pin is read from the bytes that the authorizer approves, so its
+// approval cannot admit a config that is not a JSON config.
+func TestConfigAuthorizerCannotAdmitANonJSONConfig(t *testing.T) {
+	inputs := embeddedInputs(t)
+	config := []byte(fmt.Sprintf("cvm-version: 0.15.5@sha256:%x\n", sha256.Sum256(inputs.Runtime)))
+	data, err := json.Marshal(map[string][]byte{"config_base64": config})
+	require.NoError(t, err)
+	raw, nonce, _ := embeddedDocument(t, collateral.FormatV3, collateral.Entry{ID: collateral.ConfigID, Role: collateral.RoleReferenceValues, Format: collateral.ConfigV1Format, Data: data})
+	inputs.Config = nil
+	var approved []byte
+	v, err := NewVerifier(ConfigAuthorizer{Authorize: func(candidate collateral.ConfigEndorsement) error {
+		approved = candidate.Config
+		return nil
+	}}, inputs.policy())
+	require.NoError(t, err)
+	_, err = v.VerifyV3(raw, nonce, Pin{})
+	requireRejectedAt(t, err, LayerProvenance)
+	require.ErrorContains(t, err, "not a JSON config")
+	require.Equal(t, config, approved)
+}
+
 func TestConfigAuthorizerMustNotBeNil(t *testing.T) {
 	_, err := NewVerifier(ConfigAuthorizer{}, Policy{})
 	require.ErrorAs(t, err, new(*UsageError))
