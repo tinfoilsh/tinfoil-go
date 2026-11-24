@@ -371,12 +371,18 @@ func TestSealCacheScopeUsesTheBearerCredential(t *testing.T) {
 	require.NotEqual(t, noKeyPrefix, otherPrefix, "each API key routes on its own prefix")
 }
 
-func TestGatewayLastVerificationNamesReplicaHosts(t *testing.T) {
+func TestGatewayReplicasNamesReplicaHosts(t *testing.T) {
 	seal := &Transport{}
 	failure := errors.New("verification failed")
 	for _, host := range []string{"c.example", "b.example", "a.example"} {
 		verified := verifytest.NewReport(verifytest.Fields{ConfigRepo: "tinfoilsh/model"})
 		seal.enclaves.Store(replica{host: host, ref: "tinfoilsh/model"}, &verifiedReplicaTransport{
+			currentVerification: func() *verify.VerificationReport {
+				if host == "a.example" {
+					return verified
+				}
+				return nil
+			},
 			lastVerification: func() (*verify.VerificationReport, error) {
 				switch host {
 				case "b.example":
@@ -388,14 +394,16 @@ func TestGatewayLastVerificationNamesReplicaHosts(t *testing.T) {
 			},
 		})
 	}
-	got := seal.LastVerification()
+	got := seal.Replicas()
 	require.Len(t, got, 2, "a replica with no attempt has no entry")
 	require.Equal(t, "a.example", got[0].Host)
-	require.NotNil(t, got[0].Report)
-	require.NoError(t, got[0].Err)
+	require.NotNil(t, got[0].Current)
+	require.NotNil(t, got[0].LastAttempt.Report)
+	require.NoError(t, got[0].LastAttempt.Err)
 	require.Equal(t, "b.example", got[1].Host)
-	require.Nil(t, got[1].Report)
-	require.Same(t, failure, got[1].Err, "a failed replica keeps its error")
+	require.Nil(t, got[1].Current)
+	require.Nil(t, got[1].LastAttempt.Report)
+	require.Same(t, failure, got[1].LastAttempt.Err, "a failed replica keeps its error")
 }
 
 // Each replica's entry holds its own last attempt, through the transports
@@ -428,22 +436,24 @@ func TestGatewayReplicasKeepTheirOwnLastAttempt(t *testing.T) {
 					}}), nil
 				}, onVerification)
 				keyed := transport.WithEHBP(nil, e)
-				return &verifiedReplicaTransport{transport: keyed, lastVerification: keyed.LastVerification, ensureVerified: keyed.EnsureVerified}, nil
+				return newReplicaTransport(keyed, keyed), nil
 			},
 		}
 		got, err := seal.EnsureVerified(context.Background(), sealTestModel)
 		require.NoError(t, err)
 		require.Equal(t, good, got.VerifiedFacts.CodeTag())
 
-		entries := seal.LastVerification()
+		entries := seal.Replicas()
 		require.Len(t, entries, 2)
 		byHost := map[string]ReplicaVerification{entries[0].Host: entries[0], entries[1].Host: entries[1]}
-		require.Nil(t, byHost[bad].Report)
+		require.Nil(t, byHost[bad].Current)
+		require.Nil(t, byHost[bad].LastAttempt.Report)
 		var verr *verify.VerificationError
-		require.ErrorAs(t, byHost[bad].Err, &verr, "the verifier's error and report are reachable")
+		require.ErrorAs(t, byHost[bad].LastAttempt.Err, &verr, "the verifier's error and report are reachable")
 		require.NotNil(t, verr.Report)
-		require.NoError(t, byHost[good].Err)
-		require.Equal(t, good, byHost[good].Report.VerifiedFacts.CodeTag())
+		require.NoError(t, byHost[good].LastAttempt.Err)
+		require.Equal(t, good, byHost[good].LastAttempt.Report.VerifiedFacts.CodeTag())
+		require.Equal(t, byHost[good].LastAttempt.Report, byHost[good].Current)
 		mu.Lock()
 		defer mu.Unlock()
 		require.Equal(t, []string{bad, bad, good}, hosts, "the bad replica's verification has one retry")

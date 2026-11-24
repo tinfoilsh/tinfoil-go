@@ -170,11 +170,7 @@ func NewTransport(c Config) (*Transport, error) {
 				return nil, err
 			}
 			keyed := transport.WithEHBP(nil, e)
-			return &verifiedReplicaTransport{
-				transport:        replicaChain(keyed, e.Host(), c.BaseURL),
-				lastVerification: keyed.LastVerification,
-				ensureVerified:   keyed.EnsureVerified,
-			}, nil
+			return newReplicaTransport(replicaChain(keyed, e.Host(), c.BaseURL), keyed), nil
 		},
 	}, nil
 }
@@ -223,32 +219,49 @@ func (t *Transport) verified(ctx context.Context, r replica) (*verifiedReplicaTr
 	return rt, verified, nil
 }
 
-// ReplicaVerification holds a replica's last attempt at verification: its
+// VerificationAttempt is the outcome of one attempt to verify a replica: its
 // report if it passed, and otherwise the error that the client reported for
 // it, from which the verifier's VerificationError and its report are
 // reachable when the verifier rejected the replica's document.
+type VerificationAttempt struct {
+	// Report is set if the attempt passed. It may have expired or been
+	// discarded since.
+	Report *verify.VerificationReport
+	// Err is set if the attempt failed.
+	Err error
+}
+
+// ReplicaVerification describes a replica that the client has tried to
+// verify: the verification that its requests are bound to now, if any, and
+// its last attempt at verification.
 type ReplicaVerification struct {
-	// Host is the replica that the attempt verified.
+	// Host is the replica's host.
 	Host string
 	// Request model names, not attested identities.
 	Models      []string
 	Reference   string
 	PinnedModel string
-	// Report is set if the last attempt passed. It may have expired or been
-	// invalidated since.
-	Report *verify.VerificationReport
-	// Err is set if the last attempt failed.
-	Err error
+	// Current is the report of the replica's verification that requests are
+	// bound to now: set while that verification is fresh and has not been
+	// discarded, and nil otherwise.
+	Current *verify.VerificationReport
+	// LastAttempt is the replica's most recent attempt at verification. A
+	// failed attempt replaces an earlier success here, though Current keeps
+	// that success while a failure of a category other than ErrAttestation
+	// leaves it valid.
+	LastAttempt VerificationAttempt
 }
 
-// LastVerification returns the last attempt for each replica that the
-// transport has tried to verify, failed replicas included, without
-// verifying anything.
-func (t *Transport) LastVerification() []ReplicaVerification {
+// Replicas returns an entry for each replica that the transport has tried to
+// verify, failed replicas included, without verifying anything.
+func (t *Transport) Replicas() []ReplicaVerification {
 	results := []ReplicaVerification{}
 	t.enclaves.Range(func(key, value any) bool {
 		r := key.(replica)
 		rt := value.(*verifiedReplicaTransport)
+		// Read Current first: an attempt that completes in between then
+		// shows as the last attempt, which can only be newer than Current.
+		current := rt.currentVerification()
 		if report, err := rt.lastVerification(); report != nil || err != nil {
 			models := []string{}
 			rt.models.Range(func(model, _ any) bool {
@@ -256,7 +269,7 @@ func (t *Transport) LastVerification() []ReplicaVerification {
 				return true
 			})
 			slices.Sort(models)
-			results = append(results, ReplicaVerification{Host: r.host, Models: models, Reference: r.ref, PinnedModel: r.model, Report: report, Err: err})
+			results = append(results, ReplicaVerification{Host: r.host, Models: models, Reference: r.ref, PinnedModel: r.model, Current: current, LastAttempt: VerificationAttempt{Report: report, Err: err}})
 		}
 		return true
 	})
@@ -293,6 +306,20 @@ func (t *Transport) Models(ctx context.Context) ([]string, error) {
 // repeated calls verify the same replica while it stays valid, and stops once
 // ctx is done.
 func (t *Transport) EnsureVerified(ctx context.Context, model string) (*verify.VerificationReport, error) {
+	return t.verifyModel(ctx, model, false)
+}
+
+// Reverify verifies again the replica that EnsureVerified would return for
+// model. It tries replicas in EnsureVerified's order, verifying each again,
+// and stops at the first that passes, or that fails but keeps a valid
+// verification, which requests for model still use. A replica whose
+// verification the failure discarded, or that had none, is passed over as
+// EnsureVerified passes it over.
+func (t *Transport) Reverify(ctx context.Context, model string) (*verify.VerificationReport, error) {
+	return t.verifyModel(ctx, model, true)
+}
+
+func (t *Transport) verifyModel(ctx context.Context, model string, force bool) (*verify.VerificationReport, error) {
 	catalog, err := t.catalog(ctx)
 	if err != nil {
 		return nil, err
@@ -305,19 +332,45 @@ func (t *Transport) EnsureVerified(ctx context.Context, model string) (*verify.V
 		if ctxErr := ctx.Err(); ctxErr != nil {
 			return nil, ctxErr
 		}
+		var rt *verifiedReplicaTransport
+		if rt, err = t.enclave(r); err != nil {
+			continue
+		}
 		var verified *verify.VerificationReport
-		if _, verified, err = t.verified(ctx, r); err == nil {
-			return verified, nil
+		if !force {
+			if verified, err = rt.ensureVerified(ctx); err == nil {
+				return verified, nil
+			}
+			continue
+		}
+		// A failure that keeps a valid verification leaves requests for model
+		// on this replica, so it is the outcome to report.
+		if verified, err = rt.reverify(ctx); err == nil || rt.currentVerification() != nil {
+			return verified, err
 		}
 	}
 	return nil, err
 }
 
 type verifiedReplicaTransport struct {
-	transport        http.RoundTripper
-	lastVerification func() (*verify.VerificationReport, error)
-	ensureVerified   func(context.Context) (*verify.VerificationReport, error)
-	models           sync.Map
+	transport           http.RoundTripper
+	lastVerification    func() (*verify.VerificationReport, error)
+	currentVerification func() *verify.VerificationReport
+	ensureVerified      func(context.Context) (*verify.VerificationReport, error)
+	reverify            func(context.Context) (*verify.VerificationReport, error)
+	models              sync.Map
+}
+
+// newReplicaTransport sends a replica's requests through rt, and verifies
+// the replica through keyed.
+func newReplicaTransport(rt http.RoundTripper, keyed *transport.Transport) *verifiedReplicaTransport {
+	return &verifiedReplicaTransport{
+		transport:           rt,
+		lastVerification:    keyed.LastVerificationAttempt,
+		currentVerification: keyed.CurrentVerification,
+		ensureVerified:      keyed.EnsureVerified,
+		reverify:            keyed.Reverify,
+	}
 }
 
 func (t *verifiedReplicaTransport) RoundTrip(req *http.Request) (*http.Response, error) {

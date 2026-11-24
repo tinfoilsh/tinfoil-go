@@ -30,10 +30,10 @@ type GatewayOptions struct {
 	// EnclaveOptions.VerificationCheck is.
 	// A replica that it rejects is skipped for the next replica of the model.
 	VerificationCheck func(v *verify.VerifiedFacts) error
-	// OnVerification, when set, is called once for every attempt to verify a
-	// replica, with the replica's host, as EnclaveOptions.OnVerification
-	// describes.
-	OnVerification func(host string, report *verify.VerificationReport, err error)
+	// OnVerificationAttempt, when set, is called once for every attempt to
+	// verify a replica, with the replica's host, as
+	// EnclaveOptions.OnVerificationAttempt describes.
+	OnVerificationAttempt func(host string, report *verify.VerificationReport, err error)
 	// UserCacheSecret is the default prompt-cache scope for the client's
 	// requests. A non-empty user_cache_secret string in a request's JSON body
 	// overrides it, so a server can scope the cache to each end user, for
@@ -66,9 +66,17 @@ type ModelPin struct {
 	Policy *verify.Policy
 }
 
-// ReplicaVerification holds a gateway replica's last attempt at
-// verification: its report if the attempt passed, and otherwise its error.
+// ReplicaVerification describes a gateway replica that the client has tried
+// to verify: its host, the models requested through it, its trusted reference
+// and pinned model, the report of the verification that its requests are
+// bound to now (Current), and its last attempt at verification (LastAttempt).
 type ReplicaVerification = gateway.ReplicaVerification
+
+// VerificationAttempt is the outcome of one attempt to verify a gateway
+// replica: its report if the attempt passed, and otherwise the error that
+// the client reported for it, as LastVerificationAttempt returns them for an
+// EnclaveHTTPClient.
+type VerificationAttempt = gateway.VerificationAttempt
 
 // GatewayHTTPClient is an *http.Client for Tinfoil inference through the gateway.
 // Each request is sealed to a verified replica of the model it names, as with
@@ -127,7 +135,7 @@ func unverifiedGatewayHTTPClient(opts *GatewayOptions) (*GatewayHTTPClient, erro
 		ModelPins:         pins,
 		Policy:            opts.Policy,
 		VerificationCheck: opts.VerificationCheck,
-		OnVerification:    opts.OnVerification,
+		OnVerification:    opts.OnVerificationAttempt,
 		UserCacheSecret:   opts.UserCacheSecret,
 	})
 	if err != nil {
@@ -176,12 +184,31 @@ func (c *GatewayHTTPClient) EnsureVerified(ctx context.Context, model string) (*
 	return c.transport.EnsureVerified(ctx, model)
 }
 
-// LastVerification returns one entry for each replica that the client has
-// tried to verify, failed replicas included, each holding that replica's
-// last attempt, without I/O: its report if the attempt passed, and otherwise
-// its error, as RouterHTTPClient.LastVerification describes. A replica's
-// earlier success is not kept once a later attempt for it fails. Reports
-// may have expired or been rejected since.
-func (c *GatewayHTTPClient) LastVerification() []ReplicaVerification {
-	return c.transport.LastVerification()
+// Reverify verifies again the replica that EnsureVerified(ctx, model) would
+// return, even if its cached verification is still valid, and returns the new
+// report, a copy for the caller to keep. It tries the model's replicas in the
+// order that EnsureVerified tries them, verifying each again, and stops at
+// the first that passes, or that fails but keeps a valid verification, which
+// requests for model still use; it then returns that failure. Each failure
+// follows the rule that EnclaveHTTPClient's Reverify describes, for its
+// replica: an ErrAttestation error discards the replica's cached
+// verification, so that Reverify moves on to the next replica, as
+// EnsureVerified then does, and a failure of any other category keeps it
+// while it is still valid. When no replica passes or keeps a valid
+// verification, it returns the last failure.
+func (c *GatewayHTTPClient) Reverify(ctx context.Context, model string) (*verify.VerificationReport, error) {
+	return c.transport.Reverify(ctx, model)
+}
+
+// Replicas returns one entry for each replica that the client has tried to
+// verify, failed replicas included, sorted by host, without I/O. An entry's
+// Current follows the rule of EnclaveHTTPClient's CurrentVerification for
+// that replica: the report of the replica's verification while it is fresh
+// and has not been discarded, and otherwise nil. Its LastAttempt holds the
+// replica's most recent attempt, as LastVerificationAttempt describes: a
+// failed attempt replaces an earlier success there, though Current keeps
+// that success while the failure leaves it valid. Reports are copies for the
+// caller to keep.
+func (c *GatewayHTTPClient) Replicas() []ReplicaVerification {
+	return c.transport.Replicas()
 }

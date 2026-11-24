@@ -71,12 +71,24 @@ func (t *Transport) VerifyOnce(ctx context.Context) (*verify.VerificationReport,
 	return s.report.Clone(), nil
 }
 
-// LastVerification returns the outcome of the most recent attempt to verify
-// the enclave, without I/O: its report if it passed, and otherwise no report
-// and the error that the transport reported for it. Before the first attempt
-// it returns neither. A report that it returns may have expired or been
-// invalidated; use EnsureVerified for one that is valid.
-func (t *Transport) LastVerification() (*verify.VerificationReport, error) {
+// CurrentVerification returns the report of the verification that requests
+// are bound to now, without I/O: the current verification while it is fresh
+// and has not been discarded or rejected, and otherwise nil.
+func (t *Transport) CurrentVerification() *verify.VerificationReport {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+	if s := t.current; s != nil && s.valid() {
+		return s.report.Clone()
+	}
+	return nil
+}
+
+// LastVerificationAttempt returns the outcome of the most recent attempt to
+// verify the enclave, without I/O: its report if it passed, and otherwise no
+// report and the error that the transport reported for it. Before the first
+// attempt it returns neither. A report that it returns may have expired or
+// been invalidated; CurrentVerification returns one that has not.
+func (t *Transport) LastVerificationAttempt() (*verify.VerificationReport, error) {
 	t.mu.RLock()
 	defer t.mu.RUnlock()
 	if t.last == nil {

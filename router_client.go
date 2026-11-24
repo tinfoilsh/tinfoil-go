@@ -28,12 +28,12 @@ type RouterOptions struct {
 	// ErrAttestation error that wraps the error and isn't retried. Requests
 	// wait while it runs, so keep it fast; it may be called concurrently.
 	VerificationCheck func(v *verify.VerifiedFacts) error
-	// OnVerification, when set, is called once for every attempt to verify a
-	// router, after the attempt's outcome is decided, as
-	// EnclaveOptions.OnVerification describes: for each router that
+	// OnVerificationAttempt, when set, is called once for every attempt to
+	// verify a router, after the attempt's outcome is decided, as
+	// EnclaveOptions.OnVerificationAttempt describes: for each router that
 	// discovery tries, including the fallback, each with its own host, and
 	// for the chosen router whenever the client verifies it again.
-	OnVerification func(host string, report *verify.VerificationReport, err error)
+	OnVerificationAttempt func(host string, report *verify.VerificationReport, err error)
 	// UserCacheSecret is the default prompt-cache scope for the client's
 	// requests. A non-empty user_cache_secret string in a request's JSON body
 	// overrides it, so a server can scope the cache to each end user, for
@@ -96,7 +96,7 @@ func NewRouterHTTPClient(ctx context.Context, opts *RouterOptions) (*RouterHTTPC
 	keyed, err := router.Discover(ctx, router.Options{
 		Verifier:       verifier,
 		Check:          opts.VerificationCheck,
-		OnVerification: opts.OnVerification,
+		OnVerification: opts.OnVerificationAttempt,
 		NewTransport: func(e *enclave.Enclave) *transport.Transport {
 			return keyedTransport(tr, e)
 		},

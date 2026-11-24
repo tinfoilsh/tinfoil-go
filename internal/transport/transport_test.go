@@ -469,7 +469,7 @@ func TestCallersCannotReplaceCachedVerification(t *testing.T) {
 	require.NoError(t, err)
 	*verified.VerifiedFacts = *testState(time.Now().Add(time.Hour), "other").VerifiedFacts
 	verified.Steps[0].Status = verify.StepFailed
-	last, err := transport.LastVerification()
+	last, err := transport.LastVerificationAttempt()
 	require.NoError(t, err)
 	*last.VerifiedFacts = *testState(time.Now().Add(time.Hour), "other").VerifiedFacts
 	last.VerifiedFacts = nil
@@ -482,7 +482,7 @@ func TestCallersCannotReplaceCachedVerification(t *testing.T) {
 	fp, ok := currentFacts(transport).TLSPublicKeyFP()
 	require.True(t, ok)
 	require.Equal(t, "key", fp)
-	last, err = transport.LastVerification()
+	last, err = transport.LastVerificationAttempt()
 	require.NoError(t, err)
 	require.Equal(t, "key", last.VerifiedFacts.CodeTag())
 	require.Len(t, last.Steps, 4)

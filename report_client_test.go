@@ -19,7 +19,7 @@ type recordedAttempt struct {
 	err    error
 }
 
-// recordAttempts returns an OnVerification callback and the attempts that it
+// recordAttempts returns an OnVerificationAttempt callback and the attempts that it
 // has seen.
 func recordAttempts() (func(string, *verify.VerificationReport, error), func() []recordedAttempt) {
 	var mu sync.Mutex
@@ -37,12 +37,12 @@ func recordAttempts() (func(string, *verify.VerificationReport, error), func() [
 
 // The verifier's rejection reaches the caller as an attestation error from
 // which the VerificationError and its report are reachable, and
-// LastVerification and OnVerification give the same error.
+// LastVerificationAttempt and OnVerificationAttempt give the same error.
 func TestClientReportsARejectedDocument(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		onVerification, seen := recordAttempts()
 		c, err := unverifiedEnclaveHTTPClient("enclave.example", RepoPin{Repo: "org/repo"}, &EnclaveOptions{
-			OnVerification: onVerification,
+			OnVerificationAttempt: onVerification,
 			FetchAttestation: AttestationFetcherFunc(func(context.Context, string, []byte) ([]byte, error) {
 				return []byte(`{}`), nil
 			}),
@@ -59,7 +59,7 @@ func TestClientReportsARejectedDocument(t *testing.T) {
 		require.NotNil(t, rejected.Report.PartialFacts)
 		require.Nil(t, rejected.Report.VerifiedFacts)
 
-		last, lastErr := c.LastVerification()
+		last, lastErr := c.LastVerificationAttempt()
 		require.Nil(t, last)
 		require.Same(t, err, lastErr)
 		attempts := seen()
@@ -79,7 +79,7 @@ func TestClientReportsAFailedFetch(t *testing.T) {
 		onVerification, seen := recordAttempts()
 		unreachable := errors.New("unreachable")
 		c, err := unverifiedEnclaveHTTPClient("enclave.example", RepoPin{Repo: "org/repo"}, &EnclaveOptions{
-			OnVerification: onVerification,
+			OnVerificationAttempt: onVerification,
 			FetchAttestation: AttestationFetcherFunc(func(context.Context, string, []byte) ([]byte, error) {
 				return nil, unreachable
 			}),
@@ -88,7 +88,7 @@ func TestClientReportsAFailedFetch(t *testing.T) {
 		_, err = c.EnsureVerified(context.Background())
 		testutil.RequireCategory(t, err, ErrNetwork)
 		require.NotErrorAs(t, err, new(*verify.VerificationError))
-		last, lastErr := c.LastVerification()
+		last, lastErr := c.LastVerificationAttempt()
 		require.Nil(t, last)
 		require.Same(t, err, lastErr)
 		attempts := seen()
