@@ -144,6 +144,7 @@ func (e *Enclave) verify(retries int, retried func(error)) (*verify.Verification
 	var err, firstErr error
 	for attempt := 0; ; attempt++ {
 		verified, err = fetch()
+		e.nameHost(verified, err)
 		if err == nil && verified.VerifiedFacts == nil {
 			err = errs.Attestation(errors.New("verification passed without verified facts"))
 		}
@@ -174,6 +175,20 @@ func (e *Enclave) verify(retries int, retried func(error)) (*verify.Verification
 		return nil, err
 	}
 	return verified, nil
+}
+
+// nameHost sets the enclave's host on the report of an attempt, whether it
+// passed or the verifier rejected the document, since the verifier doesn't
+// know which host the document came from. Every report that a client hands
+// out passes through here.
+func (e *Enclave) nameHost(report *verify.VerificationReport, err error) {
+	var rejected *verify.VerificationError
+	if errors.As(err, &rejected) {
+		report = rejected.Report
+	}
+	if report != nil {
+		report.Metadata.Host = e.host
+	}
 }
 
 // Notify reports the outcome of an attempt to verify the enclave to the

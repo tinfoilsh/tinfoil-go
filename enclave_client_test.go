@@ -85,7 +85,7 @@ func TestConstructorsVerifyBeforeReturning(t *testing.T) {
 		require.ErrorIs(t, err, unreachable)
 		require.Contains(t, hosts(), "enclave.example", "the enclave is verified before the client is returned")
 
-		gw, err := NewGatewayHTTPClient(context.Background(), &GatewayOptions{ModelPins: testModelPins, URL: "https://gateway.example/v1/"})
+		gw, err := NewGatewayHTTPClient(context.Background(), &GatewayOptions{ModelPins: testModelPins, URL: "https://gateway.example/"})
 		require.Nil(t, gw)
 		require.ErrorIs(t, err, unreachable)
 		require.Equal(t, []string{"gateway.example"}, hosts(), "the catalog is fetched before the client is returned")
@@ -259,13 +259,13 @@ func TestGatewayHTTPClientServesPinnedModels(t *testing.T) {
 		UserCacheSecret: "test-secret",
 	})
 	require.NoError(t, err)
-	require.Equal(t, "https://inference-gateway.tinfoil.sh/v1/", gw.BaseURL())
+	require.Equal(t, "https://inference-gateway.tinfoil.sh/", gw.BaseURL())
 	models, err := gw.Models(context.Background())
 	require.NoError(t, err)
 	require.Equal(t, []string{"pinned"}, models)
 	_, err = gw.EnsureVerified(context.Background(), "unpinned")
 	require.ErrorIs(t, err, ErrConfiguration, "a model that the catalog lists but that has no pin is refused")
-	resp, err := gw.Post(gw.BaseURL()+"chat/completions", "application/json", strings.NewReader(`{"model":"unpinned"}`))
+	resp, err := gw.Post(gw.BaseURL()+"v1/chat/completions", "application/json", strings.NewReader(`{"model":"unpinned"}`))
 	if resp != nil {
 		resp.Body.Close()
 	}
@@ -280,7 +280,7 @@ func TestGatewayHTTPClientServesPinnedModels(t *testing.T) {
 func TestNewGatewayHTTPClientRejectsInvalidOptions(t *testing.T) {
 	catalog := func() Catalog { return Catalog{} }
 	for name, opts := range map[string]*GatewayOptions{
-		"plaintext URL":         {URL: "http://gateway.example/v1/", ModelPins: testModelPins, Catalog: catalog},
+		"plaintext URL":         {URL: "http://gateway.example/", ModelPins: testModelPins, Catalog: catalog},
 		"no pins":               {Catalog: catalog},
 		"empty pins":            {ModelPins: map[string]ModelPin{}, Catalog: catalog},
 		"pin outside tinfoilsh": {ModelPins: map[string]ModelPin{"m": {Repo: "acme/m"}}, Catalog: catalog},
@@ -529,9 +529,12 @@ func TestURLOptionsWithAPathAreAccepted(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, proxyURL+"v1/", oc.BaseURL(), "OpenAI clients send to v1/ under the proxy URL")
 	}
-	gw, err := unverifiedGatewayHTTPClient(&GatewayOptions{ModelPins: testModelPins, URL: "https://gateway.example/custom/v1/", Catalog: func() Catalog { return Catalog{} }})
+	gw, err := unverifiedGatewayHTTPClient(&GatewayOptions{ModelPins: testModelPins, URL: "https://gateway.example/custom/", Catalog: func() Catalog { return Catalog{} }})
 	require.NoError(t, err)
-	require.Equal(t, "https://gateway.example/custom/v1/", gw.BaseURL())
+	require.Equal(t, "https://gateway.example/custom/", gw.BaseURL())
+	oc, err := NewOpenAIClient(gw, nil)
+	require.NoError(t, err)
+	require.Equal(t, "https://gateway.example/custom/v1/", oc.BaseURL(), "OpenAI clients send to v1/ under the gateway URL")
 }
 
 func TestDirectTransportsSendToTheEnclaveOrigin(t *testing.T) {

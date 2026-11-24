@@ -19,6 +19,11 @@ func main() {
 
 	log.Printf("Connected to enclave: %s", client.BaseURL())
 
+	// The enclave client sends bodies as they are. This one is pointed at
+	// Tinfoil's router, so wrap its transport to scope the prompt cache as the
+	// router client does; the empty secret selects the per-process secret.
+	client.Transport = tinfoil.NewCacheSecretTransport(client.Transport, "")
+
 	body := []byte(`{"model":"gpt-oss-120b","messages":[{"role":"user","content":"What is 2+2?"}]}`)
 	req, err := http.NewRequest(http.MethodPost, client.BaseURL()+"v1/chat/completions", bytes.NewReader(body))
 	if err != nil {

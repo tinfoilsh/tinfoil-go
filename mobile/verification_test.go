@@ -1,6 +1,7 @@
 package mobile
 
 import (
+	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"testing"
 	"time"
@@ -33,6 +34,47 @@ func sampleVerification() *verify.VerifiedFacts {
 	return verifytest.New(sampleFields())
 }
 
+// decodedResult is the result JSON as a Swift or Kotlin caller decodes it,
+// with the parts of the report that these tests check.
+type decodedResult struct {
+	SchemaVersion int `json:"schema_version"`
+	Report        struct {
+		SchemaVersion int `json:"schema_version"`
+		Steps         []struct {
+			Layer   string `json:"layer"`
+			Status  string `json:"status"`
+			Message string `json:"message"`
+		} `json:"steps"`
+		VerifiedFacts *struct {
+			ConfigRepo     string                        `json:"config_repo"`
+			CodeDigest     string                        `json:"code_digest"`
+			CryptoMaterial []document.CryptoMaterialItem `json:"crypto_material"`
+		} `json:"verified_facts"`
+		PartialFacts *struct {
+			Expected jsontext.Value `json:"expected"`
+			Measured jsontext.Value `json:"measured"`
+		} `json:"partial_facts"`
+	} `json:"report"`
+	Error *errorJSON `json:"error"`
+}
+
+func decodeResult(t *testing.T, payload string) decodedResult {
+	t.Helper()
+	var got decodedResult
+	require.NoError(t, json.Unmarshal([]byte(payload), &got))
+	return got
+}
+
+// key returns the data of the verified crypto_material item with id and
+// format, as a Swift or Kotlin caller looks up a channel key.
+func (r decodedResult) key(id, format string) string {
+	if r.Report.VerifiedFacts == nil {
+		return ""
+	}
+	data, _ := verify.CryptoMaterialData(r.Report.VerifiedFacts.CryptoMaterial, id, format)
+	return data
+}
+
 // encodeResult encodes the result of a verification that proved facts, and
 // returns it decoded as plain JSON.
 func encodeResult(t *testing.T, facts *verify.VerifiedFacts) map[string]any {
@@ -46,40 +88,37 @@ func encodeResult(t *testing.T, facts *verify.VerifiedFacts) map[string]any {
 	return got
 }
 
-// encodeFacts returns the verified facts of encodeResult.
-func encodeFacts(t *testing.T, facts *verify.VerifiedFacts) map[string]any {
-	t.Helper()
-	return encodeResult(t, facts)["report"].(map[string]any)["verified_facts"].(map[string]any)
-}
-
-// Lifting the channel keys out of crypto_material by ID and format is the only
-// real work this mapping does: binding a connection is what a caller has a
-// verification for, and it should not have to repeat the lookup.
-func TestVerificationLiftsChannelKeys(t *testing.T) {
-	got := encodeFacts(t, sampleVerification())
-	assert.Equal(t, "deadbeef", got["tls_public_key_fp"])
-	assert.Equal(t, "cafebabe", got["hpke_public_key"])
-	assert.Len(t, got["crypto_material"], 2, "lifted keys are still listed in full")
-}
-
-// A TLS-only enclave endorses no HPKE key. That has to be an absent field
-// rather than a failed mapping, or such an enclave could not be used at all.
-func TestVerificationOmitsMissingHPKE(t *testing.T) {
-	f := sampleFields()
-	f.CryptoMaterial = f.CryptoMaterial[:1]
-
-	got := encodeFacts(t, verifytest.New(f))
-	assert.Equal(t, "deadbeef", got["tls_public_key_fp"])
-	assert.NotContains(t, got, "hpke_public_key")
-}
-
-// time.Time cannot cross the FFI boundary, so the deadline a caller must honour
-// is formatted here and parsed back on the other side.
-func TestVerificationFormatsFreshnessDeadline(t *testing.T) {
-	got := encodeFacts(t, sampleVerification())
-	parsed, err := time.Parse(time.RFC3339Nano, got["freshness_expires_at"].(string))
+// The bridge writes the report unchanged in the SDKs' common JSON form,
+// built by the same encoder as Go's own json.Marshal of a report.
+func TestResultWrapsTheCommonReportForm(t *testing.T) {
+	report := verifytest.Passed(sampleVerification())
+	report.Metadata.VerifiedAt = time.Date(2026, 9, 26, 12, 0, 0, 0, time.UTC)
+	encoded, err := encode(toResultJSON(report, nil))
 	require.NoError(t, err)
-	assert.True(t, parsed.Equal(sampleVerification().FreshnessExpiresAt()))
+	var result struct {
+		SchemaVersion int            `json:"schema_version"`
+		Report        jsontext.Value `json:"report"`
+		Error         jsontext.Value `json:"error"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(encoded), &result))
+	assert.Equal(t, VerificationSchemaVersion, result.SchemaVersion)
+	assert.Nil(t, result.Error)
+
+	want, err := json.Marshal(report)
+	require.NoError(t, err)
+	assert.JSONEq(t, string(want), string(result.Report))
+}
+
+// The channel keys are in crypto_material only: a caller looks them up by ID
+// and format there, and the result carries no lifted copies.
+func TestVerificationKeysAreInCryptoMaterialOnly(t *testing.T) {
+	got := encodeResult(t, sampleVerification())["report"].(map[string]any)["verified_facts"].(map[string]any)
+	assert.NotContains(t, got, "tls_public_key_fp")
+	assert.NotContains(t, got, "hpke_public_key")
+	assert.Equal(t, []any{
+		map[string]any{"id": "tls", "format": document.KeySPKIFPSHA256V1Format, "data": "deadbeef"},
+		map[string]any{"id": "hpke", "format": document.KeyX25519HPKEV1Format, "data": "cafebabe"},
+	}, got["crypto_material"])
 }
 
 // The appraisal time comes from the report's metadata. The host and the
@@ -89,13 +128,11 @@ func TestVerificationKeepsAppraisalTimeOnly(t *testing.T) {
 	assert.Equal(t, float64(VerificationSchemaVersion), result["schema_version"])
 	assert.NotContains(t, result, "error")
 	report := result["report"].(map[string]any)
+	assert.Equal(t, float64(verify.ReportSchemaVersion), report["schema_version"])
 	assert.Equal(t, map[string]any{"verified_at": "2026-09-26T12:00:00Z"}, report["metadata"])
 	assert.NotContains(t, report, "partial_facts")
 	got := report["verified_facts"].(map[string]any)
 	assert.Equal(t, "tinfoilsh/confidential-model-router", got["config_repo"])
-	assert.NotContains(t, got, "enclave_host")
-	assert.NotContains(t, got, "verifier")
-	assert.NotContains(t, got, "verified_at")
 	steps := report["steps"].([]any)
 	require.Len(t, steps, 4)
 	for i, layer := range []string{"envelope", "provenance", "quote", "policy"} {
@@ -133,75 +170,11 @@ func TestRejectionResult(t *testing.T) {
 	}, report["steps"])
 	assert.Equal(t, map[string]any{
 		"expected": map[string]any{
-			"config_repo": "tinfoilsh/repo",
-			"artifact":    map[string]any{"source": "endorsement", "repo": "tinfoilsh/repo", "digest": "d0"},
-			"code_measurement": map[string]any{
-				"type": "https://tinfoil.sh/predicate/sev-snp-guest/v2", "registers": []any{launch.String()},
-			},
+			"config_repo":      "tinfoilsh/repo",
+			"artifact":         map[string]any{"source": "endorsement", "repo": "tinfoilsh/repo", "digest": "d0"},
+			"code_measurement": map[string]any{"platform": "sev-snp", "launch": launch.String()},
 		},
 		"measured": map[string]any{"tls_public_key_fp": "aa", "hpke_public_key_fp": "bb"},
 	}, report["partial_facts"])
-}
-
-// Measurements keep the contract's {type, registers} shape, with "" for a
-// register the release leaves to the platform.
-func TestVerificationMeasurements(t *testing.T) {
-	got := encodeFacts(t, sampleVerification())
-	rtmr1, rtmr2 := measurement.Register{0xbb}.String(), measurement.Register{0xcc}.String()
-	assert.Equal(t, map[string]any{
-		"type":      "https://tinfoil.sh/predicate/tdx-guest/v2",
-		"registers": []any{"", "", rtmr1, rtmr2, ""},
-	}, got["code_measurement"])
-	assert.Equal(t, map[string]any{
-		"type":      "https://tinfoil.sh/predicate/tdx-guest/v2",
-		"registers": []any{measurement.Register{0xdd}.String(), measurement.Register{}.String(), rtmr1, rtmr2, measurement.Register{}.String()},
-	}, got["enclave_measurement"])
-}
-
-// A code-release verification has no config, runtime or platform.
-func TestVerificationOmitsConfigFactsForCodeRelease(t *testing.T) {
-	got := encodeFacts(t, sampleVerification())
-	assert.NotContains(t, got, "config")
-	assert.NotContains(t, got, "runtime")
-	assert.NotContains(t, got, "platform")
-}
-
-// A config-based verification reports what it accepted for each component and
-// why, with absent facts omitted rather than written as zero values.
-func TestVerificationConfigFacts(t *testing.T) {
-	approved := time.Date(2026, 9, 20, 8, 0, 0, 500, time.UTC)
-	f := sampleFields()
-	f.Config = &verify.ConfigVerification{
-		Source: verify.SourceEndorsement, Name: "/org/project/v1", Digest: "c0",
-		Reference: "sha256:c0", SigningKeyHint: "hint", ApprovalTime: approved,
-		RegistryID: "registry", SignatureTime: approved.Add(time.Minute),
-	}
-	f.Runtime = &verify.ArtifactVerification{
-		Source: verify.SourceEndorsement, Repo: "tinfoilsh/cvmimage", Tag: "v0.15.0",
-		Digest: "r0", Name: "runtime", Commit: "abc", ApprovalTime: approved,
-	}
-	f.Platform = &verify.ArtifactVerification{Source: verify.SourceEmbedded, Digest: "p0"}
-
-	got := encodeFacts(t, verifytest.New(f))
-	assert.Equal(t, map[string]any{
-		"source": "endorsement", "name": "/org/project/v1", "digest": "c0",
-		"reference": "sha256:c0", "signing_key_hint": "hint",
-		"approval_time": "2026-09-20T08:00:00.0000005Z", "registry_id": "registry",
-		"signature_time": "2026-09-20T08:01:00.0000005Z",
-	}, got["config"])
-	assert.Equal(t, map[string]any{
-		"source": "endorsement", "repo": "tinfoilsh/cvmimage", "tag": "v0.15.0",
-		"digest": "r0", "name": "runtime", "commit": "abc",
-		"approval_time": "2026-09-20T08:00:00.0000005Z",
-	}, got["runtime"])
-	assert.Equal(t, map[string]any{"source": "embedded", "digest": "p0"}, got["platform"])
-}
-
-// A config a ConfigAuthorizer approved has only its source and digest.
-func TestVerificationPolicyConfig(t *testing.T) {
-	f := sampleFields()
-	f.Config = &verify.ConfigVerification{Source: verify.SourcePolicy, Digest: "c0"}
-
-	got := encodeFacts(t, verifytest.New(f))
-	assert.Equal(t, map[string]any{"source": "policy", "digest": "c0"}, got["config"])
+	assert.Equal(t, map[string]any{"verified_at": "2026-09-26T12:00:00Z"}, report["metadata"])
 }

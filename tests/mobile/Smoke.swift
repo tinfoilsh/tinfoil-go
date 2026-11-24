@@ -73,7 +73,10 @@ struct VerificationResult: Decodable {
         let message: String
     }
 
+    /// The report in the JSON form that every Tinfoil SDK writes, with its
+    /// own schema version.
     struct Report: Decodable {
+        let schemaVersion: Int
         let steps: [Step]
         let verifiedFacts: VerifiedFacts?
         let partialFacts: PartialFacts?
@@ -81,6 +84,7 @@ struct VerificationResult: Decodable {
 
         private enum CodingKeys: String, CodingKey {
             case steps, metadata
+            case schemaVersion = "schema_version"
             case verifiedFacts = "verified_facts"
             case partialFacts = "partial_facts"
         }
@@ -94,8 +98,15 @@ struct VerificationResult: Decodable {
 
     struct Metadata: Decodable {
         let verifiedAt: String
+        let verifier: Verifier?
+
+        struct Verifier: Decodable {
+            let name: String?
+            let version: String?
+        }
 
         private enum CodingKeys: String, CodingKey {
+            case verifier
             case verifiedAt = "verified_at"
         }
     }
@@ -147,14 +158,20 @@ struct VerifiedFacts: Decodable {
     let config: Config?
     let runtime: Artifact?
     let platform: Artifact?
-    let tlsPublicKeyFP: String
-    let hpkePublicKey: String?
     let cryptoMaterial: [CryptoMaterial]
     let freshnessExpiresAt: String
 
+    /// Named registers: "sev-snp" has launch, and "tdx" has mrtd and rtmr0
+    /// to rtmr3. A register that the release leaves to the platform is
+    /// absent, and a platform that this file doesn't know may appear.
     struct Measurement: Decodable {
-        let type: String
-        let registers: [String]
+        let platform: String
+        let launch: String?
+        let mrtd: String?
+        let rtmr0: String?
+        let rtmr1: String?
+        let rtmr2: String?
+        let rtmr3: String?
     }
 
     struct Config: Decodable {
@@ -204,8 +221,6 @@ struct VerifiedFacts: Decodable {
         case codeMeasurement = "code_measurement"
         case enclaveMeasurement = "enclave_measurement"
         case config, runtime, platform
-        case tlsPublicKeyFP = "tls_public_key_fp"
-        case hpkePublicKey = "hpke_public_key"
         case cryptoMaterial = "crypto_material"
         case freshnessExpiresAt = "freshness_expires_at"
     }

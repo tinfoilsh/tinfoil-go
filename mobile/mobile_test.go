@@ -2,7 +2,6 @@ package mobile
 
 import (
 	"bytes"
-	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"strings"
@@ -139,19 +138,17 @@ func TestLiveVerify(t *testing.T) {
 	payload, err := verifier.Verify(doc, nonce, routerRepo, routerRepo)
 	require.NoError(t, err)
 
-	var got resultJSON
-	require.NoError(t, json.Unmarshal([]byte(payload), &got))
+	got := decodeResult(t, payload)
 	require.Nil(t, got.Error)
 	require.NotNil(t, got.Report.VerifiedFacts)
 	assert.Equal(t, routerRepo, got.Report.VerifiedFacts.ConfigRepo)
-	assert.NotEmpty(t, got.Report.VerifiedFacts.HPKEPublicKey)
+	assert.NotEmpty(t, got.key(document.CryptoMaterialIDHPKE, document.KeyX25519HPKEV1Format))
 
 	_, err = verifier.Verify(doc, nonce[:len(nonce)-1], routerRepo, "")
 	require.Error(t, err, "a nonce of the wrong size is a usage error")
 	payload, err = verifier.Verify(doc, NewNonce(), routerRepo, "")
 	require.NoError(t, err, "a rejection is a result")
-	got = resultJSON{}
-	require.NoError(t, json.Unmarshal([]byte(payload), &got))
+	got = decodeResult(t, payload)
 	require.NotNil(t, got.Error, "a document verifies only against the nonce it was fetched with")
 	assert.Equal(t, "envelope", got.Error.Layer)
 }
@@ -163,8 +160,7 @@ func TestVerifyReturnsARejectionAsAResult(t *testing.T) {
 	nonce := NewNonce()
 	payload, err := verifier.Verify([]byte("{}"), nonce, routerRepo, "")
 	require.NoError(t, err)
-	var got resultJSON
-	require.NoError(t, json.Unmarshal([]byte(payload), &got))
+	got := decodeResult(t, payload)
 	require.NotNil(t, got.Error)
 	assert.Equal(t, "envelope", got.Error.Layer)
 	assert.True(t, strings.HasPrefix(got.Error.Message, VerificationErrorPrefix+"envelope: "), got.Error.Message)

@@ -4,6 +4,7 @@ package conformance
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -27,11 +28,61 @@ type fixture struct {
 		SigningKeyHint     string       `json:"signing_key_hint,omitempty"`
 		Timestamp          string       `json:"timestamp,omitempty"`
 		// FailedStep and Report, when declared, are what a full-verify
-		// vector expects of the report: the layer of the failed step, every
-		// step's status, and the partial facts.
-		FailedStep string  `json:"failed_step,omitempty"`
-		Report     *Report `json:"report,omitempty"`
+		// vector expects of the report: the layer of the failed step, and
+		// members of the report's JSON form, which the report must have
+		// with those values.
+		FailedStep string          `json:"failed_step,omitempty"`
+		Report     json.RawMessage `json:"report,omitempty"`
 	} `json:"expected"`
+}
+
+// containsJSON reports whether got, encoded, has every member of want, a
+// JSON object, with the same value. Arrays must match element by element.
+func containsJSON(got any, want json.RawMessage) error {
+	encoded, err := json.Marshal(got)
+	if err != nil {
+		return err
+	}
+	var g, w any
+	if err := json.Unmarshal(encoded, &g); err != nil {
+		return err
+	}
+	if err := json.Unmarshal(want, &w); err != nil {
+		return err
+	}
+	return containsValue("$", g, w)
+}
+
+func containsValue(path string, got, want any) error {
+	switch w := want.(type) {
+	case map[string]any:
+		g, ok := got.(map[string]any)
+		if !ok {
+			return fmt.Errorf("%s is %v, want an object", path, got)
+		}
+		for k, v := range w {
+			if err := containsValue(path+"."+k, g[k], v); err != nil {
+				return err
+			}
+		}
+		return nil
+	case []any:
+		g, ok := got.([]any)
+		if !ok || len(g) != len(w) {
+			return fmt.Errorf("%s is %v, want %d elements", path, got, len(w))
+		}
+		for i := range w {
+			if err := containsValue(fmt.Sprintf("%s[%d]", path, i), g[i], w[i]); err != nil {
+				return err
+			}
+		}
+		return nil
+	default:
+		if !reflect.DeepEqual(got, want) {
+			return fmt.Errorf("%s is %v, want %v", path, got, want)
+		}
+		return nil
+	}
 }
 
 // TestFixtures runs every shared fixture in testdata/ through Run and asserts
@@ -80,18 +131,18 @@ func TestFixtures(t *testing.T) {
 			if err := CheckReport(out); err != nil {
 				t.Errorf("report: %v (%+v)", err, out.Report)
 			}
-			if f.Expected.FailedStep != "" && out.Report.FailedStep() != f.Expected.FailedStep {
-				t.Errorf("failed step=%q, want %q", out.Report.FailedStep(), f.Expected.FailedStep)
+			if want := f.Expected.FailedStep; want != "" {
+				failed, _ := out.Report.Failed()
+				if string(failed.Layer) != want {
+					t.Errorf("failed step=%q, want %q", failed.Layer, want)
+				}
 			}
 			if want := f.Expected.Report; want != nil {
 				if out.Report == nil {
-					t.Fatalf("no report; want %+v", want)
+					t.Fatalf("no report; want %s", want)
 				}
-				if !reflect.DeepEqual(out.Report.Steps, want.Steps) {
-					t.Errorf("steps=%+v, want %+v", out.Report.Steps, want.Steps)
-				}
-				if !reflect.DeepEqual(out.Report.PartialFacts, want.PartialFacts) {
-					t.Errorf("partial_facts=%+v, want %+v", out.Report.PartialFacts, want.PartialFacts)
+				if err := containsJSON(out.Report, want); err != nil {
+					t.Errorf("report: %v", err)
 				}
 			}
 			// When an accept fixture declares the verified facts, assert the

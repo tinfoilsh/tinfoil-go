@@ -51,11 +51,29 @@ func main() {
 }
 ```
 
+## Prompt-Cache Scope Through an Enclave Client
+
+The router client adds `user_cache_secret` to the bodies of chat completion, completion and response requests: a non-empty secret that the request already carries wins, then the client's `UserCacheSecret`, then a random secret that is generated once per process. (The gateway client resolves its secret the same way and derives a `cache_salt` from it.) An `EnclaveHTTPClient` sends bodies as they are. When you point one at Tinfoil's router, for example in a service that forwards raw OpenAI-style requests, wrap its transport with `tinfoil.NewCacheSecretTransport`, which adds the field in the same way:
+
+```go
+client, err := tinfoil.NewEnclaveHTTPClient(ctx, "inference.tinfoil.sh",
+    tinfoil.ProjectPin{Project: "tinfoilsh/confidential-model-router"}, nil)
+if err != nil {
+    log.Fatal(err)
+}
+// An empty secret selects the per-process secret; pass a stable secret of
+// your own for a scope that lasts across processes.
+secret := ""
+client.Transport = tinfoil.NewCacheSecretTransport(client.Transport, secret)
+```
+
+The wrapper sits above the attested transport, so the field is added before the body is sealed (EHBP) or sent over the pinned connection (TLS), and it only rewrites request bodies, so the client still verifies the enclave and refuses other origins. It changes only POST requests to paths that end in `/chat/completions`, `/completions` or `/responses` whose body is one JSON object, and leaves a field that isn't an empty string as it is. An `OpenAIClient` doesn't send through the embedded client's `Transport`, so with one, set the field in each request, for example with `option.WithJSONSet("user_cache_secret", s)`.
+
 ## Documentation
 
 - [Go SDK documentation](https://docs.tinfoil.sh/sdk/go-sdk) and [error handling](https://docs.tinfoil.sh/sdk/error-handling).
-- Multi-user services must scope prompt caches to each end user with a per-request `user_cache_secret`, or `UserCacheSecret` in the router or gateway client's options; see [Prompt caching](https://docs.tinfoil.sh/sdk/prompt-caching). The enclave client never adds or changes `user_cache_secret`, so a caller that points it at Tinfoil's router sets the field in each request body, for example with `option.WithJSONSet("user_cache_secret", s)`.
-- `tinfoil.NewEnclaveHTTPClient` returns a client for one enclave that embeds an `*http.Client` for requests to it; `tinfoil.NewGatewayHTTPClient` returns one that seals each request to a verified replica of its model through Tinfoil's gateway. A gateway client serves only the models that its `ModelPins` name, so it requires at least one pin, and a request for any other model fails with an `ErrConfiguration` error. The gateway constructors are experimental and may change in a later release. Each checks its configuration before it returns, so a misconfigured client fails at construction: the enclave client verifies its enclave, and the gateway client fetches its catalog and verifies each model's replicas on first use. `tinfoil.NewRouterHTTPClient` discovers and verifies Tinfoil's router the same way, and returns a `RouterHTTPClient` configured by `RouterOptions`. All three take a [`verify.Policy`](verify/README.md#verification-options) in their options to pin registers or set freshness, a `VerificationCheck` that can reject a verified enclave by its `verify.VerifiedFacts`, and an `OnVerification` callback that sees every verification attempt. `tinfoil.NewOpenAIClient(httpClient, opts, openaiOpts...)` builds an OpenAI client on top of any of the three, without further network I/O. Its base URL is `OpenAIOptions.APIPath` (`/v1/` by default) under the proxy URL or the enclave's origin, or the gateway's `URL` as given. The SDK sets the base URL after the OpenAI options, so an `option.WithBaseURL` has no effect; set `APIPath` to change the path, or, for a gateway client, which takes no `APIPath`, the gateway's `URL`.
+- Multi-user services must scope prompt caches to each end user with a per-request `user_cache_secret`, or `UserCacheSecret` in the router or gateway client's options; see [Prompt caching](https://docs.tinfoil.sh/sdk/prompt-caching). The enclave client never adds or changes `user_cache_secret` by itself; see [Prompt-cache scope through an enclave client](#prompt-cache-scope-through-an-enclave-client).
+- `tinfoil.NewEnclaveHTTPClient` returns a client for one enclave that embeds an `*http.Client` for requests to it; `tinfoil.NewGatewayHTTPClient` returns one that seals each request to a verified replica of its model through Tinfoil's gateway. A gateway client serves only the models that its `ModelPins` name, so it requires at least one pin, and a request for any other model fails with an `ErrConfiguration` error. The gateway constructors are experimental and may change in a later release. Each checks its configuration before it returns, so a misconfigured client fails at construction: the enclave client verifies its enclave, and the gateway client fetches its catalog and verifies each model's replicas on first use. `tinfoil.NewRouterHTTPClient` discovers and verifies Tinfoil's router the same way, and returns a `RouterHTTPClient` configured by `RouterOptions`. All three take a [`verify.Policy`](verify/README.md#verification-options) in their options to pin registers or set freshness, a `VerificationCheck` that can reject a verified enclave by its `verify.VerifiedFacts`, and an `OnVerification` callback that sees every verification attempt. `tinfoil.NewOpenAIClient(httpClient, opts, openaiOpts...)` builds an OpenAI client on top of any of the three, without further network I/O. Its base URL is `OpenAIOptions.APIPath` (`/v1/` by default) joined under the HTTP client's `BaseURL()`: the proxy URL or the enclave's origin, or the gateway's `URL`, which is the gateway's origin (`https://inference-gateway.tinfoil.sh/` by default) or the URL that it is mounted under, never the API path. The SDK sets the base URL after the OpenAI options, so an `option.WithBaseURL` has no effect; set `APIPath` to change the path.
 - The enclave clients take a required `tinfoil.Trust` that names who vouches for the enclave's config: `RepoPin` (a GitHub repository, v2 collateral), `ProjectPin` (a config registry project, v3 collateral), `SignedBy` (your own config signing keys), `AuthorizedBy` (a callback that approves each config), `EmbeddedConfig` (the exact config bytes) or `EitherPin` (a repository and a project, both required, that accepts v2 collateral for the repository or v3 collateral for the project, for the move from v2 to v3 collateral):
 
   ```go
@@ -78,6 +96,15 @@ func main() {
   ```
 
   `OnVerification(host, report, err)` is called once for every attempt, including retries, re-verification after a key rotation and each router that discovery tries, and is a way to show verification status as it happens. The gateway client's `LastVerification()` returns each replica's last attempt. An attempt that fails before the verifier runs, such as a fetch that fails with an `ErrNetwork` error, has no report. Channel keys come only from a report's `VerifiedFacts`; a failed report holds key fingerprints only, which are unverified.
+- A report serializes to one JSON form that every Tinfoil SDK writes, for showing it or passing it on, for example from a proxy to a browser: `json.Marshal(report)` gives snake_case members with a `schema_version`, the steps, exactly one of `verified_facts` and `partial_facts`, and the metadata, with lowercase hex and RFC 3339 times in UTC. A report from one of this package's clients names the host that the client contacted in `metadata.host` (the chosen router, or the gateway replica), so a proxy that passes a report on needn't add the host itself; the host is what the client connected to, not an attested fact. A report from the verifier itself, or from the gomobile bridge, which verifies a document without knowing where it came from, has no `metadata.host`. `verify.ReportSchemaVersion` is the version that it writes, and `json.Marshal` of `*verify.VerifiedFacts` gives the `verified_facts` object on its own. The form is export only: nothing parses it back into a report or into verified facts. The JSON never authorizes anything, since anyone can write it, so a client binds a channel only to the `VerifiedFacts` of a verification that it ran itself, never to a key that it read from the JSON.
+
+  ```go
+  report, err := client.EnsureVerified(ctx)
+  if err == nil {
+      body, _ := json.Marshal(report) // for display or transport only
+      w.Write(body)
+  }
+  ```
 - All OpenAI methods and types are unchanged; see the [OpenAI Go client documentation](https://pkg.go.dev/github.com/openai/openai-go/v3).
 
 ## Reaching Only Your Own Origin
