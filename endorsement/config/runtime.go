@@ -57,9 +57,9 @@ func (r RuntimeReference) Validate() error {
 // caller that has such a config reads its cvm-version itself and uses
 // RuntimeFromPin.
 func RuntimeFromConfig(data []byte) (RuntimeReference, error) {
-	pin, ok := jsonConfigPin(data)
-	if !ok {
-		return RuntimeReference{}, fmt.Errorf("parsing config runtime pin: not a JSON config that states cvm-version; the YAML configs of versions before %s are not read", JSONConfigMinVersion)
+	pin, err := jsonConfigPin(data)
+	if err != nil {
+		return RuntimeReference{}, fmt.Errorf("parsing config runtime pin: not a JSON config that states cvm-version (%w); the YAML configs of versions before %s are not read", err, JSONConfigMinVersion)
 	}
 	ref, err := RuntimeFromPin(pin)
 	if err != nil {
@@ -94,16 +94,19 @@ func requiresJSON(pin string) bool {
 	return semver.Compare("v"+strings.TrimPrefix(version, "v"), JSONConfigMinVersion) >= 0
 }
 
-// jsonConfigPin returns the cvm-version of data read as a JSON object, and
-// whether data is one that states it.
-func jsonConfigPin(data []byte) (string, bool) {
+// jsonConfigPin returns the cvm-version that data states, read as a JSON
+// object.
+func jsonConfigPin(data []byte) (string, error) {
 	var fields struct {
 		Version *string `json:"cvm-version"`
 	}
-	if err := json.Unmarshal(data, &fields); err != nil || fields.Version == nil {
-		return "", false
+	if err := json.Unmarshal(data, &fields); err != nil {
+		return "", err
 	}
-	return *fields.Version, true
+	if fields.Version == nil {
+		return "", fmt.Errorf("no cvm-version member")
+	}
+	return *fields.Version, nil
 }
 
 // checkJSONConfigForm requires the one byte form a JSON config has: RFC 8785

@@ -148,3 +148,21 @@ func TestDeploymentStatementForACallerSuppliedRuntime(t *testing.T) {
 		})
 	}
 }
+
+// A config this package can read has to agree with the runtime a caller
+// supplies, and a JSON fault is reported as such.
+func TestCallerSuppliedRuntimeMustMatchAReadableConfig(t *testing.T) {
+	digest := strings.Repeat("ab", sha256.Size)
+	config := []byte(`{"cvm-version":"0.15.5-rc.1@sha256:` + digest + `"}`)
+	stated, err := configendorsement.RuntimeFromConfig(config)
+	require.NoError(t, err)
+	_, err = configendorsement.NewDeploymentStatementForRuntime(testName, configendorsement.PublicRegistryID, config, stated)
+	require.NoError(t, err)
+	other := stated
+	other.Tag = "v0.16.0"
+	_, err = configendorsement.NewDeploymentStatementForRuntime(testName, configendorsement.PublicRegistryID, config, other)
+	require.ErrorContains(t, err, "does not match the one the config pins")
+
+	_, err = configendorsement.RuntimeFromConfig([]byte(`{"cvm-version":"0.15.5-rc.1@sha256:` + digest + `","cvm-version":"x"}`))
+	require.ErrorContains(t, err, "duplicate")
+}

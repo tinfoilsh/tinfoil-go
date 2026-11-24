@@ -105,6 +105,10 @@ func NewDeploymentStatementForRuntime(name, registryID string, config []byte, ru
 	if err := runtime.Validate(); err != nil {
 		return nil, err
 	}
+	// A config this package can read has to agree with the caller.
+	if stated, err := RuntimeFromConfig(config); err == nil && stated != runtime {
+		return nil, fmt.Errorf("runtime does not match the one the config pins")
+	}
 	s, err := NewStatement(name, config)
 	if err != nil {
 		return nil, err
