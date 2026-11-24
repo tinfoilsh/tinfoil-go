@@ -36,6 +36,27 @@ func TestReadCatalogKeepsOnlyTrustedEntries(t *testing.T) {
 	require.Equal(t, Catalog{"ok": {Repo: "tinfoilsh/ok", Hosts: []string{"a.example"}}}, catalog)
 }
 
+func TestFetchCatalogJoinsUnderTheGatewayURL(t *testing.T) {
+	original := http.DefaultTransport
+	t.Cleanup(func() { http.DefaultTransport = original })
+	for gatewayURL, want := range map[string]string{
+		"https://gateway.example":         "https://gateway.example/catalog",
+		"https://gateway.example/":        "https://gateway.example/catalog",
+		"https://gateway.example/mount":   "https://gateway.example/mount/catalog",
+		"https://gateway.example/mount/":  "https://gateway.example/mount/catalog",
+		"https://gateway.example:8443/a/": "https://gateway.example:8443/a/catalog",
+	} {
+		var fetched []string
+		http.DefaultTransport = roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			fetched = append(fetched, req.URL.String())
+			return newResponse(http.StatusOK, `{}`), nil
+		})
+		_, err := FetchCatalog(context.Background(), gatewayURL)
+		require.NoError(t, err, gatewayURL)
+		require.Equal(t, []string{want}, fetched, "the catalog joins under the gateway's path, as for %s", gatewayURL)
+	}
+}
+
 func TestFetchCatalogRefusesInsecureRedirects(t *testing.T) {
 	original := http.DefaultTransport
 	t.Cleanup(func() { http.DefaultTransport = original })
@@ -53,7 +74,7 @@ func TestFetchCatalogRefusesInsecureRedirects(t *testing.T) {
 				}
 				return newResponse(http.StatusOK, `{"m": {"repo": "tinfoilsh/m", "hosts": ["a.example"]}}`), nil
 			})
-			catalog, err := FetchCatalog(context.Background(), "gateway.example")
+			catalog, err := FetchCatalog(context.Background(), "https://gateway.example")
 			if tc.refused {
 				require.ErrorContains(t, err, "refusing redirect to non-HTTPS URL")
 				return
@@ -161,7 +182,7 @@ func TestTransportRefreshesFetchedCatalog(t *testing.T) {
 			return newResponse(http.StatusOK, served), nil
 		})
 		pins := map[string]ModelPin{"old": {Repo: "tinfoilsh/old"}, "new": {Repo: "tinfoilsh/new"}}
-		tr, err := NewTransport(Config{ModelPins: pins, BaseURL: "https://gateway.example/v1/", Relay: "gateway.example"})
+		tr, err := NewTransport(Config{ModelPins: pins, BaseURL: "https://gateway.example/"})
 		require.NoError(t, err)
 		models := func() []string {
 			models, err := tr.Models(context.Background())

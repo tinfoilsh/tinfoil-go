@@ -8,6 +8,7 @@ import (
 	"io"
 	"maps"
 	"net/http"
+	"net/url"
 	"strings"
 	"sync"
 	"time"
@@ -20,7 +21,7 @@ import (
 )
 
 const (
-	catalogPath         = "/catalog"
+	catalogPath         = "catalog"
 	catalogFetchTimeout = 10 * time.Second
 	// The gateway lists only replicas passing its health checks and reloads
 	// its config every 10 seconds, so a client refreshes as often.
@@ -37,14 +38,19 @@ type CatalogEntry struct {
 // Catalog maps model names to untrusted repository and replica entries.
 type Catalog map[string]CatalogEntry
 
-// FetchCatalog reads the catalog of the gateway at host, keeping only models
-// with replicas of a bare tinfoilsh/ repository, without a tag or digest. It
-// reports a failure to fetch or read the catalog as a network error, except
-// that a request or read that stops because ctx ended returns its error with
-// no category, matching ctx.Err() with errors.Is. A failure that came first,
-// or its own 10-second limit, is a network error.
-func FetchCatalog(ctx context.Context, host string) (Catalog, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "https://"+host+catalogPath, nil)
+// FetchCatalog reads the catalog of the gateway at gatewayURL, from catalog
+// joined under its path, keeping only models with replicas of a bare
+// tinfoilsh/ repository, without a tag or digest. It reports a failure to
+// fetch or read the catalog as a network error, except that a request or read
+// that stops because ctx ended returns its error with no category, matching
+// ctx.Err() with errors.Is. A failure that came first, or its own 10-second
+// limit, is a network error.
+func FetchCatalog(ctx context.Context, gatewayURL string) (Catalog, error) {
+	target, err := url.JoinPath(gatewayURL, catalogPath)
+	if err != nil {
+		return nil, errs.Configuration(err)
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, target, nil)
 	if err != nil {
 		return nil, errs.Configuration(err)
 	}

@@ -55,16 +55,19 @@ func attestedCases() []attestedCase {
 			},
 			wantDefault: "https://router.example/v1/",
 		},
-		{
-			name: "gateway",
-			newClient: func(t *testing.T) (AttestedHTTPClient, *http.Client, *http.Client) {
-				c, err := unverifiedGatewayHTTPClient(&GatewayOptions{ModelPins: testModelPins, URL: "https://gateway.example/api/v1/", Catalog: func() Catalog { return Catalog{} }})
-				require.NoError(t, err)
-				return c, c.secure, c.Client
-			},
-			wantDefault: "https://gateway.example/api/v1/",
-		},
+		gatewayCase("gateway", "", "https://inference-gateway.tinfoil.sh/v1/"),
+		gatewayCase("gateway at an origin", "https://gateway.example", "https://gateway.example/v1/"),
+		gatewayCase("gateway under a path", "https://gateway.example/mount", "https://gateway.example/mount/v1/"),
+		gatewayCase("gateway under a path with a trailing slash", "https://gateway.example/mount/", "https://gateway.example/mount/v1/"),
 	}
+}
+
+func gatewayCase(name, gatewayURL, wantDefault string) attestedCase {
+	return attestedCase{name: name, wantDefault: wantDefault, newClient: func(t *testing.T) (AttestedHTTPClient, *http.Client, *http.Client) {
+		c, err := unverifiedGatewayHTTPClient(&GatewayOptions{ModelPins: testModelPins, URL: gatewayURL, Catalog: func() Catalog { return Catalog{} }})
+		require.NoError(t, err)
+		return c, c.secure, c.Client
+	}}
 }
 
 // listModels sends a request through client and returns the URLs that reached
@@ -248,21 +251,28 @@ func TestOpenAIClientAcceptsOnlyRFC3986PathCharacters(t *testing.T) {
 	}
 }
 
-func TestOpenAIClientEndsTheGatewayURLWithASlash(t *testing.T) {
-	gw, err := unverifiedGatewayHTTPClient(&GatewayOptions{ModelPins: testModelPins, URL: "https://gateway.example/api/v1", Catalog: func() Catalog { return Catalog{} }})
-	require.NoError(t, err)
-	client, err := NewOpenAIClient(gw, nil)
-	require.NoError(t, err)
-	require.Equal(t, "https://gateway.example/api/v1/", client.BaseURL())
-	require.Equal(t, []string{"https://gateway.example/api/v1/models"}, listModels(t, client, gw.secure))
-}
-
-func TestOpenAIClientRejectsAnAPIPathForTheGateway(t *testing.T) {
+func TestOpenAIClientJoinsTheAPIPathUnderTheGatewayURL(t *testing.T) {
+	for _, tc := range []struct {
+		gatewayURL, apiPath, want string
+	}{
+		{"", "", "https://inference-gateway.tinfoil.sh/v1/"},
+		{"", "/openai/v1", "https://inference-gateway.tinfoil.sh/openai/v1/"},
+		{"https://gateway.example", "/v2", "https://gateway.example/v2/"},
+		{"https://gateway.example/mount", "/openai/v1", "https://gateway.example/mount/openai/v1/"},
+		{"https://gateway.example/mount/", "/openai/v1/", "https://gateway.example/mount/openai/v1/"},
+	} {
+		gw, err := unverifiedGatewayHTTPClient(&GatewayOptions{ModelPins: testModelPins, URL: tc.gatewayURL, Catalog: func() Catalog { return Catalog{} }})
+		require.NoError(t, err)
+		client, err := NewOpenAIClient(gw, &OpenAIOptions{APIPath: tc.apiPath})
+		require.NoError(t, err, "an APIPath is valid with a gateway client")
+		require.Equal(t, tc.want, client.BaseURL(), "%q %q", tc.gatewayURL, tc.apiPath)
+		require.Equal(t, []string{tc.want + "models"}, listModels(t, client, gw.secure))
+	}
 	gw, err := unverifiedGatewayHTTPClient(&GatewayOptions{ModelPins: testModelPins, Catalog: func() Catalog { return Catalog{} }})
 	require.NoError(t, err)
-	client, err := NewOpenAIClient(gw, &OpenAIOptions{APIPath: "/v1/"})
+	client, err := NewOpenAIClient(gw, &OpenAIOptions{APIPath: "/v1/../admin/"})
 	require.Nil(t, client)
-	require.ErrorIs(t, err, ErrConfiguration)
+	require.ErrorIs(t, err, ErrConfiguration, "the API path is checked as for the other clients")
 }
 
 // embeddingClient embeds an attested client, so it implements

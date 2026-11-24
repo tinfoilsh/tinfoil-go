@@ -123,11 +123,11 @@ type ModelPin struct {
 
 // Config configures a Transport.
 type Config struct {
-	// BaseURL is where requests are sent, and Relay is the gateway host that
-	// attestation is fetched through.
-	BaseURL, Relay string
-	// Catalog is read on every request; nil fetches it from Relay on first
-	// use and refreshes it every catalogRefreshInterval.
+	// BaseURL is the gateway's URL, which requests are sent to and which the
+	// catalog and the attestation relay join under.
+	BaseURL string
+	// Catalog is read on every request; nil fetches it from the gateway on
+	// first use and refreshes it every catalogRefreshInterval.
 	Catalog func() Catalog
 	// ModelPins names the only models that are served; at least one is
 	// required.
@@ -151,13 +151,13 @@ func NewTransport(c Config) (*Transport, error) {
 	if err != nil {
 		return nil, errs.Configuration(err)
 	}
-	// The gateway relays attestation from its own origin.
+	// The gateway relays attestation under its own URL.
 	relay := func(ctx context.Context, host string, nonce []byte) ([]byte, error) {
-		return fetch.Relayed(ctx, "https://"+c.Relay, host, nonce)
+		return fetch.Relayed(ctx, c.BaseURL, host, nonce)
 	}
 	catalog := func(context.Context) (Catalog, error) { return c.Catalog(), nil }
 	if c.Catalog == nil {
-		catalog = (&catalogCache{fetch: func(ctx context.Context) (Catalog, error) { return FetchCatalog(ctx, c.Relay) }}).get
+		catalog = (&catalogCache{fetch: func(ctx context.Context) (Catalog, error) { return FetchCatalog(ctx, c.BaseURL) }}).get
 	}
 	return &Transport{
 		catalog: catalog,
