@@ -124,6 +124,9 @@ instant. Verified facts from a verification against a config also carry `config`
 keys come only from `verified_facts.crypto_material`, looked up by `id` and
 `format`; partial facts hold key fingerprints, which are unverified. The
 report's metadata has no `verifier`: the caller records which SDK verified.
+It has no `host` either, since `Verify` doesn't know where the document came
+from: a client that wraps the bridge sets `metadata.host` to the host that it
+contacted on every report that it hands out.
 
 ## Errors
 

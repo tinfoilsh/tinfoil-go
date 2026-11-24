@@ -37,7 +37,8 @@ const (
 //	  "partial_facts": { ...on a rejection only, as PartialFacts.MarshalJSON writes it... },
 //	  "metadata": {
 //	    "verified_at": "<RFC 3339, UTC>",
-//	    "verifier": {"name": "tinfoil-go", "version": "<version>"}
+//	    "verifier": {"name": "tinfoil-go", "version": "<version>"},
+//	    "host": "<host[:port]>"
 //	  }
 //	}
 //
@@ -46,7 +47,9 @@ const (
 // is kept, as in "measured": {}; no member is null or "". Exactly one of
 // verified_facts and partial_facts is present. A step's message is present
 // only for a failed or skipped step. metadata.verifier is present only for a
-// released version of this module.
+// released version of this module. metadata.host is present only in a report
+// that a client produced: it names the host that the client contacted, which
+// is not attested, so it proves nothing about the enclave.
 //
 // The JSON is for display and transport only. It never authorizes anything:
 // nothing in this package parses it back into a report or into verified
@@ -87,12 +90,13 @@ type stepJSON struct {
 	Message string `json:"message,omitempty"`
 }
 
-// MarshalJSON encodes the metadata as {"verified_at", "verifier"}. The
-// verifier is present only when its version is a release that Go's build
+// MarshalJSON encodes the metadata as {"verified_at", "verifier", "host"}.
+// The verifier is present only when its version is a release that Go's build
 // information names: a development build, such as the gomobile bridge,
-// which is built from source, can't name its own version reliably.
+// which is built from source, can't name its own version reliably. The host
+// is present only when a client set it.
 func (m VerificationMetadata) MarshalJSON() ([]byte, error) {
-	out := metadataJSON{VerifiedAt: formatReportTime(m.VerifiedAt)}
+	out := metadataJSON{VerifiedAt: formatReportTime(m.VerifiedAt), Host: m.Host}
 	if m.Verifier.Name != "" && sdkinfo.IsRelease(m.Verifier.Version) {
 		out.Verifier = &softwareIdentityJSON{Name: m.Verifier.Name, Version: m.Verifier.Version}
 	}
@@ -102,6 +106,7 @@ func (m VerificationMetadata) MarshalJSON() ([]byte, error) {
 type metadataJSON struct {
 	VerifiedAt string                `json:"verified_at,omitempty"`
 	Verifier   *softwareIdentityJSON `json:"verifier,omitzero"`
+	Host       string                `json:"host,omitempty"`
 }
 
 type softwareIdentityJSON struct {

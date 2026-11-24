@@ -184,7 +184,13 @@ platform. A fact that was not established is omitted, and one that was
 established but is empty stays, as in `"measured": {}`. `ReportSchemaVersion`
 is the `schema_version` that the form carries; a consumer ignores members
 that it doesn't know. `metadata.verifier` names this module and its version
-only in a build of a released version. `json.Marshal` of `*VerifiedFacts`
+only in a build of a released version. `metadata.host` names the host that a
+client contacted for the document (the router that a router client chose, or
+a gateway replica). The clients set it on every report that they produce or
+return, and the verifier, which doesn't know the host, leaves it out; set
+`report.Metadata.Host` yourself to name it in a report that you get from the
+verifier. It is what the client connected to, not an attested fact, so it
+proves nothing about the enclave. `json.Marshal` of `*VerifiedFacts`
 gives the `verified_facts` object on its own. `testdata/report-json` holds
 golden files of the form.
 
