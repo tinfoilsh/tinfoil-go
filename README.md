@@ -51,10 +51,27 @@ func main() {
 }
 ```
 
+## Prompt-Cache Scope Through an Enclave Client
+
+The router and gateway clients add `user_cache_secret` to the bodies of chat completion, completion and response requests: a non-empty secret that the request already carries wins, then the client's `UserCacheSecret`, then a random secret that is generated once per process. An `EnclaveHTTPClient` sends bodies as they are. When you point one at Tinfoil's router, for example in a service that forwards raw OpenAI-style requests, wrap its transport with `tinfoil.NewCacheSecretTransport`, which adds the field in the same way:
+
+```go
+client, err := tinfoil.NewEnclaveHTTPClient(ctx, "inference.tinfoil.sh",
+    tinfoil.ProjectPin{Project: "tinfoilsh/confidential-model-router"}, nil)
+if err != nil {
+    log.Fatal(err)
+}
+// An empty secret selects the per-process secret; pass your own for a scope
+// that lasts across processes.
+client.Transport = tinfoil.NewCacheSecretTransport(client.Transport, secret)
+```
+
+The wrapper sits above the attested transport, so the field is added before the body is sealed (EHBP) or sent over the pinned connection (TLS), and it only rewrites request bodies, so the client still verifies the enclave and refuses other origins. It changes only POST requests to paths that end in `/chat/completions`, `/completions` or `/responses` whose body is one JSON object, and leaves a field that isn't an empty string as it is. An `OpenAIClient` doesn't send through the embedded client's `Transport`, so with one, set the field in each request, for example with `option.WithJSONSet("user_cache_secret", s)`.
+
 ## Documentation
 
 - [Go SDK documentation](https://docs.tinfoil.sh/sdk/go-sdk) and [error handling](https://docs.tinfoil.sh/sdk/error-handling).
-- Multi-user services must scope prompt caches to each end user with a per-request `user_cache_secret`, or `UserCacheSecret` in the router or gateway client's options; see [Prompt caching](https://docs.tinfoil.sh/sdk/prompt-caching). The enclave client never adds or changes `user_cache_secret`, so a caller that points it at Tinfoil's router sets the field in each request body, for example with `option.WithJSONSet("user_cache_secret", s)`.
+- Multi-user services must scope prompt caches to each end user with a per-request `user_cache_secret`, or `UserCacheSecret` in the router or gateway client's options; see [Prompt caching](https://docs.tinfoil.sh/sdk/prompt-caching). The enclave client never adds or changes `user_cache_secret` by itself; see [Prompt-cache scope through an enclave client](#prompt-cache-scope-through-an-enclave-client).
 - `tinfoil.NewEnclaveHTTPClient` returns a client for one enclave that embeds an `*http.Client` for requests to it; `tinfoil.NewGatewayHTTPClient` returns one that seals each request to a verified replica of its model through Tinfoil's gateway. A gateway client serves only the models that its `ModelPins` name, so it requires at least one pin, and a request for any other model fails with an `ErrConfiguration` error. The gateway constructors are experimental and may change in a later release. Each checks its configuration before it returns, so a misconfigured client fails at construction: the enclave client verifies its enclave, and the gateway client fetches its catalog and verifies each model's replicas on first use. `tinfoil.NewRouterHTTPClient` discovers and verifies Tinfoil's router the same way, and returns a `RouterHTTPClient` configured by `RouterOptions`. All three take a [`verify.Policy`](verify/README.md#verification-options) in their options to pin registers or set freshness, a `VerificationCheck` that can reject a verified enclave by its `verify.VerifiedFacts`, and an `OnVerification` callback that sees every verification attempt. `tinfoil.NewOpenAIClient(httpClient, opts, openaiOpts...)` builds an OpenAI client on top of any of the three, without further network I/O. Its base URL is `OpenAIOptions.APIPath` (`/v1/` by default) under the proxy URL or the enclave's origin, or the gateway's `URL` as given. The SDK sets the base URL after the OpenAI options, so an `option.WithBaseURL` has no effect; set `APIPath` to change the path, or, for a gateway client, which takes no `APIPath`, the gateway's `URL`.
 - The enclave clients take a required `tinfoil.Trust` that names who vouches for the enclave's config: `RepoPin` (a GitHub repository, v2 collateral), `ProjectPin` (a config registry project, v3 collateral), `SignedBy` (your own config signing keys), `AuthorizedBy` (a callback that approves each config), `EmbeddedConfig` (the exact config bytes) or `EitherPin` (a repository and a project, both required, that accepts v2 collateral for the repository or v3 collateral for the project, for the move from v2 to v3 collateral):
 
