@@ -74,7 +74,7 @@ func TestLiveClientFallbackEnclave(t *testing.T) {
 	testutil.RequireLive(t)
 	defaultClient, err := enclave.New(enclave.Config{Host: "inference.tinfoil.sh", Pin: defaultRouterPin})
 	require.NoError(t, err)
-	_, err = defaultClient.Verify()
+	_, err = defaultClient.Verify(nil)
 	assert.NoError(t, err)
 }
 

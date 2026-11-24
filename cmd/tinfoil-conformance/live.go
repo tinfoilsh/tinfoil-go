@@ -60,7 +60,7 @@ func runLive() int {
 		return conformance.ExitInternal
 	}
 
-	verified, err := v.VerifyV3(doc, nonce, pin)
+	report, err := v.VerifyV3(doc, nonce, pin)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "live verification: %v\n", err)
 		code, exit := conformance.RejectionCode(err)
@@ -69,6 +69,7 @@ func runLive() int {
 		}
 		return exit
 	}
+	verified := report.VerifiedFacts
 	tlsFP, ok := verified.TLSPublicKeyFP()
 	if !ok {
 		fmt.Fprintf(os.Stderr, "endorsed keys: document endorses no %q key in format %q\n", document.CryptoMaterialIDTLS, document.KeySPKIFPSHA256V1Format)

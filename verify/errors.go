@@ -40,6 +40,10 @@ const (
 type VerificationError struct {
 	Layer Layer
 	Err   error
+	// Report describes the rejected verification: the step that failed, and
+	// the facts that the steps before it established. Its VerifiedFacts is
+	// nil. The verifier always sets it.
+	Report *VerificationReport
 }
 
 func (e *VerificationError) Error() string {

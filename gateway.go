@@ -25,10 +25,14 @@ type GatewayOptions struct {
 	// models whose pin sets no Policy; the zero Policy keeps every default.
 	// The client copies it, so later changes by the caller have no effect.
 	Policy verify.Policy
-	// VerificationCheck is called with each replica's verification, as
+	// VerificationCheck is called with each replica's verified facts, as
 	// EnclaveOptions.VerificationCheck is, for pinned and unpinned models.
-	// A replica it rejects is skipped for the next replica of the model.
-	VerificationCheck func(v *verify.Verification) error
+	// A replica that it rejects is skipped for the next replica of the model.
+	VerificationCheck func(v *verify.VerifiedFacts) error
+	// OnVerification, when set, is called once for every attempt to verify a
+	// replica, with the replica's host, as EnclaveOptions.OnVerification
+	// describes.
+	OnVerification func(host string, report *verify.VerificationReport, err error)
 	// UserCacheSecret is the default prompt-cache scope for the client's
 	// requests. A non-empty user_cache_secret string in a request's JSON body
 	// overrides it, so a server can scope the cache to each end user, for
@@ -61,7 +65,8 @@ type ModelPin struct {
 	Policy *verify.Policy
 }
 
-// ReplicaVerification holds a gateway replica's last successful verification.
+// ReplicaVerification holds a gateway replica's last attempt at
+// verification: its report if the attempt passed, and otherwise its error.
 type ReplicaVerification = gateway.ReplicaVerification
 
 // GatewayHTTPClient is an *http.Client for Tinfoil inference through the gateway.
@@ -122,6 +127,7 @@ func unverifiedGatewayHTTPClient(opts *GatewayOptions) (*GatewayHTTPClient, erro
 		PinnedModelsOnly:  opts.PinnedModelsOnly,
 		Policy:            opts.Policy,
 		VerificationCheck: opts.VerificationCheck,
+		OnVerification:    opts.OnVerification,
 		UserCacheSecret:   opts.UserCacheSecret,
 	})
 	if err != nil {
@@ -163,14 +169,19 @@ func (c *GatewayHTTPClient) Models(ctx context.Context) ([]string, error) {
 	return c.transport.Models(ctx)
 }
 
-// EnsureVerified returns a verification that is valid now of a replica
-// serving model, verifying replicas only if needed.
-func (c *GatewayHTTPClient) EnsureVerified(ctx context.Context, model string) (*verify.Verification, error) {
+// EnsureVerified returns the report of a verification that is valid now of
+// a replica serving model, verifying replicas only if needed. The report is a
+// copy for the caller to keep.
+func (c *GatewayHTTPClient) EnsureVerified(ctx context.Context, model string) (*verify.VerificationReport, error) {
 	return c.transport.EnsureVerified(ctx, model)
 }
 
-// Current returns the last successful verification of each replica used so
-// far, without checking them. They may have expired or been rejected.
-func (c *GatewayHTTPClient) Current() []ReplicaVerification {
-	return c.transport.Verifications()
+// LastVerification returns one entry for each replica that the client has
+// tried to verify, failed replicas included, each holding that replica's
+// last attempt, without I/O: its report if the attempt passed, and otherwise
+// its error, as RouterHTTPClient.LastVerification describes. A replica's
+// earlier success is not kept once a later attempt for it fails. Reports
+// may have expired or been rejected since.
+func (c *GatewayHTTPClient) LastVerification() []ReplicaVerification {
+	return c.transport.LastVerification()
 }

@@ -38,19 +38,20 @@ func TestLiveVerificationRecordsRepoAndMetadata(t *testing.T) {
 	require.NoError(t, err)
 
 	before := time.Now()
-	verified, err := verifier.VerifyV3(raw, nonce, Pin{Repo: repo})
+	report, err := verifier.VerifyV3(raw, nonce, Pin{Repo: repo})
 	after := time.Now()
 	require.NoError(t, err)
+	verified := report.VerifiedFacts
 	require.Equal(t, configRepo, verified.ConfigRepo())
-	require.Equal(t, SoftwareIdentity{Name: sdkinfo.Name, Version: sdkinfo.Version()}, verified.Metadata().Verifier)
-	require.Equal(t, time.UTC, verified.Metadata().VerifiedAt.Location())
-	require.WithinRange(t, verified.Metadata().VerifiedAt, before, after)
+	require.Equal(t, SoftwareIdentity{Name: sdkinfo.Name, Version: sdkinfo.Version()}, report.Metadata.Verifier)
+	require.Equal(t, time.UTC, report.Metadata.VerifiedAt.Location())
+	require.WithinRange(t, report.Metadata.VerifiedAt, before, after)
 
 	// A tag pin selects the release but is not part of the repository name.
 	require.NotEmpty(t, verified.CodeTag())
 	pinned, err := verifier.VerifyV3(raw, nonce, Pin{Repo: configRepo + "@" + verified.CodeTag()})
 	require.NoError(t, err)
-	require.Equal(t, configRepo, pinned.ConfigRepo())
+	require.Equal(t, configRepo, pinned.VerifiedFacts.ConfigRepo())
 }
 
 // VerifyV3 reads its clock once and the CPU evidence layer appraises vendor
@@ -102,11 +103,11 @@ func TestVerifyV3AtRequiresAnInstant(t *testing.T) {
 	require.ErrorContains(t, err, "verifier must be built with NewVerifier")
 }
 
-// Accessors hand out copies, so a caller cannot change a Verification that
+// Accessors hand out copies, so a caller cannot change VerifiedFacts that
 // another holder, such as a client's cache, still uses.
 func TestVerificationAccessorsReturnCopies(t *testing.T) {
 	register := measurement.Register{0xab}
-	v := &Verification{
+	v := &VerifiedFacts{
 		codeMeasurement: measurement.ExpectedTDX{RTMR1: &register},
 		cryptoMaterial:  []document.CryptoMaterialItem{{ID: "tls", Data: "key"}},
 	}
@@ -127,10 +128,10 @@ func TestVerificationAccessorsReturnCopies(t *testing.T) {
 func TestTestConstructorCopiesInputs(t *testing.T) {
 	register := measurement.Register{0xab}
 	items := []document.CryptoMaterialItem{{ID: "tls", Data: "key"}}
-	v := verifyhook.NewVerification(verifyhook.Fields{
+	v := verifyhook.NewVerifiedFacts(verifyhook.Fields{
 		CodeMeasurement: measurement.ExpectedTDX{RTMR1: &register},
 		CryptoMaterial:  items,
-	}).(*Verification)
+	}).(*VerifiedFacts)
 	register[0] = 0xcd
 	items[0].Data = "changed"
 	require.Equal(t, measurement.Register{0xab}, *v.CodeMeasurement().(measurement.ExpectedTDX).RTMR1)

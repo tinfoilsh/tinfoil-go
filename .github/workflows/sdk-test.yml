@@ -104,6 +104,11 @@ jobs:
           TINFOIL_CONFORMANCE_VECTORS: ${{ github.workspace }}/tinfoil-conformance/vectors
         run: go test -count=1 -tags tinfoil_conformance -run 'TestConformanceVectors|TestDangerousTestOnly' ./mobile/
 
+      - name: Check the verification reports of the full-verify vectors
+        env:
+          TINFOIL_CONFORMANCE_VECTORS: ${{ github.workspace }}/tinfoil-conformance/vectors
+        run: go test -count=1 -tags tinfoil_conformance -run 'TestReport|TestCheckReport' ./verify/conformance/
+
   live:
     name: Live integration
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository

@@ -9,7 +9,7 @@ import (
 
 func TestCryptoMaterialData(t *testing.T) {
 	const futureFormat = "https://example.com/key/future/v1"
-	v := &Verification{
+	v := &VerifiedFacts{
 		cryptoMaterial: []document.CryptoMaterialItem{
 			{ID: "tls", Format: document.KeySPKIFPSHA256V1Format, Data: "aabb"},
 			{ID: "workload", Format: futureFormat, Data: "010203"},
@@ -22,6 +22,6 @@ func TestCryptoMaterialData(t *testing.T) {
 	require.False(t, ok, "an item in another format is not the one asked for")
 	_, ok = v.CryptoMaterialData("missing", futureFormat)
 	require.False(t, ok)
-	_, ok = (*Verification)(nil).CryptoMaterialData("workload", futureFormat)
+	_, ok = (*VerifiedFacts)(nil).CryptoMaterialData("workload", futureFormat)
 	require.False(t, ok, "a nil verification endorses nothing")
 }

@@ -18,6 +18,7 @@ package mobile
 import (
 	"crypto/rand"
 	"encoding/json/v2"
+	"errors"
 	"fmt"
 	"time"
 
@@ -115,10 +116,17 @@ func (v *Verifier) CallerAuthorizesConfig() bool {
 
 // Verify appraises doc, the attestation document fetched with nonce, against
 // repo, a GitHub owner/name[@tag][@sha256:digest], and project, a registry
-// org/project[@revision][@sha256:digest], and returns what it proved as the
-// JSON described in verification.go. Either may be empty; neither is satisfied
-// by the other's collateral. A result that can no longer authorize a request
-// is an error, as in the Go SDK.
+// org/project[@revision][@sha256:digest]. Either may be empty; neither is
+// satisfied by the other's collateral.
+//
+// It returns one result JSON, described on resultJSON in verification.go,
+// both when the document verifies and when the verifier rejects it: the
+// verification report, and on a rejection the error's layer and message. A
+// caller decodes it, and returns the report or throws its verification error
+// with the report. Verify returns an error, rather than a result, only when
+// there is no report: a usage error, and a document that verified but whose
+// freshness deadline passed before Verify returned, which is a verification
+// error at the provenance layer, as in the Go SDK.
 func (v *Verifier) Verify(doc, nonce []byte, repo, project string) (string, error) {
 	return v.verifyAt(doc, nonce, verify.Pin{Repo: repo, Project: project}, time.Now(), time.Now)
 }
@@ -127,27 +135,31 @@ func (v *Verifier) Verify(doc, nonce []byte, repo, project string) (string, erro
 // and the result must still be fresh at now(), read once appraisal is done.
 func (v *Verifier) verifyAt(doc, nonce []byte, pin verify.Pin, at time.Time, now func() time.Time) (_ string, err error) {
 	defer func() { err = toMobileError(err) }()
-	verified, err := v.inner.VerifyV3At(doc, nonce, pin, at)
+	report, err := v.inner.VerifyV3At(doc, nonce, pin, at)
+	var rejected *verify.VerificationError
+	if errors.As(err, &rejected) && rejected.Report != nil {
+		return encode(toResultJSON(nil, rejected))
+	}
 	if err != nil {
 		return "", err
 	}
-	if err := checkFresh(verified, now()); err != nil {
+	if err := checkFresh(report.VerifiedFacts, now()); err != nil {
 		return "", err
 	}
-	return encode(verified)
+	return encode(toResultJSON(report, nil))
 }
 
 // checkFresh rejects a verification whose witnesses expired by now, so a
 // caller enforcing FreshnessExpiresAt does not re-verify in a loop.
-func checkFresh(verified *verify.Verification, now time.Time) error {
+func checkFresh(verified *verify.VerifiedFacts, now time.Time) error {
 	if !now.Before(verified.FreshnessExpiresAt()) {
 		return &verify.VerificationError{Layer: verify.LayerProvenance, Err: fmt.Errorf("attestation freshness witnesses expired at %s", verified.FreshnessExpiresAt().UTC().Format(time.RFC3339))}
 	}
 	return nil
 }
 
-func encode(verified *verify.Verification) (string, error) {
-	encoded, err := json.Marshal(toVerificationJSON(verified))
+func encode(result resultJSON) (string, error) {
+	encoded, err := json.Marshal(result)
 	if err != nil {
 		return "", err
 	}

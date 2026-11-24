@@ -16,7 +16,8 @@ import (
 // keys. They are published together, so a request never sends under keys
 // other than those of the verification it checked.
 type state struct {
-	verification *verify.Verification
+	// report passed every step, so its VerifiedFacts are set.
+	report       *verify.VerificationReport
 	roundTripper http.RoundTripper
 	// rejected is guarded by the Transport's mu.
 	rejected bool
@@ -24,57 +25,70 @@ type state struct {
 
 // valid is called with the Transport's mu held.
 func (s *state) valid() bool {
-	return !s.rejected && time.Now().Before(s.verification.FreshnessExpiresAt())
+	return !s.rejected && time.Now().Before(s.report.VerifiedFacts.FreshnessExpiresAt())
 }
 
-// EnsureVerified returns a verification that is valid now, verifying first
-// only if the current one has expired or been invalidated. A nil error means
-// requests can be sent under it.
-func (t *Transport) EnsureVerified(ctx context.Context) (*verify.Verification, error) {
+// attempt is the outcome of one attempt to verify the enclave: a report that
+// passed, or the error that the transport reported.
+type attempt struct {
+	report *verify.VerificationReport
+	err    error
+}
+
+// verifyFunc verifies an enclave, passing each failed attempt that it retries
+// to retried.
+type verifyFunc func(e *enclave.Enclave, retried func(error)) (*verify.VerificationReport, error)
+
+// EnsureVerified returns the report of a verification that is valid now,
+// verifying first only if the current one has expired or been invalidated. A
+// nil error means requests can be sent under it.
+func (t *Transport) EnsureVerified(ctx context.Context) (*verify.VerificationReport, error) {
 	s, err := t.verified(ctx, false, (*enclave.Enclave).Verify)
 	if err != nil {
 		return nil, err
 	}
-	return enclave.Detached(s.verification), nil
+	return s.report.Clone(), nil
 }
 
 // Reverify verifies again even if the current verification is still valid.
 // An attestation failure discards the current verification, so that the next
 // request verifies again; any other failure keeps it while it is still valid.
-func (t *Transport) Reverify(ctx context.Context) (*verify.Verification, error) {
+func (t *Transport) Reverify(ctx context.Context) (*verify.VerificationReport, error) {
 	s, err := t.verified(ctx, true, (*enclave.Enclave).Verify)
 	if err != nil {
 		return nil, err
 	}
-	return enclave.Detached(s.verification), nil
+	return s.report.Clone(), nil
 }
 
 // VerifyOnce verifies like Reverify but doesn't retry a failed attempt, so a
 // caller trying several enclaves moves on quickly.
-func (t *Transport) VerifyOnce(ctx context.Context) (*verify.Verification, error) {
+func (t *Transport) VerifyOnce(ctx context.Context) (*verify.VerificationReport, error) {
 	s, err := t.verified(ctx, true, (*enclave.Enclave).VerifyOnce)
 	if err != nil {
 		return nil, err
 	}
-	return enclave.Detached(s.verification), nil
+	return s.report.Clone(), nil
 }
 
-// Current returns the last successful verification without checking it, or
-// nil before the first. It may have expired or been invalidated; use
-// EnsureVerified for one that is valid.
-func (t *Transport) Current() *verify.Verification {
+// LastVerification returns the outcome of the most recent attempt to verify
+// the enclave, without I/O: its report if it passed, and otherwise no report
+// and the error that the transport reported for it. Before the first attempt
+// it returns neither. A report that it returns may have expired or been
+// invalidated; use EnsureVerified for one that is valid.
+func (t *Transport) LastVerification() (*verify.VerificationReport, error) {
 	t.mu.RLock()
 	defer t.mu.RUnlock()
-	if t.current == nil {
-		return nil
+	if t.last == nil {
+		return nil, nil
 	}
-	return enclave.Detached(t.current.verification)
+	return t.last.report.Clone(), t.last.err
 }
 
 // verified returns a valid state, refreshing it first when force is set or
 // the current one is invalid. Concurrent callers share one refresh, including
 // its failure.
-func (t *Transport) verified(ctx context.Context, force bool, verify func(*enclave.Enclave) (*verify.Verification, error)) (*state, error) {
+func (t *Transport) verified(ctx context.Context, force bool, verify verifyFunc) (*state, error) {
 	for {
 		if err := ctx.Err(); err != nil {
 			return nil, err
@@ -112,17 +126,43 @@ func (t *Transport) verified(ctx context.Context, force bool, verify func(*encla
 // the enclave no longer proves that it holds that state's keys. Any other
 // failure, such as a brief outage of the attestation source, keeps that state
 // while it is still valid.
-func (t *Transport) refresh(verify func(*enclave.Enclave) (*verify.Verification, error)) error {
+//
+// Each attempt, retried or final, becomes the last verification as soon as
+// its outcome is decided, and is reported to the enclave's OnVerification
+// once the refresh is done, outside mu and outside the shared refresh: the
+// refresh is forgotten first, so that a callback that calls EnsureVerified or
+// Reverify starts a refresh of its own rather than waiting for the one that
+// is calling it.
+func (t *Transport) refresh(verify verifyFunc) error {
 	t.mu.RLock()
 	replacing := t.current
 	t.mu.RUnlock()
+	var attempts []*attempt
+	retried := func(err error) {
+		t.mu.Lock()
+		t.last = &attempt{err: err}
+		t.mu.Unlock()
+		attempts = append(attempts, &attempt{err: err})
+	}
 	// The attestation fetch bounds its network I/O. Local verification has no
 	// SDK deadline; each caller can independently cancel its wait above.
-	verified, err := verify(t.enclave)
+	verified, err := verify(t.enclave, retried)
 	var s *state
 	if err == nil {
 		s, err = t.newState(verified)
 	}
+	last := t.publish(s, err, replacing)
+	attempts = append(attempts, last)
+	t.refreshes.Forget("")
+	for _, a := range attempts {
+		t.enclave.Notify(a.report.Clone(), a.err)
+	}
+	return last.err
+}
+
+// publish decides the outcome of a refresh that produced s, or failed with
+// err, makes it the last verification, and returns it.
+func (t *Transport) publish(s *state, err error, replacing *state) *attempt {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	// Creating the round tripper or waiting for mu can outlast freshness.
@@ -142,13 +182,18 @@ func (t *Transport) refresh(verify func(*enclave.Enclave) (*verify.Verification,
 	if errors.Is(err, errs.ErrAttestation) && replacing != nil && t.current == replacing {
 		t.discard(replacing)
 	}
-	return err
+	t.last = &attempt{err: err}
+	if err == nil {
+		t.last.report = s.report
+	}
+	return t.last
 }
 
-// newState creates the mode's round tripper for v.
-func (t *Transport) newState(v *verify.Verification) (*state, error) {
-	// The mode gets a copy, so it can't change the verification kept here.
-	rt, err := t.mode.newRoundTripper(enclave.Detached(v))
+// newState creates the mode's round tripper for r's verified facts.
+func (t *Transport) newState(r *verify.VerificationReport) (*state, error) {
+	// The mode gets a copy, so it can't change the facts kept here.
+	facts := *r.VerifiedFacts
+	rt, err := t.mode.newRoundTripper(&facts)
 	if rt == nil && err == nil {
 		err = fmt.Errorf("transport mode returned a nil round tripper")
 	}
@@ -156,7 +201,7 @@ func (t *Transport) newState(v *verify.Verification) (*state, error) {
 		closeIdleConnections(rt)
 		return nil, err
 	}
-	return &state{verification: v, roundTripper: rt}, nil
+	return &state{report: r, roundTripper: rt}, nil
 }
 
 // discard marks s rejected, so that no request starts under it again, and

@@ -15,7 +15,7 @@ import (
 )
 
 func TestPlaintextRequestDoesNotRefresh(t *testing.T) {
-	pinning := newTestTransport(t, testState(time.Now().Add(time.Hour), "key"), func() (*verify.Verification, error) {
+	pinning := newTestTransport(t, testState(time.Now().Add(time.Hour), "key"), func() (*verify.VerificationReport, error) {
 		t.Error("re-verification cannot make a plaintext URL acceptable")
 		return nil, errNoTLS
 	}, tlsMode{})
@@ -25,7 +25,7 @@ func TestPlaintextRequestDoesNotRefresh(t *testing.T) {
 
 func TestEnsureVerifiedReusesValidVerification(t *testing.T) {
 	var verifications int
-	transport := newTestTransport(t, nil, func() (*verify.Verification, error) {
+	transport := newTestTransport(t, nil, func() (*verify.VerificationReport, error) {
 		verifications++
 		return testState(time.Now().Add(time.Hour), "key"), nil
 	}, sendOK)
@@ -43,7 +43,7 @@ func TestEnsureVerifiedReusesValidVerification(t *testing.T) {
 func TestRefreshWaitersCancelIndependentlyWithoutVerificationTimeout(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		release := make(chan struct{})
-		transport := newTestTransport(t, nil, func() (*verify.Verification, error) {
+		transport := newTestTransport(t, nil, func() (*verify.VerificationReport, error) {
 			<-release
 			return testState(time.Now().Add(time.Hour), "key"), nil
 		}, sendOK)
@@ -62,7 +62,7 @@ func TestRefreshWaitersCancelIndependentlyWithoutVerificationTimeout(t *testing.
 		}
 		close(release)
 		require.NoError(t, <-waiting)
-		require.NotNil(t, transport.Current())
+		require.NotNil(t, currentFacts(transport))
 	})
 }
 
@@ -70,7 +70,7 @@ func TestInitializationRetryIsShared(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		var attempts int
 		release := make(chan struct{})
-		transport := newTestTransport(t, nil, func() (*verify.Verification, error) {
+		transport := newTestTransport(t, nil, func() (*verify.VerificationReport, error) {
 			attempts++
 			if attempts == 1 {
 				<-release
@@ -94,35 +94,35 @@ func TestInitializationRetryIsShared(t *testing.T) {
 func TestRoundTripperFailureFailsVerification(t *testing.T) {
 	var verifications int
 	newErr := errors.New("the verification endorses no key for this transport")
-	transport := newTestTransport(t, nil, func() (*verify.Verification, error) {
+	transport := newTestTransport(t, nil, func() (*verify.VerificationReport, error) {
 		verifications++
 		return testState(time.Now().Add(time.Hour), "key"), nil
-	}, testMode(func(*verify.Verification) (http.RoundTripper, error) { return nil, newErr }))
+	}, testMode(func(*verify.VerifiedFacts) (http.RoundTripper, error) { return nil, newErr }))
 	_, err := transport.EnsureVerified(context.Background())
 	require.ErrorIs(t, err, newErr)
 	req, _ := http.NewRequest(http.MethodGet, "https://enclave.example", nil)
 	_, err = transport.RoundTrip(req)
 	require.ErrorIs(t, err, newErr)
-	require.Nil(t, transport.Current(), "a verification the mode can't use is never kept")
+	require.Nil(t, currentFacts(transport), "a verification the mode can't use is never kept")
 	require.Equal(t, 2, verifications, "each attempt verifies once, without a retry")
 }
 
 func TestRefreshRejectsExpiredVerification(t *testing.T) {
-	transport := newTestTransport(t, testState(time.Now().Add(time.Hour), "old"), func() (*verify.Verification, error) {
+	transport := newTestTransport(t, testState(time.Now().Add(time.Hour), "old"), func() (*verify.VerificationReport, error) {
 		return testState(time.Now().Add(-time.Second), "expired"), nil
 	}, sendOK)
 	_, err := transport.Reverify(context.Background())
 	require.ErrorIs(t, err, enclave.ErrFreshnessExpired)
-	require.Equal(t, "old", transport.Current().CodeTag(), "an expired verification is never published")
+	require.Equal(t, "old", currentFacts(transport).CodeTag(), "an expired verification is never published")
 	require.False(t, currentValid(transport), "an attestation failure discards the verification it was replacing")
 }
 
 func TestRefreshRejectsVerificationThatExpiresDuringCreation(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		var sent int
-		transport := newTestTransport(t, nil, func() (*verify.Verification, error) {
+		transport := newTestTransport(t, nil, func() (*verify.VerificationReport, error) {
 			return testState(time.Now().Add(time.Minute), "key"), nil
-		}, testMode(func(*verify.Verification) (http.RoundTripper, error) {
+		}, testMode(func(*verify.VerifiedFacts) (http.RoundTripper, error) {
 			time.Sleep(2 * time.Minute) // the verification expires while its round tripper is created
 			return roundTripFunc(func(*http.Request) (*http.Response, error) {
 				sent++
@@ -133,7 +133,7 @@ func TestRefreshRejectsVerificationThatExpiresDuringCreation(t *testing.T) {
 		_, err := transport.RoundTrip(req)
 		require.ErrorIs(t, err, enclave.ErrFreshnessExpired)
 		require.Zero(t, sent, "a verification that expired before publication never authorizes a request")
-		require.Nil(t, transport.Current())
+		require.Nil(t, currentFacts(transport))
 	})
 }
 
@@ -141,10 +141,10 @@ func TestLateRejectionDoesNotInvalidateReplacement(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		var verifications int
 		release := make(chan struct{})
-		transport := newTestTransport(t, testState(time.Now().Add(time.Hour), "old"), func() (*verify.Verification, error) {
+		transport := newTestTransport(t, testState(time.Now().Add(time.Hour), "old"), func() (*verify.VerificationReport, error) {
 			verifications++
 			return testState(time.Now().Add(time.Hour), "new"), nil
-		}, testMode(func(verified *verify.Verification) (http.RoundTripper, error) {
+		}, testMode(func(verified *verify.VerifiedFacts) (http.RoundTripper, error) {
 			return roundTripFunc(func(*http.Request) (*http.Response, error) {
 				if verified.CodeTag() == "old" {
 					<-release
@@ -165,7 +165,7 @@ func TestLateRejectionDoesNotInvalidateReplacement(t *testing.T) {
 		close(release)
 		require.ErrorIs(t, <-finished, errCertMismatch)
 		require.True(t, currentValid(transport), "the replacement stays valid")
-		require.Equal(t, "new", transport.Current().CodeTag())
+		require.Equal(t, "new", currentFacts(transport).CodeTag())
 		require.Equal(t, 1, verifications)
 	})
 }
@@ -181,9 +181,9 @@ func (t *idleCountingTransport) CloseIdleConnections() { t.closes++ }
 func TestRefreshClosesReplacedConnections(t *testing.T) {
 	newErr := errors.New("the new verification endorses no key for this transport")
 	var created []*idleCountingTransport
-	transport := newTestTransport(t, nil, func() (*verify.Verification, error) {
+	transport := newTestTransport(t, nil, func() (*verify.VerificationReport, error) {
 		return testState(time.Now().Add(time.Hour), "key"), nil
-	}, testMode(func(*verify.Verification) (http.RoundTripper, error) {
+	}, testMode(func(*verify.VerifiedFacts) (http.RoundTripper, error) {
 		if len(created) == 1 {
 			created = append(created, nil)
 			return nil, newErr

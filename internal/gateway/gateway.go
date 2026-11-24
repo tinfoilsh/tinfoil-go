@@ -136,8 +136,11 @@ type Config struct {
 	PinnedModelsOnly bool
 	// Policy is the verification policy for unpinned models.
 	Policy verify.Policy
-	// VerificationCheck, when set, can reject each replica's verification.
-	VerificationCheck func(v *verify.Verification) error
+	// VerificationCheck, when set, can reject each replica's verified facts.
+	VerificationCheck func(v *verify.VerifiedFacts) error
+	// OnVerification, when set, is called with the outcome of each attempt
+	// to verify a replica.
+	OnVerification func(host string, report *verify.VerificationReport, err error)
 	// UserCacheSecret is the explicit secret; empty selects the secret that
 	// is generated once per process.
 	UserCacheSecret string
@@ -164,15 +167,15 @@ func NewTransport(c Config) (*Transport, error) {
 		secret:  cachesecret.Resolve(c.UserCacheSecret),
 		build: func(r replica) (*verifiedReplicaTransport, error) {
 			// Tinfoil owns model names in both namespaces.
-			e, err := enclave.New(enclave.Config{Host: r.host, FetchAttestation: relay, Pin: verify.Pin{Repo: r.ref, Project: r.ref}, Verifier: policy.verifierFor(r), VerificationCheck: c.VerificationCheck})
+			e, err := enclave.New(enclave.Config{Host: r.host, FetchAttestation: relay, Pin: verify.Pin{Repo: r.ref, Project: r.ref}, Verifier: policy.verifierFor(r), VerificationCheck: c.VerificationCheck, OnVerification: c.OnVerification})
 			if err != nil {
 				return nil, err
 			}
 			keyed := transport.WithEHBP(nil, e)
 			return &verifiedReplicaTransport{
-				transport:      replicaChain(keyed, e.Host(), c.BaseURL),
-				verification:   keyed.Current,
-				ensureVerified: keyed.EnsureVerified,
+				transport:        replicaChain(keyed, e.Host(), c.BaseURL),
+				lastVerification: keyed.LastVerification,
+				ensureVerified:   keyed.EnsureVerified,
 			}, nil
 		},
 	}, nil
@@ -210,7 +213,7 @@ func (t *Transport) enclave(r replica) (*verifiedReplicaTransport, error) {
 
 // verified returns r's transport once r's replica verifies under ctx, so a
 // caller can fall over to another replica before sealing anything to it.
-func (t *Transport) verified(ctx context.Context, r replica) (*verifiedReplicaTransport, *verify.Verification, error) {
+func (t *Transport) verified(ctx context.Context, r replica) (*verifiedReplicaTransport, *verify.VerificationReport, error) {
 	rt, err := t.enclave(r)
 	if err != nil {
 		return nil, nil, err
@@ -222,32 +225,40 @@ func (t *Transport) verified(ctx context.Context, r replica) (*verifiedReplicaTr
 	return rt, verified, nil
 }
 
-// ReplicaVerification holds a replica's last successful verification.
+// ReplicaVerification holds a replica's last attempt at verification: its
+// report if it passed, and otherwise the error that the client reported for
+// it, from which the verifier's VerificationError and its report are
+// reachable when the verifier rejected the replica's document.
 type ReplicaVerification struct {
-	// Host is the replica the verification is for.
+	// Host is the replica that the attempt verified.
 	Host string
 	// Request model names, not attested identities.
-	Models       []string
-	Reference    string
-	PinnedModel  string
-	Verification *verify.Verification
+	Models      []string
+	Reference   string
+	PinnedModel string
+	// Report is set if the last attempt passed. It may have expired or been
+	// invalidated since.
+	Report *verify.VerificationReport
+	// Err is set if the last attempt failed.
+	Err error
 }
 
-// Verifications returns cached results without re-verifying them.
-// Results may be expired or invalidated.
-func (t *Transport) Verifications() []ReplicaVerification {
+// LastVerification returns the last attempt for each replica that the
+// transport has tried to verify, failed replicas included, without
+// verifying anything.
+func (t *Transport) LastVerification() []ReplicaVerification {
 	results := []ReplicaVerification{}
 	t.enclaves.Range(func(key, value any) bool {
 		r := key.(replica)
 		rt := value.(*verifiedReplicaTransport)
-		if verified := rt.verification(); verified != nil {
+		if report, err := rt.lastVerification(); report != nil || err != nil {
 			models := []string{}
 			rt.models.Range(func(model, _ any) bool {
 				models = append(models, model.(string))
 				return true
 			})
 			slices.Sort(models)
-			results = append(results, ReplicaVerification{Host: r.host, Models: models, Reference: r.ref, PinnedModel: r.model, Verification: verified})
+			results = append(results, ReplicaVerification{Host: r.host, Models: models, Reference: r.ref, PinnedModel: r.model, Report: report, Err: err})
 		}
 		return true
 	})
@@ -279,10 +290,11 @@ func (t *Transport) Models(ctx context.Context) ([]string, error) {
 	return models, nil
 }
 
-// EnsureVerified returns a valid verification of a replica serving model. It
-// tries replicas in a fixed order for the model, so repeated calls verify the
-// same replica while it stays valid, and stops once ctx is done.
-func (t *Transport) EnsureVerified(ctx context.Context, model string) (*verify.Verification, error) {
+// EnsureVerified returns the report of a valid verification of a replica
+// serving model. It tries replicas in a fixed order for the model, so
+// repeated calls verify the same replica while it stays valid, and stops once
+// ctx is done.
+func (t *Transport) EnsureVerified(ctx context.Context, model string) (*verify.VerificationReport, error) {
 	catalog, err := t.catalog(ctx)
 	if err != nil {
 		return nil, err
@@ -295,7 +307,7 @@ func (t *Transport) EnsureVerified(ctx context.Context, model string) (*verify.V
 		if ctxErr := ctx.Err(); ctxErr != nil {
 			return nil, ctxErr
 		}
-		var verified *verify.Verification
+		var verified *verify.VerificationReport
 		if _, verified, err = t.verified(ctx, r); err == nil {
 			return verified, nil
 		}
@@ -304,10 +316,10 @@ func (t *Transport) EnsureVerified(ctx context.Context, model string) (*verify.V
 }
 
 type verifiedReplicaTransport struct {
-	transport      http.RoundTripper
-	verification   func() *verify.Verification
-	ensureVerified func(context.Context) (*verify.Verification, error)
-	models         sync.Map
+	transport        http.RoundTripper
+	lastVerification func() (*verify.VerificationReport, error)
+	ensureVerified   func(context.Context) (*verify.VerificationReport, error)
+	models           sync.Map
 }
 
 func (t *verifiedReplicaTransport) RoundTrip(req *http.Request) (*http.Response, error) {

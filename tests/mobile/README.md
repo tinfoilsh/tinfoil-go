@@ -1,7 +1,7 @@
 # Mobile smoke test
 
 `Smoke.swift` type-checks the supported Swift API of `TinfoilGo.xcframework`,
-including decoding a verification payload, since gomobile drops what it cannot
+including decoding a verification result, since gomobile drops what it cannot
 represent without failing the build. See [mobile/README.md](../../mobile/README.md)
 for the binding contract.
 

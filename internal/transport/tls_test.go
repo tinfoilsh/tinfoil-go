@@ -194,7 +194,7 @@ func TestTLSPinsAttestedKey(t *testing.T) {
 	require.True(t, ok)
 	require.Equal(t, key, pinned.key)
 
-	_, err = pinning.newRoundTripper(&verify.Verification{})
+	_, err = pinning.newRoundTripper(&verify.VerifiedFacts{})
 	require.ErrorIs(t, err, errs.ErrAttestation)
 	require.ErrorIs(t, err, errNoTLSKey)
 }
@@ -208,7 +208,7 @@ func TestTLSUnsupportedDefaultTransport(t *testing.T) {
 		return nil, nil
 	}), (*http.Transport)(nil)} {
 		http.DefaultTransport = transport
-		pinning := newTestTransport(t, nil, func() (*verify.Verification, error) {
+		pinning := newTestTransport(t, nil, func() (*verify.VerificationReport, error) {
 			return testState(time.Now().Add(time.Hour), "key"), nil
 		}, tlsMode{})
 		req, err := http.NewRequest(http.MethodGet, "https://enclave.example", nil)
@@ -240,7 +240,7 @@ func TestTLSClientPreservesTLSCategory(t *testing.T) {
 			http.DefaultTransport = transport
 			t.Cleanup(func() { http.DefaultTransport = original; transport.CloseIdleConnections() })
 			var refreshes int
-			pinning := newTestTransport(t, testState(time.Now().Add(time.Hour), "wrong-pin"), func() (*verify.Verification, error) {
+			pinning := newTestTransport(t, testState(time.Now().Add(time.Hour), "wrong-pin"), func() (*verify.VerificationReport, error) {
 				refreshes++
 				return testState(time.Now().Add(time.Hour), "wrong-pin"), nil
 			}, tlsMode{})
@@ -281,7 +281,7 @@ func TestTLSRefusesCustomTLSDialers(t *testing.T) {
 			http.DefaultTransport = transport
 			// No certificate matches the pin, so only a skipped pin reaches
 			// the server.
-			pinning := newTestTransport(t, nil, func() (*verify.Verification, error) {
+			pinning := newTestTransport(t, nil, func() (*verify.VerificationReport, error) {
 				return testState(time.Now().Add(time.Hour), "wrong-pin"), nil
 			}, tlsMode{})
 			_, err := (&http.Client{Transport: pinning}).Post(server.URL, "text/plain", strings.NewReader("plaintext"))

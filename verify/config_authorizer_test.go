@@ -81,6 +81,9 @@ func TestConfigAuthorizerErrorNeverChoosesTheType(t *testing.T) {
 	require.IsType(t, &VerificationError{}, classified, "the outermost verify error is the type")
 	require.Equal(t, LayerProvenance, classified.(*VerificationError).Layer)
 	require.ErrorIs(t, err, refused, "the authorizer's error remains the cause")
+	report := requireReport(t, err, LayerProvenance, time.Time{})
+	require.Contains(t, report.Steps[1].Message, "authorizing config")
+	require.Nil(t, report.PartialFacts.Expected)
 }
 
 func TestConfigAuthorizerPreservesReferencesAndHardwareChecks(t *testing.T) {

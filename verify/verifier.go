@@ -39,7 +39,7 @@ import (
 // It does read the clock. VerifyV3 samples it once and judges everything
 // time-bound against that instant: the freshness witnesses and approvals, and
 // the vendor certificate and CRL validity windows of the CPU evidence. The
-// same instant is reported as Metadata.VerifiedAt. VerifyV3At takes that
+// same instant is reported as the report's Metadata.VerifiedAt. VerifyV3At takes that
 // instant from the caller instead. So the same document is accepted today and
 // rejected once its witnesses go stale.
 type Verifier struct {
@@ -177,12 +177,18 @@ func (v *Verifier) PinnedRegisters() measurement.Expected {
 // VerifyV3 appraises a nonce-bound v3 attestation document against pin. The
 // document's collateral decides which part of pin applies.
 //
+// It reports an accepted document as a VerificationReport whose
+// VerifiedFacts hold what the document proved, and a rejected one as a
+// VerificationError whose Report shows the step that failed and what the
+// steps before it established. A UsageError comes with no report, because
+// verification never started.
+//
 // The caller owns both expectations that cannot come from the document: the
 // nonce it generated, and any additional workload constraints.
-// On success it must bind traffic to the returned keys and enforce any nonzero
-// FreshnessExpiresAt. Hardware collateral bounds the result even when all
-// reference values are embedded.
-func (v *Verifier) VerifyV3(docBytes, nonce []byte, pin Pin) (*Verification, error) {
+// On success it must bind traffic to the keys in the report's VerifiedFacts
+// and enforce any nonzero FreshnessExpiresAt. Hardware collateral bounds the
+// result even when all reference values are embedded.
+func (v *Verifier) VerifyV3(docBytes, nonce []byte, pin Pin) (*VerificationReport, error) {
 	// The only clock read.
 	return v.VerifyV3At(docBytes, nonce, pin, time.Now())
 }
@@ -190,23 +196,40 @@ func (v *Verifier) VerifyV3(docBytes, nonce []byte, pin Pin) (*Verification, err
 // VerifyV3At is VerifyV3 for an archived document. verificationTime replaces
 // the current time in every time-bound check: the freshness witnesses and
 // approvals, and the vendor certificate and CRL validity windows of the CPU
-// evidence. Metadata.VerifiedAt reports it, and a zero verificationTime is a
-// UsageError.
+// evidence. The report's Metadata.VerifiedAt reports it, and a zero
+// verificationTime is a UsageError.
 //
 // The caller must authenticate verificationTime independently, for example
 // from a trusted timestamp recorded when the document was received. An
 // earlier time accepts collateral that has since expired or been revoked, so
 // live clients use VerifyV3.
-func (v *Verifier) VerifyV3At(docBytes, nonce []byte, pin Pin, verificationTime time.Time) (*Verification, error) {
-	verified, rejectedAt, err := v.verifyV3(docBytes, nonce, pin, verificationTime)
-	// An error already carrying a verify type, such as the UsageError for a
-	// caller's mistake, passes through; anything else becomes a
-	// VerificationError for the layer that rejected the document.
-	var classified Error
-	if err == nil || errors.As(err, &classified) {
-		return verified, err
+func (v *Verifier) VerifyV3At(docBytes, nonce []byte, pin Pin, verificationTime time.Time) (*VerificationReport, error) {
+	steps := newReportBuilder()
+	verified, rejectedAt, err := v.verifyV3(docBytes, nonce, pin, verificationTime, steps)
+	if err == nil {
+		return steps.passedAll(verified, metadataAt(verificationTime)), nil
 	}
-	return nil, &VerificationError{Layer: rejectedAt, Err: err}
+	// An error already carrying a verify type passes through: a UsageError
+	// for a caller's mistake as it is, and a VerificationError with the
+	// report attached. Anything else becomes a VerificationError for the
+	// layer that rejected the document.
+	var classified Error
+	if errors.As(err, &classified) {
+		rejected, ok := classified.(*VerificationError)
+		if !ok {
+			return nil, err
+		}
+		return nil, &VerificationError{Layer: rejected.Layer, Err: rejected.Err, Report: steps.failed(rejected.Layer, rejected.Err, metadataAt(verificationTime))}
+	}
+	return nil, &VerificationError{Layer: rejectedAt, Err: err, Report: steps.failed(rejectedAt, err, metadataAt(verificationTime))}
+}
+
+// metadataAt describes a verification made at verificationTime.
+func metadataAt(verificationTime time.Time) VerificationMetadata {
+	return VerificationMetadata{
+		Verifier:   SoftwareIdentity{Name: sdkinfo.Name, Version: sdkinfo.Version()},
+		VerifiedAt: verificationTime.UTC(),
+	}
 }
 
 type endorsementResult struct {
@@ -219,8 +242,10 @@ type endorsementResult struct {
 
 // verifyV3 is VerifyV3 before classification: it returns the error a stage
 // reported, a plain error for a rejected document or a UsageError for a
-// caller's mistake, and the layer of that stage.
-func (v *Verifier) verifyV3(docBytes, nonce []byte, pin Pin, now time.Time) (*Verification, Layer, error) {
+// caller's mistake, and the layer of that stage. It records each step that
+// passes, and the facts that the step establishes, in steps, from the values
+// that the step already computes.
+func (v *Verifier) verifyV3(docBytes, nonce []byte, pin Pin, now time.Time, steps *reportBuilder) (*VerifiedFacts, Layer, error) {
 	if v == nil || v.endorsements == nil || v.configVerifier == nil || v.freshnessVerifier == nil {
 		return nil, "", &UsageError{Err: fmt.Errorf("verifier must be built with NewVerifier")}
 	}
@@ -246,6 +271,10 @@ func (v *Verifier) verifyV3(docBytes, nonce []byte, pin Pin, now time.Time) (*Ve
 	if err != nil {
 		return nil, LayerEnvelope, err
 	}
+	steps.passed(LayerEnvelope)
+	// Parse checked only that the document is consistent with itself, so
+	// these stay unverified until the policy step binds them.
+	steps.measured = measuredKeys(doc.CryptoMaterialItems())
 
 	// Reference values and CPU evidence are appraised against the same instant.
 	var refs *endorsementResult
@@ -266,20 +295,42 @@ func (v *Verifier) verifyV3(docBytes, nonce []byte, pin Pin, now time.Time) (*Ve
 	if err != nil {
 		return nil, LayerProvenance, err
 	}
+	if refs.embedded() {
+		steps.set(LayerProvenance, StepSkipped, "the verifier embeds every reference value, so there is no endorsement to authenticate")
+	} else {
+		steps.passed(LayerProvenance)
+	}
+	steps.expected = &ExpectedFacts{
+		ConfigRepo:      refs.artifact.Repo,
+		Artifact:        refs.artifact,
+		Config:          refs.config,
+		Platform:        refs.platform,
+		CodeMeasurement: quote.CodeMeasurement(refs.quote, doc.CPUEvidence().Format),
+	}
 
 	authenticated, err := quote.Authenticate(doc.CPUEvidence(), doc.CPUEndorsements(), now, v.quoteOptions())
 	if err != nil {
 		return nil, LayerQuote, err
 	}
+	steps.passed(LayerQuote)
+	steps.measured.CPU = &CPUEvidence{Measurement: authenticated.Measurement}
+
 	assembled, err := quote.Assemble(doc, refs.quote, v.pinnedRegisters, authenticated)
 	if err != nil {
+		var resolved *quote.ResolvedError
+		if errors.As(err, &resolved) {
+			steps.expected.Measurement = resolved.Expected
+			err = resolved.Err
+		}
 		return nil, LayerPolicy, err
 	}
+	steps.expected.Measurement = assembled.Expected
 	if err := assembled.Validate(); err != nil {
 		return nil, LayerPolicy, err
 	}
+	steps.passed(LayerPolicy)
 
-	result := &Verification{
+	result := &VerifiedFacts{
 		configRepo:         refs.artifact.Repo,
 		codeDigest:         refs.artifact.Digest,
 		codeTag:            refs.artifact.Tag,
@@ -289,15 +340,19 @@ func (v *Verifier) verifyV3(docBytes, nonce []byte, pin Pin, now time.Time) (*Ve
 		enclaveMeasurement: authenticated.Measurement,
 		cryptoMaterial:     doc.CryptoMaterialItems(),
 		freshnessExpiresAt: validity.Earliest(refs.freshnessExpiresAt, authenticated.ExpiresAt),
-		metadata: VerificationMetadata{
-			Verifier:   SoftwareIdentity{Name: sdkinfo.Name, Version: sdkinfo.Version()},
-			VerifiedAt: now.UTC(),
-		},
 	}
 	if refs.config != nil {
 		result.runtime = &refs.artifact
 	}
 	return result, "", nil
+}
+
+// embedded reports reference values that the caller embedded in the
+// verifier, every one of them, so that provenance authenticated nothing.
+func (r *endorsementResult) embedded() bool {
+	return r.config != nil && r.config.Source == SourceEmbedded &&
+		r.artifact.Source == SourceEmbedded &&
+		r.platform != nil && r.platform.Source == SourceEmbedded
 }
 
 func (v *Verifier) codeReferences(doc *document.Document, repo string, appraisalTime time.Time) (*endorsementResult, error) {

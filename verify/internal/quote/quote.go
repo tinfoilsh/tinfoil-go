@@ -56,6 +56,10 @@ func (q *Authenticated) Identity() string { return q.identity }
 type AssembledPolicy struct {
 	// CodeMeasurement is the registers the release fixes on the quote's platform.
 	CodeMeasurement measurement.Expected
+	// Expected is every register that the quote must attest: the code
+	// measurement, the caller's pins and, for a legacy TDX release, the
+	// platform registers that the platform endorsements resolve.
+	Expected measurement.Measurement
 	// PolicyName is the matched policy name.
 	PolicyName string
 	// PlatformMeasurementName is the resolved TDX platform configuration;
@@ -71,7 +75,44 @@ type AssembledPolicy struct {
 // Implementations resolve all workload expectations before shared assembly.
 type ReferenceValues interface {
 	resolve(*Authenticated, measurement.Expected) (*resolvedValues, error)
+	// code returns the registers that the release fixes on platform.
+	code(platform string) (measurement.Expected, error)
 }
+
+// CodeMeasurement returns the registers that refs fix on the platform that
+// evidenceFormat names, or nil if the format names no platform or refs fix
+// nothing usable on it. It reads only refs, which provenance authenticated,
+// so it is known before the quote is authenticated; the format, which the
+// quote has not yet proven, only selects the platform.
+func CodeMeasurement(refs ReferenceValues, evidenceFormat string) measurement.Expected {
+	var platform string
+	switch evidenceFormat {
+	case document.SEVSNPReportV1Format:
+		platform = policy.PlatformSEVSNP
+	case document.TDXQuoteV1Format:
+		platform = policy.PlatformTDX
+	default:
+		return nil
+	}
+	code, err := refs.code(platform)
+	if err != nil || code == nil {
+		return nil
+	}
+	return code.Clone()
+}
+
+// ResolvedError is an Assemble failure that came after every expected
+// register was resolved, which it carries so that a caller can report them
+// next to the rejection.
+type ResolvedError struct {
+	// Expected is every register that the quote had to attest, as
+	// AssembledPolicy.Expected describes.
+	Expected measurement.Measurement
+	Err      error
+}
+
+func (e *ResolvedError) Error() string { return e.Err.Error() }
+func (e *ResolvedError) Unwrap() error { return e.Err }
 
 type resolvedValues struct {
 	policy                  *policy.Policy
@@ -166,7 +207,8 @@ func Authenticate(ev document.CPUEvidence, en collateral.CPUEndorsements, now ti
 // Assemble combines endorsed machine policy, release measurements, caller pins,
 // and the REPORT_DATA doc binds. TDX platform measurements must match the
 // required VM shape. A machine absent from endorsements is rejected. Pins fill
-// unset registers or must match the existing source value.
+// unset registers or must match the existing source value. A failure after
+// every expected register was resolved is a *ResolvedError.
 //
 // doc must come from document.Parse, so its expected REPORT_DATA was
 // recomputed from the caller's nonce, and q must be the quote authenticated
@@ -204,8 +246,19 @@ func assemble(refs ReferenceValues, pins measurement.Expected, reportData [64]by
 	if err != nil {
 		return nil, err
 	}
+	assembled, err := assembleResolved(resolved, expected, reportData, q)
+	if err != nil {
+		return nil, &ResolvedError{Expected: expected, Err: err}
+	}
+	return assembled, nil
+}
+
+// assembleResolved is assemble once every expected register is resolved.
+func assembleResolved(resolved *resolvedValues, expected measurement.Measurement, reportData [64]byte, q *Authenticated) (*AssembledPolicy, error) {
+	var err error
 	assembled := &AssembledPolicy{
 		CodeMeasurement:         resolved.code,
+		Expected:                expected,
 		PolicyName:              resolved.policyName,
 		PlatformMeasurementName: resolved.platformMeasurementName,
 		quote:                   *q,

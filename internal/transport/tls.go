@@ -44,7 +44,7 @@ func (tlsMode) validateRequest(req *http.Request) error {
 	return nil
 }
 
-func (tlsMode) newRoundTripper(v *verify.Verification) (http.RoundTripper, error) {
+func (tlsMode) newRoundTripper(v *verify.VerifiedFacts) (http.RoundTripper, error) {
 	key, ok := v.TLSPublicKeyFP()
 	if !ok {
 		return nil, errs.Attestation(errNoTLSKey)
