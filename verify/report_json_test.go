@@ -176,12 +176,13 @@ func TestReportJSONCodeMeasurement(t *testing.T) {
 
 // The form's members and their presence: the schema version, exactly one of
 // the facts, an established but empty fact kept, absent ones omitted, the
-// verifier only for a release, and no null or "".
+// verifier only for a release, the host only when a client set it, and no
+// null or "".
 func TestReportJSONPresence(t *testing.T) {
 	report := &VerificationReport{
 		Steps:        []Step{{Layer: LayerEnvelope, Status: StepFailed, Message: "bad"}, {Layer: LayerProvenance, Status: StepNotRun}},
 		PartialFacts: &PartialFacts{Measured: &MeasuredFacts{}},
-		Metadata:     VerificationMetadata{Verifier: SoftwareIdentity{Name: sdkinfo.Name, Version: "0.17.0"}, VerifiedAt: goldenAt},
+		Metadata:     VerificationMetadata{Verifier: SoftwareIdentity{Name: sdkinfo.Name, Version: "0.17.0"}, VerifiedAt: goldenAt, Host: "enclave.example:8443"},
 	}
 	got, err := json.Marshal(report)
 	require.NoError(t, err)
@@ -189,10 +190,11 @@ func TestReportJSONPresence(t *testing.T) {
 		"schema_version": 1,
 		"steps": [{"layer": "envelope", "status": "failed", "message": "bad"}, {"layer": "provenance", "status": "not_run"}],
 		"partial_facts": {"measured": {}},
-		"metadata": {"verified_at": "2026-01-02T02:04:05Z", "verifier": {"name": "tinfoil-go", "version": "0.17.0"}}
+		"metadata": {"verified_at": "2026-01-02T02:04:05Z", "verifier": {"name": "tinfoil-go", "version": "0.17.0"}, "host": "enclave.example:8443"}
 	}`, string(got))
 
 	report.Metadata.Verifier.Version = "devel"
+	report.Metadata.Host = ""
 	report.Steps = nil
 	report.PartialFacts = &PartialFacts{}
 	got, err = json.Marshal(*report)
