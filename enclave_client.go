@@ -39,7 +39,9 @@ type EnclaveOptions struct {
 	// that wait for the verification wait for it too, so keep it fast. A
 	// retried attempt is reported, in order, once the verification that
 	// retried it is done. The callback can't change the outcome; reject an
-	// enclave with VerificationCheck.
+	// enclave with VerificationCheck. A panic in the callback is recovered and
+	// ignored, so that it never reaches the requests that share the
+	// verification.
 	OnVerification func(host string, report *verify.VerificationReport, err error)
 	// FetchAttestation, when set, obtains the enclave's attestation documents,
 	// for example through an AttestationRelay on the application's own

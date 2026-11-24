@@ -179,10 +179,17 @@ func (e *Enclave) verify(retries int, retried func(error)) (*verify.Verification
 // Notify reports the outcome of an attempt to verify the enclave to the
 // OnVerification callback, if there is one. The caller must hold no lock that
 // the callback could need, and passes a report that no one else holds.
+//
+// A panic in the callback is recovered and ignored. The callback runs inside a
+// verification that concurrent requests share, so a panic that escaped would
+// reach every caller waiting for it, and the callback can't change the outcome
+// anyway.
 func (e *Enclave) Notify(report *verify.VerificationReport, err error) {
-	if e.onVerification != nil {
-		e.onVerification(e.host, report, err)
+	if e.onVerification == nil {
+		return
 	}
+	defer func() { _ = recover() }()
+	e.onVerification(e.host, report, err)
 }
 
 // retriedError is the error of a verification that failed again when it was

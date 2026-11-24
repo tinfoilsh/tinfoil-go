@@ -317,3 +317,26 @@ func TestOnVerificationCanVerifyAgainAfterAFailure(t *testing.T) {
 		require.Equal(t, 3, calls)
 	})
 }
+
+func TestOnVerificationPanicIsRecovered(t *testing.T) {
+	calls := 0
+	onVerification := func(string, *verify.VerificationReport, error) {
+		calls++
+		panic("callback bug")
+	}
+	transport := &Transport{enclave: enclave.NewForTest("enclave.example", fresh("key"), onVerification), mode: sendOK}
+
+	report, err := transport.EnsureVerified(context.Background())
+	require.NoError(t, err, "a panic in the callback doesn't change the outcome")
+	require.Equal(t, "key", report.VerifiedFacts.CodeTag())
+	require.Equal(t, 1, calls)
+
+	last, err := transport.LastVerification()
+	require.NoError(t, err)
+	require.Equal(t, report, last)
+
+	// The transport still works: a later verification runs and is reported.
+	_, err = transport.Reverify(context.Background())
+	require.NoError(t, err)
+	require.Equal(t, 2, calls)
+}
