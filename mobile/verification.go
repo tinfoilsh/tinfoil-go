@@ -43,7 +43,9 @@ const VerificationSchemaVersion = 3
 // checks both. The bridge writes the report unchanged and adds nothing to
 // it. Its metadata has no verifier, since this package is built from source
 // and so can't name its own version (verify.VerificationMetadata.MarshalJSON):
-// the caller records which SDK did the verifying.
+// the caller records which SDK did the verifying. It has no host either, since
+// Verify doesn't know where the document came from: a client that wraps the
+// bridge sets metadata.host to the host that it contacted.
 //
 // On success, error is absent and the report carries verified_facts and no
 // partial_facts. On a rejection, error is present, and the report carries

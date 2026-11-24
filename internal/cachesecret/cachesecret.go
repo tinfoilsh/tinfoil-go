@@ -1,6 +1,7 @@
 // Package cachesecret provisions the user_cache_secret that scopes the prompt
 // cache to one user, and says which requests carry it. transport.WithCacheSecret
-// adds it to their bodies.
+// adds it to their bodies, for the router and gateway clients and for
+// tinfoil.NewCacheSecretTransport.
 package cachesecret
 
 import (
@@ -21,8 +22,10 @@ import (
 // cannot observe each other's cache timing.
 //
 // Clients for Tinfoil's inference routes (router discovery and the gateway)
-// resolve it in this order; a client for an explicit enclave uses only the
-// first two, since other enclaves don't read the field:
+// resolve it in this order; a client for an explicit enclave adds none,
+// since other enclaves don't read the field, unless its caller wraps its
+// transport with tinfoil.NewCacheSecretTransport, which resolves it the same
+// way:
 //
 //  1. a non-empty explicit per-request `user_cache_secret` field in the body,
 //  2. the client's UserCacheSecret option,
