@@ -2,6 +2,7 @@ package document
 
 import (
 	"encoding/base64"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -86,4 +87,38 @@ func TestReferenceValuesReturnCopies(t *testing.T) {
 	witness, err = doc.Freshness(collateral.FreshnessIDCode)
 	require.NoError(t, err)
 	assert.JSONEq(t, `{"b":2}`, string(witness.Bundle))
+}
+
+func TestContainerProvenanceIsKeyedByImageDigest(t *testing.T) {
+	first, second := strings.Repeat("ab", 32), strings.Repeat("cd", 32)
+	entry := func(id, data string) collateral.Entry {
+		return collateral.Entry{ID: id, Role: collateral.RoleReferenceValues, Format: collateral.ContainerProvenanceV1Format, Data: []byte(data)}
+	}
+	doc := documentWithCollateral(t, "", []collateral.Entry{
+		entry("one", `{"digest":"`+first+`","sigstore_bundle":{"a":1}}`),
+		entry("two", `{"digest":"`+second+`","sigstore_bundle":{"b":2}}`),
+		entry("again", `{"digest":"`+first+`","sigstore_bundle":{"c":3}}`),
+	})
+	bundle, err := doc.ContainerProvenance(first)
+	require.NoError(t, err)
+	assert.JSONEq(t, `{"a":1}`, string(bundle), "the first entry for a digest is the one used")
+	bundle[0] = '!'
+	bundle, err = doc.ContainerProvenance(first)
+	require.NoError(t, err)
+	assert.JSONEq(t, `{"a":1}`, string(bundle))
+	bundle, err = doc.ContainerProvenance(second)
+	require.NoError(t, err)
+	assert.JSONEq(t, `{"b":2}`, string(bundle))
+	_, err = doc.ContainerProvenance(strings.Repeat("ef", 32))
+	require.ErrorIs(t, err, collateral.ErrNotFound)
+
+	for name, data := range map[string]string{
+		"uppercase digest": `{"digest":"` + strings.ToUpper(first) + `","sigstore_bundle":{}}`,
+		"prefixed digest":  `{"digest":"sha256:` + first + `","sigstore_bundle":{}}`,
+		"missing bundle":   `{"digest":"` + first + `"}`,
+		"unknown member":   `{"digest":"` + first + `","sigstore_bundle":{},"repo":"o/r"}`,
+	} {
+		_, err := collateral.Decode([]collateral.Entry{entry("one", data)})
+		require.Error(t, err, name)
+	}
 }
