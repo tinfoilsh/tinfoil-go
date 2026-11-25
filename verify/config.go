@@ -90,11 +90,13 @@ func (v *Verifier) applyConfigTrust(config ConfigTrust) error {
 		v.configAuthorizer = c.Authorize
 		return nil
 	case EmbeddedConfig:
+		// The reference and the kept bytes come from one copy.
+		c.Bytes = slices.Clone(c.Bytes)
 		reference, err := c.reference()
 		if err != nil {
 			return err
 		}
-		v.embedded.configBytes = slices.Clone(c.Bytes)
+		v.embedded.configBytes = c.Bytes
 		return v.applyEmbeddedConfig(reference)
 	case EmbeddedConfigReference:
 		return v.applyEmbeddedConfig(c)
@@ -242,7 +244,7 @@ func (v *Verifier) authenticateContainers(doc *document.Document, digest [sha256
 	config := v.embedded.configBytes
 	if config == nil {
 		carried, err := doc.ConfigEndorsement()
-		if err != nil || sha256.Sum256(carried.Config) != digest {
+		if err != nil || len(carried.Config) == 0 || sha256.Sum256(carried.Config) != digest {
 			return nil
 		}
 		config = carried.Config
