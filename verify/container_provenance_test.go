@@ -17,7 +17,7 @@ import (
 const (
 	recordedContainerBundle     = "internal/endorsement/testdata/container-provenance-bundle.json"
 	recordedContainerDigest     = "85306e3ab312a2d80466e901081e855cc53f21c4802c638f861e6ef31ba4f5d1"
-	recordedContainerProvenance = `{"github":{"repository":"tinfoilsh/measure-image-action","repository_id":"924941172","workflow":"build.yml","ref":"refs/tags/build-v*"}}`
+	recordedContainerProvenance = `{"github":{"repository":"tinfoilsh/measure-image-action","repository_id":"924941172","workflow":"build.yml","ref":"refs/tags/build-v0.14.2","commit":"01a05df207140a8e8e1d2cd26028ab7c51dad9d1"}}`
 )
 
 // requiringProvenance returns config with a container that runs the recorded

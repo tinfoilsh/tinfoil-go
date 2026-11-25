@@ -14,7 +14,8 @@ func TestContainerProvenanceFromConfig(t *testing.T) {
 	digest, other := strings.Repeat("ab", sha256.Size), strings.Repeat("cd", sha256.Size)
 	const imageName = `"ghcr.io/tinfoilsh/inference-vllm`
 	image := imageName + `@sha256:` + digest + `"`
-	const github = `{"repository":"tinfoilsh/inference","repository_id":"902195777","workflow":"containers.yml","ref":"refs/tags/vllm-v*"}`
+	const commit = "efefefefefefefefefefefefefefefefefefefef"
+	const github = `{"repository":"tinfoilsh/inference","repository_id":"902195777","workflow":"containers.yml","ref":"refs/tags/vllm-v0.34.0","commit":"` + commit + `"}`
 	const provenance = `{"github":` + github + `}`
 	const unconstrained = `{"name":"router","image":"example.com/router:latest"}`
 	container := func(image, provenance string) string {
@@ -30,7 +31,7 @@ func TestContainerProvenanceFromConfig(t *testing.T) {
 	required := func(digest string) configendorsement.ContainerProvenance {
 		return configendorsement.ContainerProvenance{
 			Digest: digest, Repository: "tinfoilsh/inference", RepositoryID: "902195777",
-			Workflow: "containers.yml", Ref: "refs/tags/vllm-v*",
+			Workflow: "containers.yml", Ref: "refs/tags/vllm-v0.34.0", Commit: commit,
 		}
 	}
 
@@ -72,11 +73,13 @@ func TestContainerProvenanceFromConfig(t *testing.T) {
 		"github without repository":    edited(`"repository":"tinfoilsh/inference",`, ``),
 		"github without repository_id": edited(`"repository_id":"902195777",`, ``),
 		"github without workflow":      edited(`"workflow":"containers.yml",`, ``),
-		"github without ref":           edited(`,"ref":"refs/tags/vllm-v*"`, ``),
+		"github without ref":           edited(`"ref":"refs/tags/vllm-v0.34.0",`, ``),
+		"github without commit":        edited(`,"commit":"`+commit+`"`, ``),
 		"github unknown member":        edited(`}`, `,"environment":"release"}`),
 		"github repeated member":       edited(`}`, `,"ref":"refs/heads/main"}`),
 		"github number member":         edited(`"902195777"`, `902195777`),
-		"github null member":           edited(`"refs/tags/vllm-v*"`, `null`),
+		"github null member":           edited(`"refs/tags/vllm-v0.34.0"`, `null`),
+		"github commit not a string":   edited(`"`+commit+`"`, `7`),
 		"image absent":                 config(`[{"provenance":` + provenance + `}]`),
 		"image null":                   requiring(`null`, provenance),
 		"image not a string":           requiring(`7`, provenance),

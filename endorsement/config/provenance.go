@@ -17,14 +17,14 @@ const imageDigestPrefix = "@sha256:"
 
 // ContainerProvenance is the build that a config requires for the container
 // image with the lowercase hex SHA-256 Digest: a run of a GitHub Actions
-// workflow of a repository. In Ref, "*" stands for any run of characters
-// other than "/".
+// workflow of a repository, at a ref and a source commit.
 type ContainerProvenance struct {
 	Digest       string
 	Repository   string
 	RepositoryID string
 	Workflow     string
 	Ref          string
+	Commit       string
 }
 
 // ContainerProvenanceFromConfig returns the builds that a config requires, in
@@ -62,12 +62,13 @@ func ContainerProvenanceFromConfig(data []byte) ([]ContainerProvenance, error) {
 				RepositoryID *string `json:"repository_id"`
 				Workflow     *string `json:"workflow"`
 				Ref          *string `json:"ref"`
+				Commit       *string `json:"commit"`
 			} `json:"github"`
 		}
 		err := json.Unmarshal(container.Provenance, &provenance, json.RejectUnknownMembers(true))
 		github := provenance.GitHub
-		if err != nil || github == nil || github.Repository == nil || github.RepositoryID == nil || github.Workflow == nil || github.Ref == nil {
-			return nil, fmt.Errorf("containers[%d].provenance must hold only github, with only the strings repository, repository_id, workflow and ref", index)
+		if err != nil || github == nil || github.Repository == nil || github.RepositoryID == nil || github.Workflow == nil || github.Ref == nil || github.Commit == nil {
+			return nil, fmt.Errorf("containers[%d].provenance must hold only github, with only the strings repository, repository_id, workflow, ref and commit", index)
 		}
 		var image string
 		if err := json.Unmarshal(container.Image, &image); err != nil {
@@ -79,7 +80,7 @@ func ContainerProvenanceFromConfig(data []byte) ([]ContainerProvenance, error) {
 		}
 		required = append(required, ContainerProvenance{
 			Digest: image[split:], Repository: *github.Repository, RepositoryID: *github.RepositoryID,
-			Workflow: *github.Workflow, Ref: *github.Ref,
+			Workflow: *github.Workflow, Ref: *github.Ref, Commit: *github.Commit,
 		})
 	}
 	return required, nil
