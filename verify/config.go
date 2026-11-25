@@ -90,10 +90,13 @@ func (v *Verifier) applyConfigTrust(config ConfigTrust) error {
 		v.configAuthorizer = c.Authorize
 		return nil
 	case EmbeddedConfig:
+		// The reference and the kept bytes come from one copy.
+		c.Bytes = slices.Clone(c.Bytes)
 		reference, err := c.reference()
 		if err != nil {
 			return err
 		}
+		v.embedded.configBytes = c.Bytes
 		return v.applyEmbeddedConfig(reference)
 	case EmbeddedConfigReference:
 		return v.applyEmbeddedConfig(c)
@@ -154,6 +157,9 @@ func (v *Verifier) configReferences(doc *document.Document, ref string, now time
 	}
 	digest, err := canonical.DecodeLowerHex("config digest", approved.Digest, sha256.Size)
 	if err != nil {
+		return nil, err
+	}
+	if err := v.authenticateContainers(doc, [sha256.Size]byte(digest)); err != nil {
 		return nil, err
 	}
 	manifest, runtimeTrust, err := v.resolveRuntime(doc, expectedRuntime, now)
@@ -228,6 +234,22 @@ func (v *Verifier) resolveConfig(doc *document.Document, pins endorsement.Config
 		Reference: approved.Reference, SigningKeyHint: approved.SigningKeyHint, ApprovalTime: approved.ApprovalTime,
 		RegistryID: approved.RegistryID, SignatureTime: approved.SignatureTime,
 	}, nil
+}
+
+// authenticateContainers authenticates the container builds that the config
+// with the verified digest requires. It reads them from config bytes that
+// have that digest: the caller's, or else the document's. Without such bytes
+// there is nothing to check.
+func (v *Verifier) authenticateContainers(doc *document.Document, digest [sha256.Size]byte) error {
+	config := v.embedded.configBytes
+	if config == nil {
+		carried, err := doc.ConfigEndorsement()
+		if err != nil || len(carried.Config) == 0 || sha256.Sum256(carried.Config) != digest {
+			return nil
+		}
+		config = carried.Config
+	}
+	return v.endorsements.AuthenticateContainers(config, doc.ContainerProvenance)
 }
 
 func (v *Verifier) resolveRuntime(doc *document.Document, expected collateral.RuntimeReference, now time.Time) (*runtime.Manifest, ArtifactVerification, error) {

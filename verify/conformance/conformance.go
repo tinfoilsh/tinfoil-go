@@ -50,6 +50,7 @@ const (
 	StageAuthenticateQuote      = "v3-authenticate-quote"      // CPU quote signature chain to the vendor root
 	StageAuthenticateApproval   = "v3-authenticate-approval"   // key-signed approval bundle under pinned keys
 	StageVerifyTimestamp        = "v3-verify-timestamp"        // RFC 3161 response against the trusted TSAs
+	StageAuthenticateContainers = "v3-authenticate-containers" // container builds the document's config requires
 )
 
 // Input is the stdin JSON: a v3 document, the verifier-supplied nonce, the
@@ -250,6 +251,21 @@ func Run(stage string, in Input) (Output, int) {
 		return Output{Stage: stage, Accepted: true, Outputs: &AcceptOutputs{
 			EnclaveMeasurement: MeasurementOf(auth.Measurement),
 		}}, ExitAccepted
+	case StageAuthenticateContainers:
+		parsed, err := document.DangerousTestOnlyDecode(doc)
+		if err != nil {
+			return malformed(stage)
+		}
+		// The stage takes the config as given: it authenticates the builds
+		// that the config requires, not the config.
+		config, err := parsed.ConfigEndorsement()
+		if err != nil {
+			return reject(stage, "PROVENANCE_REJECTED")
+		}
+		if err := prov.AuthenticateContainers(config.Config, parsed.ContainerProvenance); err != nil {
+			return reject(stage, "PROVENANCE_REJECTED")
+		}
+		return Output{Stage: stage, Accepted: true}, ExitAccepted
 	default:
 		return Output{Stage: stage}, ExitUnsupported
 	}

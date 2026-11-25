@@ -14,7 +14,8 @@ import (
 // of a registry endorsement. Name optionally associates them with a trusted
 // /org/project/revision identity, which a Project pin must then match. The
 // config must come from trusted client configuration, be a JSON config, and
-// requires attestation-collaterals/v3.
+// requires attestation-collaterals/v3. The document must still prove every
+// container build that the config requires.
 type EmbeddedConfig struct {
 	Name  string
 	Bytes []byte
@@ -22,7 +23,9 @@ type EmbeddedConfig struct {
 
 // EmbeddedConfigReference trusts an exact config, identified by the hex
 // SHA-256 Digest of its bytes, and the runtime that it pins, in place of a
-// registry endorsement. Otherwise it is EmbeddedConfig.
+// registry endorsement. Otherwise it is EmbeddedConfig, except that the
+// container builds that the config requires are checked only when the
+// document carries the config bytes.
 type EmbeddedConfigReference struct {
 	Name    string
 	Digest  string
@@ -38,6 +41,9 @@ type embeddedReferences struct {
 	config   *EmbeddedConfigReference
 	runtime  []byte
 	platform []byte
+	// configBytes are the bytes of a config that the caller embedded in
+	// full. A config embedded by reference has none.
+	configBytes []byte
 }
 
 // reference returns the config reference that c's bytes determine.
