@@ -7,6 +7,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"encoding/pem"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -16,6 +17,8 @@ import (
 
 	"github.com/tinfoilsh/tinfoil-go/internal/sigstoretest"
 	"github.com/tinfoilsh/tinfoil-go/internal/statement"
+	"github.com/tinfoilsh/tinfoil-go/verify/document"
+	"github.com/tinfoilsh/tinfoil-go/verify/document/collateral"
 )
 
 // approvalFixture is a synthetic Sigstore world for the approval and
@@ -204,8 +207,67 @@ func TestVerifyTimestampStage(t *testing.T) {
 	})
 }
 
+// The recorded bundle is the published build attestation of the image with
+// this digest. It verifies against the embedded production root and meets
+// recordedContainerProvenance.
+const (
+	recordedContainerBundle     = "../internal/endorsement/testdata/container-provenance-bundle.json"
+	recordedContainerDigest     = "85306e3ab312a2d80466e901081e855cc53f21c4802c638f861e6ef31ba4f5d1"
+	recordedContainerProvenance = `{"github":{"repository":"tinfoilsh/measure-image-action","repository_id":"924941172","workflow":"build.yml","ref":"refs/tags/build-v*"}}`
+)
+
+func TestAuthenticateContainersStage(t *testing.T) {
+	bundle, err := os.ReadFile(recordedContainerBundle)
+	require.NoError(t, err)
+	data, err := json.Marshal(map[string]any{"digest": recordedContainerDigest, "sigstore_bundle": json.RawMessage(bundle)})
+	require.NoError(t, err)
+	proof := collateral.Entry{ID: "container:sha256:" + recordedContainerDigest, Role: collateral.RoleReferenceValues, Format: collateral.ContainerProvenanceV1Format, Data: data}
+	// config carries a config whose container runs the recorded image and
+	// has the given members besides.
+	config := func(members string) collateral.Entry {
+		data, err := json.Marshal(map[string][]byte{"config_base64": []byte(`{"containers":[{"image":"ghcr.io/tinfoilsh/measure-image-action@sha256:` + recordedContainerDigest + `"` + members + `}]}`)})
+		require.NoError(t, err)
+		return collateral.Entry{ID: collateral.ConfigID, Role: collateral.RoleReferenceValues, Format: collateral.ConfigV1Format, Data: data}
+	}
+	input := func(entries ...collateral.Entry) Input {
+		doc, err := document.Build(document.BuildInput{
+			Nonce: make([]byte, document.NonceSize), Collateral: entries, CollateralFormat: collateral.FormatV3,
+		}, func([64]byte) (string, []byte, error) {
+			return document.SEVSNPReportV1Format, []byte("unauthenticated quote"), nil
+		})
+		require.NoError(t, err)
+		return Input{SchemaVersion: SchemaVersion, DocumentB64: base64.StdEncoding.EncodeToString(doc)}
+	}
+	const requiring = `,"provenance":` + recordedContainerProvenance
+	underAnotherRoot := input(config(requiring), proof)
+	underAnotherRoot.SigstoreTrustedRootB64 = newApprovalFixture(t).trustRootB64
+
+	for name, tt := range map[string]struct {
+		in   Input
+		want Output
+		exit int
+	}{
+		"proven":               {input(config(requiring), proof), Output{Accepted: true}, ExitAccepted},
+		"no requirement":       {input(config(``)), Output{Accepted: true}, ExitAccepted},
+		"no entry":             {input(config(requiring)), Output{Rejection: &Rejection{Code: "PROVENANCE_REJECTED"}}, ExitRejected},
+		"another workflow":     {input(config(strings.Replace(requiring, "build.yml", "release.yml", 1)), proof), Output{Rejection: &Rejection{Code: "PROVENANCE_REJECTED"}}, ExitRejected},
+		"unknown kind":         {input(config(`,"provenance":{"gitlab":{}}`), proof), Output{Rejection: &Rejection{Code: "PROVENANCE_REJECTED"}}, ExitRejected},
+		"no config":            {input(proof), Output{Rejection: &Rejection{Code: "PROVENANCE_REJECTED"}}, ExitRejected},
+		"another trusted root": {underAnotherRoot, Output{Rejection: &Rejection{Code: "PROVENANCE_REJECTED"}}, ExitRejected},
+		"undecodable document": {Input{SchemaVersion: SchemaVersion, DocumentB64: base64.StdEncoding.EncodeToString([]byte("{}"))}, Output{Rejection: &Rejection{Code: "MALFORMED_INPUT"}}, ExitMalformed},
+	} {
+		t.Run(name, func(t *testing.T) {
+			out, exit := Run(StageAuthenticateContainers, tt.in)
+			tt.want.Stage = StageAuthenticateContainers
+			require.Equal(t, tt.want, out)
+			require.Equal(t, tt.exit, exit)
+		})
+	}
+}
+
 func TestNewStagesAdvertised(t *testing.T) {
 	stages := Capabilities()["v3"].(map[string]any)["stages_supported"].([]string)
 	require.Contains(t, stages, StageAuthenticateApproval)
 	require.Contains(t, stages, StageVerifyTimestamp)
+	require.Contains(t, stages, StageAuthenticateContainers)
 }
