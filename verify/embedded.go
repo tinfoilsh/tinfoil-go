@@ -55,9 +55,6 @@ func (c EmbeddedConfig) reference() (EmbeddedConfigReference, error) {
 	if err != nil {
 		return EmbeddedConfigReference{}, err
 	}
-	if _, err := configendorsement.ContainerProvenanceFromConfig(c.Bytes); err != nil {
-		return EmbeddedConfigReference{}, err
-	}
 	digest := sha256.Sum256(c.Bytes)
 	return EmbeddedConfigReference{Name: c.Name, Digest: hex.EncodeToString(digest[:]), Runtime: expected}, nil
 }

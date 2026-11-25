@@ -62,6 +62,7 @@ func TestContainerProvenance(t *testing.T) {
 		"authorized, unknown kind":              {authorizer, []collateral.Entry{configEntry(t, unreadable), proof}, LayerProvenance},
 		"embedded, proven":                      {embedded, []collateral.Entry{proof}, LayerQuote},
 		"embedded, no entry":                    {embedded, nil, LayerProvenance},
+		"embedded, unknown kind":                {EmbeddedConfig{Bytes: unreadable}, []collateral.Entry{proof}, LayerProvenance},
 		"reference, document's bytes, proven":   {reference, []collateral.Entry{configEntry(t, requiring), proof}, LayerQuote},
 		"reference, document's bytes, no entry": {reference, []collateral.Entry{configEntry(t, requiring)}, LayerProvenance},
 		"reference, no bytes":                   {reference, nil, LayerQuote},
@@ -75,7 +76,4 @@ func TestContainerProvenance(t *testing.T) {
 			requireRejectedAt(t, err, tt.want)
 		})
 	}
-
-	_, err = NewVerifier(EmbeddedConfig{Bytes: unreadable}, inputs.policy())
-	require.ErrorAs(t, err, new(*UsageError))
 }
